@@ -15,10 +15,6 @@ export const WAL_SIZE_LIMIT_BYTES = 32 * 1024 * 1024;
 const layerSetup = Layer.effectDiscard(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    // CLI and server write from separate processes. The writer worker retries
-    // short lock waits; never park the server event loop for seconds.
-    yield* sql`PRAGMA busy_timeout = 100;`;
-    yield* sql`PRAGMA foreign_keys = ON;`;
     // Only an empty file can switch modes here; an existing database needs the
     // offline VACUUM that `cogenly doctor` runs, which rebuilds it with pointer maps.
     const tables = yield* sql<{
@@ -26,19 +22,6 @@ const layerSetup = Layer.effectDiscard(
     }>`SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table'`;
     if (tables[0]?.count === 0) yield* sql`PRAGMA auto_vacuum = INCREMENTAL;`;
     yield* sql`PRAGMA journal_mode = WAL;`;
-    // FULL fsyncs the WAL on every commit. Provider events commit frequently,
-    // so that flush cost delays queued writes even on a worker. NORMAL only
-    // fsyncs at checkpoints. It
-    // cannot corrupt the database and an app crash loses nothing; an OS crash
-    // or power loss can roll back commits since the last checkpoint.
-    yield* sql`PRAGMA synchronous = NORMAL;`;
-    // Checkpoints are now the only sync, and macOS fsync() does not flush the
-    // drive cache. F_FULLFSYNC makes them reach disk; other platforms ignore it.
-    // Per-commit fullfsync stays off.
-    yield* sql`PRAGMA checkpoint_fullfsync = ON;`;
-    // PASSIVE checkpoints never shrink the -wal file, so it otherwise keeps its
-    // largest size until the last connection closes.
-    yield* sql.unsafe(`PRAGMA journal_size_limit = ${WAL_SIZE_LIMIT_BYTES};`);
     yield* runMigrations();
     // Without sqlite_stat1 the planner guesses at index selectivity. 0x10012
     // analyzes tables whose indexes lack stats or whose row count changed 10x,
@@ -58,6 +41,17 @@ export const layerFromPath = Effect.fn("makeSqlitePersistenceLive")(function* (d
       filename: dbPath,
       readerWorker: true,
       writerWorker: true,
+      // These settings are connection-local: initialize the main-thread fallback
+      // and every replacement writer, not just the worker that runs migrations.
+      connectionPragmas: [
+        "PRAGMA foreign_keys = ON",
+        // NORMAL fsyncs at checkpoints. An app crash loses nothing; an OS crash
+        // or power loss can roll back commits since the last checkpoint.
+        "PRAGMA synchronous = NORMAL",
+        // F_FULLFSYNC flushes the macOS drive cache; other platforms ignore it.
+        "PRAGMA checkpoint_fullfsync = ON",
+        `PRAGMA journal_size_limit = ${WAL_SIZE_LIMIT_BYTES}`,
+      ],
       // Checkpoints sync the database, with F_FULLFSYNC on macOS. Run them off
       // the event loop so a slow flush cannot stall clients.
       checkpointWorker: true,

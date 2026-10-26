@@ -32,6 +32,7 @@ import {
   buildReport,
   chatSandboxCheck,
   diskCheck,
+  databaseCheck,
   integrationsCheck,
   machineLinksCheck,
   providersCheck,
@@ -793,4 +794,16 @@ it("chat sandbox health offers provisioning only for repairable failures", () =>
     status: "ok",
     items: [],
   });
+});
+
+it("reports a warning while database writes use the main-thread fallback", () => {
+  expect(
+    databaseCheck({ answered: true, sizeBytes: 4096, writerWorkerUnavailable: true }),
+  ).toMatchObject({
+    status: "warn",
+    items: [{ key: "database:writer-worker", status: "warn" }],
+  });
+  expect(
+    databaseCheck({ answered: true, sizeBytes: 4096, writerWorkerUnavailable: false }).status,
+  ).toBe("ok");
 });

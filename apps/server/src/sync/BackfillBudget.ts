@@ -6,7 +6,8 @@ import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 
 export const PASS_BUDGET_MS = 50;
 
-/** Returns true when another pass is needed. A running batch is never interrupted. */
+/** Returns true when another pass is needed. The pass budget is checked between peer calls;
+ * a running batch is never interrupted. */
 export const runPass = <E, R>(step: Effect.Effect<boolean, E, R>) =>
   Effect.gen(function* () {
     const started = yield* Clock.currentTimeMillis;
@@ -48,8 +49,14 @@ export const make = Effect.gen(function* () {
   });
   const completed = (events: number, elapsedMs: number) =>
     Effect.gen(function* () {
-      charged = events;
-      chargedAt = yield* Clock.currentTimeMillis;
+      const now = yield* Clock.currentTimeMillis;
+      // Retain unpaid work from earlier peers without charging elapsed time twice.
+      const currentRate = rate(now);
+      charged =
+        (currentRate === Infinity
+          ? 0
+          : Math.max(0, charged - ((now - chargedAt) * currentRate) / 1000)) + events;
+      chargedAt = now;
       batchEvents =
         elapsedMs > 25
           ? Math.max(1, Math.floor(batchEvents / 2))

@@ -58,6 +58,8 @@ export interface SqliteClientConfig {
   readonly readerWorker?: boolean | undefined;
   /** Execute writer statements and bounded lock waits off the event loop. */
   readonly writerWorker?: boolean | undefined;
+  /** Connection-local settings applied to the fallback and every worker incarnation. */
+  readonly connectionPragmas?: ReadonlyArray<string> | undefined;
   /** How long a reader worker may take to open the database before reads use the writer. Default 10 seconds. */
   readonly readerStartupTimeout?: Duration.Input | undefined;
   /**
@@ -97,6 +99,8 @@ interface Load {
   interactiveAt: number;
   writerWaitMs: number;
   writerWaitAt: number;
+  writerWorkerUnavailable: boolean;
+  writerBusyRetries: number;
 }
 /** Per-client pressure, including when tracing is disabled. */
 export const load = (client: Client.SqlClient): Readonly<Load> | undefined =>
@@ -251,7 +255,10 @@ try {
     allowExtension: workerData.allowExtension,
   });
   next.exec("PRAGMA busy_timeout = " + (workerData.writable ? 100 : 5000));
-  if (workerData.writable) next.exec("PRAGMA wal_autocheckpoint = " + workerData.checkpointFrames);
+  if (workerData.writable) {
+    next.exec("PRAGMA wal_autocheckpoint = " + workerData.checkpointFrames);
+    for (const pragma of workerData.connectionPragmas) next.exec(pragma);
+  }
   // Without WAL a reader's shared lock blocks the writer's commits, so refuse.
   const mode = String(next.prepare("PRAGMA journal_mode").get().journal_mode).toLowerCase();
   if (!workerData.writable && mode !== "wal") throw new Error("database uses journal_mode " + mode + ", not wal");
@@ -273,12 +280,25 @@ const prepare = (sql, cached) => {
   statements.set(sql, statement);
   return statement;
 };
-parentPort.on("message", (request) => {
+const requests = [];
+let executing = false;
+const nextRequest = () => {
+  if (executing || requests.length === 0) return;
+  executing = true;
+  const request = requests.shift();
+  const finish = (reply) => {
+    parentPort.postMessage(reply);
+    executing = false;
+    nextRequest();
+  };
   if (request.checkpointFrames !== undefined) {
     db.exec("PRAGMA wal_autocheckpoint = " + request.checkpointFrames);
+    executing = false;
+    nextRequest();
     return;
   }
   const { id, sql, params, cached, values, raw, safeIntegers } = request;
+  const startedAt = performance.now();
   let attempts = 0;
   const execute = () => {
     let operation = "open";
@@ -290,17 +310,21 @@ parentPort.on("message", (request) => {
       statement.setReadBigInts(safeIntegers);
       if (statement.columns().length > 0) {
         statement.setReturnArrays(values);
-        parentPort.postMessage({ id, rows: statement.all(...params) });
+        finish({ id, rows: statement.all(...params) });
       } else {
         const result = statement.run(...params);
-        parentPort.postMessage({ id, rows: raw ? result : [] });
+        finish({ id, rows: raw ? result : [] });
       }
     } catch (error) {
-      if (workerData.writable && (error.errcode === 5 || error.errcode === 6) && attempts++ < 3) {
-        setTimeout(execute, 10 * attempts);
+      if (workerData.writable && ((error.errcode & 255) === 5 || (error.errcode & 255) === 6)
+          && performance.now() - startedAt < 5000) {
+        // Each native attempt blocks only this worker for 100 ms; the total
+        // contention budget matches SQLite's former five-second timeout.
+        parentPort.postMessage({ type: "busy" });
+        setTimeout(execute, Math.min(100, 10 * ++attempts));
         return;
       }
-      parentPort.postMessage({
+      finish({
         id,
         error: {
           operation,
@@ -313,7 +337,8 @@ parentPort.on("message", (request) => {
     }
   };
   execute();
-});
+};
+parentPort.on("message", (request) => { requests.push(request); nextRequest(); });
 `;
 
 interface WorkerRequest {
@@ -366,7 +391,13 @@ const makeWorker = Effect.fnUntraced(function* (
   options: SqliteClientConfig,
   writable = false,
   onStatement?: (worker: NodeWorkerThreads.Worker) => void,
+  onAvailability?: (available: boolean) => void,
+  onBusy?: () => void,
 ) {
+  const runFork = Effect.runForkWith(yield* Effect.context<never>());
+  const clock = yield* Clock.Clock;
+  let closing = false;
+  let retryAt = 0;
   let current:
     | {
         readonly worker: NodeWorkerThreads.Worker;
@@ -386,6 +417,7 @@ const makeWorker = Effect.fnUntraced(function* (
         checkpointFrames: options.checkpointWorker ? WRITER_BACKSTOP_FRAMES : CHECKPOINT_FRAMES,
         allowExtension: options.allowExtension ?? false,
         prepareCacheSize: options.prepareCacheSize ?? 200,
+        connectionPragmas: options.connectionPragmas ?? [],
       },
     });
     let announce: (startup: WorkerStartup) => void = () => {};
@@ -398,7 +430,14 @@ const makeWorker = Effect.fnUntraced(function* (
       { readonly endsTransaction: boolean; readonly resume: (reply: WorkerReply) => void }
     >();
     const stop = (message: string) => {
+      if (stoppedMessage !== undefined) return;
       stoppedMessage = message;
+      if (writable && !closing) {
+        onAvailability?.(false);
+        runFork(
+          Effect.logWarning("SQLite writer worker exited; the next write reacquires a connection"),
+        );
+      }
       announce({ type: "unavailable", message });
       if (current?.worker === worker) current = undefined;
       for (const [id, request] of pending) {
@@ -410,7 +449,11 @@ const makeWorker = Effect.fnUntraced(function* (
       }
       pending.clear();
     };
-    worker.on("message", (reply: WorkerReply | WorkerStartup) => {
+    worker.on("message", (reply: WorkerReply | WorkerStartup | { readonly type: "busy" }) => {
+      if ("type" in reply && reply.type === "busy") {
+        onBusy?.();
+        return;
+      }
       if ("type" in reply) {
         announce(reply);
         // An idle reader must not keep the process alive.
@@ -512,6 +555,7 @@ const makeWorker = Effect.fnUntraced(function* (
 
   yield* Effect.addFinalizer(() =>
     Effect.promise(async () => {
+      closing = true;
       await current?.worker.terminate();
     }),
   );
@@ -528,10 +572,12 @@ const makeWorker = Effect.fnUntraced(function* (
         void reader.worker.terminate();
       }
       if (unavailable) return Effect.succeed(undefined);
-      unavailable = true;
+      unavailable = !writable;
+      retryAt = clock.currentTimeMillisUnsafe() + 1000;
+      onAvailability?.(false);
       return Effect.logWarning(
         writable
-          ? "SQLite writer worker unavailable"
+          ? "SQLite writer worker unavailable; writes use the main-thread connection"
           : "SQLite reader worker unavailable; reads use the writer",
         { reason },
       ).pipe(Effect.as(undefined));
@@ -539,15 +585,16 @@ const makeWorker = Effect.fnUntraced(function* (
 
   /** The live worker's connection once it is ready, or undefined to use the writer. */
   return Effect.suspend((): Effect.Effect<Connection | undefined> => {
-    if (unavailable) return Effect.succeed(undefined);
+    if (unavailable || (writable && clock.currentTimeMillisUnsafe() < retryAt))
+      return Effect.succeed(undefined);
     let reader: NonNullable<typeof current>;
     try {
       reader = current ?? start();
     } catch (cause) {
       return turnOff(undefined, String(cause));
     }
-    // SqlClient acquires transaction connections uninterruptibly. Waiting for the
-    // worker happens before any lock is taken, so let a cancelled request leave.
+    // SqlClient acquires transaction connections uninterruptibly. Startup has not
+    // begun a transaction, so cancellation can still release the acquired lease.
     return Effect.flatMap(
       Effect.interruptible(
         Effect.timeoutOption(
@@ -561,7 +608,10 @@ const makeWorker = Effect.fnUntraced(function* (
         unavailable || current !== reader
           ? Effect.succeed(undefined)
           : Option.isSome(startup) && startup.value.type === "ready"
-            ? Effect.succeed(reader.connection)
+            ? Effect.sync(() => {
+                onAvailability?.(true);
+                return reader.connection;
+              })
             : turnOff(
                 reader,
                 Option.isSome(startup) && startup.value.type === "unavailable"
@@ -716,6 +766,14 @@ const make = Effect.fn("makeWithDatabase")(function* (
     ? Statement.defaultTransforms(options.transformResultNames).array
     : undefined;
 
+  const pressure: Load = {
+    interactiveAt: -Infinity,
+    writerWaitMs: 0,
+    writerWaitAt: -Infinity,
+    writerWorkerUnavailable: false,
+    writerBusyRetries: 0,
+  };
+  let acquireWriter: Effect.Effect<Connection | undefined> | undefined;
   const makeConnection = Effect.gen(function* () {
     const scope = yield* Effect.scope;
     const db = yield* Effect.try({
@@ -745,26 +803,34 @@ const make = Effect.fn("makeWithDatabase")(function* (
         ? yield* startCheckpointWorker(options.filename, db)
         : undefined;
 
+    // The fallback must have the same connection-local settings as a respawned worker.
+    yield* Effect.try({
+      try: () => {
+        db.exec("PRAGMA busy_timeout = 5000");
+        for (const pragma of options.connectionPragmas ?? []) db.exec(pragma);
+      },
+      catch: (cause) => failed(cause, "Failed to initialize database connection", "open"),
+    });
     if (options.writerWorker && !options.readonly && isFileDatabase) {
-      let handedBack = false;
-      const acquire = yield* makeWorker(options, true, (worker) => {
-        if (checkpoint?.active()) checkpoint();
-        else if (!handedBack) {
-          handedBack = true;
-          // The native control connection and writer worker need the same
-          // fallback when the checkpoint worker cannot run.
-          // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Node workers do not accept a target origin.
-          worker.postMessage({ checkpointFrames: CHECKPOINT_FRAMES });
-        }
-      });
-      const workerConnection = yield* acquire;
-      if (workerConnection === undefined)
-        return yield* failed(
-          new Error("Writer worker unavailable"),
-          "Failed to open database",
-          "open",
-        );
-      return workerConnection;
+      const handedBack = new WeakSet<NodeWorkerThreads.Worker>();
+      acquireWriter = yield* makeWorker(
+        options,
+        true,
+        (worker) => {
+          if (checkpoint?.active()) checkpoint();
+          else if (!handedBack.has(worker)) {
+            handedBack.add(worker);
+            // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Node workers do not accept a target origin.
+            worker.postMessage({ checkpointFrames: CHECKPOINT_FRAMES });
+          }
+        },
+        (available) => {
+          pressure.writerWorkerUnavailable = !available;
+        },
+        () => {
+          pressure.writerBusyRetries++;
+        },
+      );
     }
 
     const statementReaderCache = new WeakMap<NodeSqlite.StatementSync, boolean>();
@@ -905,14 +971,21 @@ const make = Effect.fn("makeWithDatabase")(function* (
     });
   });
 
-  const pressure: Load = { interactiveAt: -Infinity, writerWaitMs: 0, writerWaitAt: -Infinity };
   const semaphore = yield* Semaphore.make(1);
   const connection = yield* makeConnection;
   const acquireReader =
     options.readerWorker && isFileDatabase ? yield* makeWorker(options) : undefined;
   const readerSemaphore = yield* Semaphore.make(1);
 
-  const writer = { name: "writer" as const, lock: semaphore, connection };
+  const writer = {
+    name: "writer" as const,
+    lock: semaphore,
+    acquire: Effect.suspend(() =>
+      acquireWriter === undefined
+        ? Effect.succeed(connection)
+        : Effect.map(acquireWriter, (worker) => worker ?? connection),
+    ),
+  };
   // Picks the reader only for `readOnly` work, and the writer whenever the
   // reader is turned off.
   const route = Effect.withFiber((fiber) =>
@@ -920,7 +993,11 @@ const make = Effect.fn("makeWithDatabase")(function* (
       ? Effect.map(acquireReader, (readerConnection) =>
           readerConnection === undefined
             ? writer
-            : { name: "reader" as const, lock: readerSemaphore, connection: readerConnection },
+            : {
+                name: "reader" as const,
+                lock: readerSemaphore,
+                acquire: Effect.succeed(readerConnection),
+              },
         )
       : Effect.succeed(writer),
   );
@@ -958,7 +1035,7 @@ const make = Effect.fn("makeWithDatabase")(function* (
       const start = clock.monotonicTimeNanosUnsafe();
       if (Context.get(fiber.context, Interactive))
         pressure.interactiveAt = clock.currentTimeMillisUnsafe();
-      return Effect.as(
+      return Effect.flatMap(
         Effect.tap(restore(target.lock.take(1)), () => {
           const pending = fiber.getRef(TransactionAcquire);
           const sample = acquired(target, clock, start);
@@ -971,7 +1048,7 @@ const make = Effect.fn("makeWithDatabase")(function* (
             annotateAcquired(fiber, sample);
           return Scope.addFinalizer(scope, target.lock.release(1));
         }),
-        target.connection,
+        () => target.acquire,
       );
     }),
   );

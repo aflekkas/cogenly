@@ -200,6 +200,7 @@ export function serverCheck(input: {
 export function databaseCheck(input: {
   readonly answered: boolean;
   readonly sizeBytes: number | null;
+  readonly writerWorkerUnavailable?: boolean;
 }): MachineHealthCheck {
   if (!input.answered) {
     return check("database", "The database didn't answer", [
@@ -216,7 +217,17 @@ export function databaseCheck(input: {
     input.sizeBytes === null
       ? "Database answers"
       : `Database answers (${formatBytes(input.sizeBytes)})`,
-    [],
+    input.writerWorkerUnavailable
+      ? [
+          item({
+            key: "database:writer-worker",
+            status: "warn",
+            title: "Database writes are using the main thread",
+            detail:
+              "The background writer is unavailable. Writes still work, but may delay the client. Cogenly retries starting the worker on later writes.",
+          }),
+        ]
+      : [],
   );
 }
 

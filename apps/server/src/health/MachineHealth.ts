@@ -291,6 +291,7 @@ const make = Effect.gen(function* () {
       const pageSize = size[0]?.page_size;
       return databaseCheck({
         answered: true,
+        writerWorkerUnavailable: NodeSqliteClient.load(sql)?.writerWorkerUnavailable ?? false,
         sizeBytes: pages === undefined || pageSize === undefined ? null : pages * pageSize,
       });
     }),

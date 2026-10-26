@@ -74,3 +74,23 @@ it("backs off further under event-loop or writer pressure", () => {
   expect(backfillRate(false, 21, 0)).toBe(10);
   expect(backfillRate(true, 0, 26)).toBe(10);
 });
+
+it.effect("adds unpaid charges from consecutive peers instead of replacing them", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const budget = yield* make;
+    yield* sql`SELECT 1`.pipe(NodeSqliteClient.interactive);
+    yield* budget.completed(10, 5);
+    yield* TestClock.adjust(100);
+    yield* budget.completed(10, 5);
+    const done = yield* Deferred.make<void>();
+    const waiting = yield* budget.ready.pipe(
+      Effect.andThen(Deferred.succeed(done, undefined)),
+      Effect.forkChild,
+    );
+    yield* TestClock.adjust(299);
+    expect(yield* Deferred.isDone(done)).toBe(false);
+    yield* TestClock.adjust(1);
+    yield* Fiber.join(waiting);
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+);
