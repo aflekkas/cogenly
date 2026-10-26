@@ -22,6 +22,7 @@ import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { IntegrationSourceIcon } from "../chat/ComposerSourcesPicker";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { ScrollArea } from "../ui/scroll-area";
 import { DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { toastManager } from "../ui/toast";
@@ -329,28 +330,31 @@ const STATUS_BADGE_VARIANT = {
 /** The review's servers, grouped by provider and capped in height so the page stays short. */
 function NativeImportList({ review }: { readonly review: NativeImportReview }) {
   return (
-    <div className="mt-2 max-h-72 space-y-3 overflow-y-auto">
-      {review.groups.map((group) => (
-        <section key={group.provider} aria-label={group.title}>
-          <h4 className="pb-1 font-medium text-muted-foreground text-xs">{group.title}</h4>
-          <ul>
-            {group.rows.map((row) => {
-              const status = NATIVE_IMPORT_STATUS_TEXT[row.status];
-              return (
-                <li key={row.key} className="flex min-w-0 items-center gap-2 py-1">
-                  <IntegrationSourceIcon icon={row.icon} className="size-4 shrink-0" />
-                  <span className="shrink-0 text-sm">{row.label}</span>
-                  <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs">
-                    {row.source}
-                  </span>
-                  <Badge variant={STATUS_BADGE_VARIANT[status.tone]}>{status.label}</Badge>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      ))}
-    </div>
+    <ScrollArea chainVerticalScroll className="mt-2 h-auto max-h-72">
+      {/* pe-2 keeps the badges clear of the overlay scrollbar. */}
+      <div className="space-y-3 pe-2">
+        {review.groups.map((group) => (
+          <section key={group.provider} aria-label={group.title}>
+            <h4 className="pb-1 font-medium text-muted-foreground text-xs">{group.title}</h4>
+            <ul>
+              {group.rows.map((row) => {
+                const status = NATIVE_IMPORT_STATUS_TEXT[row.status];
+                return (
+                  <li key={row.key} className="flex min-w-0 items-center gap-2 py-1">
+                    <IntegrationSourceIcon icon={row.icon} className="size-4 shrink-0" />
+                    <span className="shrink-0 text-sm">{row.label}</span>
+                    <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs">
+                      {row.source}
+                    </span>
+                    <Badge variant={STATUS_BADGE_VARIANT[status.tone]}>{status.label}</Badge>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ))}
+      </div>
+    </ScrollArea>
   );
 }
 

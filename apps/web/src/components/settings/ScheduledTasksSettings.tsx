@@ -965,7 +965,7 @@ function DeliveryBlock({ title, children }: { title: string; children: ReactNode
   return (
     <div className="space-y-1">
       <Label>{title}</Label>
-      <pre className="max-h-64 overflow-auto rounded-md bg-muted p-2 text-xs whitespace-pre-wrap break-all">
+      <pre className="scroll-fade-y max-h-64 overflow-auto rounded-md bg-muted p-2 text-xs whitespace-pre-wrap break-all">
         {children}
       </pre>
     </div>

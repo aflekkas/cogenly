@@ -227,7 +227,7 @@ export function DeviceHostEditor({
                       {result.status === "failed" ? (
                         <details className="mt-1.5 text-muted-foreground">
                           <summary className="cursor-pointer">Show error</summary>
-                          <p className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words">
+                          <p className="scroll-fade-y mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words">
                             {result.error}
                           </p>
                         </details>

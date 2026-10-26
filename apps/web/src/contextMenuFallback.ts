@@ -446,7 +446,7 @@ export function showContextMenuFallback<T extends string>(
       // Fit the viewport minus its margins, so a menu only scrolls when the
       // window is shorter than the menu itself.
       const maxHeight = `calc(100vh - ${MENU_VIEWPORT_MARGIN_PX * 2}px)`;
-      inner.className = "min-w-0 max-w-sm overflow-y-auto overflow-x-hidden p-1";
+      inner.className = "scroll-fade-y min-w-0 max-w-sm overflow-y-auto overflow-x-hidden p-1";
       inner.style.cssText = `max-height:${maxHeight};min-width:0;max-width:24rem;overflow-x:hidden;overflow-y:auto;padding:0.25rem;`;
 
       for (const item of entries) {

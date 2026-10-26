@@ -6652,7 +6652,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     // The 4px bleed keeps focus rings clear of the scroll clip. The start
                     // also pulls in by a control's px-2.5, so the first control's icon sits
                     // on the prompt's text inset while its hover background bleeds left.
-                    "relative -my-1 -ms-3.5 -me-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+                    "scroll-fade-x relative -my-1 -ms-3.5 -me-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
                   )}
                 >
                   {composerControlsCollapsed ? null : composerControls}

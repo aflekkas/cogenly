@@ -154,7 +154,7 @@ export function BrowserDeviceToolbar({
 
   return (
     <div
-      className="sticky left-0 top-0 z-50 flex items-center gap-0.5 overflow-x-auto border-b border-border/70 bg-background px-1.5 shadow-xs [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="sticky left-0 top-0 z-50 flex border-b border-border/70 bg-background shadow-xs"
       style={{ width, height: BROWSER_DEVICE_TOOLBAR_HEIGHT }}
       role="toolbar"
       aria-label="Browser device toolbar"
@@ -174,155 +174,160 @@ export function BrowserDeviceToolbar({
         applyCustomSize();
       }}
     >
-      {width >= 560 ? (
-        <span className="mr-0.5 shrink-0 text-2xs font-medium text-muted-foreground">
-          Dimensions
-        </span>
-      ) : null}
-      <Select
-        modal={false}
-        value={selectedValue}
-        onValueChange={selectViewport}
-        items={SELECT_ITEMS}
-        disabled={pending}
-      >
-        <SelectTrigger
-          variant="ghost"
-          size="xs"
-          className={cn("shrink-0 justify-between", width >= 440 ? "w-36" : "w-24")}
-          aria-label="Browser device preset"
+      {/* Scrolls inside the bar so the fade masks the controls, not the bar's opaque surface. */}
+      <div className="scroll-fade-x flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto px-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {width >= 560 ? (
+          <span className="mr-0.5 shrink-0 text-2xs font-medium text-muted-foreground">
+            Dimensions
+          </span>
+        ) : null}
+        <Select
+          modal={false}
+          value={selectedValue}
+          onValueChange={selectViewport}
+          items={SELECT_ITEMS}
+          disabled={pending}
         >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectPopup align="start" alignItemWithTrigger={false}>
-          <SelectItem value={RESPONSIVE_VALUE}>Responsive</SelectItem>
-          <SelectGroup>
-            <SelectGroupLabel>Standard</SelectGroupLabel>
-            {PREVIEW_VIEWPORT_PRESETS.map((preset) => (
-              <SelectItem key={preset.id} value={preset.id}>
-                <span className="flex w-full items-center justify-between gap-5">
-                  <span>{preset.label}</span>
-                  <span className="text-xs tabular-nums text-muted-foreground">
-                    {preset.detail}
+          <SelectTrigger
+            variant="ghost"
+            size="xs"
+            className={cn("shrink-0 justify-between", width >= 440 ? "w-36" : "w-24")}
+            aria-label="Browser device preset"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectPopup align="start" alignItemWithTrigger={false}>
+            <SelectItem value={RESPONSIVE_VALUE}>Responsive</SelectItem>
+            <SelectGroup>
+              <SelectGroupLabel>Standard</SelectGroupLabel>
+              {PREVIEW_VIEWPORT_PRESETS.map((preset) => (
+                <SelectItem key={preset.id} value={preset.id}>
+                  <span className="flex w-full items-center justify-between gap-5">
+                    <span>{preset.label}</span>
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      {preset.detail}
+                    </span>
                   </span>
-                </span>
-              </SelectItem>
-            ))}
-          </SelectGroup>
-        </SelectPopup>
-      </Select>
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectPopup>
+        </Select>
 
-      <form
-        className="m-0 flex min-w-0 shrink-0 items-center gap-0.5 border-0 p-0"
-        aria-label="Viewport dimensions"
-        onSubmit={(event) => {
-          event.preventDefault();
-          applyCustomSize();
-        }}
-      >
-        <Input
-          nativeInput
-          type="number"
-          inputMode="numeric"
-          size="compact"
-          font="mono"
-          min={PREVIEW_VIEWPORT_MIN_DIMENSION}
-          max={PREVIEW_VIEWPORT_MAX_DIMENSION}
-          value={presentedSize.width}
-          disabled={pending}
-          onFocus={() =>
-            setCustomSize(
-              (current) =>
-                current ?? {
-                  width: String(setting.width),
-                  height: String(setting.height),
-                },
-            )
-          }
-          onChange={(event) => updateCustomDimension("width", event.target.value)}
-          aria-label="Viewport width"
-          aria-invalid={!customValid}
-          className={width >= 360 ? "w-14" : "w-13"}
-        />
-        <span className="text-xs text-muted-foreground">×</span>
-        <Input
-          nativeInput
-          type="number"
-          inputMode="numeric"
-          size="compact"
-          font="mono"
-          min={PREVIEW_VIEWPORT_MIN_DIMENSION}
-          max={PREVIEW_VIEWPORT_MAX_DIMENSION}
-          value={presentedSize.height}
-          disabled={pending}
-          onFocus={() =>
-            setCustomSize(
-              (current) =>
-                current ?? {
-                  width: String(setting.width),
-                  height: String(setting.height),
-                },
-            )
-          }
-          onChange={(event) => updateCustomDimension("height", event.target.value)}
-          aria-label="Viewport height"
-          aria-invalid={!customValid}
-          className={width >= 360 ? "w-14" : "w-13"}
-        />
-      </form>
-
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              variant={aspectRatio === null ? "ghost" : "secondary"}
-              size="icon-xs"
-              type="button"
-              aria-label={
-                aspectRatio === null ? "Lock viewport aspect ratio" : "Unlock viewport aspect ratio"
-              }
-              aria-pressed={aspectRatio !== null}
-              disabled={pending || !customValid}
-              onPointerDown={(event) => event.preventDefault()}
-              onClick={toggleAspectRatio}
-            />
-          }
+        <form
+          className="m-0 flex min-w-0 shrink-0 items-center gap-0.5 border-0 p-0"
+          aria-label="Viewport dimensions"
+          onSubmit={(event) => {
+            event.preventDefault();
+            applyCustomSize();
+          }}
         >
-          {aspectRatio === null ? (
-            <Unlink2 className={cn(aspectRatio !== null && "text-foreground")} />
-          ) : (
-            <Link2 className={cn(aspectRatio !== null && "text-foreground")} />
-          )}
-        </TooltipTrigger>
-        <TooltipPopup side="top">
-          {aspectRatio === null ? "Lock aspect ratio" : "Unlock aspect ratio"}
-        </TooltipPopup>
-      </Tooltip>
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        type="button"
-        aria-label="Rotate viewport"
-        disabled={pending}
-        onClick={rotate}
-      >
-        <ScreenRotationIcon />
-      </Button>
-      {/* Sticky backing so scrolled controls do not show through the close action. */}
-      <span className="sticky right-0 ml-auto flex bg-background">
+          <Input
+            nativeInput
+            type="number"
+            inputMode="numeric"
+            size="compact"
+            font="mono"
+            min={PREVIEW_VIEWPORT_MIN_DIMENSION}
+            max={PREVIEW_VIEWPORT_MAX_DIMENSION}
+            value={presentedSize.width}
+            disabled={pending}
+            onFocus={() =>
+              setCustomSize(
+                (current) =>
+                  current ?? {
+                    width: String(setting.width),
+                    height: String(setting.height),
+                  },
+              )
+            }
+            onChange={(event) => updateCustomDimension("width", event.target.value)}
+            aria-label="Viewport width"
+            aria-invalid={!customValid}
+            className={width >= 360 ? "w-14" : "w-13"}
+          />
+          <span className="text-xs text-muted-foreground">×</span>
+          <Input
+            nativeInput
+            type="number"
+            inputMode="numeric"
+            size="compact"
+            font="mono"
+            min={PREVIEW_VIEWPORT_MIN_DIMENSION}
+            max={PREVIEW_VIEWPORT_MAX_DIMENSION}
+            value={presentedSize.height}
+            disabled={pending}
+            onFocus={() =>
+              setCustomSize(
+                (current) =>
+                  current ?? {
+                    width: String(setting.width),
+                    height: String(setting.height),
+                  },
+              )
+            }
+            onChange={(event) => updateCustomDimension("height", event.target.value)}
+            aria-label="Viewport height"
+            aria-invalid={!customValid}
+            className={width >= 360 ? "w-14" : "w-13"}
+          />
+        </form>
+
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant={aspectRatio === null ? "ghost" : "secondary"}
+                size="icon-xs"
+                type="button"
+                aria-label={
+                  aspectRatio === null
+                    ? "Lock viewport aspect ratio"
+                    : "Unlock viewport aspect ratio"
+                }
+                aria-pressed={aspectRatio !== null}
+                disabled={pending || !customValid}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={toggleAspectRatio}
+              />
+            }
+          >
+            {aspectRatio === null ? (
+              <Unlink2 className={cn(aspectRatio !== null && "text-foreground")} />
+            ) : (
+              <Link2 className={cn(aspectRatio !== null && "text-foreground")} />
+            )}
+          </TooltipTrigger>
+          <TooltipPopup side="top">
+            {aspectRatio === null ? "Lock aspect ratio" : "Unlock aspect ratio"}
+          </TooltipPopup>
+        </Tooltip>
         <Button
           variant="ghost"
           size="icon-xs"
           type="button"
-          aria-label="Close device toolbar"
+          aria-label="Rotate viewport"
           disabled={pending}
-          onClick={() => {
-            apply({ _tag: "fill" }, null);
-          }}
+          onClick={rotate}
         >
-          <X />
+          <ScreenRotationIcon />
         </Button>
-      </span>
+        {/* Sticky backing so scrolled controls do not show through the close action. */}
+        <span className="sticky right-0 ml-auto flex bg-background">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            type="button"
+            aria-label="Close device toolbar"
+            disabled={pending}
+            onClick={() => {
+              apply({ _tag: "fill" }, null);
+            }}
+          >
+            <X />
+          </Button>
+        </span>
+      </div>
     </div>
   );
 }

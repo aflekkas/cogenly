@@ -9713,7 +9713,7 @@ export default function ChatView(props: ChatViewProps) {
               </WorkHandoffMarkersProvider>
               {embedded?.renderEmptyState ? (
                 <div
-                  className="absolute inset-x-0 top-0 z-10 flex flex-col overflow-y-auto transition-opacity duration-(--motion-duration-base) ease-standard data-hidden:pointer-events-none data-hidden:opacity-0"
+                  className="scroll-fade-y absolute inset-x-0 top-0 z-10 flex flex-col overflow-y-auto transition-opacity duration-(--motion-duration-base) ease-standard data-hidden:pointer-events-none data-hidden:opacity-0"
                   style={{ bottom: composerTimelineInset }}
                   data-hidden={embeddedEmptyStateVisible ? undefined : ""}
                   inert={!embeddedEmptyStateVisible}

@@ -292,6 +292,7 @@
   margin-top: 2px;
 }
 .agent-markdown pre {
+  @apply scroll-fade-x;
   overflow: auto;
   max-width: 100%;
   border-radius: 8px;
@@ -325,6 +326,7 @@
   margin: 8px 0;
 }
 .agent-markdown table {
+  @apply scroll-fade-x;
   display: block;
   overflow-x: auto;
   border-collapse: collapse;

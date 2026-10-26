@@ -195,7 +195,7 @@ export function MermaidDiagram({
         {/* Find matches the source through the hidden copy beside the diagram. */}
         <pre
           data-thread-find-ignore
-          className="mt-2 mb-0 overflow-auto font-mono text-xs whitespace-pre-wrap"
+          className="scroll-fade-y mt-2 mb-0 overflow-auto font-mono text-xs whitespace-pre-wrap"
         >
           {source}
         </pre>
@@ -204,7 +204,7 @@ export function MermaidDiagram({
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div className="scroll-fade-x overflow-x-auto">
       <button
         type="button"
         aria-label="Expand diagram"
