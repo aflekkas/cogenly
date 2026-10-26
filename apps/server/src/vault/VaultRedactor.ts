@@ -16,13 +16,22 @@ export const redactText = (text: string, secrets: Iterable<string>): string => {
   return result;
 };
 
-/** Deep-copies a tool result, rewriting every string inside it. */
-const mapStrings = <A>(value: A, rewrite: (text: string) => string): A => {
+/**
+ * Deep-copies a tool result, rewriting every string inside it, and object keys
+ * too when `keys` is set: a page or upstream can echo a secret as a key.
+ */
+const mapStrings = <A>(
+  value: A,
+  rewrite: (text: string) => string,
+  { keys }: { readonly keys: boolean },
+): A => {
   const walk = (current: unknown): unknown => {
     if (typeof current === "string") return rewrite(current);
     if (Array.isArray(current)) return current.map(walk);
     if (typeof current === "object" && current !== null)
-      return Object.fromEntries(Object.entries(current).map(([key, entry]) => [key, walk(entry)]));
+      return Object.fromEntries(
+        Object.entries(current).map(([key, entry]) => [keys ? rewrite(key) : key, walk(entry)]),
+      );
     return current;
   };
   return walk(value) as A;
@@ -32,11 +41,15 @@ const mapStrings = <A>(value: A, rewrite: (text: string) => string): A => {
 export const redactValue = <A>(value: A, secrets: Iterable<string>): A => {
   const ordered = orderedSecrets(secrets);
   if (ordered.length === 0) return value;
-  return mapStrings(value, (text) => {
-    let result = text;
-    for (const secret of ordered) result = result.split(secret).join(VAULT_REDACTION);
-    return result;
-  });
+  return mapStrings(
+    value,
+    (text) => {
+      let result = text;
+      for (const secret of ordered) result = result.split(secret).join(VAULT_REDACTION);
+      return result;
+    },
+    { keys: true },
+  );
 };
 
 /** What a tool result says in place of its text when the vault cannot be checked. */
@@ -44,10 +57,11 @@ export const VAULT_WITHHELD = "[withheld: the vault could not be checked for sec
 
 /**
  * A tool result with every string replaced by `VAULT_WITHHELD`, for when the
- * secrets to scrub cannot be loaded. The shape stays, so the result still
- * encodes; nothing it said reaches the agent.
+ * secrets to scrub cannot be loaded. Keys stay, so the result keeps its shape
+ * and still encodes; every value it said is withheld.
  */
-export const withholdValue = <A>(value: A): A => mapStrings(value, () => VAULT_WITHHELD);
+export const withholdValue = <A>(value: A): A =>
+  mapStrings(value, () => VAULT_WITHHELD, { keys: false });
 
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -75,7 +89,7 @@ export const redactShortSecrets = (text: string, secrets: Iterable<string>): str
 export const redactShortValue = <A>(value: A, secrets: Iterable<string>): A => {
   const list = [...secrets];
   if (list.length === 0) return value;
-  return mapStrings(value, (text) => redactShortSecrets(text, list));
+  return mapStrings(value, (text) => redactShortSecrets(text, list), { keys: true });
 };
 
 /** A PTY may split a token across data callbacks. Hold only a possible secret
