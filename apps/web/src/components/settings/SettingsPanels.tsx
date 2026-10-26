@@ -30,7 +30,8 @@ import {
 } from "@cogenly/client-runtime/state/runtime";
 import {
   DEFAULT_UNIFIED_SETTINGS,
-  type ChatWidth,
+  ChatWidth,
+  DiffColorScheme,
   type ResponseStreamingMode,
   type QuitConfirmationMode,
   SidebarProjectSortOrder,
@@ -52,7 +53,6 @@ import {
 import { isElectron } from "../../env";
 import { buildHostedChannelSelectionUrl, type HostedAppChannel } from "../../hostedPairing";
 import { useTheme } from "../../hooks/useTheme";
-import { BrowserAppearanceSettingRow } from "./IntegrationsSettings";
 import { DEFAULT_APPEARANCE_MODE, type AppearanceMode } from "../../theme";
 import { AccentColorSettingRow } from "./AccentColorSettingRow";
 import {
@@ -142,10 +142,18 @@ const TIMESTAMP_FORMAT_LABELS: Record<TimestampFormat, string> = {
   "24-hour": "24-hour",
 };
 
+const CHAT_WIDTHS: readonly ChatWidth[] = ChatWidth.literals;
 const CHAT_WIDTH_LABELS: Record<ChatWidth, string> = {
   comfortable: "Comfortable",
   wide: "Wide",
   full: "Full",
+};
+
+type DiffColorSchemeValue = typeof DiffColorScheme.Type;
+const DIFF_COLOR_SCHEMES: readonly DiffColorSchemeValue[] = DiffColorScheme.literals;
+const DIFF_COLOR_SCHEME_LABELS: Record<DiffColorSchemeValue, string> = {
+  "red-green": "Red and green",
+  "blue-orange": "Blue and orange",
 };
 
 const QUIT_CONFIRMATION_MODE_LABELS: Record<QuitConfirmationMode, string> = {
@@ -895,30 +903,90 @@ function SettingsSegmented<T extends string>(props: {
   );
 }
 
-function TimeFormatSettingRow() {
-  const timestampFormat = useClientSettings((settings) => settings.timestampFormat);
+function ChatWidthSettingRow() {
+  const value = useClientSettings((settings) => settings.chatWidth);
   const updateClientSettings = useUpdateClientSettings();
+  const setValue = (chatWidth: typeof value) => updateClientSettings({ chatWidth });
+  const isDefault = value === DEFAULT_UNIFIED_SETTINGS.chatWidth;
+  return (
+    <SettingsRow
+      {...searchableSetting("chat-width")}
+      description="How wide threads and the composer grow on large screens."
+      resetAction={
+        isDefault ? null : (
+          <SettingResetButton
+            label="chat width"
+            onClick={() => setValue(DEFAULT_UNIFIED_SETTINGS.chatWidth)}
+          />
+        )
+      }
+      control={
+        <SettingsSegmented
+          label="Chat width"
+          value={value}
+          options={CHAT_WIDTHS}
+          labels={CHAT_WIDTH_LABELS}
+          onChange={setValue}
+        />
+      }
+    />
+  );
+}
+
+function DiffColorsSettingRow() {
+  const value = useClientSettings((settings) => settings.diffColorScheme);
+  const updateClientSettings = useUpdateClientSettings();
+  const setValue = (diffColorScheme: typeof value) => updateClientSettings({ diffColorScheme });
+  const isDefault = value === DEFAULT_UNIFIED_SETTINGS.diffColorScheme;
+  return (
+    <SettingsRow
+      {...searchableSetting("diff-colors")}
+      description="Colors for added and removed lines. Blue and orange is easier to tell apart for color blindness."
+      resetAction={
+        isDefault ? null : (
+          <SettingResetButton
+            label="diff colors"
+            onClick={() => setValue(DEFAULT_UNIFIED_SETTINGS.diffColorScheme)}
+          />
+        )
+      }
+      control={
+        <SettingsSegmented
+          label="Diff colors"
+          value={value}
+          options={DIFF_COLOR_SCHEMES}
+          labels={DIFF_COLOR_SCHEME_LABELS}
+          onChange={setValue}
+        />
+      }
+    />
+  );
+}
+
+function TimeFormatSettingRow() {
+  const value = useClientSettings((settings) => settings.timestampFormat);
+  const updateClientSettings = useUpdateClientSettings();
+  const setValue = (timestampFormat: typeof value) => updateClientSettings({ timestampFormat });
+  const isDefault = value === DEFAULT_UNIFIED_SETTINGS.timestampFormat;
   return (
     <SettingsRow
       {...searchableSetting("time-format")}
       description="How times are shown in threads and lists. System follows your device's clock."
       resetAction={
-        timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat ? (
+        isDefault ? null : (
           <SettingResetButton
             label="time format"
-            onClick={() =>
-              updateClientSettings({ timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat })
-            }
+            onClick={() => setValue(DEFAULT_UNIFIED_SETTINGS.timestampFormat)}
           />
-        ) : null
+        )
       }
       control={
         <SettingsSegmented
           label="Time format"
-          value={timestampFormat}
+          value={value}
           options={TIMESTAMP_FORMATS}
           labels={TIMESTAMP_FORMAT_LABELS}
-          onChange={(value) => updateClientSettings({ timestampFormat: value })}
+          onChange={setValue}
         />
       }
     />
@@ -930,10 +998,10 @@ export function AppearanceSettingsPanel() {
   const { preferences, update } = useAppearancePreferences();
   return (
     <>
-      <SettingsSection id="appearance" title="Appearance">
+      <SettingsSection id="appearance" title="Theme">
         <SettingsRow
           {...searchableSetting("color-scheme")}
-          description="Light, dark, or follow your system."
+          description="Light, dark, or match your system."
           resetAction={
             appearanceMode !== DEFAULT_APPEARANCE_MODE ? (
               <SettingResetButton
@@ -953,6 +1021,10 @@ export function AppearanceSettingsPanel() {
           }
         />
         <AccentColorSettingRow />
+        <DiffColorsSettingRow />
+      </SettingsSection>
+
+      <SettingsSection id="layout" title="Layout">
         <SettingsRow
           {...searchableSetting("font-size")}
           description="Scales text and spacing across the app."
@@ -974,9 +1046,10 @@ export function AppearanceSettingsPanel() {
             />
           }
         />
+        <ChatWidthSettingRow />
         <SettingsRow
           {...searchableSetting("sidebar-layout")}
-          description="Anchored to the bottom near search, or top-down."
+          description="Bottom docks search at the foot of the sidebar, Top puts it under the titlebar. Set per device."
           resetAction={
             preferences.sidebarLayout !== DEFAULT_APPEARANCE_PREFERENCES.sidebarLayout ? (
               <SettingResetButton
@@ -998,21 +1071,8 @@ export function AppearanceSettingsPanel() {
           }
         />
         <SettingsRow
-          {...searchableSetting("usage-meters")}
-          description="Whether usage limit bars show quota remaining (draining) or quota used (filling up)."
-          resetAction={
-            preferences.usageMeter !== DEFAULT_APPEARANCE_PREFERENCES.usageMeter ? (
-              <SettingResetButton
-                label="usage meters"
-                onClick={() => update({ usageMeter: DEFAULT_APPEARANCE_PREFERENCES.usageMeter })}
-              />
-            ) : null
-          }
-          control={<UsageMeterModeToggle />}
-        />
-        <SettingsRow
           {...searchableSetting("reduce-motion")}
-          description="Turn animations down to simple fades. Off follows your system setting."
+          description="Use simple fades instead of animations. Off follows your system setting."
           resetAction={
             preferences.motion !== DEFAULT_APPEARANCE_PREFERENCES.motion ? (
               <SettingResetButton
@@ -1029,10 +1089,23 @@ export function AppearanceSettingsPanel() {
             />
           }
         />
-        <TimeFormatSettingRow />
       </SettingsSection>
-      <SettingsSection id="browser-appearance" title="Browser on this device">
-        <BrowserAppearanceSettingRow disabled={false} />
+
+      <SettingsSection id="display" title="Display">
+        <TimeFormatSettingRow />
+        <SettingsRow
+          {...searchableSetting("usage-meters")}
+          description="Show usage limits as how much is left or how much is used."
+          resetAction={
+            preferences.usageMeter !== DEFAULT_APPEARANCE_PREFERENCES.usageMeter ? (
+              <SettingResetButton
+                label="usage meters"
+                onClick={() => update({ usageMeter: DEFAULT_APPEARANCE_PREFERENCES.usageMeter })}
+              />
+            ) : null
+          }
+          control={<UsageMeterModeToggle />}
+        />
       </SettingsSection>
     </>
   );

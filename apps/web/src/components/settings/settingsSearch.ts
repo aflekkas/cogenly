@@ -366,16 +366,30 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["appearance theme brand primary color orange blue violet green pink"],
   },
   {
+    id: "diff-colors",
+    title: "Diff colors",
+    to: "/settings/appearance",
+    searchTerms: [
+      "appearance theme added removed lines red green blue orange color blind colorblind accessibility",
+    ],
+  },
+  {
     id: "font-size",
     title: "Font size",
     to: "/settings/appearance",
     searchTerms: ["appearance text size zoom small large scale"],
   },
   {
+    id: "chat-width",
+    title: "Chat width",
+    to: "/settings/appearance",
+    searchTerms: ["appearance layout thread timeline composer wide full comfortable column"],
+  },
+  {
     id: "sidebar-layout",
     title: "Sidebar layout",
     to: "/settings/appearance",
-    searchTerms: ["appearance sidebar search dock top bottom anchored list order"],
+    searchTerms: ["appearance layout sidebar search dock top bottom anchored list order"],
   },
   {
     id: "usage-meters",
@@ -387,7 +401,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "reduce-motion",
     title: "Reduce motion",
     to: "/settings/appearance",
-    searchTerms: ["appearance animation motion accessibility"],
+    searchTerms: ["appearance layout animation motion accessibility"],
   },
   {
     id: "project-grouping",
@@ -437,7 +451,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "time-format",
     title: "Time format",
     to: "/settings/appearance",
-    searchTerms: ["timestamp clock locale system browser os 12 hour 24 hour"],
+    searchTerms: ["appearance display timestamp clock locale system browser os 12 hour 24 hour"],
   },
   {
     id: "response-streaming",
@@ -734,7 +748,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "browser-default-appearance",
     title: "Default browser appearance",
     to: "/settings/integrations",
-    searchTerms: ["preview color scheme light dark system os"],
+    searchTerms: ["preview appearance color scheme light dark system os match cogenly"],
   },
   {
     id: "browser-recording-frame-rate",
