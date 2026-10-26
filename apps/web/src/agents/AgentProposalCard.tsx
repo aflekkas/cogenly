@@ -8,7 +8,7 @@ import {
   ZapIcon,
   type LucideIcon,
 } from "lucide-react";
-import { useState, type ReactNode, type Ref } from "react";
+import { useEffect, useState, type ReactNode, type Ref } from "react";
 import { AgentFace } from "~/components/agents/face";
 import { avatarFaceProps } from "~/components/agents/face/agentAvatar.logic";
 import { WorkLogCollapse } from "~/components/chat/WorkLog";
@@ -67,6 +67,7 @@ export function AgentProposalCard({
   project,
   creating,
   onCreate,
+  onFaceChange,
   ref,
 }: {
   proposal: AgentProposal;
@@ -80,10 +81,13 @@ export function AgentProposalCard({
   } | null;
   creating: boolean;
   onCreate: () => void;
+  /** The face's entrance starting and settling, so another face of the agent can play along. */
+  onFaceChange?: (state: "created" | "idle") => void;
   ref?: Ref<HTMLDivElement>;
 }) {
   // The face plays its "created" entrance once, then idles.
   const [settled, setSettled] = useState(false);
+  useEffect(() => onFaceChange?.(settled ? "idle" : "created"), [onFaceChange, settled]);
   const creatable = canCreateProposal(proposal);
   const grants = PERMISSION_OPTIONS.filter((option) =>
     proposal.permissions.includes(option.key),

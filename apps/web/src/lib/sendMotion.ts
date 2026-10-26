@@ -44,8 +44,13 @@ export function glideClockStart(input: {
     : null;
 }
 
+/** The system setting, or the app's own Reduce motion (data-reduce-motion on <html>). */
 export function prefersReducedMotion(): boolean {
-  return typeof window !== "undefined" && window.matchMedia?.(REDUCED_MOTION).matches === true;
+  if (typeof window === "undefined") return false;
+  return (
+    window.matchMedia?.(REDUCED_MOTION).matches === true ||
+    (typeof document !== "undefined" && document.documentElement.hasAttribute("data-reduce-motion"))
+  );
 }
 
 /** The `--ease-spring` token as a CSS timing function. */

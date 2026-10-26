@@ -10,7 +10,7 @@ import type {
 import { squashAtomCommandFailure } from "@cogenly/client-runtime/state/runtime";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
-import { FolderIcon, XIcon } from "lucide-react";
+import { XIcon } from "lucide-react";
 import {
   Fragment,
   useCallback,
@@ -21,20 +21,23 @@ import {
   useState,
   type ComponentProps,
   type ReactNode,
+  type Ref,
   type RefObject,
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { AgentFaceProps } from "~/components/agents/face";
+import { agentAppearance, type AgentFaceProps } from "~/components/agents/face";
 import { avatarFaceProps } from "~/components/agents/face/agentAvatar.logic";
+import { ComposerControl } from "~/components/chat/ComposerControl";
 import { ComposerPrimaryActions } from "~/components/chat/ComposerPrimaryActions";
 import { ComposerSurface } from "~/components/chat/ComposerSurface";
 import { Button } from "~/components/ui/button";
 import { SidebarInset } from "~/components/ui/sidebar";
 import { toastManager } from "~/components/ui/toast";
 import { useScratchProject } from "~/hooks/useScratchProject";
+import { prefersReducedMotion } from "~/lib/sendMotion";
 import { cn, newMessageId, randomUUID } from "~/lib/utils";
-import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
+import { ComposerProjectChip } from "~/projectLabels/ComposerProjectPicker";
 import { agentsRpc } from "~/rpc/agents";
 import { useThreadShells } from "~/state/entities";
 import { usePrimaryEnvironmentId } from "~/state/environments";
@@ -53,7 +56,7 @@ import {
   proposalTriggers,
   stripProposal,
 } from "./agentBuilder.logic";
-import { AgentIdentity } from "./AgentIdentity";
+import { AgentIdentity, AgentIdentityPerson, motionToken } from "./AgentIdentity";
 import { AgentProjectPicker, useAgentProjectFolders } from "./AgentProjectPicker";
 import { AgentProposalCard } from "./AgentProposalCard";
 import { AgentTypingDots } from "./AgentTypingBubble";
@@ -77,14 +80,27 @@ import type { AgentContact, AgentMessage } from "./agents.types";
 import { useMessageMotion } from "./useMessageMotion";
 
 const LIVE_RUN = new Set(["preparing", "queued", "starting", "running"]);
-/** The builder's own face: the mono cloud, until the proposal's face takes over. */
-const BUILDER_FACE: AgentFaceProps = {
-  seed: "new-friend",
+const BUILDER_SHAPE = agentAppearance("new-friend").shape;
+/**
+ * The builder's own face: the mono cloud, until the proposal's face takes over. It
+ * carries the agent's seed, so the face morphs into the proposed one instead of
+ * being replaced by it.
+ */
+const builderFace = (seed: string): AgentFaceProps => ({
+  seed,
+  shape: BUILDER_SHAPE,
   expression: "curieux",
   color: "currentColor",
   paper: "none",
   className: "text-foreground/90",
-};
+});
+/**
+ * The empty state introduces the agent with its face and name; once the
+ * conversation starts they move up into the header (`playHeroMove`) while the
+ * copy fades. A failed first send brings the empty state back (`returning`): the
+ * header's person fades out as the hero fades in.
+ */
+type HeroPhase = "shown" | "leaving" | "gone" | "returning";
 
 interface BuilderThread {
   environmentId: EnvironmentId;
@@ -105,12 +121,30 @@ interface BuilderThread {
  * proposes are filed there; the owner can change that before the first message, and
  * on the card before creating.
  */
-export function AgentBuilder({
+export function AgentBuilder(props: {
+  environmentId?: EnvironmentId;
+  projectFolderId?: ProjectLabelId;
+}) {
+  return (
+    <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none md:h-dvh">
+      <AgentBuilderConversation {...props} />
+    </SidebarInset>
+  );
+}
+
+/**
+ * The builder page's content. `resume` opens a builder thread that already exists,
+ * such as one an agent started over MCP (`start_agent_builder`): the conversation
+ * shows in place, with no empty state to move out of.
+ */
+export function AgentBuilderConversation({
   environmentId: requested,
   projectFolderId: requestedFolderId,
+  resume,
 }: {
   environmentId?: EnvironmentId;
   projectFolderId?: ProjectLabelId;
+  resume?: BuilderThread & { modelSelection: ModelSelection };
 }) {
   const navigate = useNavigate();
   const client = useAgentsClient();
@@ -118,7 +152,7 @@ export function AgentBuilder({
   const shells = useThreadShells();
   const primary = usePrimaryEnvironmentId();
   const { scratchEnvironmentId, openScratchProject } = useScratchProject();
-  const environmentId = scratchEnvironmentId(requested ?? primary);
+  const environmentId = resume?.environmentId ?? scratchEnvironmentId(requested ?? primary);
   const setSidebarMode = useUiStateStore((store) => store.setSidebarMode);
   const startTurn = useOrchestrationCommand(threadEnvironment.startTurn, { reportFailure: false });
   const builderStart = useOrchestrationCommand(agentsRpc.builderStart, {
@@ -127,17 +161,30 @@ export function AgentBuilder({
   const deleteThread = useOrchestrationCommand(threadEnvironment.delete, {
     reportFailure: false,
   });
-  const [thread, setThread] = useState<BuilderThread | null>(null);
+  const [thread, setThread] = useState<BuilderThread | null>(() =>
+    resume
+      ? {
+          environmentId: resume.environmentId,
+          projectId: resume.projectId,
+          threadId: resume.threadId,
+          projectFolderId: resume.projectFolderId,
+        }
+      : null,
+  );
   const [pending, setPending] = useState<ReadonlyArray<AgentMessage>>([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<AgentContact | null>(null);
-  const [seed] = useState(() => randomUUID());
+  // A resumed thread's face stays the same on every open.
+  const [seed] = useState(() => resume?.threadId ?? randomUUID());
   const defaultModel = useDefaultAgentModel(environmentId);
-  const [chosenModel, setChosenModel] = useState<ModelSelection | null>(null);
+  const [chosenModel, setChosenModel] = useState<ModelSelection | null>(
+    resume?.modelSelection ?? null,
+  );
   const modelSelection = chosenModel ?? defaultModel;
   const cardRef = useRef<HTMLDivElement>(null);
+  const [cardFace, setCardFace] = useState<"created" | "idle">("idle");
   // Where the builder is filed when it starts, and the owner's pick on the card.
   const [startFolderId, setStartFolderId] = useState<ProjectLabelId | null>(
     requestedFolderId ?? null,
@@ -178,7 +225,59 @@ export function AgentBuilder({
   const accent = proposal?.face?.color ? accentForColor(proposal.face.color) : NEUTRAL_ACCENT;
   const face: AgentFaceProps = proposal?.face
     ? avatarFaceProps({ seed, ...proposal.face })
-    : BUILDER_FACE;
+    : builderFace(seed);
+  const name = proposal?.name ?? "New agent";
+  // Only a change while mounted moves the person: a new builder mounts empty, so the
+  // first render is the empty state at rest. A resumed one already has its
+  // conversation (it may still be loading), so it never shows the empty state.
+  const [hero, setHero] = useState<HeroPhase>(resume ? "gone" : "shown");
+  const empty = messages.length === 0;
+  const heroShown = hero === "shown" || hero === "returning";
+  if (!resume && !empty && heroShown) setHero("leaving");
+  if (!resume && empty && !heroShown) setHero("returning");
+  const heroRef = useRef<HTMLDivElement>(null);
+  const headerPersonRef = useRef<HTMLDivElement>(null);
+  // Every animation of the move and its way back, kept across phases: a send that
+  // fails mid-move returns from wherever the move got to.
+  const heroMotion = useRef<Animation[]>([]);
+  useLayoutEffect(() => {
+    if (hero === "shown") {
+      // The header's person is hidden again; drop what the way back left on it.
+      for (const animation of heroMotion.current) animation.cancel();
+      heroMotion.current = [];
+    }
+    if (hero !== "leaving" && hero !== "returning") return;
+    const layer = heroRef.current;
+    const person = headerPersonRef.current;
+    let animations: Animation[] = [];
+    if (hero === "leaving") {
+      animations = layer && person ? playHeroMove(layer, person) : [];
+      heroMotion.current = animations;
+    } else {
+      // The empty state fades back in as a whole over its own half-faded copy, and
+      // the header's person fades out where it is, even mid-move.
+      for (const animation of heroMotion.current) {
+        const target = animation.effect instanceof KeyframeEffect ? animation.effect.target : null;
+        if (layer && target && layer.contains(target)) animation.cancel();
+      }
+      animations = [fadeOut(person), fadeIn(layer)].filter((animation) => animation !== undefined);
+      heroMotion.current = [...heroMotion.current, ...animations];
+    }
+    let current = true;
+    void Promise.all(animations.map((animation) => animation.finished)).then(
+      () => current && setHero(hero === "returning" ? "shown" : "gone"),
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+  }, [hero]);
+  useEffect(
+    () => () => {
+      for (const animation of heroMotion.current) animation.cancel();
+    },
+    [],
+  );
   const proposalFolderId = proposalProjectFolderId({
     chosen: cardFolderId,
     proposed: proposal?.projectFolderId,
@@ -347,77 +446,100 @@ export function AgentBuilder({
   };
 
   return (
-    <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none md:h-dvh">
-      <section className="agent-conversation" aria-label="New agent" style={accentStyle(accent)}>
-        <AgentIdentity
-          face={{ ...face, state: busy ? "thinking" : "idle" }}
-          name={proposal?.name ?? "New agent"}
-          status={busy ? "Thinking…" : null}
-          trailing={
-            <Button size="icon-sm" variant="ghost-muted" aria-label="Cancel" onClick={cancel}>
-              <XIcon className="size-4.5" />
-            </Button>
-          }
-        />
-        <Transcript
-          threadKey={thread?.threadId ?? "builder"}
-          messages={messages}
-          busy={busy}
-          workingOn={workingOn}
-          seed={seed}
-          proposal={proposal}
-          modelName={modelName}
-          project={
-            // Nothing to pick on a machine without projects.
-            thread && folders.length > 0
-              ? {
-                  environmentId: thread.environmentId,
-                  value: proposalFolderId,
-                  onChange: setCardFolderId,
-                }
-              : null
-          }
-          creating={creating}
-          cardRef={cardRef}
-          onCreate={() => void create()}
-          onExample={(text) => void send(text)}
-        >
-          <footer className="agent-composer-area">
-            {error && (
-              <p role="alert" className="agent-error">
-                {error}
-              </p>
-            )}
-            {environmentId === null ? (
-              <p className="agent-conversation-empty">
-                Agents aren't available here.
-                <span>This machine can't start a conversation without a repository right now.</span>
-              </p>
-            ) : (
-              <BuilderComposer
-                environmentId={environmentId}
-                modelSelection={modelSelection}
-                onModelChange={setChosenModel}
-                // Filing is picked before the conversation starts; the card takes over after.
-                project={
-                  thread === null
-                    ? { value: startFolder, onChange: setStartFolderId, shown: folders.length > 0 }
-                    : null
-                }
-                placeholder={
-                  thread
-                    ? "Adjust anything, or ask for something else"
-                    : "What should this agent take care of?"
-                }
-                disabled={!modelSelection || creating || created !== null}
-                sending={sending}
-                onSend={send}
-              />
-            )}
-          </footer>
-        </Transcript>
-      </section>
-    </SidebarInset>
+    <section className="agent-conversation" aria-label="New agent" style={accentStyle(accent)}>
+      <AgentIdentity
+        face={face}
+        name={name}
+        person={
+          <AgentIdentityPerson
+            ref={headerPersonRef}
+            // Plays the card face's entrance along with it, so the two read as one agent.
+            face={{
+              ...face,
+              state: cardFace === "created" ? "created" : busy ? "thinking" : "idle",
+            }}
+            name={name}
+            // Held until the move lands, so the pill arrives the size it left.
+            status={busy && hero === "gone" ? "Thinking…" : null}
+            hidden={hero === "shown"}
+            morphName
+          />
+        }
+        trailing={
+          <Button size="icon-sm" variant="ghost-muted" aria-label="Cancel" onClick={cancel}>
+            <XIcon className="size-4.5" />
+          </Button>
+        }
+      />
+      <Transcript
+        threadKey={thread?.threadId ?? "builder"}
+        messages={messages}
+        busy={busy}
+        workingOn={workingOn}
+        seed={seed}
+        proposal={proposal}
+        modelName={modelName}
+        project={
+          // Nothing to pick on a machine without projects.
+          thread && folders.length > 0
+            ? {
+                environmentId: thread.environmentId,
+                value: proposalFolderId,
+                onChange: setCardFolderId,
+              }
+            : null
+        }
+        creating={creating}
+        cardRef={cardRef}
+        onCreate={() => void create()}
+        onCardFace={setCardFace}
+        overlay={
+          hero === "gone" ? null : (
+            <Hero
+              ref={heroRef}
+              face={face}
+              name={name}
+              leaving={hero === "leaving"}
+              onExample={(text) => void send(text)}
+            />
+          )
+        }
+      >
+        <footer className="agent-composer-area">
+          {error && (
+            <p role="alert" className="agent-error">
+              {error}
+            </p>
+          )}
+          {environmentId === null ? (
+            <p className="agent-conversation-empty">
+              Agents aren't available here.
+              <span>This machine can't start a conversation without a repository right now.</span>
+            </p>
+          ) : (
+            <BuilderComposer
+              environmentId={environmentId}
+              modelSelection={modelSelection}
+              onModelChange={setChosenModel}
+              // Filing is picked before the conversation starts; the card takes over after.
+              project={
+                thread === null
+                  ? { value: startFolder, onChange: setStartFolderId, shown: folders.length > 0 }
+                  : null
+              }
+              placeholder={
+                thread
+                  ? "Adjust anything, or ask for something else"
+                  : "What should this agent take care of?"
+              }
+              disabled={!modelSelection || creating || created !== null}
+              sending={sending}
+              onSend={send}
+            />
+          )}
+        </footer>
+      </Transcript>
+    </section>
   );
 }
 
@@ -433,7 +555,8 @@ function Transcript({
   creating,
   cardRef,
   onCreate,
-  onExample,
+  onCardFace,
+  overlay,
   children,
 }: {
   threadKey: string;
@@ -447,7 +570,9 @@ function Transcript({
   creating: boolean;
   cardRef: RefObject<HTMLDivElement | null>;
   onCreate: () => void;
-  onExample: (text: string) => void;
+  onCardFace: (state: "created" | "idle") => void;
+  /** The empty state, drawn over the transcript. */
+  overlay: ReactNode;
   /** The composer, under the transcript. */
   children: ReactNode;
 }) {
@@ -479,23 +604,21 @@ function Transcript({
   const latestAssistant = messages.findLast((message) => message.role === "assistant");
   return (
     <>
-      <div
-        ref={scroll}
-        className="agent-message-scroll scroll-fade-y"
-        onScroll={onScroll}
-        onWheel={stopFollowing}
-        onTouchStart={stopFollowing}
-      >
+      <div className="agent-builder-stage">
         <div
-          className="agent-messages"
-          role="log"
-          aria-live="polite"
-          aria-relevant="additions text"
+          ref={scroll}
+          className="agent-message-scroll scroll-fade-y"
+          onScroll={onScroll}
+          onWheel={stopFollowing}
+          onTouchStart={stopFollowing}
         >
-          {messages.length === 0 && !typingKey ? (
-            <Hero onExample={onExample} />
-          ) : (
-            conversationRows(messages).map(({ message, separator, grouped }) => {
+          <div
+            className="agent-messages"
+            role="log"
+            aria-live="polite"
+            aria-relevant="additions text"
+          >
+            {conversationRows(messages).map(({ message, separator, grouped }) => {
               const text = message.role === "user" ? message.text : stripProposal(message.text);
               return (
                 <Fragment key={claimed.get(message.id) ?? message.id}>
@@ -535,58 +658,154 @@ function Transcript({
                           project={project}
                           creating={creating}
                           onCreate={onCreate}
+                          onFaceChange={onCardFace}
                         />
                       </div>
                     )}
                   </div>
                 </Fragment>
               );
-            })
-          )}
-          {typingKey && (
-            <div
-              key={typingKey}
-              data-message-id={typingKey}
-              className="agent-message-row"
-              data-owner={false}
-              data-grouped={messages.at(-1)?.role === "assistant"}
-            >
-              <div className="agent-bubble" data-owner={false}>
-                <AgentTypingDots />
+            })}
+            {typingKey && (
+              <div
+                key={typingKey}
+                data-message-id={typingKey}
+                className="agent-message-row"
+                data-owner={false}
+                data-grouped={messages.at(-1)?.role === "assistant"}
+              >
+                <div className="agent-bubble" data-owner={false}>
+                  <AgentTypingDots />
+                </div>
+                {workingOn && (
+                  <span key={workingOn} className="agent-typing-hint agent-morph">
+                    {workingOn}
+                  </span>
+                )}
               </div>
-              {workingOn && (
-                <span key={workingOn} className="agent-typing-hint agent-morph">
-                  {workingOn}
-                </span>
-              )}
-            </div>
-          )}
+            )}
+          </div>
         </div>
+        {overlay}
       </div>
       {children}
     </>
   );
 }
 
-function Hero({ onExample }: { onExample: (text: string) => void }) {
+/**
+ * The empty state: the agent about to be made, then what to say. A first render
+ * is at rest; only an empty state that comes back (a first send that failed)
+ * fades in, which the builder plays on it.
+ */
+function Hero({
+  ref,
+  face,
+  name,
+  leaving,
+  onExample,
+}: {
+  ref: Ref<HTMLDivElement>;
+  face: AgentFaceProps;
+  name: string;
+  leaving: boolean;
+  onExample: (text: string) => void;
+}) {
   return (
-    <div className="agent-conversation-empty agent-enter gap-3">
-      <span className="text-base text-foreground">Tell me what to take care of.</span>
-      <span>
-        Describe the job in a sentence. I'll pick a face, a name and a schedule; change anything by
-        just saying so.
-      </span>
-      <ul className="mt-2 flex flex-wrap justify-center gap-1.5" aria-label="Examples">
-        {BUILDER_EXAMPLES.map((example) => (
-          <li key={example}>
-            <Button variant="outline" size="xs" onClick={() => onExample(example)}>
-              {example}
-            </Button>
-          </li>
-        ))}
-      </ul>
+    <div
+      ref={ref}
+      className="agent-builder-hero"
+      data-leaving={leaving || undefined}
+      inert={leaving}
+    >
+      <div className="m-auto flex w-full flex-col items-center gap-5">
+        <AgentIdentityPerson face={face} name={name} size="hero" morphName />
+        <div data-hero-copy className="agent-conversation-empty w-full gap-3">
+          <span className="text-base text-foreground">Tell me what to take care of.</span>
+          <span>
+            Describe the job in a sentence. I'll pick a face, a name and a schedule; change anything
+            by just saying so.
+          </span>
+          <ul className="mt-2 flex flex-wrap justify-center gap-1.5" aria-label="Examples">
+            {BUILDER_EXAMPLES.map((example) => (
+              <li key={example} className="grid max-w-full">
+                <Button
+                  variant="outline"
+                  size="xs"
+                  className="min-w-0"
+                  title={example}
+                  onClick={() => onExample(example)}
+                >
+                  <span className="truncate">{example}</span>
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
     </div>
   );
+}
+
+const STANDARD_EASING_FALLBACK = "cubic-bezier(0.32, 0.72, 0, 1)";
+
+function fade(element: Element | null, keyframes: Keyframe[], fill: FillMode) {
+  if (!element || typeof element.animate !== "function") return undefined;
+  return element.animate(keyframes, {
+    duration: Number.parseFloat(motionToken("--motion-duration-fast", "150")),
+    easing: motionToken("--motion-ease-standard", STANDARD_EASING_FALLBACK),
+    fill,
+  });
+}
+
+/** A short opacity fade out that holds, for something about to be hidden or removed. */
+const fadeOut = (element: Element | null) =>
+  fade(element, [{ opacity: 1 }, { opacity: 0 }], "forwards");
+const fadeIn = (element: Element | null) => fade(element, [{ opacity: 0 }, { opacity: 1 }], "none");
+
+/**
+ * The empty state's person moves into the header as one element: the header's
+ * person, already in its final place, is drawn from where the hero's is and
+ * glides up while the copy fades. Under reduced motion the hero fades out and
+ * the header's person fades in. Returns the running animations.
+ */
+function playHeroMove(hero: HTMLElement, header: HTMLElement): Animation[] {
+  if (typeof hero.animate !== "function") return [];
+  const easing = motionToken("--motion-ease-standard", STANDARD_EASING_FALLBACK);
+  const from = hero.querySelector<HTMLElement>(".agent-identity-person");
+  const animations = [fadeOut(hero.querySelector("[data-hero-copy]"))];
+  if (!from || prefersReducedMotion()) {
+    animations.push(fadeOut(from), fadeIn(header));
+    return animations.filter((animation) => animation !== undefined);
+  }
+  const move = {
+    duration: Number.parseFloat(motionToken("--motion-duration-panel", "300")),
+    easing,
+  };
+  // The header's person is the one that moves; the hero's steps aside for it.
+  animations.push(
+    from.animate([{ opacity: 0 }, { opacity: 0 }], { duration: move.duration, fill: "forwards" }),
+  );
+  // The face and the pill each scale by their own ratio, so both land exactly.
+  for (const part of [".agent-identity-face", ".agent-identity-name"]) {
+    const start = from.querySelector(part)?.getBoundingClientRect();
+    const target = header.querySelector<HTMLElement>(part);
+    const end = target?.getBoundingClientRect();
+    if (!start || !target || !end || end.height === 0) continue;
+    const dx = start.left + start.width / 2 - (end.left + end.width / 2);
+    const dy = start.top + start.height / 2 - (end.top + end.height / 2);
+    const scale = start.height / end.height;
+    animations.push(
+      target.animate(
+        [
+          { transformOrigin: "50% 50%", transform: `translate(${dx}px, ${dy}px) scale(${scale})` },
+          { transformOrigin: "50% 50%", transform: "none" },
+        ],
+        move,
+      ),
+    );
+  }
+  return animations.filter((animation) => animation !== undefined);
 }
 
 const MIN_HEIGHT = 78;
@@ -737,12 +956,9 @@ function BuilderProjectPicker(props: {
       onChange={props.onChange}
       disabled={props.disabled}
       aria-label={current ? `File in ${current.label.name}` : "File in a project"}
-      trigger={<Button type="button" variant="ghost-muted" size="xs" />}
+      trigger={<ComposerControl collapsible />}
     >
-      <span key={current?.key ?? "none"} className="swap-motion flex min-w-0 items-center gap-1">
-        {current ? <ProjectFolderIcon project={current} className="size-3.5" /> : <FolderIcon />}
-        <span className="min-w-0 truncate">{current ? current.label.name : "No project"}</span>
-      </span>
+      <ComposerProjectChip project={current} />
     </AgentProjectPicker>
   );
 }

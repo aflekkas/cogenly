@@ -7,6 +7,7 @@ import {
   ComposerControl,
   ComposerControlChevron,
   ComposerControlIcon,
+  composerControlGapClassName,
   type ComposerControlSize,
 } from "../components/chat/ComposerControl";
 import {
@@ -55,6 +56,42 @@ type ProjectOption =
   | { readonly kind: "none"; readonly key: "none"; readonly label: string }
   | { readonly kind: "new"; readonly key: "new" }
   | { readonly kind: "create"; readonly key: "create"; readonly name: string };
+
+/**
+ * The composer's project chip, inside a collapsible `ComposerControl`: the project's
+ * mark and name, or No project. Every composer with a project picker draws this, so
+ * a narrow composer collapses each to its icon alike.
+ */
+export function ComposerProjectChip({
+  project,
+  size = "sm",
+}: {
+  project: EnvironmentProjectLabel | null;
+  size?: ComposerControlSize | undefined;
+}) {
+  return (
+    <>
+      {/* A picked project fades in where the last one was. */}
+      <span
+        key={project?.key ?? "none"}
+        className={cn("swap-motion flex min-w-0 items-center", composerControlGapClassName(size))}
+      >
+        {project ? (
+          <ProjectFolderIcon project={project} className={size === "xs" ? "size-3" : "size-4"} />
+        ) : (
+          <ComposerControlIcon icon={FolderIcon} size={size} />
+        )}
+        <span
+          data-composer-control-label
+          className={cn("max-w-40 truncate", project === null && "text-muted-foreground")}
+        >
+          <span>{project ? project.label.name : "No project"}</span>
+        </span>
+      </span>
+      <ComposerControlChevron size={size} />
+    </>
+  );
+}
 
 function optionText(option: ProjectOption): string {
   switch (option.kind) {
@@ -310,25 +347,11 @@ export function ComposerProjectPicker(props: {
                 disabled={props.disabled}
                 aria-label={triggerLabel}
                 data-composer-project-picker=""
-                render={<ComposerControl size={props.size} className="min-w-0" />}
+                render={<ComposerControl size={props.size} collapsible />}
               />
             }
           >
-            {current ? (
-              <ProjectFolderIcon
-                project={current}
-                className={props.size === "xs" ? "size-3" : "size-4"}
-              />
-            ) : (
-              <ComposerControlIcon icon={FolderIcon} size={props.size} />
-            )}
-            <span
-              data-composer-control-label
-              className={cn("max-w-40 truncate", current === null && "text-muted-foreground")}
-            >
-              {current ? current.label.name : "No project"}
-            </span>
-            <ComposerControlChevron size={props.size} />
+            <ComposerProjectChip project={current} size={props.size} />
           </TooltipTrigger>
           <TooltipPopup side="top">
             {forks ? "Fork into project…" : "Move to project…"}
