@@ -114,7 +114,7 @@ export function RepositoryActionsSettings({
     <SettingsSection id="project-actions" title="Actions">
       <SettingsRow
         title="Actions"
-        description="Commands that run in this repository or its worktrees, with optional shortcuts. They stay on each machine."
+        description="Commands that run in this repository or its worktrees, with optional shortcuts. Saved on every checkout of this repository."
         control={
           <div className="flex flex-wrap items-center gap-1.5">
             {importableScripts.length > 0 ? (

@@ -14,6 +14,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import * as ServerConfig from "../config.ts";
+import * as Settings from "../serverSettings.ts";
 import {
   LEGACY_PROJECT_ACTIONS_FILE_NAME,
   LegacyProjectActionsJson,
@@ -28,6 +29,8 @@ export const migrate = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const projects = yield* ProjectService.ProjectService;
+  // Loading settings is what writes the sidecar, so load them before looking.
+  yield* (yield* Settings.ServerSettingsService).getSettings;
   const sidecarPath = path.join(path.dirname(settingsPath), LEGACY_PROJECT_ACTIONS_FILE_NAME);
   if (!(yield* fs.exists(sidecarPath))) return;
   const legacy = yield* fs.readFileString(sidecarPath).pipe(Effect.flatMap(decodeSidecar));

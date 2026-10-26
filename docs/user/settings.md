@@ -4,8 +4,7 @@ Settings are global and apply to every machine you have paired: change one on yo
 your server gets it too. Projects group your work; they don't have settings of their own. What
 belongs to one project, such as its instructions, repositories and links, is on the project's page.
 
-A layers icon beside a row's title shows whether the value is the built-in default or one you set,
-and whether it differs between machines.
+A layers icon beside a row's title shows whether the value is the built-in default or one you set.
 
 Some settings belong to one machine, such as where its projects folder is, its background activity,
 or its device hub. On a page with other settings these rows say which machine they change, such
@@ -76,12 +75,13 @@ pull request merge method and the model that writes commit messages and pull req
 
 The Repository page, opened from a repository in the sidebar, sits under Projects and holds that
 repository's name, icon, actions, checkouts and removal. Actions are commands that run in the
-repository or its worktrees, with optional shortcuts. They never sync between machines; configure
-them separately on each one. A repository's `cogenly.json` actions can be imported there.
+repository or its worktrees, with optional shortcuts. Editing them updates every checkout of the
+repository, so connect each machine that has one first. A repository's `cogenly.json` actions can
+be imported there.
 
 Settings a repository can also declare in `cogenly.json`, such as the workspace for new threads,
-use your setting when you set one, then `cogenly.json`, then the built-in default. Leave a setting
-on **Inherit** to let the repository's file decide. A repository that still has a `t3.json` and no
+use your setting when you set one, then `cogenly.json`, then the built-in default. Reset a setting
+to let the repository's file decide. A repository that still has a `t3.json` and no
 `cogenly.json` is read the same way; rename the file when convenient. Browser access and computer
 use changes apply when an agent session next starts.
 
@@ -89,7 +89,7 @@ New worktrees initialize git submodules recursively. If that step is slow becaus
 declares many nested submodules, set **Submodules** in **Settings → New threads** to **Top level
 only** to stop at the ones the repository declares itself, or **Skip** to leave them for a setup
 script. It resolves in the same order as the workspace default: a `"worktreeSubmodules"` value in
-the `cogenly.json` of the branch being checked out applies when the setting is on **Inherit**.
+the `cogenly.json` of the branch being checked out applies while the setting is unset.
 
 ## Worktree location
 
