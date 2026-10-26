@@ -22,6 +22,7 @@ import { shouldShowInstanceBadge, type ProviderInstanceEntry } from "../../provi
 import {
   ComposerControl,
   ComposerControlChevron,
+  composerControlGapClassName,
   type ComposerControlSize,
 } from "./ComposerControl";
 import { useComposerMenuProps } from "./composerEventScope";
@@ -267,7 +268,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               <span
                 className={cn(
                   "flex min-w-0 flex-1 items-center",
-                  size === "xs" ? "gap-1" : "gap-1.5",
+                  composerControlGapClassName(size),
                 )}
               />
             }
@@ -283,7 +284,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 displayName={activeEntry.displayName}
                 accentColor={activeEntry.accentColor}
                 showBadge={showInstanceBadge}
-                className="size-4"
+                // Brand marks fill their box; the margin gives them the side bearing the
+                // lucide icons on the other controls have, so the gaps match.
+                className="mx-px size-4"
                 iconClassName={cn("size-4", props.activeProviderIconClassName)}
                 indicatorBackground={props.instanceIndicatorBackground ?? "var(--contrast-input)"}
               />

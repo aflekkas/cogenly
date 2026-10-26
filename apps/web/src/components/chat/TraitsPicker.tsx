@@ -38,6 +38,7 @@ import {
   ComposerControl,
   ComposerControlChevron,
   ComposerControlIcon,
+  composerControlGapClassName,
   type ComposerControlSize,
 } from "./ComposerControl";
 import { useComposerMenuProps } from "./composerEventScope";
@@ -715,10 +716,7 @@ export const TraitsPicker = memo(function TraitsPicker({
             // The label truncates itself; clipping the wrapper too would cut off
             // the chevron, whose negative end margin overhangs the wrapper edge.
             <span
-              className={cn(
-                "flex min-w-0 w-full items-center",
-                size === "xs" ? "gap-1" : "gap-1.5",
-              )}
+              className={cn("flex min-w-0 w-full items-center", composerControlGapClassName(size))}
             >
               <ComposerControlIcon icon={BrainIcon} size={size} />
               <span data-composer-control-label className="min-w-0 truncate">
