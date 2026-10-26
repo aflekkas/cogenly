@@ -5,7 +5,9 @@ import {
   instructionsSaveState,
   mixProjectRecent,
   projectCardCount,
+  projectFileTree,
   projectRecentPip,
+  uploadFolderFor,
 } from "./projectHome.logic";
 
 interface Thread {
@@ -177,5 +179,51 @@ describe("instructionsSaveState", () => {
     expect(
       instructionsSaveState({ draft: "Use bun.", saved: "Use pnpm.", saving: true, failed: false }),
     ).toBe("saving");
+  });
+});
+
+describe("projectFileTree", () => {
+  const resource = (
+    relativePath: string,
+    kind: "file" | "folder",
+    modifiedAt = "2026-01-01T00:00:00.000Z",
+  ) => ({
+    relativePath,
+    kind,
+    modifiedAt,
+  });
+
+  it("nests by path with folders first and files newest first", () => {
+    const tree = projectFileTree([
+      resource("Resources", "folder"),
+      resource("Resources/old.md", "file", "2026-01-01T00:00:00.000Z"),
+      resource("Resources/new.md", "file", "2026-02-01T00:00:00.000Z"),
+      resource("Resources/Briefs", "folder"),
+      resource("Resources/Briefs/a.pdf", "file"),
+      resource("notes.txt", "file"),
+    ]);
+    expect(tree.map((node) => node.name)).toEqual(["Resources", "notes.txt"]);
+    const resources = tree[0]!;
+    expect(resources.children.map((node) => node.name)).toEqual(["Briefs", "new.md", "old.md"]);
+    expect(resources.fileCount).toBe(3);
+    expect(resources.children[0]!.children[0]!.path).toBe("Resources/Briefs/a.pdf");
+  });
+
+  it("keeps a folder only implied by a file under it", () => {
+    const tree = projectFileTree([resource("Deep/inner/file.txt", "file")]);
+    expect(tree[0]).toMatchObject({
+      name: "Deep",
+      kind: "folder",
+      resource: undefined,
+      fileCount: 1,
+    });
+  });
+});
+
+describe("uploadFolderFor", () => {
+  it("places a file from an uploaded folder under the same subfolders", () => {
+    expect(uploadFolderFor("Resources", "Trip/photos/a.jpg")).toBe("Resources/Trip/photos");
+    expect(uploadFolderFor("Resources/Briefs", "a.pdf")).toBe("Resources/Briefs");
+    expect(uploadFolderFor("Resources", "../x/a.pdf")).toBe("Resources/x");
   });
 });

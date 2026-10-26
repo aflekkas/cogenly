@@ -3,9 +3,12 @@ import { Children, Fragment, type ComponentProps, type ReactNode } from "react";
 import { SearchInput } from "../ui/search-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { cn } from "../../lib/utils";
-import { SettingsEmpty, SettingsRowContent } from "./settingsLayout";
+import { SettingsRowContent } from "./settingsLayout";
 
-export { SettingsToolbar as SettingsListToolbar } from "./settingsLayout";
+export {
+  SettingsEmpty as SettingsListEmpty,
+  SettingsToolbar as SettingsListToolbar,
+} from "./settingsLayout";
 
 export function SettingsListSearch({
   label,
@@ -95,18 +98,4 @@ export function SettingsListMeta({ children }: { children: ReactNode }) {
       ))}
     </span>
   );
-}
-
-export function SettingsListEmpty({
-  icon,
-  title,
-  description,
-  children,
-}: {
-  icon?: ReactNode;
-  title: ReactNode;
-  description?: ReactNode;
-  children?: ReactNode;
-}) {
-  return <SettingsEmpty icon={icon} title={title} description={description} action={children} />;
 }

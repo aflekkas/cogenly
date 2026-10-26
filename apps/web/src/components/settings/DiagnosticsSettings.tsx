@@ -46,6 +46,7 @@ import { toastManager } from "../ui/toast";
 import { ExpandableText } from "./ExpandableText";
 import { ResourceTelemetryDiagnostics } from "./ResourceTelemetryDiagnostics";
 import {
+  SettingsEmpty,
   SettingsNote,
   SettingsPageMessage,
   SettingsRefreshAction,
@@ -167,8 +168,13 @@ function StatsGrid({ children }: { children: ReactNode }) {
   );
 }
 
-function EmptyRows({ label }: { label: string }) {
-  return <SettingsNote>{label}</SettingsNote>;
+/** A section with no rows: its loading line while the first fetch runs, then the empty state. */
+function EmptyRows({ label, loading }: { label: string; loading: boolean }) {
+  return loading ? (
+    <SettingsNote role="status">{label}</SettingsNote>
+  ) : (
+    <SettingsEmpty label={label} />
+  );
 }
 
 /** A section's load failures, one plain line each, under its summary numbers. */
@@ -793,6 +799,7 @@ function AgentProcessesSection({
         </DiagnosticsTable>
       ) : (
         <EmptyRows
+          loading={isPending && data === null}
           label={
             isPending && data === null ? "Loading agent processes..." : "No agent commands running."
           }
@@ -1280,7 +1287,10 @@ export function DiagnosticsSettingsPanel() {
             ))}
           </DiagnosticsTable>
         ) : (
-          <EmptyRows label={isInitialLoading ? "Loading failures..." : "No failed spans found."} />
+          <EmptyRows
+            loading={isInitialLoading}
+            label={isInitialLoading ? "Loading failures..." : "No failed spans found."}
+          />
         )}
       </SettingsSection>
 
@@ -1344,6 +1354,7 @@ export function DiagnosticsSettingsPanel() {
           </ScrollArea>
         ) : (
           <EmptyRows
+            loading={isInitialLoading}
             label={isInitialLoading ? "Loading recent logs..." : "No warnings or errors found."}
           />
         )}
@@ -1390,6 +1401,7 @@ export function DiagnosticsSettingsPanel() {
           </DiagnosticsTable>
         ) : (
           <EmptyRows
+            loading={isInitialLoading}
             label={isInitialLoading ? "Loading failure groups..." : "No repeated failures found."}
           />
         )}
@@ -1424,7 +1436,10 @@ export function DiagnosticsSettingsPanel() {
             ))}
           </DiagnosticsTable>
         ) : (
-          <EmptyRows label={isInitialLoading ? "Loading slow spans..." : "No spans found."} />
+          <EmptyRows
+            loading={isInitialLoading}
+            label={isInitialLoading ? "Loading slow spans..." : "No spans found."}
+          />
         )}
       </FoldedSettingsSection>
 
@@ -1460,7 +1475,10 @@ export function DiagnosticsSettingsPanel() {
             ))}
           </DiagnosticsTable>
         ) : (
-          <EmptyRows label={isInitialLoading ? "Loading span names..." : "No spans found."} />
+          <EmptyRows
+            loading={isInitialLoading}
+            label={isInitialLoading ? "Loading span names..." : "No spans found."}
+          />
         )}
       </FoldedSettingsSection>
       {exportFormEnvironmentId === environmentId && <TelemetryExportSettings />}

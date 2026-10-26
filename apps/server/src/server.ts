@@ -191,6 +191,7 @@ import * as Scheduler from "./scheduling/Scheduler.ts";
 import * as SharedState from "./sync/SharedState.ts";
 import * as IntegrationSync from "./sync/IntegrationSync.ts";
 import * as SettingsSync from "./sync/SettingsSync.ts";
+import * as ProjectFileSync from "./sync/ProjectFileSync.ts";
 import * as SharedSync from "./sync/SharedSync.ts";
 import * as SharedSyncStatus from "./sync/SharedSyncStatus.ts";
 import * as VaultSync from "./vault/VaultSync.ts";
@@ -633,6 +634,11 @@ const layerMachineSetup = MachineSetup.layer.pipe(
 const layerPairedMachines = Layer.mergeAll(
   SharedSync.layer.pipe(Layer.provide(SharedState.layer)),
   SharedSyncStatus.layer,
+  // Project folders' files, by content hash; the bytes travel over the same link.
+  ProjectFileSync.layer.pipe(
+    Layer.provide(SharedState.layer),
+    Layer.provide(RuntimeLayer.layerProjectFilesProvided),
+  ),
   // Vault items shared with paired machines, end-to-end encrypted over the same documents.
   layerVaultSync,
   // Web integration sign-ins ride the vault: who refreshes them, and renewing them in time.

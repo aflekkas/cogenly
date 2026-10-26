@@ -1450,11 +1450,9 @@ export function KeybindingsSettingsPanel() {
         ) : (
           <SettingsGroup>
             <SettingsEmpty
-              size="sm"
-              title="No keybindings match your search"
-              description="Try a command name, a key or part of a shortcut."
+              label="No keybindings match this search."
               action={
-                <Button size="sm" variant="outline" onClick={() => setQuery("")}>
+                <Button size="xs" variant="outline" onClick={() => setQuery("")}>
                   Clear search
                 </Button>
               }

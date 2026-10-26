@@ -2,7 +2,13 @@ import { describe, expect, it } from "@effect/vitest";
 import { EnvironmentId, type SharedDocumentChange } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import { normalizeRepositoryRemote } from "../project/RepositoryRemote.ts";
-import { checkIntegrity, factDocumentId, splitChange, validateChange } from "./documentSchemas.ts";
+import {
+  checkIntegrity,
+  factDocumentId,
+  projectFileDocumentId,
+  splitChange,
+  validateChange,
+} from "./documentSchemas.ts";
 
 const node = EnvironmentId.make("local");
 const change = (kind: SharedDocumentChange["kind"], fields: SharedDocumentChange["fields"]) => ({
@@ -16,6 +22,23 @@ const change = (kind: SharedDocumentChange["kind"], fields: SharedDocumentChange
   updatedBy: node,
 });
 describe("shared configuration schemas", () => {
+  it.effect("refuses a project file whose id names another project or path", () =>
+    Effect.gen(function* () {
+      const entry = { kind: "file", sha256: null, sizeBytes: 0, baseSha256: null, deleted: false };
+      const fields = { projectId: "label:a", path: "Resources/a.md", entry };
+      yield* validateChange({
+        ...change("project-file", fields),
+        id: projectFileDocumentId("label:a", "Resources/a.md"),
+      });
+      const forged = {
+        ...change("project-file", fields),
+        id: projectFileDocumentId("label:a", "Resources/b.md"),
+      };
+      expect((yield* Effect.result(checkIntegrity(forged)))._tag).toBe("Failure");
+      // An entry edit alone carries neither, so it needs no check.
+      yield* checkIntegrity({ ...change("project-file", { entry }), id: forged.id });
+    }),
+  );
   it.effect.each([
     { type: "root", branch: "feature/" + "x".repeat(250) },
     { type: "worktree", baseRef: "refs/heads/" + "x".repeat(250) },

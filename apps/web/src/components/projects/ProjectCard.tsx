@@ -1,5 +1,4 @@
-import { SettingsRowContent, SettingsSection } from "../settings/settingsLayout";
-import { SettingsListEmpty } from "../settings/SettingsList";
+import { SettingsEmpty, SettingsRowContent, SettingsSection } from "../settings/settingsLayout";
 import { XIcon } from "lucide-react";
 import {
   useEffect,
@@ -12,6 +11,7 @@ import {
 
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
+import { DisclosureChevron } from "../ui/disclosure";
 import { PROJECT_CARD_ARRIVAL_MS, arrivedKeys, projectCardCount } from "./projectHome.logic";
 
 /**
@@ -25,7 +25,7 @@ export function ProjectCard(props: {
   readonly count?: number;
   /** The card's one add affordance, usually a `ProjectCardAddButton`. */
   readonly add?: ReactNode;
-  /** Shown instead of the rows when there are none. */
+  /** One short sentence shown instead of the rows when there are none. */
   readonly empty?: ReactNode;
   readonly isEmpty?: boolean;
   readonly children?: ReactNode;
@@ -47,7 +47,7 @@ export function ProjectCard(props: {
       className={props.className}
     >
       {props.isEmpty ? (
-        <SettingsListEmpty title={props.empty ?? `No ${props.title.toLowerCase()} yet`} />
+        <SettingsEmpty label={props.empty ?? `No ${props.title.toLowerCase()} yet.`} />
       ) : (
         props.children
       )}
@@ -100,6 +100,11 @@ export function ProjectCardRow(props: {
   readonly onRemove?: () => void;
   readonly removeLabel?: string;
   readonly removeDisabledReason?: string | null;
+  /**
+   * A row in a tree: indented by `depth`, with a disclosure chevron when
+   * `open` is set (a folder) and the chevron's space when not (a file).
+   */
+  readonly tree?: { readonly depth: number; readonly open?: boolean | undefined };
 }) {
   const interactive = props.onOpen !== undefined;
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -121,8 +126,16 @@ export function ProjectCardRow(props: {
       )}
       onClick={props.onOpen}
       onKeyDown={interactive ? onKeyDown : undefined}
+      aria-expanded={props.tree?.open}
+      // A tree row indents as a whole, so its meta line stays under its name.
+      style={props.tree ? { paddingInlineStart: `${1 + props.tree.depth * 0.875}rem` } : undefined}
       title={
         <span className="flex min-w-0 items-center gap-2">
+          {props.tree ? (
+            <span aria-hidden className="flex w-3 shrink-0 items-center justify-center">
+              {props.tree.open !== undefined ? <DisclosureChevron open={props.tree.open} /> : null}
+            </span>
+          ) : null}
           <span
             aria-hidden
             className="flex size-3.5 shrink-0 items-center justify-center text-muted-foreground [&>svg]:size-3.5"

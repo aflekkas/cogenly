@@ -226,11 +226,9 @@ export function OpenSourceLicensesPanel() {
                 })
               ) : (
                 <SettingsEmpty
-                  size="sm"
-                  title="No licenses match your search"
-                  description="Try a package name, a version or a license such as MIT."
+                  label="No licenses match this search."
                   action={
-                    <Button size="sm" variant="outline" onClick={() => setQuery("")}>
+                    <Button size="xs" variant="outline" onClick={() => setQuery("")}>
                       Clear search
                     </Button>
                   }

@@ -34,6 +34,8 @@ export type HybridClock = typeof HybridClock.Type;
  * SettingsSync. `project-settings` held per-project overrides from builds
  * before 0.3.2. This build reads none of its fields, so older machines'
  * documents are kept and relayed as they came, and never applied.
+ * `project-file` is one file or folder in a project's folder, by relative
+ * path; its bytes travel separately over `ProjectFileBlobRead`.
  */
 export const SharedDocumentKind = Schema.Literals([
   "project",
@@ -44,6 +46,7 @@ export const SharedDocumentKind = Schema.Literals([
   "settings",
   "project-settings",
   "integration",
+  "project-file",
 ]);
 export type SharedDocumentKind = typeof SharedDocumentKind.Type;
 /** A delta contains only fields authored by this edit; relay preserves their clocks. */
@@ -108,6 +111,27 @@ export const SharedChangesRead = makePeerChannel({
   payload: Schema.Struct({ after: Counter }),
   success: SharedChangeBatch,
   error: SharedStateError,
+});
+/** Largest project file that replicates; bigger files stay on their machine. */
+export const PROJECT_FILE_SYNC_MAX_BYTES = 100 * 1024 * 1024;
+/** Bytes per blob read, so one peer reply stays small. */
+export const PROJECT_FILE_BLOB_CHUNK_BYTES = 1024 * 1024;
+export const ProjectFileSha256 = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/));
+export class ProjectFileBlobError extends Schema.TaggedError<ProjectFileBlobError>()(
+  "ProjectFileBlobError",
+  { reason: Schema.Literals(["not-found", "storage"]) },
+) {
+  override get message() {
+    return `Project file content unavailable (${this.reason}).`;
+  }
+}
+/** One chunk of a project file's content, found by its sha256 in any project. */
+export const ProjectFileBlobRead = makePeerChannel({
+  name: "sync.project-files.blob.v1",
+  scope: AuthSyncReplicateScope,
+  payload: Schema.Struct({ sha256: ProjectFileSha256, offset: Counter }),
+  success: Schema.Struct({ totalBytes: Counter, base64: Schema.String }),
+  error: ProjectFileBlobError,
 });
 export const SharedChangesApply = makePeerChannel({
   name: "sync.documents.apply.v1",

@@ -81,6 +81,28 @@ it does not own a copy.
   deleted project, rather than making "Name (2)" beside it.
 - Links and notes are files too (`.url` / `.md`), so the folder stays complete
   without the database.
+- Every way a file enters a project (upload, drop, a copied chat attachment,
+  an agent's note) writes a real file into the folder, under `Resources/` or
+  the folder the caller names. Nothing is a reference: the folder is what
+  replicates and what agents read, so a path pointing elsewhere would be a
+  different file on each machine. For the same reason, a symlinked file that
+  leads outside the project is replaced by a copy at startup
+  (`ProjectFiles.copyLinkedFiles`, idempotent); the original stays where it
+  was. Linked folders stay links and are neither indexed nor synced.
+- Project files replicate to paired machines
+  ([`ProjectFileSync`](../../apps/server/src/sync/ProjectFileSync.ts)). Each
+  project and relative path is one `project-file` shared document holding the
+  content hash, never the bytes; a machine missing the content reads it in
+  1 MiB chunks over `ProjectFileBlobRead` from the author, or through its hub.
+  `project_file_sync_state` records what the disk held when this machine last
+  agreed with the document, so a difference is a local edit to publish and a
+  peer's change applies only over content it was made from. Otherwise the
+  peer's version wins (field clocks) and the local one is kept as
+  `name (conflict from <machine>)`, which then syncs like any file. A delete
+  is a `deleted` flag rather than a tombstone, so the path can return; a
+  rename is a delete plus an add, and the add copies the content locally.
+  Files above `PROJECT_FILE_SYNC_MAX_BYTES` stay local and are never taken
+  for deletes. Repositories never travel this way; they clone per machine.
 - A chat in a project runs with the project directory as its working directory.
   Work in a repository runs in that repository (its worktree), as today. Work
   started in a project with no repository runs in the project directory too:
@@ -144,5 +166,5 @@ now, while only one environment holds a project:
 4. Resource identity is a content hash plus a relative path, so two copies of a
    project can be compared without trusting timestamps.
 5. File access goes through one project-files service (list, read, write,
-   watch, search). No caller touches the filesystem directly, so the service
-   can later be backed by a synced store.
+   watch, search). Callers other than it and `ProjectFileSync`, which applies
+   peers' changes to the folder, do not touch the project's files directly.

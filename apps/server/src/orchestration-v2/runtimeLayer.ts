@@ -114,7 +114,9 @@ export const layerEventInfrastructure = Layer.mergeAll(
 );
 
 // Shared so every consumer gets the one files index and watcher.
-const layerProjectFilesProvided = ProjectFiles.layer.pipe(Layer.provide(ProjectLabelFolders.layer));
+export const layerProjectFilesProvided = ProjectFiles.layer.pipe(
+  Layer.provide(ProjectLabelFolders.layer),
+);
 
 // One signal shared by every writer of agent_approvals and both approval streams.
 const layerApprovalChanges = ApprovalChanges.layer;

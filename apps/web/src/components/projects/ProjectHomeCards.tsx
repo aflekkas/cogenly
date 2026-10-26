@@ -15,6 +15,10 @@ import {
   BotIcon,
   ClockIcon,
   FileIcon,
+  FolderIcon,
+  FolderOpenIcon,
+  FolderPlusIcon,
+  FolderUpIcon,
   FolderGit2Icon,
   HammerIcon,
   LinkIcon,
@@ -22,7 +26,13 @@ import {
   PlusIcon,
   SquarePenIcon,
 } from "lucide-react";
-import { useMemo, useRef, useState, type DragEvent as ReactDragEvent } from "react";
+import {
+  Fragment,
+  useMemo,
+  useState,
+  type DragEvent as ReactDragEvent,
+  type ReactNode,
+} from "react";
 
 import { useAgents, useAgentsClient } from "../../agents/agentsClient";
 import type { AgentContact } from "../../agents/agents.types";
@@ -56,6 +66,7 @@ import {
   RepositoryRowIcon,
   RepositoryRowMenu,
   RepositoryRowStatus,
+  type RepositoryRowMenuAction,
 } from "../../projectLabels/RepositorySourceRows";
 import { reportProjectFolderFailure } from "../../projectLabels/useMoveThreadToFolder";
 import {
@@ -74,8 +85,11 @@ import { AgentFace } from "../agents/face";
 import { GitHubIcon } from "../Icons";
 import { resolveSidebarThreadStatus } from "../Sidebar.logic";
 import { chatActivityAt } from "../sidebar/modes/sidebarModes.logic";
+import { SettingsEmpty } from "../settings/settingsLayout";
 import { Button } from "../ui/button";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import { DisclosurePanel } from "../ui/disclosure";
+import { Input } from "../ui/input";
 import { toastManager } from "../ui/toast";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import {
@@ -85,8 +99,14 @@ import {
   ProjectCardRow,
   useArrivedKeys,
 } from "./ProjectCard";
-import { mixProjectRecent, projectRecentPip, type ProjectRecentPip } from "./projectHome.logic";
-import { sortRecentFirst } from "./projectPanel.logic";
+import {
+  mixProjectRecent,
+  projectFileTree,
+  projectRecentPip,
+  uploadFolderFor,
+  type ProjectFileNode,
+  type ProjectRecentPip,
+} from "./projectHome.logic";
 
 const NO_PERMISSION = "You don't have permission to change projects here.";
 
@@ -193,7 +213,7 @@ export function RepositoriesCard(props: {
         </span>
       }
       isEmpty={rows.length === 0}
-      empty="No repositories yet. Add one from this machine or GitHub, and its Work files here too."
+      empty="Add a repository from this machine or GitHub."
     >
       {/* A machine switch fades its rows in place. */}
       <div key={environmentId} className="swap-motion flex flex-col">
@@ -304,11 +324,13 @@ export function SourcesCard(props: {
       }
     >
       {links.length === 0 && !linking ? (
-        <p className="px-1.5 pt-0.5 pb-1.5 text-xs/relaxed text-muted-foreground">
-          {org === null
-            ? "Link a GitHub org or repository so agents and the repository picker can reach it."
-            : `Repositories outside ${org} that agents and the repository picker should reach.`}
-        </p>
+        <SettingsEmpty
+          label={
+            org === null
+              ? "Link a GitHub org or repository for agents to reach."
+              : `Link repositories outside ${org} for agents to reach.`
+          }
+        />
       ) : null}
       {links.map((link) => {
         const key = projectSourceLinkKey(link);
@@ -343,11 +365,51 @@ export function SourcesCard(props: {
   );
 }
 
-function resourceName(resource: ProjectResource): string {
-  return resource.relativePath.slice(resource.relativePath.lastIndexOf("/") + 1);
+/** A file picked or dropped, with its path inside an uploaded folder. */
+interface PendingUpload {
+  readonly file: File;
+  /** `Trip/photos/a.jpg` for a file from a dropped folder; just the name otherwise. */
+  readonly relativePath: string;
 }
 
-/** The project's files on disk, newest first. The whole card takes a drop; "+" picks files. */
+/** Every file in a drop, walking dropped folders. */
+async function droppedFiles(transfer: DataTransfer): Promise<ReadonlyArray<PendingUpload>> {
+  const entries = Array.from(transfer.items)
+    .map((item) => item.webkitGetAsEntry?.() ?? null)
+    .filter((entry): entry is FileSystemEntry => entry !== null);
+  if (entries.length === 0) {
+    return Array.from(transfer.files).map((file) => ({ file, relativePath: file.name }));
+  }
+  const out: Array<PendingUpload> = [];
+  const walk = async (entry: FileSystemEntry, prefix: string): Promise<void> => {
+    if (entry.isFile) {
+      const file = await new Promise<File>((resolve, reject) =>
+        (entry as FileSystemFileEntry).file(resolve, reject),
+      );
+      out.push({ file, relativePath: `${prefix}${entry.name}` });
+      return;
+    }
+    const reader = (entry as FileSystemDirectoryEntry).createReader();
+    // A reader returns a folder in batches until it returns none.
+    for (;;) {
+      const batch = await new Promise<ReadonlyArray<FileSystemEntry>>((resolve, reject) =>
+        reader.readEntries(resolve, reject),
+      );
+      if (batch.length === 0) break;
+      for (const child of batch) await walk(child, `${prefix}${entry.name}/`);
+    }
+  };
+  for (const entry of entries) await walk(entry, "");
+  return out;
+}
+
+const RESOURCES_FOLDER = "Resources";
+
+/**
+ * The project's files and folders on disk, as a tree. The whole card takes a
+ * drop, folders included, into `Resources`; "+" and a folder's menu add files,
+ * a whole folder, or a new folder there. Changes reach paired machines too.
+ */
 export function FilesCard(props: {
   readonly environmentId: EnvironmentId;
   readonly label: ProjectLabelWithRepositories;
@@ -370,24 +432,46 @@ export function FilesCard(props: {
     label: "remove project file",
     reportFailure: false,
   });
-  const inputRef = useRef<HTMLInputElement>(null);
+  // Held in state, not refs: the add menus that click them are built during render.
+  const [filesInput, setFilesInput] = useState<HTMLInputElement | null>(null);
+  const [folderInput, setFolderInput] = useState<HTMLInputElement | null>(null);
+  // The folder the next pick lands in.
+  const [pickTarget, setPickTarget] = useState(RESOURCES_FOLDER);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(0);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set([RESOURCES_FOLDER]));
+  // The folder a new folder is being named in, while the name field shows.
+  const [naming, setNaming] = useState<string | null>(null);
+  const [folderName, setFolderName] = useState("");
   const { removing, run } = useRemoving();
-  const files = useMemo(
-    () =>
-      sortRecentFirst(
-        props.resources.filter((resource) => resource.kind === "file"),
-        (resource) => resource.modifiedAt,
-      ),
+  const tree = useMemo(() => projectFileTree(props.resources), [props.resources]);
+  const fileCount = tree.reduce((total, node) => total + node.fileCount, 0);
+  const paths = useMemo(
+    () => props.resources.map((resource) => resource.relativePath),
     [props.resources],
   );
-  const arrived = useArrivedKeys(
-    files.map((resource) => resource.relativePath),
-    props.loaded,
+  const arrived = useArrivedKeys(paths, props.loaded);
+  // The bare `Resources` folder every project starts with is not content.
+  const isEmpty = tree.every(
+    (node) =>
+      node.kind === "folder" && node.name === RESOURCES_FOLDER && node.children.length === 0,
   );
+  const expand = (path: string) =>
+    setExpanded((current) => {
+      const next = new Set(current);
+      const parts = path.split("/");
+      for (let index = 1; index <= parts.length; index++) next.add(parts.slice(0, index).join("/"));
+      return next;
+    });
+  const toggle = (path: string) =>
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
 
-  const upload = async (file: File) => {
+  const upload = async ({ file, relativePath }: PendingUpload, base: string) => {
     const id = randomUUID() as ChatAttachmentId;
     setUploading((count) => count + 1);
     try {
@@ -417,6 +501,7 @@ export function FilesCard(props: {
         environmentId,
         input: {
           id: label.id,
+          folder: uploadFolderFor(base, relativePath),
           resource: { kind: "upload", attachmentId: state.attachmentId, fileName: file.name },
         },
       });
@@ -427,30 +512,158 @@ export function FilesCard(props: {
       setUploading((count) => count - 1);
     }
   };
-  const uploadAll = (list: FileList | null) => {
-    if (!canAdd || list === null) return;
-    for (const file of Array.from(list)) void upload(file);
+  const uploadAll = (uploads: ReadonlyArray<PendingUpload>, base: string) => {
+    if (!canAdd || uploads.length === 0) return;
+    expand(base);
+    for (const pending of uploads) void upload(pending, base);
+  };
+  const pick = (kind: "files" | "folder", base: string) => {
+    setPickTarget(base);
+    (kind === "files" ? filesInput : folderInput)?.click();
   };
   const onDrop = (event: ReactDragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setDragging(false);
-    uploadAll(event.dataTransfer.files);
+    if (!canAdd) return;
+    void droppedFiles(event.dataTransfer).then((uploads) => uploadAll(uploads, RESOURCES_FOLDER));
   };
-  const remove = (resource: ProjectResource) =>
-    run(resource.relativePath, async () => {
-      const name = resourceName(resource);
+  const startFolder = (parent: string) => {
+    expand(parent);
+    setFolderName("");
+    setNaming(parent);
+  };
+  const createFolder = async () => {
+    const parent = naming;
+    const name = folderName.trim();
+    setNaming(null);
+    if (parent === null || name === "") return;
+    const result = await addResource({
+      environmentId,
+      input: { id: label.id, folder: parent, resource: { kind: "folder", name } },
+    });
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      reportProjectFolderFailure(`Could not make ${name}`, result);
+    }
+  };
+  const remove = (relativePath: string, kind: "file" | "folder") =>
+    run(relativePath, async () => {
+      const name = relativePath.slice(relativePath.lastIndexOf("/") + 1);
       const confirmed = await confirmRemoval(
-        `Delete ${name}?\nIt is removed from the project's folder on disk.`,
+        kind === "folder"
+          ? `Delete ${name} and everything in it?\nIt is removed from the project's folder on disk and on paired machines.`
+          : `Delete ${name}?\nIt is removed from the project's folder on disk and on paired machines.`,
       );
       if (!confirmed) return;
       const result = await removeResource({
         environmentId,
-        input: { id: label.id, relativePath: resource.relativePath },
+        input: { id: label.id, relativePath },
       });
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
         reportProjectFolderFailure(`Could not remove ${name}`, result);
       }
     });
+  const addActions = (base: string): ReadonlyArray<RepositoryRowMenuAction> => [
+    {
+      key: "files",
+      label: "Add files…",
+      icon: <FileIcon />,
+      onSelect: () => pick("files", base),
+    },
+    {
+      key: "folder-upload",
+      label: "Upload a folder…",
+      icon: <FolderUpIcon />,
+      onSelect: () => pick("folder", base),
+    },
+    {
+      key: "new-folder",
+      label: "New folder",
+      icon: <FolderPlusIcon />,
+      onSelect: () => startFolder(base),
+    },
+  ];
+
+  const renderNodes = (
+    nodes: ReadonlyArray<ProjectFileNode<ProjectResource>>,
+    depth: number,
+  ): ReactNode =>
+    nodes.map((node) => {
+      if (node.kind === "file") {
+        return (
+          <ProjectCardRow
+            key={node.path}
+            tree={{ depth }}
+            icon={<FileIcon />}
+            title={node.name}
+            meta={node.resource ? formatBytes(node.resource.sizeBytes) : undefined}
+            arrived={arrived.has(node.path)}
+            removing={removing.has(node.path)}
+            onRemove={() => void remove(node.path, "file")}
+            removeLabel={`Delete ${node.name}`}
+            removeDisabledReason={canRemove ? null : NO_PERMISSION}
+          />
+        );
+      }
+      const open = expanded.has(node.path);
+      return (
+        <Fragment key={node.path}>
+          <ProjectCardRow
+            tree={{ depth, open }}
+            icon={open ? <FolderOpenIcon /> : <FolderIcon />}
+            title={node.name}
+            meta={
+              node.fileCount === 0
+                ? "Empty"
+                : `${node.fileCount} ${node.fileCount === 1 ? "file" : "files"}`
+            }
+            arrived={arrived.has(node.path)}
+            removing={removing.has(node.path)}
+            onOpen={() => toggle(node.path)}
+            ariaLabel={`${node.name} folder`}
+            menu={
+              canAdd ? (
+                <RepositoryRowMenu label={`${node.name} actions`} actions={addActions(node.path)} />
+              ) : undefined
+            }
+            {...(node.resource !== undefined
+              ? {
+                  onRemove: () => void remove(node.path, "folder"),
+                  removeLabel: `Delete ${node.name}`,
+                  removeDisabledReason: canRemove ? null : NO_PERMISSION,
+                }
+              : {})}
+          />
+          <DisclosurePanel open={open}>
+            <div className="flex flex-col">
+              {renderNodes(node.children, depth + 1)}
+              {naming === node.path ? folderNameField(depth + 1) : null}
+            </div>
+          </DisclosurePanel>
+        </Fragment>
+      );
+    });
+
+  const folderNameField = (depth: number) => (
+    <div
+      key="new-folder"
+      className="reveal-motion px-3 py-1.5 sm:px-4"
+      style={{ paddingInlineStart: `${depth * 0.875 + 2.75}rem` }}
+    >
+      <Input
+        size="compact"
+        autoFocus
+        aria-label="New folder name"
+        placeholder="Folder name"
+        value={folderName}
+        onChange={(event) => setFolderName(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") void createFolder();
+          if (event.key === "Escape") setNaming(null);
+        }}
+        onBlur={() => void createFolder()}
+      />
+    </div>
+  );
 
   const note =
     uploading > 0
@@ -476,55 +689,77 @@ export function FilesCard(props: {
       onDrop={onDrop}
     >
       <input
-        ref={inputRef}
+        ref={setFilesInput}
         type="file"
         multiple
         hidden
         onChange={(event) => {
-          uploadAll(event.currentTarget.files);
+          const files = Array.from(event.currentTarget.files ?? []);
+          uploadAll(
+            files.map((file) => ({ file, relativePath: file.name })),
+            pickTarget,
+          );
+          event.currentTarget.value = "";
+        }}
+      />
+      <input
+        ref={setFolderInput}
+        // Not in React's types: the picker chooses a folder and gives each file its path.
+        {...{ webkitdirectory: "" }}
+        type="file"
+        multiple
+        hidden
+        onChange={(event) => {
+          const files = Array.from(event.currentTarget.files ?? []);
+          uploadAll(
+            files.map((file) => ({ file, relativePath: file.webkitRelativePath || file.name })),
+            pickTarget,
+          );
           event.currentTarget.value = "";
         }}
       />
       <ProjectCard
         icon={<FileIcon />}
         title="Files"
-        count={files.length}
+        count={fileCount}
         add={
-          <ProjectCardAddButton
-            icon={<PlusIcon />}
-            label="Add files"
-            title={canAdd ? undefined : NO_PERMISSION}
-            disabled={!canAdd}
-            onClick={() => inputRef.current?.click()}
-          />
+          canAdd ? (
+            <Menu>
+              <MenuTrigger
+                render={<Button size="icon-xs" variant="ghost-muted" aria-label="Add files" />}
+              >
+                <PlusIcon />
+              </MenuTrigger>
+              <MenuPopup align="end">
+                {addActions(RESOURCES_FOLDER).map((action) => (
+                  <MenuItem key={action.key} onClick={action.onSelect}>
+                    {action.icon}
+                    {action.label}
+                  </MenuItem>
+                ))}
+              </MenuPopup>
+            </Menu>
+          ) : (
+            <ProjectCardAddButton
+              icon={<PlusIcon />}
+              label="Add files"
+              title={NO_PERMISSION}
+              disabled
+            />
+          )
         }
-        isEmpty={files.length === 0 && note === null}
+        isEmpty={isEmpty && note === null && naming === null}
         empty={
           canAdd ? (
             <>
-              Drop files here. They land in the project's <code>Resources</code> folder.
+              Drop files or folders here to add them to <code>Resources</code>.
             </>
           ) : (
             NO_PERMISSION
           )
         }
       >
-        {files.map((resource) => {
-          const name = resourceName(resource);
-          return (
-            <ProjectCardRow
-              key={resource.relativePath}
-              icon={<FileIcon />}
-              title={name}
-              meta={formatBytes(resource.sizeBytes)}
-              arrived={arrived.has(resource.relativePath)}
-              removing={removing.has(resource.relativePath)}
-              onRemove={() => void remove(resource)}
-              removeLabel={`Delete ${name}`}
-              removeDisabledReason={canRemove ? null : NO_PERMISSION}
-            />
-          );
-        })}
+        {renderNodes(tree, 0)}
         {note !== null ? <ProjectCardNote>{note}</ProjectCardNote> : null}
       </ProjectCard>
     </div>
@@ -600,7 +835,7 @@ export function RecentCard(props: {
         </Menu>
       }
       isEmpty={recent.items.length === 0}
-      empty="Chats and Work you start in this project show up here."
+      empty="Chats and Work from this project show up here."
     >
       {recent.items.map((item) => {
         const { thread } = item;
@@ -720,7 +955,7 @@ export function AgentsCard(props: {
         </Menu>
       }
       isEmpty={here.length === 0}
-      empty="No agents here yet. Assign one and it works inside this project."
+      empty="Assign an agent to work inside this project."
     >
       {here.map((agent) => (
         <ProjectCardRow

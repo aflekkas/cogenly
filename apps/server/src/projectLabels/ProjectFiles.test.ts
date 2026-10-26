@@ -4,6 +4,7 @@ import { ProjectLabelId } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
@@ -180,6 +181,80 @@ describe("project files", () => {
       expect(yield* fs.exists(pendingPath)).toBe(false);
       expect(yield* fs.readFileString(path.join(dir, "Resources", "hello.txt"))).toBe("uploaded\n");
     }).pipe(Effect.provide(filesLayer("label-files-add"))),
+  );
+
+  it.effect("makes folders, adds into nested folders, and copies chat attachments", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const config = yield* ServerConfig.ServerConfig;
+      const files = yield* Files.ProjectFiles;
+      const folders = yield* Folders.ProjectLabelFolders;
+      const label = labelRef("label:folders", "Folder Me");
+      yield* seedLabel(label.id, label.name);
+      const { dir } = yield* folders.ensureForLabel(label);
+      const folder = yield* files.createResource({
+        id: label.id,
+        resource: { kind: "folder", name: "Briefs" },
+      });
+      expect(folder.resource).toMatchObject({ relativePath: "Resources/Briefs", kind: "folder" });
+      const nested = yield* files.createResource({
+        id: label.id,
+        folder: "Resources/Briefs/2026/Q4",
+        resource: { kind: "note", title: "Plan", text: "deep" },
+      });
+      expect(nested.resource.relativePath).toBe("Resources/Briefs/2026/Q4/Plan.md");
+      expect(yield* fs.readFileString(path.join(dir, nested.resource.relativePath))).toBe("deep\n");
+      // Attaching from a chat copies; the chat keeps its file.
+      const attachmentId = createPendingAttachmentId(".pdf");
+      const source = path.join(config.attachmentsDir, `${attachmentId}.pdf`);
+      yield* fs.makeDirectory(config.attachmentsDir, { recursive: true });
+      yield* fs.writeFileString(source, "%PDF\n");
+      const copied = yield* files.createResource({
+        id: label.id,
+        folder: "Resources/Briefs",
+        resource: { kind: "attachment", attachmentId, fileName: "deck.pdf" },
+      });
+      expect(copied.resource.relativePath).toBe("Resources/Briefs/deck.pdf");
+      expect(yield* fs.readFileString(source)).toBe("%PDF\n");
+      // Reserved folders and paths leaving the project are refused.
+      for (const target of ["repos/x", "../outside", ".worktrees/a"]) {
+        const refused = yield* files
+          .createResource({
+            id: label.id,
+            folder: target,
+            resource: { kind: "note", title: "No", text: "no" },
+          })
+          .pipe(Effect.flip);
+        expect(refused.reason).toBe("invalid_path");
+      }
+    }).pipe(Effect.provide(filesLayer("label-files-folders"))),
+  );
+
+  it.effect("replaces files linked from outside the project with copies, once", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const files = yield* Files.ProjectFiles;
+      const folders = yield* Folders.ProjectLabelFolders;
+      const label = labelRef("label:linked", "Linked Me");
+      yield* seedLabel(label.id, label.name);
+      const { dir } = yield* folders.ensureForLabel(label);
+      const outside = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-linked-" });
+      const original = path.join(outside, "report.txt");
+      yield* fs.writeFileString(original, "original\n");
+      const linked = path.join(dir, "Resources", "report.txt");
+      yield* fs.symlink(original, linked);
+      expect(yield* files.copyLinkedFiles(label.id)).toBe(1);
+      expect(yield* fs.readLink(linked).pipe(Effect.option)).toEqual(Option.none());
+      expect(yield* fs.readFileString(linked)).toBe("original\n");
+      // The original outside the project is untouched and stays independent.
+      yield* fs.writeFileString(original, "changed\n");
+      expect(yield* fs.readFileString(linked)).toBe("original\n");
+      expect(yield* files.copyLinkedFiles(label.id)).toBe(0);
+      const { resources } = yield* files.listResources(label.id);
+      expect(resources.map((resource) => resource.relativePath)).toContain("Resources/report.txt");
+    }).pipe(Effect.scoped, Effect.provide(filesLayer("label-files-linked"))),
   );
 
   it.effect("removes files and refuses the id file", () =>

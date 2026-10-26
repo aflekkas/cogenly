@@ -142,6 +142,8 @@ export function VaultSettings() {
   const showToolbar = list.isLoaded && (others.length > 0 || filtered);
   const addButton = () => (
     <Button
+      size="xs"
+      variant="outline"
       disabled={!actions.canWrite}
       title={actions.canWrite ? undefined : NO_WRITE_TITLE}
       onClick={() => setEditing({ kind: "create", type: "api_key" })}
@@ -204,27 +206,26 @@ export function VaultSettings() {
           filtered ? (
             <SettingsListEmpty
               icon={<KeyRoundIcon />}
-              title="Nothing matches"
-              description="Try another search or type."
-            >
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setQuery("");
-                  setType("all");
-                }}
-              >
-                Clear filters
-              </Button>
-            </SettingsListEmpty>
+              label="No items match these filters."
+              action={
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => {
+                    setQuery("");
+                    setType("all");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              }
+            />
           ) : (
             <SettingsListEmpty
               icon={<KeyRoundIcon />}
-              title="No keys, cards or notes yet"
-              description="Store API keys, cards and notes so agents can use them without ever seeing them."
-            >
-              {addButton()}
-            </SettingsListEmpty>
+              label="Store keys, cards and notes agents can use without seeing them."
+              action={addButton()}
+            />
           )
         ) : (
           <SettingsList>
