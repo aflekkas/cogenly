@@ -257,7 +257,7 @@ function classifyItem(
             detail: "The last run hasn't finished after 10 minutes.",
             sinceMs: requestedAtMs + RUN_DEADLINE_MS,
             target: threadTarget,
-            fix: "stop-runs",
+            fix: "resume",
           })
         : canaryItem({
             status: "ok",

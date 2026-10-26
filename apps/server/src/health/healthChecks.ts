@@ -683,7 +683,7 @@ export function stuckRunsCheck(input: {
           : "They have likely lost their provider sessions. Fix stops them so the thread can continue.",
       since: oldest.startedAt,
       target: { _tag: "thread", threadId: oldest.threadId },
-      fix: "stop-runs",
+      fix: "resume",
     });
   });
   return check(

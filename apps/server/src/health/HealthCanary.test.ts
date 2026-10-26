@@ -129,7 +129,7 @@ describe("classifyCanary", () => {
       status: "fail",
       title: "Canary turn missed its deadline",
       target: { _tag: "thread", threadId },
-      fix: "stop-runs",
+      fix: "resume",
     });
     expect(DateTime.toEpochMillis(late.since!)).toBe(ms("2026-10-24T10:10:01.000Z"));
     expect(
