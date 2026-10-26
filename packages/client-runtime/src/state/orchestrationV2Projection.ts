@@ -1,3 +1,4 @@
+import { isMisroutedLegacyRecoveryEvent } from "@cogenly/shared/legacyRecoveryEvent";
 import { withWorkMetadata } from "@cogenly/shared/workMetadata";
 import { applyThreadPullRequestLinkUpdate } from "@cogenly/shared/threadPullRequests";
 import type {
@@ -197,7 +198,12 @@ export function applyOrchestrationV2ProjectionEvent(
   event: OrchestrationV2DomainEvent,
   options?: ApplyOrchestrationV2ProjectionEventOptions,
 ): OrchestrationV2ThreadProjection | null {
-  if (projection === null || event.threadId !== projection.thread.id) return projection;
+  if (
+    projection === null ||
+    event.threadId !== projection.thread.id ||
+    isMisroutedLegacyRecoveryEvent(event)
+  )
+    return projection;
 
   const partialTimeline = options?.partialTimeline === true;
   const latestLocalTurnOrdinal = options?.latestLocalTurnOrdinal;

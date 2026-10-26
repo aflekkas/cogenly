@@ -656,3 +656,34 @@ it("does not scan every row against every run for a streaming item update", () =
   expect(next?.visibleTurnItems[0]).toBe(projection.visibleTurnItems[0]);
   expect(runReads).toBeLessThanOrEqual(100);
 });
+
+it("keeps historical recovery updates for a different app thread out of the client projection", () => {
+  const other = ThreadId.make("thread:related-recovery");
+  const command = `command:runtime-reconcile:shutdown:${threadId}:2026-10-22T18:38:21.451Z`;
+  const event: OrchestrationV2DomainEvent = {
+    id: EventId.make(
+      `event:thread:${encodeURIComponent(threadId)}:command:${encodeURIComponent(command)}:old`,
+    ),
+    type: "provider-thread.updated",
+    threadId,
+    occurredAt: now,
+    payload: {
+      id: ProviderThreadId.make("provider-thread:related-recovery"),
+      driver: ProviderDriverKind.make("codex"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      providerSessionId: null,
+      appThreadId: other,
+      ownerNodeId: null,
+      nativeThreadRef: null,
+      nativeConversationHeadRef: null,
+      status: "idle",
+      firstRunOrdinal: null,
+      lastRunOrdinal: null,
+      handoffIds: [],
+      forkedFrom: null,
+      createdAt: now,
+      updatedAt: now,
+    },
+  };
+  expect(applyOrchestrationV2ProjectionEvent(emptyProjection, event)).toBe(emptyProjection);
+});
