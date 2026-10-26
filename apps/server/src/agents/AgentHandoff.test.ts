@@ -1,6 +1,8 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { AgentHandoffBrief, AgentHandoffNarrative, TextGenerationError } from "@cogenly/contracts";
+import * as DateTime from "effect/DateTime";
+import * as TestClock from "effect/testing/TestClock";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -50,6 +52,57 @@ const provide = (generation: Text.TextGeneration["Service"]["generateAgentNarrat
   );
 
 describe("agent handoff", () => {
+  it.effect("uses a marked partial brief at the deadline after narrative generation fails", () =>
+    Effect.gen(function* () {
+      const { agent } = yield* seed;
+      const handoff = yield* Handoff.AgentHandoff;
+      const since = yield* DateTime.now;
+      yield* handoff.request({
+        agent,
+        ordinal: 31,
+        cwd: "/unused",
+        selections: [agent.modelSelection],
+      });
+      yield* handoff.drain;
+      yield* TestClock.adjust(Handoff.HANDOFF_WAIT_MS - 1);
+      expect(yield* handoff.prepare(agent.id, 40, since)).toBeNull();
+      yield* TestClock.adjust(1);
+      const brief = yield* handoff.prepare(agent.id, 40, since);
+      expect(brief?.text).toContain("PARTIAL HANDOFF");
+      expect(brief?.text).toContain(agent.instructions);
+      expect(brief!.text.length).toBeLessThanOrEqual(Handoff.HANDOFF_MAX_CHARS);
+    }).pipe(
+      Effect.provide(
+        provide(() =>
+          Effect.fail(
+            new TextGenerationError({ operation: "generateThreadTitle", detail: "unavailable" }),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("compacts oversized facts deterministically while preserving pending approvals", () =>
+    Effect.gen(function* () {
+      const { agent, sql } = yield* seed;
+      const handoff = yield* Handoff.AgentHandoff;
+      const since = yield* DateTime.now;
+      const fact = encodeJson({
+        id: "fact:huge",
+        status: "confirmed",
+        text: "x".repeat(Handoff.HANDOFF_MAX_CHARS),
+      });
+      yield* sql`INSERT INTO facts(id,agent_id,status,payload_json,updated_at) VALUES ('fact:huge',${agent.id},'confirmed',${fact},${agent.createdAt})`;
+      yield* sql`INSERT INTO agent_approvals(id,agent_id,action_json,status,requested_at) VALUES ('critical',${agent.id},'Never send without approval','pending',${agent.createdAt})`;
+      yield* TestClock.adjust(Handoff.HANDOFF_WAIT_MS);
+      const brief = yield* handoff.prepare(agent.id, 40, since);
+      expect(brief?.text).toContain("1 facts");
+      expect(brief?.text).toContain("[fact:fact:huge] status=confirmed");
+      expect(brief?.text).toContain("Never send without approval");
+      expect(brief!.text.length).toBeLessThanOrEqual(Handoff.HANDOFF_MAX_CHARS);
+    }).pipe(Effect.provide(provide(() => Effect.succeed(narrative)))),
+  );
+
   it.effect(
     "generates without blocking a turn, refreshes every exact record and carries core memory across rotations",
     () =>
@@ -167,6 +220,11 @@ describe("agent handoff", () => {
       yield* sql`INSERT INTO agent_approvals(id,agent_id,action_json,status,requested_at) VALUES ('huge',${agent.id},${"z".repeat(Handoff.HANDOFF_MAX_CHARS)},'pending',${agent.createdAt})`;
       expect(yield* handoff.prepare(agent.id, 40)).toBeNull();
       expect(yield* sql`SELECT * FROM agent_handoff_briefs`).toEqual([]);
+      const since = yield* DateTime.now;
+      yield* TestClock.adjust(Handoff.HANDOFF_WAIT_MS);
+      const result = yield* Effect.result(handoff.prepare(agent.id, 40, since));
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") expect(result.failure.message).toContain("required state");
     }).pipe(Effect.provide(provide(() => Effect.succeed(narrative)))),
   );
 

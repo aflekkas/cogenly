@@ -644,22 +644,51 @@ export const layer: Layer.Layer<
           })
           .pipe(Effect.mapError((cause) => new ProviderTurnStartError({ runId, cause })));
       }
-      const agentBrief =
+      const briefResult = yield* Effect.result(
         rotateAgentSession && persistentAgent !== null
-          ? yield* agentHandoff
-              .prepare(persistentAgent.id, run.ordinal - 1)
-              .pipe(Effect.mapError((cause) => new ProviderTurnStartError({ runId, cause })))
-          : null;
+          ? agentHandoff.prepare(persistentAgent.id, run.ordinal - 1, run.requestedAt)
+          : Effect.succeed(null),
+      );
+      if (briefResult._tag === "Failure") {
+        yield* settleStartFailure({
+          signal: "agent-handoff-failure",
+          title: "Agent handoff failed",
+          error: briefResult.failure,
+        });
+        return;
+      }
+      const agentBrief = briefResult.success;
       if (rotateAgentSession && agentBrief === null) {
         const switching =
           previousAgentRun !== undefined &&
           (previousAgentRun.modelSelection.instanceId !== run.modelSelection.instanceId ||
             previousAgentRun.modelSelection.model !== run.modelSelection.model);
-        if (switching)
+        if (switching) {
+          if (!run.handoffPending) {
+            yield* eventSink.writeIfRunCurrent({
+              threadId: projection.thread.id,
+              runId,
+              activeAttemptId: attempt.id,
+              expectedStatus: "starting",
+              events: [
+                {
+                  type: "run.updated",
+                  payload: { ...run, handoffPending: true },
+                  id: yield* idAllocator.allocate.event({ threadId: projection.thread.id }),
+                  threadId: projection.thread.id,
+                  runId,
+                  nodeId: rootNode.id,
+                  providerInstanceId: run.providerInstanceId,
+                  occurredAt: yield* DateTime.now,
+                },
+              ],
+            });
+          }
           return yield* new ProviderTurnStartError({
             runId,
             cause: new AgentHandoffPendingError({ runId }),
           });
+        }
         rotateAgentSession = false;
       }
       let effectiveHandoffs = handoffs;
@@ -963,6 +992,7 @@ export const layer: Layer.Layer<
       };
       const runningRun: OrchestrationV2Run = {
         ...run,
+        handoffPending: false,
         status: "running",
         startedAt: now,
       };

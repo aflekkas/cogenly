@@ -18,6 +18,7 @@ import * as Store from "./AgentStore.ts";
 
 export const HANDOFF_SOFT_RUNS = 32;
 export const HANDOFF_MAX_CHARS = 180_000;
+export const HANDOFF_WAIT_MS = 180_000;
 type State = ReadonlyArray<{ readonly heading: string; readonly rows: ReadonlyArray<string> }>;
 
 /** Exact records stay outside the model's narrative and are never clipped to fit. */
@@ -25,9 +26,29 @@ export const renderHandoffState = (state: State) =>
   state
     .map((section) => `${section.heading}:\n${section.rows.join("\n") || "(none)"}`)
     .join("\n\n");
+// Facts remain retrievable by id; live obligations and approvals always stay verbatim.
+const compactHandoffState = (snapshot: State): State => {
+  if (renderHandoffState(snapshot).length <= HANDOFF_MAX_CHARS - 1024) return snapshot;
+  return snapshot.map((section) =>
+    section.heading === "Decisions recorded as facts (status retained)"
+      ? {
+          ...section,
+          rows: [
+            `${section.rows.length} facts (partial state; retrieve full records by these refs):`,
+            ...section.rows.map((row) => {
+              const fact = Schema.decodeSync(
+                Schema.fromJsonString(Schema.Struct({ id: Schema.String, status: Schema.String })),
+              )(row);
+              return `[fact:${fact.id}] status=${fact.status}`;
+            }),
+          ],
+        }
+      : section,
+  );
+};
 export const validateHandoff = (text: string, state: State) =>
   text.length <= HANDOFF_MAX_CHARS &&
-  state.every((section) =>
+  compactHandoffState(state).every((section) =>
     text.includes(`${section.heading}:\n${section.rows.join("\n") || "(none)"}`),
   );
 
@@ -44,6 +65,7 @@ export class AgentHandoff extends Context.Service<
     readonly prepare: (
       agentId: AgentId,
       ordinal: number,
+      waitSince?: DateTime.Utc,
     ) => Effect.Effect<AgentHandoffBrief | null, AgentError>;
   }
 >()("cogenly-server/agents/AgentHandoff") {}
@@ -228,7 +250,7 @@ const make = Effect.gen(function* () {
         );
         pending.set(input.agent.id, fiber);
       }).pipe(Effect.mapError(failure)),
-    prepare: (agentId, ordinal) =>
+    prepare: (agentId, ordinal, waitSince) =>
       sql
         .withTransaction(
           Effect.gen(function* () {
@@ -250,14 +272,30 @@ const make = Effect.gen(function* () {
               narrative: string;
               covered_run_ordinal: number;
             }>`SELECT narrative, covered_run_ordinal FROM agent_handoff_narratives WHERE agent_id = ${agentId} AND covered_run_ordinal > ${saved.length > 0 ? ordinal - 1 : (latest[0]?.covered_run_ordinal ?? -1)} AND covered_run_ordinal <= ${ordinal} ORDER BY covered_run_ordinal DESC LIMIT 1`;
-            if (!ready[0]) return null;
+            const expired =
+              waitSince !== undefined &&
+              DateTime.toEpochMillis(yield* DateTime.now) - DateTime.toEpochMillis(waitSince) >=
+                HANDOFF_WAIT_MS;
+            if (!ready[0] && !expired) return null;
             const agent = yield* store.get(agentId);
-            const snapshot = yield* state(agent);
-            const tail = yield* messages(agent, ready[0].covered_run_ordinal, ordinal);
+            const snapshot = compactHandoffState(yield* state(agent));
+            const tail = yield* messages(agent, ready[0]?.covered_run_ordinal ?? 0, ordinal);
+            const summary = ready[0]
+              ? renderNarrative(yield* decodeNarrative(ready[0].narrative))
+              : "";
             const createdAt = DateTime.formatIso(yield* DateTime.now);
             const version = (latest[0]?.version ?? 0) + 1;
-            const body = `HANDOFF BRIEF v1 / revision ${version}\nAgent: ${agentId}; covers runs 1..${ordinal}; generated: ${createdAt}\n\n${renderHandoffState(snapshot)}\n\nNarrative (model-written, source-referenced; through run ${ready[0].covered_run_ordinal}):\n${renderNarrative(yield* decodeNarrative(ready[0].narrative))}\n\nMessages since narrative (verbatim):\n${encodeJson(tail)}`;
-            if (!validateHandoff(body, snapshot)) return null;
+            let body = `HANDOFF BRIEF v1 / revision ${version}\nAgent: ${agentId}; covers runs 1..${ordinal}; generated: ${createdAt}\n\n${renderHandoffState(snapshot)}\n\nNarrative (model-written, source-referenced; through run ${ready[0]?.covered_run_ordinal ?? 0}):\n${summary}\n\nMessages since narrative (verbatim):\n${encodeJson(tail)}`;
+            if (!validateHandoff(body, snapshot) || !ready[0]) {
+              if (!expired) return null;
+              const prefix = `HANDOFF BRIEF v1 / revision ${version}\nPARTIAL HANDOFF: narrative unavailable or history exceeded its budget. Older messages omitted; consult the conversation for history.\nAgent: ${agentId}; covers runs 1..${ordinal}; generated: ${createdAt}\n\n${renderHandoffState(snapshot)}\n\nNarrative (partial):\n`;
+              if (prefix.length > HANDOFF_MAX_CHARS)
+                return yield* new AgentError({
+                  message:
+                    "Handoff could not fit required state within its budget after three minutes. Open commitments, pending tasks and approvals were preserved; reduce stored state and retry the turn.",
+                });
+              body = prefix + summary.slice(0, HANDOFF_MAX_CHARS - prefix.length);
+            }
             const brief = {
               formatVersion: 1 as const,
               version,
@@ -265,12 +303,12 @@ const make = Effect.gen(function* () {
               createdAt,
               text: body,
             };
-            yield* sql`INSERT INTO agent_conversation_context(agent_id, summary, covered_run_ordinal) VALUES (${agentId}, ${renderNarrative(yield* decodeNarrative(ready[0].narrative))}, ${ordinal}) ON CONFLICT(agent_id) DO UPDATE SET summary = excluded.summary, covered_run_ordinal = excluded.covered_run_ordinal`;
+            yield* sql`INSERT INTO agent_conversation_context(agent_id, summary, covered_run_ordinal) VALUES (${agentId}, ${summary}, ${ordinal}) ON CONFLICT(agent_id) DO UPDATE SET summary = excluded.summary, covered_run_ordinal = excluded.covered_run_ordinal`;
             yield* sql`INSERT INTO agent_handoff_briefs(agent_id, version, covered_run_ordinal, payload_json) VALUES (${agentId}, ${version}, ${ordinal}, ${encodeBrief(brief)})`;
             return brief;
           }),
         )
-        .pipe(Effect.mapError(failure)),
+        .pipe(Effect.mapError((cause) => (Schema.is(AgentError)(cause) ? cause : failure(cause)))),
   });
 });
 export const layer = Layer.effect(AgentHandoff, make);

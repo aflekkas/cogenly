@@ -942,7 +942,7 @@ function LiveCommitmentHistory({
 
 export type AgentConversationData = Pick<
   AgentContact,
-  "messages" | "requests" | "memory" | "activity" | "workingOn"
+  "messages" | "requests" | "memory" | "activity" | "workingOn" | "preparingHandoff"
 >;
 
 /** The title of the newest tool call still running in a thread, for a typing hint. */
@@ -1061,6 +1061,9 @@ export function useAgentConversation(agent: AgentContact | null): AgentContact |
       memory: memory.data?.notes ?? [],
       activity: activity.data?.runs ?? [],
       workingOn: workingOnFromItems(projection.turnItems),
+      preparingHandoff: projection.runs.some(
+        (run) => run.status === "starting" && run.handoffPending,
+      ),
     };
   }, [projection, workProjection, triggerNames, memory.data, activity.data]);
   const key = agent ? agentContactKey(agent) : null;
