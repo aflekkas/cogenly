@@ -111,8 +111,7 @@ const SCREENCAST_SETTLE_MS = 200;
 const SCREENCAST_MOTION_FRAMES = 4;
 const SCREENCAST_MOTION_WINDOW_MS = 300;
 const SCREENCAST_MOTION_QUALITY = 50;
-const HOST_RECONNECT_DELAY = "1 second";
-/** How long a new tab waits for the desktop app to mount it before running headless. */
+/** How long an agent waits for the desktop panel to attach or show its existing page. */
 const DESKTOP_ATTACH_TIMEOUT = "10 seconds";
 const VIEWER_OUTPUT_LIMIT = 64;
 const RECORDING_SCREENCAST = { format: "jpeg", quality: 90, everyNthFrame: 1 } as const;
@@ -342,6 +341,7 @@ interface ServerTab {
   /** The agent's latest request on this tab; idle agent tabs close. */
   usedAt: number;
   readonly viewers: Set<ViewerState>;
+  readonly panelWaiters: Set<(shown: boolean) => void>;
   readonly consoleEntries: Array<PreviewAutomationConsoleEntry>;
   readonly networkEntries: Array<PreviewAutomationNetworkEntry>;
   readonly actionTimeline: Array<PreviewAutomationActionEvent>;
@@ -353,6 +353,7 @@ interface ServerTab {
    * page; the desktop owns its size, storage, and window.
    */
   readonly desktop: { readonly close: () => Promise<void> } | null;
+  automationFault: boolean;
   readonly profileId: string | undefined;
   /** Set when a page in another tab opened this one with `window.open` or a link. */
   readonly openerTabId: string | undefined;
@@ -786,6 +787,7 @@ const make = Effect.gen(function* () {
     tabs.delete(key);
     if (closeSession) revealRequestedAt.delete(key);
     tab.closing = true;
+    for (const complete of tab.panelWaiters) complete(false);
     clearAbortedNavigation(tab);
     // A desktop page outlives the connection unless its session closed with it.
     const end =
@@ -889,9 +891,23 @@ const make = Effect.gen(function* () {
       requestPanelReveal(snapshot.threadId, snapshot.tabId);
     }
     const desktop =
-      adopted === undefined && (await desktopRenders(snapshot))
+      adopted === undefined &&
+      snapshot.serverRendering !== "stream" &&
+      (await desktopRenders(snapshot))
         ? await connectDesktop(snapshot)
         : null;
+    if (!desktop && snapshot.serverRendering === "native") {
+      throw new ServerBrowserPage.ServerBrowserOperationError(
+        "PreviewAutomationExecutionError",
+        `The desktop browser panel did not attach for tab ${snapshot.tabId} within 10 seconds. Cogenly requested it automatically. Retry preview_open with tabId=${snapshot.tabId}; keep this tab open and do not ask the user to show the panel.`,
+      );
+    }
+    await Effect.runPromise(
+      manager.reportServerRendering({
+        ...snapshot,
+        serverRendering: desktop ? "native" : "stream",
+      }),
+    );
     // An agent tab without a profile (no client reported one) keeps throwaway storage.
     const isolatedContext =
       Targeting.tabBacking({
@@ -935,12 +951,14 @@ const make = Effect.gen(function* () {
       createdAt: Date.now(),
       usedAt: Date.now(),
       viewers: new Set(),
+      panelWaiters: new Set(),
       consoleEntries: [],
       networkEntries: [],
       actionTimeline: [],
       control,
       isolatedContext,
       desktop: desktop === null ? null : { close: desktop.close },
+      automationFault: false,
       profileId: snapshot.profileId,
       openerTabId: adopted?.openerTabId,
       downloads: [],
@@ -1674,10 +1692,12 @@ const make = Effect.gen(function* () {
   const statusWithTitle = async (
     tab: ServerTab | undefined,
     agentSessionId?: string,
+    recover = true,
   ): Promise<PreviewAutomationStatus> => {
     if (!tab) {
       return {
         available: false,
+        automation: { connected: false, state: "disconnected" },
         visible: false,
         tabId: null,
         url: null,
@@ -1691,7 +1711,11 @@ const make = Effect.gen(function* () {
     const sitePermissions = await desktopSitePermissions(tab);
     const summary = withPermissionNotice(tabSummary(tab), sitePermissions);
     const status = {
-      available: true,
+      available: !tab.automationFault,
+      automation: {
+        connected: !tab.automationFault,
+        state: tab.automationFault ? ("unresponsive" as const) : ("ready" as const),
+      },
       visible: summary.visible,
       tabId: tab.tabId,
       url: url === "about:blank" ? null : url,
@@ -1723,7 +1747,8 @@ const make = Effect.gen(function* () {
           ownedByCaller: candidate.control.agentId === agentSessionId,
           visible: isShown(candidate),
           ...(candidate.profileId === undefined ? {} : { profileId: candidate.profileId }),
-          rendering: candidate.desktop === null ? ("background" as const) : ("panel" as const),
+          rendering: Targeting.tabRenderingStatus(targetable(candidate), desktopChannel.available)
+            .rendering,
         })),
       ...profileStatus(),
       downloads: tab.downloads.map(({ fileName, path, sizeBytes, url, completedAt }) => ({
@@ -1735,7 +1760,21 @@ const make = Effect.gen(function* () {
       })),
     };
     if (status.url === null || tab.dialog) return status;
-    return { ...status, title: (await tab.page.title().catch(() => "")) || null };
+    const title = await Effect.runPromise(
+      Effect.tryPromise(() => tab.page.title()).pipe(
+        Effect.timeoutOption("500 millis"),
+        Effect.orElseSucceed(() => Option.none<string>()),
+      ),
+    );
+    if (Option.isSome(title) && !tab.automationFault)
+      return { ...status, title: title.value || null };
+    if (tab.desktop && recover) dropTab(tab, false, "reconnect");
+    return {
+      ...status,
+      available: false,
+      automation: { connected: false, state: "unresponsive" },
+      notice: `The tab is open but its automation connection is unresponsive. ${tab.desktop ? "Desktop automation reconnects on the next call. " : ""}Keep this tab open; do not reload or recreate it.`,
+    };
   };
 
   const resolveNavigationUrl = (input: PreviewAutomationNavigateInput) => {
@@ -2065,16 +2104,66 @@ const make = Effect.gen(function* () {
     }
   };
 
+  const waitForPanel = async (tab: ServerTab) => {
+    if (tab.desktop || !desktopChannel.available || isShown(tab)) return;
+    const shown = await Effect.runPromise(
+      Effect.callback<boolean>((resume) => {
+        const complete = (visible: boolean) => {
+          tab.panelWaiters.delete(complete);
+          resume(Effect.succeed(visible));
+        };
+        tab.panelWaiters.add(complete);
+        if (isShown(tab) || tab.closing) complete(!tab.closing);
+        return Effect.sync(() => {
+          tab.panelWaiters.delete(complete);
+        });
+      }).pipe(Effect.timeoutOption(DESKTOP_ATTACH_TIMEOUT)),
+    );
+    if (Option.isNone(shown) || !shown.value) {
+      throw new ServerBrowserPage.ServerBrowserOperationError(
+        "PreviewAutomationExecutionError",
+        `The browser panel did not show tab ${tab.tabId} within 10 seconds. Its page and login are preserved. Retry preview_open with tabId=${tab.tabId}; do not ask the user to show the panel.`,
+      );
+    }
+  };
+
   const runOperation = async (request: PreviewAutomationRequest): Promise<unknown> => {
     const input = request.input;
     switch (request.operation) {
-      case "status":
+      case "status": {
+        if (request.tabId !== undefined && !tabs.has(tabKey(request.threadId, request.tabId))) {
+          const { sessions } = await Effect.runPromise(
+            manager.list({ threadId: request.threadId }),
+          );
+          const saved = sessions.find((session) => session.tabId === request.tabId);
+          if (
+            saved?.serverRendering === "native" &&
+            !(await Effect.runPromise(desktopChannel.isAttached(saved)))
+          ) {
+            return {
+              available: false,
+              automation: { connected: false, state: "disconnected" },
+              tabId: saved.tabId,
+              visible: shownReport?.has(tabKey(saved.threadId, saved.tabId)) ?? false,
+              url: saved.navStatus._tag === "Idle" ? null : saved.navStatus.url,
+              title: saved.navStatus._tag === "Idle" ? null : saved.navStatus.title,
+              loading: saved.navStatus._tag === "Loading",
+              rendering: "panel",
+              notice:
+                "The desktop tab's debugger is disconnected. Automation reconnects when it is available again. Keep this tab open; do not reload or recreate it.",
+              ...profileStatus(),
+            };
+          }
+          if (saved) await Effect.runPromise(findTab(request.threadId, request.tabId));
+        }
         return statusWithTitle(
           request.tabId === undefined
             ? latestThreadTab(request.threadId, request.agentSessionId)
             : tabs.get(tabKey(request.threadId, request.tabId)),
           request.agentSessionId,
+          request.timeoutMs > 500,
         );
+      }
       case "open": {
         if (!request.agentSessionId)
           throw new BrowserControlInterrupted(
@@ -2133,6 +2222,11 @@ const make = Effect.gen(function* () {
                   ...(url ? { url } : {}),
                   ...(profileId === undefined ? {} : { profileId }),
                   runtime: "server",
+                  ...(background
+                    ? { serverRendering: "stream" as const }
+                    : desktopChannel.available
+                      ? { serverRendering: "native" as const }
+                      : {}),
                   reveal: false,
                   automationOwner: request.agentSessionId,
                 }),
@@ -2177,7 +2271,14 @@ const make = Effect.gen(function* () {
               .waitForLoadState("load", { timeout: navigationTimeout })
               .catch(constVoid);
           }
-          return statusWithTitle(tab, request.agentSessionId);
+          if (reveal !== false) await waitForPanel(tab);
+          const status = await statusWithTitle(tab, request.agentSessionId);
+          if (!status.available)
+            throw new ServerBrowserPage.ServerBrowserOperationError(
+              "PreviewAutomationExecutionError",
+              `Tab ${tab.tabId} attached but its automation is unresponsive. Retry preview_open with tabId=${tab.tabId}; keep the same tab open.`,
+            );
+          return status;
         });
       }
       case "recordingStop": {
@@ -2493,13 +2594,61 @@ const make = Effect.gen(function* () {
     }
   };
 
+  const requestTimeout = (request: PreviewAutomationRequest, unresponsive = true) => {
+    const tab =
+      request.tabId === undefined
+        ? latestThreadTab(request.threadId, request.agentSessionId)
+        : tabs.get(tabKey(request.threadId, request.tabId));
+    const detail = {
+      ...(tab ? { tabId: tab.tabId } : {}),
+      rendering: tab && (tab.desktop || tab.viewers.size > 0) ? "panel" : "background",
+      visible: tab ? isShown(tab) : false,
+      loading: tab?.loading ?? false,
+      automationConnected: !unresponsive,
+    };
+    if (tab && unresponsive) tab.automationFault = true;
+    // Reconnect automation only. The desktop owns the page and its login.
+    if (tab?.desktop && unresponsive) dropTab(tab, false, "reconnect");
+    return new ServerBrowserPage.ServerBrowserOperationError(
+      "PreviewAutomationTimeoutError",
+      unresponsive
+        ? "Browser automation stopped responding. Read preview_status before retrying; keep the existing tab open."
+        : "The browser operation timed out. Read preview_status before retrying; keep the existing tab open.",
+      detail,
+    );
+  };
+
   const handleRequest = (connectionId: string, request: PreviewAutomationRequest) =>
     Effect.tryPromise({
       try: () => runOperation(request).finally(() => markUsed(request)),
       catch: ServerBrowserPage.toOperationError,
     }).pipe(
+      // Let Playwright report an ordinary operation timeout before diagnosing
+      // an unresponsive connection; the broker allows a further 1s for delivery.
+      Effect.timeoutOption(request.timeoutMs + 250),
+      Effect.flatMap((result) =>
+        Option.isSome(result)
+          ? Effect.succeed(result.value)
+          : Effect.fail(
+              requestTimeout(request, request.operation !== "status" || request.timeoutMs > 500),
+            ),
+      ),
+      Effect.mapError((error) =>
+        error.tag === "PreviewAutomationTimeoutError" && error.detail === undefined
+          ? requestTimeout(request, false)
+          : error,
+      ),
       Effect.match({
-        onSuccess: (result) => ({ ok: true as const, result }),
+        onSuccess: (result) => {
+          if (request.operation === "snapshot" || request.operation === "evaluate") {
+            const tab =
+              request.tabId === undefined
+                ? latestThreadTab(request.threadId, request.agentSessionId)
+                : tabs.get(tabKey(request.threadId, request.tabId));
+            if (tab) tab.automationFault = false;
+          }
+          return { ok: true as const, result };
+        },
         onFailure: (error) => ({
           ok: false as const,
           error: {
@@ -2859,6 +3008,7 @@ const make = Effect.gen(function* () {
       yield* Effect.acquireRelease(
         Effect.sync(() => {
           tab.viewers.add(viewer);
+          for (const complete of tab.panelWaiters) complete(true);
           reportLiveTabs();
         }),
         () =>
@@ -3040,20 +3190,15 @@ const make = Effect.gen(function* () {
   // rather than on the next viewer or agent, or the tab's URL and title stop
   // reaching every client in the meantime.
   //
-  // A tab that had to start headless (its thread was not open on the desktop)
-  // moves to the desktop's page as soon as it attaches. The headless page has
-  // the server's own cookies; left running, the agent would drive a page the
-  // user never sees, signed out where the panel is signed in.
+  // Headless pages retain their backing and stream into the panel; attachment
+  // must never replace a page that already holds a user's signed-in state.
   yield* desktopChannel.attached.pipe(
     Stream.runForEach((key) =>
       Effect.gen(function* () {
         const existing = tabs.get(tabKey(key.threadId, key.tabId));
-        if (
-          existing &&
-          !Targeting.shouldMoveToDesktop({ rendersOnDesktop: existing.desktop !== null })
-        )
-          return;
-        if (existing) dropTab(existing, false, "reconnect");
+        // A headless tab is streamed into the panel. Swapping its backing page
+        // would discard its DOM, session storage, opener, and signed-in state.
+        if (existing) return;
         const { sessions } = yield* manager.list({ threadId: ThreadId.make(key.threadId) });
         const snapshot = sessions.find(
           (session) => session.tabId === key.tabId && session.runtime === "server",
@@ -3068,38 +3213,25 @@ const make = Effect.gen(function* () {
     Effect.forkScoped,
   );
   const environmentId = yield* environment.getEnvironmentId;
-  const hostSession = broker
-    .connect(
+  // Each broker generation owns its in-flight requests. Eviction ends those
+  // fibers and re-registers the host without closing any browsing session.
+  yield* broker
+    .serve(
       {
         clientId: SERVER_HOST_CLIENT_ID,
         environmentId,
         supportedOperations: [...PREVIEW_AUTOMATION_SERVER_OPERATIONS],
       },
+      (event) => {
+        if (event.type === "connected") {
+          hostConnectionId = event.connectionId;
+          return Effect.sync(reportLiveTabs);
+        }
+        return handleRequest(event.connectionId, event.request);
+      },
       { preferred: true },
     )
-    .pipe(
-      Effect.flatMap((events) =>
-        events.pipe(
-          Stream.runForEach((event) => {
-            if (event.type === "connected") {
-              hostConnectionId = event.connectionId;
-              return Effect.sync(reportLiveTabs);
-            }
-            return handleRequest(event.connectionId, event.request).pipe(
-              Effect.forkScoped,
-              Effect.asVoid,
-            );
-          }),
-        ),
-      ),
-    );
-  // The broker disconnects timed-out hosts, including slow first installs. Reconnect.
-  yield* hostSession.pipe(
-    Effect.exit,
-    Effect.andThen(Effect.sleep(HOST_RECONNECT_DELAY)),
-    Effect.forever,
-    Effect.forkScoped,
-  );
+    .pipe(Effect.forkScoped);
   yield* Effect.addFinalizer(() =>
     Effect.promise(async () => {
       await contexts.close();

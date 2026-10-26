@@ -32,6 +32,8 @@ export interface CdpRelayTarget {
 export interface CdpRelayConnection {
   /** Feed one message from the server. */
   readonly receive: (raw: string) => void;
+  /** Detaches only this connection's CDP sessions; the page stays open. */
+  readonly close: () => Promise<void>;
   /** Feed one debugger event from the tab. */
   readonly event: (method: string, params: unknown, sessionId: string | undefined) => void;
 }
@@ -69,10 +71,30 @@ export function createCdpRelayConnection(
 ): CdpRelayConnection {
   const send = (message: Record<string, unknown>) => write(JSON.stringify(message));
   let attached = false;
+  let closed = false;
+  const pageSessions = new Map<string, string>();
+  const exposedSessions = new Map<string, string>();
+  const childSessions = new Set<string>();
+  const attachPage = async (id: string) => {
+    const result = (await target.send(
+      "Target.attachToTarget",
+      {
+        targetId: await target.targetId(),
+        flatten: true,
+      },
+      undefined,
+    )) as { sessionId: string };
+    if (closed) {
+      await target.send("Target.detachFromTarget", { sessionId: result.sessionId }, undefined);
+      throw new Error("The preview automation connection was released.");
+    }
+    pageSessions.set(id, result.sessionId);
+    exposedSessions.set(result.sessionId, id);
+    return id;
+  };
   /**
-   * Sessions this relay invented. Extra page sessions (Playwright's
-   * `newCDPSession`) all reach the one real debugger session, so each gets the
-   * page's events; other ids are the page's own child sessions, such as iframes.
+   * Browser sessions are synthetic; each exposed page session maps to its
+   * own real Chromium session. Child iframe and worker ids pass through.
    */
   const sessions = new Map<string, "browser" | "page">([[PAGE_SESSION_ID, "page"]]);
   let sessionSequence = 0;
@@ -132,18 +154,25 @@ export function createCdpRelayConnection(
         const targetId = command.params?.["targetId"];
         if (targetId !== (await target.targetId()))
           throw new Error("Only this preview tab's page can be attached.");
-        return { sessionId: newSession("page") };
+        return { sessionId: await attachPage(newSession("page")) };
       }
       case "Target.detachFromTarget": {
         const sessionId = command.params?.["sessionId"];
-        if (typeof sessionId === "string" && sessionId !== PAGE_SESSION_ID)
+        if (typeof sessionId === "string" && sessionId !== PAGE_SESSION_ID) {
+          const realSession = pageSessions.get(sessionId);
+          pageSessions.delete(sessionId);
+          if (realSession) exposedSessions.delete(realSession);
           sessions.delete(sessionId);
+          if (realSession)
+            await target.send("Target.detachFromTarget", { sessionId: realSession }, undefined);
+        }
         return {};
       }
       case "Target.setAutoAttach": {
         if (attached) return {};
         attached = true;
         // The page is announced once, right after this reply, as Chromium does.
+        await attachPage(PAGE_SESSION_ID);
         const info = await targetInfo();
         return {
           [ANNOUNCE]: {
@@ -158,19 +187,24 @@ export function createCdpRelayConnection(
   };
 
   const pageCommand = (command: CdpCommand): Promise<unknown> => {
-    const child = sessions.get(command.sessionId!) === "page" ? undefined : command.sessionId;
-    // The page itself is already running, but its child frames are not:
-    // Playwright auto-attaches with waitForDebuggerOnStart, so Chromium pauses
-    // every new cross-site iframe and worker until this reaches it. Swallowing
-    // it left sign-in checks and captchas, which run in such frames, frozen.
-    if (command.method === "Runtime.runIfWaitingForDebugger" && child === undefined) {
-      return Promise.resolve({});
-    }
+    // Each Playwright page session owns its Runtime/Page domains. Sharing the
+    // manager's debugger session makes Runtime.enable idempotent on reconnect:
+    // Chromium then never replays execution contexts and evaluate waits forever.
+    const ownPage = pageSessions.has(command.sessionId!);
+    const focusedInput =
+      ownPage &&
+      ["Input.insertText", "Input.dispatchKeyEvent", "Input.imeSetComposition"].includes(
+        command.method,
+      );
+    const child = focusedInput
+      ? undefined
+      : (pageSessions.get(command.sessionId!) ?? command.sessionId);
     return target.send(command.method, command.params ?? {}, child);
   };
 
   return {
     receive: (raw) => {
+      if (closed) return;
       let command: unknown;
       try {
         command = JSON.parse(raw);
@@ -205,20 +239,38 @@ export function createCdpRelayConnection(
           }),
       );
     },
+    close: async () => {
+      closed = true;
+      await Promise.allSettled(
+        [...pageSessions.values()].map((sessionId) =>
+          target.send("Target.detachFromTarget", { sessionId }, undefined),
+        ),
+      );
+      pageSessions.clear();
+      exposedSessions.clear();
+      childSessions.clear();
+    },
     event: (method, params, sessionId) => {
-      if (!attached) return;
+      if (!attached || closed) return;
       // Download events are the browser's; Playwright listens on its root session.
       if (method.startsWith("Browser.download")) {
         send({ method, params });
         return;
       }
-      // Electron reports the page's own events with an empty session id.
-      if (sessionId) {
-        send({ method, params, sessionId });
-        return;
+      // Root events belong to the desktop manager. Page sessions get only
+      // their own events; iframe/worker sessions keep Chromium's session ids.
+      if (!sessionId) return;
+      const exposed = exposedSessions.get(sessionId);
+      if (exposed === undefined && !childSessions.has(sessionId)) return;
+      const child =
+        typeof params === "object" && params !== null && "sessionId" in params
+          ? params.sessionId
+          : undefined;
+      if (typeof child === "string") {
+        if (method === "Target.attachedToTarget") childSessions.add(child);
+        if (method === "Target.detachedFromTarget") childSessions.delete(child);
       }
-      for (const [id, kind] of sessions)
-        if (kind === "page") send({ method, params, sessionId: id });
+      send({ method, params, sessionId: exposed ?? sessionId });
     },
   };
 }

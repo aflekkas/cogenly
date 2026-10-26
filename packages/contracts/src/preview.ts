@@ -307,6 +307,8 @@ export const PreviewSessionSnapshot = Schema.Struct({
    */
   profileId: Schema.optional(BrowserProfileId),
   runtime: Schema.optional(PreviewRuntime),
+  /** Keep a headless page and its login when the desktop panel shows it. */
+  serverRendering: Schema.optional(Schema.Literals(["stream", "native"])),
   /** Authenticated provider session owning an isolated server tab. */
   automationOwner: Schema.optional(Schema.String),
   /** An agent opened this tab and asked to show it, so viewers float it. */

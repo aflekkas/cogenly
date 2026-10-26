@@ -114,9 +114,8 @@ export const PreviewAutomationProfile = Schema.Struct({
 export type PreviewAutomationProfile = typeof PreviewAutomationProfile.Type;
 
 /**
- * Server hosts: `panel` when the desktop app's browser panel renders the tab
- * (the user's own profile and logins), `background` when the server's own
- * browser does.
+ * Server hosts: `panel` for a desktop-owned page or a streamed page with a
+ * viewer; `background` for a headless page without viewers.
  */
 export const PreviewAutomationTabRendering = Schema.Literals(["panel", "background"]);
 export type PreviewAutomationTabRendering = typeof PreviewAutomationTabRendering.Type;
@@ -138,6 +137,13 @@ export type PreviewAutomationTabSummary = typeof PreviewAutomationTabSummary.Typ
 
 export const PreviewAutomationStatus = Schema.Struct({
   available: Schema.Boolean,
+  /** Health of the automation connection, independent of whether the tab is visible. */
+  automation: Schema.optional(
+    Schema.Struct({
+      connected: Schema.Boolean,
+      state: Schema.Literals(["ready", "unresponsive", "disconnected"]),
+    }),
+  ),
   /** Advisory: whether the user can see this tab. Never a reason to stop or to ask the user. */
   visible: Schema.Boolean,
   tabId: Schema.NullOr(PreviewTabId),
@@ -1142,16 +1148,26 @@ export class PreviewAutomationTabNotFoundError extends Schema.TaggedError<Previe
   }
 }
 
+const PreviewAutomationTimeoutTabState = Schema.Struct({
+  tabId: Schema.optional(PreviewTabId),
+  rendering: PreviewAutomationTabRendering,
+  visible: Schema.Boolean,
+  loading: Schema.Boolean,
+  automationConnected: Schema.Boolean,
+});
+
 export class PreviewAutomationTimeoutError extends Schema.TaggedError<PreviewAutomationTimeoutError>()(
   "PreviewAutomationTimeoutError",
   {
     ...PreviewAutomationRequestErrorFields,
     ...PreviewAutomationOptionalRemoteDiagnosticFields,
+    tabState: Schema.optional(PreviewAutomationTimeoutTabState),
   },
 ) {
   override get message(): string {
     const summary = `Preview automation ${this.operation} timed out after ${this.timeoutMs}ms.`;
-    return summary;
+    const state = this.tabState;
+    return `${summary} Tab ${state?.tabId ?? this.tabId ?? "unknown"}; client ${this.clientId}; ${state ? `rendering=${state.rendering}, visible=${state.visible}, loading=${state.loading}, automationConnected=${state.automationConnected}.` : "automation connection did not answer."} Read preview_status before retrying. Keep the existing tab open; do not reload or recreate it.`;
   }
 }
 
