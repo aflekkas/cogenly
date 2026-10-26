@@ -979,7 +979,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "archive",
     title: "Archived threads",
     to: "/settings/archived",
-    searchTerms: ["restore reopen deleted history projects"],
+    searchTerms: ["archive unarchive restore reopen delete deleted history projects"],
   },
   {
     id: "project-folders",

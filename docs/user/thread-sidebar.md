@@ -222,6 +222,9 @@ viewing. Discarding an unsent draft from the sidebar works the same way: Undo br
 back its text and attachments. `mod+z` triggers the most recent Undo when no text field is focused; see
 [Keybindings](./keybindings.md#commands-with-special-behavior).
 
+Archived threads stay in **Settings → Archive**. Search them, then choose **Unarchive** to
+bring one back to the sidebar or the trash button to delete it for good.
+
 On web and desktop, you can also drag files from your computer onto any thread row:
 the thread opens and the files are attached in its composer, ready for
 your next message. The same per-message file limits apply as when attaching
