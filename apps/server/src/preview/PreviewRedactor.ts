@@ -45,7 +45,9 @@ export const redactPreview = <A>(value: A, passwords: ReadonlyArray<string> = []
     return Object.fromEntries(
       Object.entries(record).map(([key, entry]) => [
         redactText(key, passwords),
-        /^(?:password|passwd|client_secret)$/i.test(key) ||
+        /secret|token|api[-_]?key|authorization|credential|passwd|password|client_secret/i.test(
+          key,
+        ) ||
         (key === "value" && (record.type === "password" || record.inputType === "password"))
           ? SECRET_REDACTED
           : // Images are binary artifacts, not DOM strings.

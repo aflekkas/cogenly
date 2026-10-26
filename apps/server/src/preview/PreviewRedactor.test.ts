@@ -27,6 +27,10 @@ describe("preview credential redaction", () => {
     expect(redactPreview({ type: "password", value: "tiny" }).value).toBe(SECRET_REDACTED);
     expect(redactPreview({ password: "tiny" }).password).toBe(SECRET_REDACTED);
   });
+  it("masks short values under secret-looking keys that entropy checks would keep", () => {
+    expect(redactPreview({ api_key: "short" }).api_key).toBe(SECRET_REDACTED);
+    expect(redactPreview({ access_token: "x" }).access_token).toBe(SECRET_REDACTED);
+  });
   it("keeps normal text, refs and image payloads useful", () => {
     const input = {
       ref: "t3-abc12345-12-e3",
