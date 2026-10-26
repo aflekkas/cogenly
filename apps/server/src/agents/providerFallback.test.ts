@@ -59,6 +59,41 @@ describe("classifyProviderFailure", () => {
 });
 
 describe("decideFallback / advanceFallback", () => {
+  it("keeps retry advancement and stored selection aligned with an incomplete catalog", () => {
+    for (const catalog of [[], providers.slice(1), providers.slice(0, 1)]) {
+      const advance = advanceFallback({
+        chain,
+        providers: catalog,
+        failedIndex: 0,
+        reason: "usage_limit",
+        resetAt: null,
+        nowMs: NOW,
+      });
+      expect(advance?.index).toBe(1);
+      const selected = decideFallback(
+        agent({
+          fallbackIndex: advance!.index,
+          fallbackReason: advance!.reason,
+          fallbackUntil: advance!.until,
+        }),
+        NOW,
+        catalog,
+      );
+      expect(selected).toMatchObject({ index: 1, selection: second, restored: false });
+      expect(
+        advanceFallback({
+          chain,
+          providers: catalog,
+          failedIndex: selected.index,
+          reason: "auth",
+          resetAt: null,
+          nowMs: NOW,
+          existingUntil: advance!.until,
+        }),
+      ).toMatchObject({ index: 2, until: advance!.until });
+    }
+  });
+
   it("skips a stored same-provider account without changing its config", () => {
     const school = sel("school", "opus");
     const stored = agent({ fallbackChain: [school, third], fallbackIndex: 1 });
@@ -105,7 +140,7 @@ describe("decideFallback / advanceFallback", () => {
         resetAt: null,
         nowMs: NOW,
       }),
-    ).toBeNull();
+    ).toMatchObject({ index: 1 });
   });
   it("uses the primary entry with no stored fallback, and without a chain", () => {
     expect(decideFallback(agent(), NOW, providers)).toMatchObject({

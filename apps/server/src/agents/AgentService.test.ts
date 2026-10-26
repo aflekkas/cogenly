@@ -112,10 +112,6 @@ const makeHarness = Effect.sync(() => {
           driver: ProviderDriverKind.make("codex"),
         },
         {
-          instanceId: ProviderInstanceId.make("claude"),
-          driver: ProviderDriverKind.make("claudeAgent"),
-        },
-        {
           instanceId: ProviderInstanceId.make("claude-backup"),
           driver: ProviderDriverKind.make("claudeAgent"),
         },
@@ -2500,7 +2496,7 @@ it.effect("direct texts and governed Work use the saved fallback selection", () 
 );
 
 it.effect.each(["conversation", "work"] as const)(
-  "retries a failed %s once on the next fallback",
+  "retries a failed %s past a same-provider account with an unknown fallback driver",
   (kind) =>
     Effect.gen(function* () {
       const h = yield* makeHarness;
@@ -2509,7 +2505,13 @@ it.effect.each(["conversation", "work"] as const)(
         const agents = yield* Agents.AgentService;
         const sql = yield* SqlClient.SqlClient;
         const fallback = { instanceId: ProviderInstanceId.make("claude"), model: "opus" };
-        yield* store.save({ ...h.fixture, fallbackChain: [fallback] });
+        yield* store.save({
+          ...h.fixture,
+          fallbackChain: [
+            { instanceId: ProviderInstanceId.make("codex-school"), model: "gpt-5" },
+            fallback,
+          ],
+        });
         const threadId =
           kind === "conversation" ? h.fixture.conversationThreadId : ThreadId.make("governed:work");
         if (kind === "work")
@@ -2582,6 +2584,7 @@ it.effect.each(["conversation", "work"] as const)(
         h.projections.set(threadId, projection);
         yield* agents.reconcile();
         expect(h.calls.at(-1)?.modelSelection).toEqual(fallback);
+        expect((yield* store.get(h.fixture.id)).fallbackIndex).toBe(2);
         expect(h.calls.at(-1)?.text).toBe("Check CI");
         const retry = h.calls.at(-1)!;
         h.projections.set(threadId, {
