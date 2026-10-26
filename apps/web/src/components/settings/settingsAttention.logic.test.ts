@@ -1,4 +1,4 @@
-import { EnvironmentId, ProviderInstanceId, ScheduledTaskId } from "@cogenly/contracts";
+import { EnvironmentId, ProviderInstanceId, ScheduledTaskId, ThreadId } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -87,6 +87,17 @@ describe("settingsAttentionByPage", () => {
   it("shows nothing once the alerts clear", () => {
     expect(settingsAttentionByPage([]).size).toBe(0);
     expect(settingsAttentionByPage([alert({ status: "ok" })]).size).toBe(0);
+  });
+
+  it("shows a silent turn as an amber Machines dot, and an over-age run as red", () => {
+    const thread = { _tag: "thread" as const, threadId: ThreadId.make("thread-1") };
+    const silent = alert({ checkId: "stuck-runs", status: "warn", target: thread });
+    expect(Object.fromEntries(settingsAttentionByPage([silent]))).toEqual({
+      "/settings/machines": "warning",
+    });
+    expect(
+      settingsAttentionByPage([silent, { ...silent, status: "fail" }]).get("/settings/machines"),
+    ).toBe("destructive");
   });
 
   it("agrees with the rail's dot", () => {
