@@ -3,6 +3,8 @@
 import {
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   type PreviewAutomationClickInput,
+  type PreviewAutomationOutputOptions,
+  type PreviewAutomationObservation,
   type PreviewAutomationConsoleEntry,
   type PreviewAutomationDragInput,
   type PreviewAutomationEvaluateInput,
@@ -20,6 +22,7 @@ import {
 import { constVoid } from "effect/Function";
 import type { CDPSession, Locator, Page } from "playwright-core";
 import * as NodeCrypto from "node:crypto";
+import { compactElements } from "./BrowserOutput.ts";
 import { BrowserControlInterrupted } from "./SessionControl.ts";
 
 const MAX_EVALUATION_BYTES = 64_000;
@@ -206,21 +209,38 @@ export const snapshot = async (input: {
   readonly consoleEntries: ReadonlyArray<PreviewAutomationConsoleEntry>;
   readonly networkEntries: ReadonlyArray<PreviewAutomationNetworkEntry>;
   readonly actionTimeline: PreviewAutomationSnapshot["actionTimeline"];
+  readonly scope?: string | undefined;
+  readonly includeScreenshot?: boolean;
+  readonly save?: boolean;
 }): Promise<PreviewAutomationSnapshot> => {
-  const viewport = input.page.viewportSize() ?? { width: 1280, height: 800 };
-  const scale = Math.min(1, MAX_SCREENSHOT_WIDTH / (viewport.width * input.renderScale));
   const state = refsFor(input.page);
-  invalidateRefs(input.page);
   const generation = state.generation;
+  const root = input.scope ? targetLocator(input.page, { locator: input.scope }) : null;
   const [page, tree, data] = await Promise.all([
-    input.page.evaluate(SNAPSHOT_SCRIPT) as Promise<
+    (root
+      ? root.evaluate((element) => ({
+          url: element.ownerDocument.URL,
+          title: element.ownerDocument.title,
+          loading: element.ownerDocument.readyState !== "complete",
+          visibleText: (
+            (element as unknown as { innerText?: string }).innerText ??
+            element.textContent ??
+            ""
+          ).slice(0, 20_000),
+          interactiveElements: [],
+        }))
+      : input.page.evaluate(SNAPSHOT_SCRIPT)) as Promise<
       Pick<
         PreviewAutomationSnapshot,
         "url" | "title" | "loading" | "visibleText" | "interactiveElements"
       >
     >,
-    input.page.ariaSnapshot({ mode: "ai", boxes: true, timeout: DEFAULT_TIMEOUT_MS }),
-    captureViewport(input.page, input.cdp, { format: "png", scale }),
+    (root ?? input.page).ariaSnapshot({
+      mode: "ai",
+      boxes: true,
+      timeout: DEFAULT_TIMEOUT_MS,
+    }),
+    input.includeScreenshot === false ? {} : screenshot(input),
   ]);
   if (state.generation !== generation) {
     throw new ServerBrowserOperationError(
@@ -241,12 +261,106 @@ export const snapshot = async (input: {
     consoleEntries: [...input.consoleEntries],
     networkEntries: [...input.networkEntries],
     actionTimeline: [...input.actionTimeline],
-    screenshot: {
-      mimeType: "image/png",
-      data,
-      width: Math.round(viewport.width * input.renderScale * scale),
-      height: Math.round(viewport.height * input.renderScale * scale),
+    ...data,
+  };
+};
+
+/** Images are optional evidence: capture failures never discard a successful structured read. */
+export const screenshot = async (input: {
+  page: Page;
+  cdp: CDPSession;
+  renderScale: number;
+  save?: boolean | undefined;
+}): Promise<Pick<PreviewAutomationSnapshot, "screenshot" | "screenshotError">> => {
+  const viewport = input.page.viewportSize() ?? { width: 1280, height: 800 };
+  const scale = Math.min(1, MAX_SCREENSHOT_WIDTH / (viewport.width * input.renderScale));
+  try {
+    const data = await captureViewport(input.page, input.cdp, {
+      format: input.save ? "png" : "jpeg",
+      ...(input.save ? {} : { quality: 70 }),
+      scale,
+    });
+    return {
+      screenshot: {
+        mimeType: input.save ? "image/png" : "image/jpeg",
+        data,
+        width: Math.round(viewport.width * input.renderScale * scale),
+        height: Math.round(viewport.height * input.renderScale * scale),
+      },
+    };
+  } catch {
+    return {
+      screenshotError: "Screenshot capture failed; structured page data is still available.",
+    };
+  }
+};
+
+/** Read bounded data through the same evaluation deadline and vault safety gate as evaluate. */
+export const extract = (
+  cdp: CDPSession,
+  input: import("@cogenly/contracts").PreviewAutomationExtractInput,
+  timeoutMs: number,
+) =>
+  evaluate(
+    cdp,
+    {
+      expression: `(() => {
+    const matches = document.querySelectorAll(${JSON.stringify(input.selector)});
+    return { items: Array.from(matches).slice(0, ${input.limit ?? 50}).map(element => ({
+      text: (element.innerText ?? element.textContent ?? "").trim().slice(0, 1000),
+      attributes: Object.fromEntries(${JSON.stringify(input.attributes ?? [])}.map(name => [name, element.getAttribute(name)?.slice(0, 1000) ?? null]))
+    })), total: matches.length, omitted: Math.max(0, matches.length - ${input.limit ?? 50}) };
+  })()`,
     },
+    timeoutMs,
+  );
+
+/** A bounded semantic observation with no screenshot, history, or duplicated body text. */
+export const observe = async (
+  page: Page,
+  options: PreviewAutomationOutputOptions = {},
+): Promise<PreviewAutomationObservation> => {
+  const state = refsFor(page);
+  const generation = state.generation;
+  const root = options.scope ? targetLocator(page, { locator: options.scope })! : page;
+  const [tree, title, pageState] = await Promise.all([
+    root.ariaSnapshot({
+      mode: "ai",
+      boxes: options.viewportOnly !== false,
+      timeout: DEFAULT_TIMEOUT_MS,
+    }),
+    page.title(),
+    page.evaluate(
+      `({ loading: document.readyState !== "complete", visual: Array.from(document.querySelectorAll("canvas")).some(el => { const r = el.getBoundingClientRect(); return r.width > 100 && r.height > 100 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth; }) })`,
+    ) as Promise<{ loading: boolean; visual: boolean }>,
+  ]);
+  if (state.generation !== generation)
+    throw new ServerBrowserOperationError(
+      "PreviewAutomationExecutionError",
+      "The page changed while reading it. Take another snapshot.",
+    );
+  const referenced = tree.replace(/\[ref=((?:f\d+)?e\d+)\]/g, (_match, nativeRef: string) => {
+    const ref = `t3-${generation}-${nativeRef}`;
+    state.refs.set(ref, nativeRef);
+    return `[ref=${ref}]`;
+  });
+  const compact = compactElements(
+    referenced,
+    options.viewportOnly === false
+      ? undefined
+      : (page.viewportSize() ?? { width: 1280, height: 800 }),
+  );
+  return {
+    url: page.url().slice(0, 2048),
+    title: title.slice(0, 2048),
+    loading: pageState.loading,
+    ...compact,
+    ...(compact.elements.length === 0 || pageState.visual
+      ? {
+          guidance:
+            "Structured view may omit visual content. Request preview_snapshot includeImage=true for visual or canvas checks.",
+        }
+      : {}),
   };
 };
 

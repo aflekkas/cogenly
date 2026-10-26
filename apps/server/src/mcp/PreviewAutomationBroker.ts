@@ -651,7 +651,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
         const threadPrefix = `${input.scope.environmentId}\u0000${input.scope.thread.threadId}\u0000`;
         const protectedKey = `${threadPrefix}${requestContext.tabId}`;
         if (
-          input.operation === "evaluate" &&
+          (input.operation === "evaluate" || input.operation === "extract") &&
           (requestContext.tabId === undefined
             ? [...current.vaultProtectedTabs].some((key) => key.startsWith(threadPrefix))
             : current.vaultProtectedTabs.has(protectedKey))

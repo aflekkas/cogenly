@@ -88,6 +88,7 @@ import * as PreviewAutomationBroker from "../mcp/PreviewAutomationBroker.ts";
 import * as DesktopBrowserChannel from "./DesktopBrowserChannel.ts";
 import * as PreviewManager from "./Manager.ts";
 import * as ServerBrowserPage from "./ServerBrowserPage.ts";
+import { actionOutput, observationChanges } from "./BrowserOutput.ts";
 import * as ServerBrowserPick from "./ServerBrowserPick.ts";
 import * as PreviewBrowser from "./PreviewBrowser.ts";
 import * as PreviewBrowserHost from "./PreviewBrowserHost.ts";
@@ -2266,7 +2267,7 @@ const make = Effect.gen(function* () {
             "A browser dialog is pending. Read preview_status.",
             "dialogPending",
           );
-        return executeTabOperation(tab, request);
+        return executeWithOutput(tab, request);
       });
     }
     return agentAction(tab, agentSessionId, async () => {
@@ -2277,10 +2278,87 @@ const make = Effect.gen(function* () {
         );
       const generation = tab.control.generation;
       try {
-        return await executeTabOperation(tab, request);
+        return await executeWithOutput(tab, request);
       } finally {
         if (generation !== tab.control.generation) ServerBrowserPage.invalidateRefs(tab.page);
       }
+    });
+  };
+
+  const outputActions = new Set([
+    "navigate",
+    "click",
+    "type",
+    "hover",
+    "select",
+    "drag",
+    "upload",
+    "press",
+    "scroll",
+    "waitFor",
+  ]);
+  const snapshotBaselines = new WeakMap<
+    ServerTab,
+    Map<string, import("@cogenly/contracts").PreviewAutomationObservation>
+  >();
+  const baselineKey = (
+    request: PreviewAutomationRequest,
+    options: import("@cogenly/contracts").PreviewAutomationOutputOptions,
+  ) => `${request.agentSessionId}:${options.scope ?? ""}:${options.viewportOnly !== false}`;
+  const rememberOutput = (
+    tab: ServerTab,
+    key: string,
+    view: import("@cogenly/contracts").PreviewAutomationObservation,
+  ) => {
+    let baselines = snapshotBaselines.get(tab);
+    if (!baselines) {
+      baselines = new Map();
+      snapshotBaselines.set(tab, baselines);
+    }
+    baselines.delete(key);
+    baselines.set(key, view);
+    // Bound per-tab memory even when agents keep requesting different subtrees.
+    if (baselines.size > 16) baselines.delete(baselines.keys().next().value!);
+  };
+  const compactOutput = async (
+    tab: ServerTab,
+    options: import("@cogenly/contracts").PreviewAutomationOutputOptions,
+  ) => {
+    const view = await ServerBrowserPage.observe(tab.page, options);
+    const errors = [
+      ...tab.consoleEntries
+        .filter((entry) => entry.level === "error")
+        .slice(-5)
+        .map((entry) => entry.text.slice(0, 500)),
+      ...tab.networkEntries
+        .filter((entry) => entry.failed)
+        .slice(-5)
+        .map((entry) => (entry.errorText ?? "Network request failed").slice(0, 500)),
+    ];
+    return { ...view, ...(errors.length ? { errors } : {}) };
+  };
+  const executeWithOutput = async (tab: ServerTab, request: PreviewAutomationRequest) => {
+    if (!outputActions.has(request.operation)) return executeTabOperation(tab, request);
+    const options = request.input as import("@cogenly/contracts").PreviewAutomationOutputOptions;
+    const key = baselineKey(request, options);
+    return actionOutput({
+      mode: options.output ?? "changes",
+      before: snapshotBaselines.get(tab)?.get(key),
+      action: () => executeTabOperation(tab, request),
+      read: async () => {
+        if (options.output === "full")
+          return ServerBrowserPage.snapshot({
+            ...tab,
+            renderScale: RENDER_SCALE,
+            includeScreenshot: false,
+            scope: options.scope,
+          });
+        const view = await compactOutput(tab, options);
+        rememberOutput(tab, key, view);
+        return view;
+      },
+      dialog: () =>
+        tab.dialog ? { type: tab.dialog.type(), message: tab.dialog.message() } : undefined,
     });
   };
 
@@ -2322,9 +2400,32 @@ const make = Effect.gen(function* () {
         return { tabId: tab.tabId, colorScheme };
       }
       case "snapshot": {
-        return withScreencastsPaused(tab, () =>
-          ServerBrowserPage.snapshot({ ...tab, renderScale: RENDER_SCALE }),
+        const options = input as import("@cogenly/contracts").PreviewAutomationSnapshotInput;
+        const includeScreenshot = options.includeImage === true || options.save === true;
+        if (options.output === "none" && !includeScreenshot) return {};
+        const full = options.output === "full";
+        let structured: import("@cogenly/contracts").PreviewAutomationObservation =
+          options.output === "none"
+            ? { url: tab.page.url() }
+            : full
+              ? await ServerBrowserPage.snapshot({
+                  ...tab,
+                  renderScale: RENDER_SCALE,
+                  includeScreenshot: false,
+                  scope: options.scope,
+                })
+              : await compactOutput(tab, options);
+        if (options.output !== "none" && !full) {
+          const key = baselineKey(request, options);
+          const before = snapshotBaselines.get(tab)?.get(key);
+          rememberOutput(tab, key, structured);
+          if (options.output === "changes") structured = observationChanges(before, structured);
+        }
+        if (!includeScreenshot) return structured;
+        const captured = await withScreencastsPaused(tab, () =>
+          ServerBrowserPage.screenshot({ ...tab, renderScale: RENDER_SCALE, save: options.save }),
         );
+        return { ...structured, ...captured };
       }
       case "click": {
         const clickInput = input as PreviewAutomationClickInput;
@@ -2369,6 +2470,14 @@ const make = Effect.gen(function* () {
             pointerFor(tab),
           ),
         );
+      case "extract":
+        return {
+          value: await ServerBrowserPage.extract(
+            tab.cdp,
+            input as import("@cogenly/contracts").PreviewAutomationExtractInput,
+            request.timeoutMs,
+          ),
+        };
       case "evaluate":
         return ServerBrowserPage.evaluate(
           tab.cdp,

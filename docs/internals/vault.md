@@ -95,7 +95,7 @@ receipt is removed, so storage failures remain retryable. CLI verification
 uses a replacement environment and private empty configuration directories;
 provider-native credential files are neither imported nor cloned.
 
-## Scrubbing and the preview_evaluate trap
+## Scrubbing and browser extraction
 
 Stored and delivered secret values are scrubbed from tool results; values shorter
 than six characters use whole-token matching.
@@ -106,12 +106,12 @@ against them before serialization. That covers terminal output
 (`terminal_run`/`terminal_read`) and other tool output as a second layer.
 Exact-value scrubbing cannot catch transformed secrets (base64, character
 codes, etc.). Before dispatching a `vault_fill`, `PreviewAutomationBroker`
-therefore disables agent evaluation on that tab for its remaining lifetime,
+therefore disables agent evaluation and selector extraction on that tab for its remaining lifetime,
 across provider sessions and browser-host reconnections. It also seals fills
 whose browser response fails: typing may already have happened. Navigation
 does not lift the restriction, since history can restore filled inputs and
 pages can retain values in script state or storage. Snapshots and focused
-browser actions remain available; evaluation needs a fresh tab. Values are
+browser actions remain available; evaluation and extraction need a fresh tab. Values are
 never logged; lengths and names are the most telemetry may carry. Card values
 are also scrubbed in the shapes a page echoes them: the number digits-only or
 grouped in fours, and the expiry as `MM/YYYY`; the CVC and `MM/YY` expiry are

@@ -1,4 +1,10 @@
-import { EnvironmentId, PreviewTabId, ProviderInstanceId, ThreadId } from "@cogenly/contracts";
+import {
+  PREVIEW_AUTOMATION_SERVER_OPERATIONS,
+  EnvironmentId,
+  PreviewTabId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@cogenly/contracts";
 import { expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeCrypto } from "@effect/platform-node";
@@ -88,6 +94,7 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
         const connected = yield* Deferred.make<void>();
         const events = yield* broker.connect({
           clientId: "test-browser",
+          supportedOperations: PREVIEW_AUTOMATION_SERVER_OPERATIONS,
           environmentId: scope.environmentId,
         });
         const fiber = yield* events.pipe(
@@ -199,6 +206,19 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
           if (blocked._tag === "Failure")
             expect(blocked.failure.message).toContain("disabled on this tab after a vault fill");
         }
+      }
+      for (const target of [{ tabId }, {}]) {
+        const blocked = yield* broker
+          .invoke({
+            scope: threadScope,
+            operation: "extract",
+            input: { selector: "input", attributes: ["value"] },
+            ...target,
+          })
+          .pipe(Effect.result);
+        expect(blocked._tag).toBe("Failure");
+        if (blocked._tag === "Failure")
+          expect(blocked.failure.message).toContain("disabled on this tab after a vault fill");
       }
       // Navigation, a new provider session and host reconnection cannot clear the seal.
       yield* broker.invoke({
