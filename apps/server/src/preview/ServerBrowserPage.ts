@@ -281,11 +281,140 @@ export const click = async (
   return point;
 };
 
-export const type = async (
+/**
+ * Binds a vault fill to the page the vault checked. Agents cannot send this:
+ * only the vault_fill handler builds it, on the server.
+ */
+export interface VaultFillBinding {
+  /** Origin of the page the vault's domain check passed for. */
+  readonly origin: string;
+  /** Normalized hosts the item may be used on, subdomains included. */
+  readonly allowedHosts: ReadonlyArray<string>;
+}
+
+export type TypeInput = PreviewAutomationTypeInput & { readonly vaultFill?: VaultFillBinding };
+
+const originOf = (url: string): string | null => {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+};
+
+type BoundInsert = "filled" | "origin_changed" | "not_editable";
+
+/** The parts of a page element `insertBound` uses; the server has no DOM types. */
+interface PageElement {
+  readonly tagName: string;
+  readonly ownerDocument: {
+    readonly defaultView: { readonly location: { readonly hostname: string } } | null;
+    getSelection(): { selectAllChildren(node: PageElement): void } | null;
+    execCommand(command: string, showUi: boolean, value: string): boolean;
+  };
+  getRootNode(): unknown;
+  contains(node: unknown): boolean;
+  dispatchEvent(event: Event): boolean;
+}
+
+/**
+ * Runs in the receiving element's own document, in one task: the host check
+ * and the insertion cannot be split by a navigation, so the text lands only in
+ * a document whose host the vault item allows. Self-contained, since
+ * Playwright serializes it into the page.
+ */
+const insertBound = (
+  element: PageElement,
+  args: {
+    readonly text: string;
+    readonly clear: boolean;
+    readonly allowedHosts: ReadonlyArray<string>;
+  },
+): BoundInsert => {
+  const document = element.ownerDocument;
+  const host = (document.defaultView?.location.hostname ?? "").toLowerCase().replace(/\.$/, "");
+  if (!args.allowedHosts.some((allowed) => host === allowed || host.endsWith(`.${allowed}`)))
+    return "origin_changed";
+  const control = element as unknown as {
+    readonly type?: string;
+    readonly disabled?: boolean;
+    readonly readOnly?: boolean;
+    readonly isContentEditable?: boolean;
+    value?: string;
+    readonly focus?: () => void;
+    readonly select?: () => void;
+  };
+  const nonText = [
+    "button",
+    "checkbox",
+    "color",
+    "file",
+    "hidden",
+    "image",
+    "radio",
+    "range",
+    "reset",
+    "submit",
+  ];
+  const textControl =
+    element.tagName === "TEXTAREA" ||
+    (element.tagName === "INPUT" && !nonText.includes(control.type ?? "text"));
+  if (!(textControl || control.isContentEditable) || control.disabled || control.readOnly)
+    return "not_editable";
+  control.focus?.();
+  const root = element.getRootNode() as { readonly activeElement?: unknown };
+  const active = root.activeElement;
+  if (active == null || !(active === element || element.contains(active))) return "not_editable";
+  if (args.clear) {
+    if (textControl) control.select?.();
+    else document.getSelection()?.selectAllChildren(element);
+  }
+  // insertText fires the input events typing would; a control that refuses it
+  // takes the value directly, announced the same way.
+  if (document.execCommand("insertText", false, args.text)) return "filled";
+  if (!textControl) return "not_editable";
+  control.value = args.clear ? args.text : `${control.value ?? ""}${args.text}`;
+  element.dispatchEvent(new Event("input", { bubbles: true }));
+  element.dispatchEvent(new Event("change", { bubbles: true }));
+  return "filled";
+};
+
+const vaultOriginChanged = () =>
+  new ServerBrowserOperationError(
+    "PreviewAutomationVaultOriginError",
+    "The page or field changed after the vault check, so nothing was filled. Check the page, then ask again.",
+  );
+
+/** A vault fill: the checked page must still be showing, and the field must be on an allowed host. */
+const typeBound = async (
   page: Page,
-  input: PreviewAutomationTypeInput,
-  pointer: PointerReporter = noPointer,
+  input: TypeInput,
+  binding: VaultFillBinding,
+  pointer: PointerReporter,
 ) => {
+  const timeout = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  if (originOf(page.url()) !== binding.origin) throw vaultOriginChanged();
+  const locator = targetLocator(page, input);
+  if (locator !== null) await pointer(await targetPoint(page, locator, {}, timeout), "move");
+  const target = locator ?? page.locator("*:focus").last();
+  if (locator === null && (await target.count()) === 0) throw notEditable();
+  const result = await target.evaluate(
+    insertBound,
+    { text: input.text, clear: input.clear ?? false, allowedHosts: binding.allowedHosts },
+    { timeout },
+  );
+  if (result === "origin_changed") throw vaultOriginChanged();
+  if (result === "not_editable") throw notEditable();
+};
+
+const notEditable = () =>
+  new ServerBrowserOperationError(
+    "PreviewAutomationTargetNotEditableError",
+    "The target is not an enabled text field, so no text was typed.",
+  );
+
+export const type = async (page: Page, input: TypeInput, pointer: PointerReporter = noPointer) => {
+  if (input.vaultFill !== undefined) return typeBound(page, input, input.vaultFill, pointer);
   const timeout = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const locator = targetLocator(page, input);
   // Typing into the focused field has no target to point at.
@@ -336,12 +465,7 @@ export const type = async (
       undefined,
       { timeout },
     ));
-  if (focused !== true) {
-    throw new ServerBrowserOperationError(
-      "PreviewAutomationTargetNotEditableError",
-      "The target is not an enabled text field, so no text was typed.",
-    );
-  }
+  if (focused !== true) throw notEditable();
   if (input.clear) {
     await page.keyboard.press("ControlOrMeta+A");
     await page.keyboard.press("Delete");

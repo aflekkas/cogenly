@@ -95,7 +95,11 @@ invalidated on writes) and `McpToolAccess` redacts every MCP tool result
 against them before serialization. That covers terminal output
 (`terminal_run`/`terminal_read`) and other tool output as a second layer.
 Exact-value scrubbing cannot catch transformed secrets (base64, character
-codes, etc.). Before dispatching a `vault_fill`, `PreviewAutomationBroker`
+codes, etc.). A `vault_fill` is bound to the page it checked: the server
+browser refuses it if the page's origin changed since, and inserts the text
+from inside the field's own document only when that document's host is one the
+item allows, in a single in-page step a navigation cannot split. Before
+dispatching a `vault_fill`, `PreviewAutomationBroker`
 therefore disables agent evaluation on that tab for its remaining lifetime,
 across provider sessions and browser-host reconnections. It also seals fills
 whose browser response fails: typing may already have happened. Navigation

@@ -15,9 +15,17 @@ import { normalizeHost } from "../../../vault/VaultPolicy.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
+import type { VaultFillBinding } from "../../../preview/ServerBrowserPage.ts";
 import { VaultToolkit } from "./tools.ts";
 
 const isVaultError = Schema.is(VaultError);
+const originOf = (url: string): string | null => {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+};
 const failure = (message: string, code: OrchestratorMcpFailure["code"] = "invalid_request") =>
   new OrchestratorMcpFailure({ code, message });
 const toFailure = (cause: unknown) =>
@@ -81,7 +89,8 @@ export const layer = McpToolAccess.toLayer(VaultToolkit, {
         })
         .pipe(Effect.mapError((cause) => failure(cause.message, "orchestration_error")));
       const domain = status.url ? normalizeHost(status.url) || null : null;
-      if (!domain || !status.tabId)
+      const checkedOrigin = status.url ? originOf(status.url) : null;
+      if (!domain || !checkedOrigin || !status.tabId)
         return yield* failure("vault_fill needs an active preview tab with a page URL.");
       const agent = yield* agents
         .forThread(scope.thread.threadId)
@@ -132,6 +141,12 @@ export const layer = McpToolAccess.toLayer(VaultToolkit, {
             ...(rest.locator ? { locator: rest.locator } : {}),
             ...(rest.selector ? { selector: rest.selector } : {}),
             clear: true,
+            // The browser types only into the page checked above, and only into
+            // a field whose own host the item allows.
+            vaultFill: {
+              origin: checkedOrigin,
+              allowedHosts: result.item.allowedDomains.map(normalizeHost).filter(Boolean),
+            } satisfies VaultFillBinding,
           },
           tabId: status.tabId,
         })

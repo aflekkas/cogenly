@@ -32,7 +32,6 @@ import {
   type PreviewAutomationSelectInput,
   type PreviewAutomationSetColorSchemeInput,
   type PreviewAutomationStatus,
-  type PreviewAutomationTypeInput,
   type PreviewAutomationUploadInput,
   type PreviewAutomationWaitForInput,
   PreviewClearProfileError,
@@ -2213,7 +2212,7 @@ const make = Effect.gen(function* () {
         );
       case "type":
         return recordAction(tab, "type", () =>
-          ServerBrowserPage.type(tab.page, input as PreviewAutomationTypeInput, pointerFor(tab)),
+          ServerBrowserPage.type(tab.page, input as ServerBrowserPage.TypeInput, pointerFor(tab)),
         );
       case "press":
         return recordAction(tab, "press", () =>
