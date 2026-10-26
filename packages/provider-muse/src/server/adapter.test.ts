@@ -373,12 +373,21 @@ describe("MuseAdapterV2", () => {
       for (const nativeId of [undefined, "saved-native-session"]) {
         const fake = yield* makeFakeMuse();
         fake.host.initializeResult.grantedCapabilities.push("sessionMcp");
-        yield* makeHarness(fake, INSTANCE_ID, nativeId, undefined, undefined, runtimePolicy, {
-          createHost: async (options) => {
-            assert.isTrue(options.disableShell);
-            return fake.host;
+        const harness = yield* makeHarness(
+          fake,
+          INSTANCE_ID,
+          nativeId,
+          undefined,
+          undefined,
+          runtimePolicy,
+          {
+            createHost: async (options) => {
+              assert.isFalse(options.disableShell);
+              assert.isFalse(options.readOnly);
+              return fake.host;
+            },
           },
-        });
+        );
         const call = yield* fake.takeCall(nativeId ? "session/resume" : "session/start");
         assert.deepStrictEqual(call.params.config, {
           mcpServers: {
@@ -390,55 +399,52 @@ describe("MuseAdapterV2", () => {
             },
           },
         });
+        yield* harness.runtime.startTurn(
+          yield* turnInput(harness.providerThread, 1, runtimePolicy),
+        );
+        const turn = yield* fake.takeCall("turn/start");
+        const instructions = JSON.stringify(turn.params.input);
+        assert.include(
+          instructions,
+          "Use the cogenly MCP terminal_run tool for every shell command",
+        );
+        assert.include(instructions, "Discover terminal_run with tool_search");
+        assert.notInclude(instructions, "Native shell is disabled");
+        yield* fake.emit("turn/completed", { turnId: turn.commandId, terminal: "completed" });
       }
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );
 
-  it.effect(
-    "keeps the native shell unless terminal tools are explicitly granted to the session",
-    () =>
-      Effect.gen(function* () {
-        const sessions = yield* McpProviderSessions.McpProviderSessions;
-        const base = {
-          environmentId: EnvironmentId.make("test-environment"),
-          threadId: THREAD_ID,
-          providerSessionId: "test-session",
-          providerInstanceId: INSTANCE_ID,
-          endpoint: "http://127.0.0.1:43210/mcp",
-          authorizationHeader: "Bearer test-token",
-          browserToolsAvailable: true,
-        };
-        // A delegated child whose MCP credential never stated terminal
-        // availability (flag absent) must keep its native shell; only an
-        // explicit grant disables it, and an explicit denial keeps it too.
-        const cases: ReadonlyArray<{
-          readonly terminalToolsAvailable?: boolean;
-          readonly expectedDisableShell: boolean;
-        }> = [
-          { terminalToolsAvailable: true, expectedDisableShell: true },
-          { terminalToolsAvailable: false, expectedDisableShell: false },
-          { expectedDisableShell: false },
-        ];
-        for (const testCase of cases) {
-          yield* sessions.set(
-            testCase.terminalToolsAvailable === undefined
-              ? base
-              : { ...base, terminalToolsAvailable: testCase.terminalToolsAvailable },
-          );
-          const fake = yield* makeFakeMuse();
-          fake.host.initializeResult.grantedCapabilities.push("sessionMcp");
-          let disableShell: boolean | undefined;
-          yield* makeHarness(fake, INSTANCE_ID, undefined, undefined, undefined, runtimePolicy, {
-            createHost: async (options) => {
-              disableShell = options.disableShell;
-              return fake.host;
-            },
-          });
-          assert.strictEqual(disableShell, testCase.expectedDisableShell);
-        }
-        // No MCP session at all: no terminal toolkit, so the shell stays on.
-        yield* sessions.clear(THREAD_ID);
+  it.effect("keeps Work shell capability when MCP terminals are granted, denied or absent", () =>
+    Effect.gen(function* () {
+      const sessions = yield* McpProviderSessions.McpProviderSessions;
+      const base = {
+        environmentId: EnvironmentId.make("test-environment"),
+        threadId: THREAD_ID,
+        providerSessionId: "test-session",
+        providerInstanceId: INSTANCE_ID,
+        endpoint: "http://127.0.0.1:43210/mcp",
+        authorizationHeader: "Bearer test-token",
+        browserToolsAvailable: true,
+      };
+      // --disable-shell adds Muse's global read-only planning reminder.
+      // Work must retain shell capability even when commands are routed via MCP.
+      const cases: ReadonlyArray<{
+        readonly terminalToolsAvailable?: boolean;
+        readonly expectedDisableShell: boolean;
+      }> = [
+        { terminalToolsAvailable: true, expectedDisableShell: false },
+        { terminalToolsAvailable: false, expectedDisableShell: false },
+        { expectedDisableShell: false },
+      ];
+      for (const testCase of cases) {
+        yield* sessions.set(
+          testCase.terminalToolsAvailable === undefined
+            ? base
+            : { ...base, terminalToolsAvailable: testCase.terminalToolsAvailable },
+        );
         const fake = yield* makeFakeMuse();
+        fake.host.initializeResult.grantedCapabilities.push("sessionMcp");
         let disableShell: boolean | undefined;
         yield* makeHarness(fake, INSTANCE_ID, undefined, undefined, undefined, runtimePolicy, {
           createHost: async (options) => {
@@ -446,8 +452,20 @@ describe("MuseAdapterV2", () => {
             return fake.host;
           },
         });
-        assert.strictEqual(disableShell, false);
-      }).pipe(Effect.scoped, Effect.provide(testLayer)),
+        assert.strictEqual(disableShell, testCase.expectedDisableShell);
+      }
+      // No MCP session at all: no terminal toolkit, so the shell stays on.
+      yield* sessions.clear(THREAD_ID);
+      const fake = yield* makeFakeMuse();
+      let disableShell: boolean | undefined;
+      yield* makeHarness(fake, INSTANCE_ID, undefined, undefined, undefined, runtimePolicy, {
+        createHost: async (options) => {
+          disableShell = options.disableShell;
+          return fake.host;
+        },
+      });
+      assert.strictEqual(disableShell, false);
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );
 
   it.effect("publishes account usage notifications without requiring a sessionId", () =>

@@ -16,6 +16,7 @@ import {
   type OrchestrationV2Run,
   type OrchestrationV2Subagent,
   type OrchestrationV2TurnItem,
+  type OrchestrationV2ThreadProjection,
   type RunId,
   type ThreadId,
 } from "@cogenly/contracts";
@@ -368,6 +369,48 @@ function noticeFailures(
 }
 
 /**
+ * Started notice runs and acknowledged task results are durable delivery receipts.
+ * Queued batches can outlive a restart or a blocking task_status response; never
+ * copy their already observed failures into a new batch. Only an explicit
+ * followUpOf link identifies a successful retry, not a similar title or prompt.
+ */
+export function pendingDelegatedTaskFailures(
+  parent: Pick<OrchestrationV2ThreadProjection, "runs" | "messages" | "subagents">,
+  failures: ReadonlyArray<OrchestrationV2DelegatedTaskFailure>,
+  messageId?: MessageId,
+): ReadonlyArray<OrchestrationV2DelegatedTaskFailure> {
+  const startedRuns = new Set(
+    parent.runs.filter((run) => run.startedAt !== null).map((run) => run.id),
+  );
+  const delivered = new Set(
+    parent.messages
+      .filter(
+        (message) =>
+          message.id !== messageId && message.runId !== null && startedRuns.has(message.runId),
+      )
+      .flatMap((message) => noticeFailures(message).map(failureKey)),
+  );
+  const superseded = new Set<NodeId>();
+  for (const completed of parent.subagents.filter((task) => task.status === "completed")) {
+    let previous = completed.followUpOf;
+    while (previous !== undefined && !superseded.has(previous)) {
+      superseded.add(previous);
+      previous = parent.subagents.find((task) => task.id === previous)?.followUpOf;
+    }
+  }
+  return failures.filter((failure) => {
+    const task = parent.subagents.find((candidate) => candidate.id === failure.taskId);
+    return (
+      !delivered.has(failureKey(failure)) &&
+      !superseded.has(failure.taskId) &&
+      task?.status !== "completed" &&
+      task?.completionDelivery?.state !== "acknowledged" &&
+      task?.completionDelivery?.state !== "delivered"
+    );
+  });
+}
+
+/**
  * Queues a notice on the parent that a delegated child run failed or was cut
  * off. It waits behind the parent's current turn and arrives as that turn's
  * next input. Ids derive from the task and child run, so a replayed effect or
@@ -426,13 +469,16 @@ export const deliverDelegatedTaskFailureNotice = Effect.fn("DelegatedTaskFailure
       .filter((candidate) => candidate.status === "queued")
       .flatMap((queued) => {
         const message = parent.messages.find((candidate) => candidate.id === queued.userMessageId);
-        const failures = message === undefined ? [] : noticeFailures(message);
+        const failures =
+          message === undefined
+            ? []
+            : pendingDelegatedTaskFailures(parent, noticeFailures(message), message.id);
         return failures.length === 0 ? [] : [{ run: queued, failures }];
       });
     const alreadyNoticed = parent.messages.some((message) =>
       noticeFailures(message).some((existing) => failureKey(existing) === key),
     );
-    if (!alreadyNoticed) {
+    if (!alreadyNoticed && pendingDelegatedTaskFailures(parent, [failure]).length > 0) {
       // The latest queued notice is folded into this one; it has not started, so nothing is lost.
       const merged = queuedNotices.at(-1);
       const notice = delegatedTaskFailureNotice([...(merged?.failures ?? []), failure]);

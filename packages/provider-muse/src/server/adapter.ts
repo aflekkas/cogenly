@@ -1710,7 +1710,11 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
               // Cogenly MCP server, whose terminal tools run their lookups.
               readOnly: input.runtimePolicy.conversationMode === true,
               sessionMcp: true,
-              disableShell: McpProviderSession.terminalToolsAvailable(mcpSession),
+              // Muse's --disable-shell injects a global "plan without running
+              // commands" reminder, even with working MCP terminals. Work must
+              // keep shell capability; the turn instructions route it through MCP.
+              // readOnly still disables native shell and writes for conversations.
+              disableShell: false,
             },
             options.createHost,
           ).pipe(
@@ -1822,8 +1826,8 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
           const config = mcpSession
             ? {
                 mcpServers: {
-                  // Native shell is disabled when terminal tools are attached, so
-                  // MCP setup must succeed before the session can run.
+                  // Tool instructions depend on Cogenly MCP, so setup must succeed
+                  // before the session can run.
                   cogenly: {
                     transport: "streamableHttp",
                     mode: "required",
@@ -2103,7 +2107,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                           COGENLY_ORCHESTRATION_INSTRUCTIONS +
                           (!terminalTools
                             ? ""
-                            : "\nUse the cogenly MCP terminal_run tool for every shell command. Native shell is disabled. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. A command that may take more than about a minute, or may prompt (logins, cloud CLIs, installs, builds, test suites), runs with background=true and is polled with terminal_read, so the user's messages aren't blocked while it runs. Terminals and their children stop when this thread settles.")
+                            : "\nUse the cogenly MCP terminal_run tool for every shell command. Discover terminal_run with tool_search if it is not listed yet. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. A command that may take more than about a minute, or may prompt (logins, cloud CLIs, installs, builds, test suites), runs with background=true and is polled with terminal_read, so the user's messages aren't blocked while it runs. Terminals and their children stop when this thread settles.")
                         : ""),
                   },
                   ...parts,
