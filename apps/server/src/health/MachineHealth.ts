@@ -272,8 +272,13 @@ const make = Effect.gen(function* () {
     ),
     SLOW_SOURCE_TTL,
   );
-  // The probe runs the tailscale CLI; read only while Serve is on.
-  const tailscaleSetup = yield* Effect.cachedWithTTL(setup.status, SLOW_SOURCE_TTL);
+  // The probe runs the tailscale CLI; read only while Serve is on. Only a
+  // serving reading is kept for the TTL: one taken while Serve was still being
+  // pointed at this run must not read as broken for the next minute.
+  const servingSetup = yield* Effect.cachedWithTTL(setup.status, SLOW_SOURCE_TTL);
+  const tailscaleSetup = servingSetup.pipe(
+    Effect.flatMap((status) => (status.tailscale.served ? Effect.succeed(status) : setup.status)),
+  );
 
   const database = Effect.all([
     sql<{ readonly page_count: number }>`PRAGMA page_count`,

@@ -36,6 +36,7 @@ import {
   serverCheck,
   stuckRunsCheck,
   syncCheck,
+  tailscaleServeCheck,
   trackSyncProgress,
   worstStatus,
 } from "./healthChecks.ts";
@@ -45,6 +46,11 @@ import {
   peerReachabilityItem,
   unreachableReport,
 } from "./peerReachability.ts";
+import {
+  buildMachineSetupStatus,
+  emptyProgress,
+  type MachineSetupObservation,
+} from "../tailscale/machineSetupSteps.ts";
 
 const NOW_MS = Date.parse("2026-10-24T12:00:00.000Z");
 const now = DateTime.makeUnsafe(NOW_MS);
@@ -624,6 +630,58 @@ describe("stuckRunsCheck", () => {
         `A subagent in "Other" has been running for 6 hours`,
       ],
     );
+  });
+});
+
+describe("tailscaleServeCheck", () => {
+  const setup = (overrides: Partial<MachineSetupObservation>) =>
+    buildMachineSetupStatus(
+      {
+        machineName: "Contabo VPS",
+        host: { platform: "linux", root: false, passwordlessSudo: false, homebrew: false },
+        installed: true,
+        version: "1.104.2",
+        status: {
+          backendState: "Running",
+          authUrl: null,
+          magicDnsName: "contabo-vps.tail300b9e.ts.net",
+          tailnetName: "alex@example.com",
+          httpsEnabled: true,
+        },
+        serveMappings: [],
+        localPort: 4773,
+        serveMode: { enabled: true, servePort: 443 },
+        progress: emptyProgress,
+        ...overrides,
+      },
+      now,
+    );
+
+  it("serves when the mapping points at this server's port", () => {
+    const result = tailscaleServeCheck({
+      serveEnabled: true,
+      setup: setup({
+        serveMappings: [{ port: 443, target: "http://127.0.0.1:4773", funnel: false }],
+      }),
+    });
+    expect(result).toMatchObject({
+      status: "ok",
+      summary: "Serving at https://contabo-vps.tail300b9e.ts.net/",
+    });
+  });
+
+  it("doesn't call a restart broken while Cogenly points Serve back at this run", () => {
+    // `--tailscale-serve` removes the mapping at shutdown; the new run adds it back.
+    const restarting = tailscaleServeCheck({
+      serveEnabled: true,
+      setup: setup({ progress: { ...emptyProgress, working: new Set(["expose"]) } }),
+    });
+    expect(restarting).toMatchObject({ status: "ok", items: [] });
+    const broken = tailscaleServeCheck({ serveEnabled: true, setup: setup({}) });
+    expect(broken).toMatchObject({
+      status: "fail",
+      summary: "Tailscale Serve isn't forwarding to this server",
+    });
   });
 });
 

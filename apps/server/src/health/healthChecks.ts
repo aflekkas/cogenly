@@ -765,6 +765,14 @@ export function tailscaleServeCheck(input: {
     return check("tailscale-serve", "Tailscale Serve off", []);
   }
   const { tailscale, problem, joinUrl } = input.setup;
+  // Cogenly is pointing Serve at this run (at startup, or after a port change):
+  // the mapping is missing on purpose for those seconds.
+  const exposing = input.setup.steps.some(
+    (entry) => entry.id === "expose" && entry.state === "working",
+  );
+  if (tailscale.running && tailscale.signedIn && !tailscale.served && exposing) {
+    return check("tailscale-serve", "Pointing Tailscale Serve at this server", []);
+  }
   const failure = !tailscale.installed
     ? "Tailscale isn't installed"
     : !tailscale.running

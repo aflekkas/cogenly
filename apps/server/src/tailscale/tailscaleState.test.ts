@@ -70,6 +70,34 @@ describe("tailscale serve status", () => {
     ]);
   });
 
+  it("reads Tailscale 1.104's indented output for a server it fronts", () => {
+    // `tailscale serve status --json` on a VPS whose health reported Serve as broken.
+    const output = `{
+  "TCP": {
+    "443": {
+      "HTTPS": true
+    }
+  },
+  "Web": {
+    "contabo-vps.tail300b9e.ts.net:443": {
+      "Handlers": {
+        "/": {
+          "Proxy": "http://127.0.0.1:4773"
+        }
+      }
+    }
+  }
+}
+`;
+    const mappings = parseServeMappings(output);
+    assert.deepEqual(mappings, [{ port: 443, target: "http://127.0.0.1:4773", funnel: false }]);
+    assert.deepEqual(chooseServePort(mappings ?? [], 4773, 443), {
+      _tag: "ours",
+      port: 443,
+      funnel: false,
+    });
+  });
+
   it("reads an empty configuration as no mappings", () => {
     assert.deepEqual(parseServeMappings(""), []);
     assert.deepEqual(parseServeMappings("{}"), []);
