@@ -1,15 +1,16 @@
-import { useScopedSettingsWriteAllowed } from "./useScopedSettings";
-import { AuthSettingsWriteScope } from "@cogenly/contracts";
-import { EnvironmentId, type T3ProjectFileScript } from "@cogenly/contracts";
+import { AuthSettingsWriteScope, type T3ProjectFileScript } from "@cogenly/contracts";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@cogenly/client-runtime/state/runtime";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@cogenly/shared/keybindings";
+import { resolveProjectScripts } from "@cogenly/shared/projectScripts";
 import { ChevronDownIcon, PlusIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useProjectConfigFileState } from "../../hooks/useProjectConfigFile";
+import type { SidebarProjectGroupMember } from "../../sidebarProjectGrouping";
 import { useEnvironments } from "../../state/environments";
+import { useEnvironmentsWithScope } from "../../state/session";
 import {
   EMPTY_PROJECT_SCRIPT_INPUT,
   editorRequestForScript,
@@ -31,72 +32,45 @@ import {
 import { ProjectActionsList } from "./ProjectActionsList";
 import { useProjectScriptSettings } from "./useProjectScriptSettings";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
-import { useSettingsScope } from "./SettingsScopeContext";
-import { selectMachineLocalSettingsTargets } from "./scopedSettings";
 
 /**
- * A project's actions, on its repositories on the selected machine. Actions belong
- * to a project, so this only renders at a project scope; `defaultProjectScripts`
- * for all projects is the layer a project without its own list inherits.
- * Shortcuts are machine-wide, so the same action id shares its binding on a
- * machine.
+ * A repository's actions, on the Repository page. They are stored on each
+ * checkout; editing them here writes every checkout of the group. Shortcuts
+ * are machine-wide, so the same action id shares its binding on a machine.
  */
-export function ProjectActionsSettings() {
-  const { scope, targets: scopedTargets } = useSettingsScope();
-  const targets = selectMachineLocalSettingsTargets(scope, scopedTargets);
-  const target = targets[0] ?? null;
+export function RepositoryActionsSettings({
+  members,
+  canEdit,
+}: {
+  members: readonly SidebarProjectGroupMember[];
+  canEdit: boolean;
+}) {
   const { environments } = useEnvironments();
-  const isProjectScope = scope.kind === "project";
-  const representativeConfig = target
-    ? environments.find((environment) => environment.environmentId === target.environmentId)
+  const writableIds = useEnvironmentsWithScope(members, AuthSettingsWriteScope);
+  const canWriteSettings =
+    canEdit && members.every((member) => writableIds.has(member.environmentId));
+  const representative =
+    members.find(
+      (member) =>
+        environments.find((environment) => environment.environmentId === member.environmentId)
+          ?.serverConfig != null,
+    ) ?? members[0];
+  const representativeConfig = representative
+    ? environments.find((environment) => environment.environmentId === representative.environmentId)
         ?.serverConfig
     : undefined;
-  const scripts = target?.settings.defaultProjectScripts ?? [];
+  const scripts =
+    representative && representativeConfig
+      ? resolveProjectScripts(representativeConfig.settings, representative)
+      : [];
   const keybindings = representativeConfig?.keybindings ?? DEFAULT_RESOLVED_KEYBINDINGS;
-  const mixed = targets.some(
-    (candidate) =>
-      JSON.stringify(candidate.settings.defaultProjectScripts) !== JSON.stringify(scripts),
-  );
-  const canWriteSettings = useScopedSettingsWriteAllowed(true);
   const [request, setRequest] = useState<ProjectScriptEditorRequest | null>(null);
-  const memberById = new Map(
-    isProjectScope ? scope.members.map((member) => [member.id, member]) : [],
-  );
-  const { saving, persist, submit } = useProjectScriptSettings(
-    targets.flatMap((candidate) => {
-      const environment = environments.find(
-        (entry) => entry.environmentId === candidate.environmentId,
-      );
-      if (!environment?.serverConfig) return [];
-      const member = candidate.projectId ? memberById.get(candidate.projectId) : undefined;
-      // An older server ignores the override record, so a project edit there
-      // would report success and vanish; such environments are left out and
-      // the legacy per-project map keeps serving them.
-      if (
-        member &&
-        environment.serverConfig.environment?.capabilities.projectSettingsOverrides !== true
-      ) {
-        return [];
-      }
-      return [
-        {
-          environmentId: candidate.environmentId,
-          // Writes read the raw environment settings so an override entry is
-          // extended, not derived from already-resolved values.
-          settings: environment.serverConfig.settings,
-          keybindings: environment.serverConfig.keybindings,
-          ...(member ? { project: member } : {}),
-        },
-      ];
-    }),
-  );
+  const { saving, persist, submit } = useProjectScriptSettings(members);
 
-  // A project's cogenly.json can declare actions to import. Read it from the
-  // representative checkout on the selected machine.
-  const representativeMember = target?.projectId ? memberById.get(target.projectId) : undefined;
+  // A repository's cogenly.json can declare actions to import.
   const configFile = useProjectConfigFileState(
-    representativeMember?.environmentId ?? EnvironmentId.make("none"),
-    representativeMember?.workspaceRoot ?? null,
+    representative?.environmentId ?? members[0]!.environmentId,
+    representative?.workspaceRoot ?? null,
   );
   const importableScripts = useMemo(
     () =>
@@ -139,12 +113,8 @@ export function ProjectActionsSettings() {
   return (
     <SettingsSection id="project-actions" title="Actions">
       <SettingsRow
-        serverScoped
-        settingKeys={["defaultProjectScripts"]}
-        mixed={mixed}
         title="Actions"
-        description="Commands that run in this project's repositories or their worktrees on this machine, with optional shortcuts."
-        onResetOverride={() => void persist(() => null)}
+        description="Commands that run in this repository or its worktrees, with optional shortcuts. They stay on each machine."
         control={
           <div className="flex flex-wrap items-center gap-1.5">
             {importableScripts.length > 0 ? (
@@ -191,7 +161,7 @@ export function ProjectActionsSettings() {
             <Button
               size="sm"
               variant="outline"
-              disabled={saving || !canWriteSettings || targets.length === 0}
+              disabled={saving || !canWriteSettings}
               onClick={() => setRequest({ scriptId: null, initial: EMPTY_PROJECT_SCRIPT_INPUT })}
             >
               <PlusIcon className="size-3.5" />
@@ -200,19 +170,12 @@ export function ProjectActionsSettings() {
           </div>
         }
       />
-      {mixed ? (
-        <SettingsRow
-          title="Different actions between this project's repositories"
-          description="Adding an action here adds it to every repository in this project on this machine. Reset the list to start them all from the actions for all projects."
-        />
-      ) : (
-        <ProjectActionsList
-          scripts={scripts}
-          keybindings={keybindings}
-          disabled={saving || !canWriteSettings}
-          onEdit={(script) => setRequest(editorRequestForScript(script, keybindings))}
-        />
-      )}
+      <ProjectActionsList
+        scripts={scripts}
+        keybindings={keybindings}
+        disabled={saving || !canWriteSettings}
+        onEdit={(script) => setRequest(editorRequestForScript(script, keybindings))}
+      />
       {configFile.status === "invalid" ? (
         <SettingsRow
           title={`${configFile.fileName} is invalid`}
@@ -220,9 +183,9 @@ export function ProjectActionsSettings() {
           className="text-warning"
         />
       ) : null}
-      {target && (
+      {representative ? (
         <ProjectScriptEditorDialog
-          environmentId={target.environmentId}
+          environmentId={representative.environmentId}
           editScope={AuthSettingsWriteScope}
           request={request}
           scripts={scripts}
@@ -232,7 +195,7 @@ export function ProjectActionsSettings() {
           }
           onClose={() => setRequest(null)}
         />
-      )}
+      ) : null}
     </SettingsSection>
   );
 }

@@ -54,7 +54,6 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
     [props.environmentId, scopeContext.connectedEnvironments],
   );
   const canConfigure = useEnvironmentScope(props.environmentId, AuthSettingsWriteScope);
-  const projectScope = scopeContext.scope.kind === "project";
   const update = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
   const [editing, setEditing] = useState<SshDeviceHostConfig | null>(null);
   const [originalHost, setOriginalHost] = useState<SshDeviceHostConfig | null>(null);
@@ -77,7 +76,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
   );
   const groupedHosts = useMemo(() => groupDeviceHosts(hostEnvironments), [hostEnvironments]);
   const save = async (host: SshDeviceHostConfig, remove = false, original = host) => {
-    if (!props.environmentId || projectScope) return;
+    if (!props.environmentId) return;
     setBusy(true);
     try {
       const results = await Promise.allSettled(
@@ -121,7 +120,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
     }
   };
   const listActions = {
-    busy: !canConfigure || projectScope || busy,
+    busy: !canConfigure || busy,
     checks,
     testConnection: async (host: SshDeviceHostConfig) => {
       const results = await testConnection(host);
@@ -155,9 +154,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
         <Button
           size="sm"
           variant="outline"
-          disabled={
-            !canConfigure || projectScope || busy || !props.environmentId || editing !== null
-          }
+          disabled={!canConfigure || busy || !props.environmentId || editing !== null}
           onClick={() => {
             setOriginalHost(null);
             setEditing({ id: randomUUID(), label: "", target: "" });

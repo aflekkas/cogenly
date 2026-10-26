@@ -2,7 +2,6 @@ import {
   type AgentEventFilter,
   type AgentEventKind,
   EnvironmentId,
-  type ProjectId,
   ScheduledTaskId,
   type ScheduledTask,
   type ScheduledTaskUpsertSchedule,
@@ -13,27 +12,16 @@ import {
 } from "@cogenly/contracts";
 import { parseMaxDeliveryAge } from "@cogenly/client-runtime/scheduled-task-webhook";
 
-import {
-  resolveProjectSettings,
-  type LegacyProjectSettingsFields,
-} from "@cogenly/shared/projectSettings";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 
 import type { ResolvedSettingsScope } from "./settingsScope";
 
-/** Repository IDs belong to an environment, including when a project spans machines. */
+/** Whether the settings scope shows a task or repository on `environmentId`. */
 export function matchesScheduledTaskScope(
   scope: ResolvedSettingsScope,
   environmentId: EnvironmentId,
-  projectId: ProjectId,
 ): boolean {
-  if (scope.kind === "unavailable" || !scope.environmentIds.includes(environmentId)) return false;
-  if (scope.kind === "project") {
-    return scope.members.some(
-      (member) => member.environmentId === environmentId && member.id === projectId,
-    );
-  }
-  return true;
+  return scope.kind !== "unavailable" && scope.environmentIds.includes(environmentId);
 }
 
 export function validateScheduledTasksSearch(raw: Record<string, unknown>) {
@@ -202,7 +190,6 @@ export function taskToDraft(task: ScheduledTask): DraftState {
 /** Use configured defaults before the catalog's advertised default model. */
 export function scheduledTaskDefaultModel(
   settings: ServerSettings,
-  project: (LegacyProjectSettingsFields & { readonly id: ProjectId }) | null,
   entries: readonly ProviderInstanceEntry[],
 ): ModelSelection | null {
   const available = entries.filter(
@@ -212,19 +199,16 @@ export function scheduledTaskDefaultModel(
       entry.isAvailable &&
       entry.snapshot.auth.status !== "unauthenticated",
   );
-  const configured = resolveProjectSettings(settings, project?.id ?? null, project).settings
-    .defaultModelSelection;
-  for (const selection of [configured, settings.defaultModelSelection]) {
-    if (
-      selection &&
-      available.some(
-        (entry) =>
-          entry.instanceId === selection.instanceId &&
-          entry.models.find((model) => model.slug === selection.model)?.isLegacy !== true,
-      )
+  const selection = settings.defaultModelSelection;
+  if (
+    selection &&
+    available.some(
+      (entry) =>
+        entry.instanceId === selection.instanceId &&
+        entry.models.find((model) => model.slug === selection.model)?.isLegacy !== true,
     )
-      return selection;
-  }
+  )
+    return selection;
   const models = available.flatMap((entry) =>
     entry.models
       .filter((model) => !model.isLegacy)

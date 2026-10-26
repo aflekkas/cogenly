@@ -16,9 +16,8 @@ import {
   DEFAULT_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
   PROVIDER_DISPLAY_NAMES,
-  resolveProjectProviderInstanceEnabled,
+  isProviderInstanceIdEnabled,
   type ModelSelection,
-  type ProjectId,
   type ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
@@ -193,19 +192,13 @@ export function deriveProviderInstanceEntries(
  */
 export function deriveProviderEntriesByEnvironment(
   providersByEnvironment: Iterable<
-    readonly [
-      string,
-      ReadonlyArray<ServerProvider>,
-      Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">?,
-    ]
+    readonly [string, ReadonlyArray<ServerProvider>, Pick<ServerSettings, "providerInstances">?]
   >,
 ): ReadonlyMap<string, ReadonlyMap<string, ProviderInstanceEntry>> {
   const byEnvironment = new Map<string, ReadonlyMap<string, ProviderInstanceEntry>>();
   for (const [environmentId, providers, settings] of providersByEnvironment) {
     const derived = deriveProviderInstanceEntries(providers);
-    // One map per environment serves every project with a thread there, so
-    // there is no single project to scope `enabled` to; it stays machine-wide.
-    const entries = settings ? applyProviderInstanceSettings(derived, settings, null) : derived;
+    const entries = settings ? applyProviderInstanceSettings(derived, settings) : derived;
     byEnvironment.set(
       environmentId,
       new Map(entries.map((entry) => [entry.instanceId as string, entry] as const)),
@@ -224,22 +217,13 @@ export function deriveProviderEntriesByEnvironment(
  * streamed state, since the server runs it with default config. Any other
  * instance missing from `providerInstances` is stale (for example
  * immediately after deletion) and is treated as disabled.
- *
- * `projectId` folds in that project's `providerInstances[id].enabled` override
- * (enable or disable in either direction over the machine value); `null`
- * resolves the machine value only. It has no default: a caller that renders
- * for a single project but forgets to pass it would silently show the
- * machine's enablement instead of that project's, so passing `null` for a
- * surface that isn't project-aware must be a deliberate choice, not an
- * omission.
  */
 export function applyProviderInstanceSettings(
   entries: ReadonlyArray<ProviderInstanceEntry>,
-  settings: Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">,
-  projectId: ProjectId | null,
+  settings: Pick<ServerSettings, "providerInstances">,
 ): ReadonlyArray<ProviderInstanceEntry> {
   return entries.map((entry) => {
-    const enabled = resolveProjectProviderInstanceEnabled(settings, projectId, entry.instanceId);
+    const enabled = isProviderInstanceIdEnabled(settings, entry.instanceId);
     return enabled === entry.enabled ? entry : { ...entry, enabled };
   });
 }

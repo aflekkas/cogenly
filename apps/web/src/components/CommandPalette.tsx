@@ -851,7 +851,7 @@ function OpenCommandPaletteDialog(props: {
       // Thread rows span every project on the environment, so use machine-wide
       // enablement here rather than a single project's overrides.
       const entries = serverConfig
-        ? applyProviderInstanceSettings(derived, serverConfig.settings, null)
+        ? applyProviderInstanceSettings(derived, serverConfig.settings)
         : derived;
       for (const entry of entries) {
         map.set(`${environment.environmentId}:${entry.instanceId}`, entry);

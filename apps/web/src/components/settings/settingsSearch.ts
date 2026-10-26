@@ -29,9 +29,8 @@ export type SettingsPath =
   | "/settings/new-threads";
 
 /**
- * A searchable setting. Search and deep links keep the selected scope: every
- * row renders at every scope, and one that can't vary there says where it
- * applies inline (see `SettingsRow`) rather than blocking the page.
+ * A searchable setting. Search and deep links keep the selected machine, and
+ * every row renders whichever machine is selected.
  */
 export interface SettingsSearchItem {
   readonly id: string;
@@ -178,7 +177,7 @@ const MOVED_GENERAL_ANCHORS: Readonly<Record<string, SettingsPath>> = {
   "projects-and-threads": "/settings/new-threads",
   "add-project-starts-in": "/settings/new-threads",
   "projects-folder": "/settings/new-threads",
-  "project-actions": "/settings/new-threads",
+  "project-actions": "/settings/projects",
   diagnostics: "/settings/diagnostics",
 };
 
@@ -280,7 +279,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Worktree cleanup",
     to: "/settings/storage",
     searchTerms: [
-      "disk storage delete deleted archived threads old inactive merged unchanged worktrees retention days project inherit off custom",
+      "disk storage delete deleted archived threads old inactive merged unchanged worktrees retention days off custom",
     ],
   },
   {
@@ -300,7 +299,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "New threads",
     to: "/settings/new-threads",
     searchTerms: [
-      "project defaults overrides workspace worktree submodules start from origin machines projects repositories inheritance all projects",
+      "defaults workspace worktree submodules start from origin repositories cogenly.json",
     ],
   },
   {
@@ -664,7 +663,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Agent browser access",
     to: "/settings/integrations",
     searchTerms: [
-      "agent access allow disable enable open drive shared browser preview tools sessions project override",
+      "agent access allow disable enable open drive shared browser preview tools sessions",
     ],
   },
   {
@@ -672,7 +671,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Computer use",
     to: "/settings/integrations",
     searchTerms: [
-      "agent access allow disable enable control mac apps click type screenshot accessibility screen recording macos permission system settings privacy project override",
+      "agent access allow disable enable control mac apps click type screenshot accessibility screen recording macos permission system settings privacy",
     ],
   },
   {
@@ -834,9 +833,11 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "project-actions",
-    title: "Actions",
-    to: "/settings/new-threads",
-    searchTerms: ["commands scripts setup run dev server checkout worktree cogenly.json import"],
+    title: "Repository actions",
+    to: "/settings/projects",
+    searchTerms: [
+      "actions commands scripts setup run dev server checkout worktree cogenly.json import repository",
+    ],
   },
   {
     id: "environment-icon",

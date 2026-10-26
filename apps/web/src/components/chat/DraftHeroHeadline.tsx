@@ -89,7 +89,6 @@ import {
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { InlineButton } from "../ui/button";
-import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 
 /** The draft heading's FadeSwap slot, which a replacing draft's heading picks up from. */
 const DRAFT_HEADING_GROUP = "draft-heading";
@@ -491,8 +490,7 @@ export function DraftHeroHeadline({
         (environment) => environment.environmentId === project.environmentId,
       )?.serverConfig?.settings;
       const defaultModelSelection = environmentSettings
-        ? resolveProjectSettings(environmentSettings, project.id, project).settings
-            .defaultModelSelection
+        ? environmentSettings.defaultModelSelection
         : project.defaultModelSelection;
       if (defaultModelSelection) {
         setModelSelection(draftId, defaultModelSelection, {

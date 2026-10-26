@@ -64,11 +64,7 @@ import {
 } from "../../appearancePreferences";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { UsageMeterModeToggle } from "../usage/UsageMeter";
-import {
-  useScopedSettings,
-  useScopedSettingsMixed,
-  useUpdateScopedSettings,
-} from "./useScopedSettings";
+import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
@@ -88,7 +84,6 @@ import {
 } from "../ui/dialog";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
-import { ScopedSwitch } from "./ScopedSwitch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
@@ -353,7 +348,6 @@ function AboutVersionSection() {
       />
       {selectedHostedAppChannel ? (
         <SettingsRow
-          clientSetting
           {...searchableSetting("update-track")}
           description="Switches the hosted app release channel."
           control={
@@ -1031,7 +1025,6 @@ function LegacyFeaturesSection() {
       headerPlacement="outside"
     >
       <SettingsRow
-        clientSetting
         {...searchableSetting("legacy-plan-mode")}
         description="Restore Build/Plan, /plan, /default, and Shift+Tab. Off uses build mode."
         control={
@@ -1045,7 +1038,6 @@ function LegacyFeaturesSection() {
         }
       />
       <SettingsRow
-        clientSetting
         {...searchableSetting("legacy-context-window-indicator")}
         description="Shows context window usage as a circular indicator in the composer."
         control={
@@ -1059,7 +1051,6 @@ function LegacyFeaturesSection() {
         }
       />
       <SettingsRow
-        clientSetting
         {...searchableSetting("legacy-sidebar")}
         description="Restore per-repository thread trees instead of the default flat sidebar."
         control={
@@ -1109,13 +1100,12 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
   ] as const;
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
-  const { scope, environment, connectedEnvironments } = useSettingsScope();
+  const { environment, connectedEnvironments } = useSettingsScope();
   // The representative environment is the machine machine-local rows such as
   // background activity apply to, so per-machine tuning edits that machine.
   const environmentId = environment?.environmentId ?? null;
-  const isEnvironmentScope = scope.kind !== "project" && environmentId !== null;
+  const hasMachine = environmentId !== null;
   const [backgroundActivityDialogOpen, setBackgroundActivityDialogOpen] = useState(false);
-  const mixedResponseStreamingMode = useScopedSettingsMixed(["responseStreamingMode"]);
   const lastEnabledProjectGroupingMode = useRef<SidebarProjectGroupingMode>(
     readLastEnabledProjectGroupingMode(),
   );
@@ -1128,7 +1118,6 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
   const resolvedBackgroundActivity = resolveServerBackgroundActivitySettings(settings);
   const activeBackgroundActivityProfile = resolvedBackgroundActivity.profile;
   const backgroundActivityProfileOption = resolveBackgroundActivityProfileOption(settings);
-  const mixedBackgroundActivity = useScopedSettingsMixed(["backgroundActivity"]);
   const backgroundActivityDescription =
     backgroundActivityProfileOption === "advanced"
       ? `${ADVANCED_BACKGROUND_ACTIVITY_DESCRIPTION} Shared policy: ${
@@ -1144,7 +1133,6 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
     <>
       <SettingsSection id="organization" title="Organization">
         <SettingsRow
-          clientSetting
           {...searchableSetting("project-grouping")}
           description="Combine matching repositories across machines."
           resetAction={
@@ -1180,7 +1168,6 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
           }
         />
         <SettingsRow
-          clientSetting
           {...searchableSetting("project-order")}
           description="Order of repositories in the sidebar repository picker and command palette."
           resetAction={
@@ -1227,8 +1214,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
           description="Continue usage-limit stops at the reported reset time. Each thread can opt out from its banner or menu."
           settingKeys={["autoResumeLimitedThreads"]}
           control={
-            <ScopedSwitch
-              settingKeys={["autoResumeLimitedThreads"]}
+            <Switch
               checked={settings.autoResumeLimitedThreads}
               onCheckedChange={(checked) =>
                 updateSettings({ autoResumeLimitedThreads: Boolean(checked) })
@@ -1243,8 +1229,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
           description="Snooze usage-limit stops until the reported reset time. Combine with auto-resume to continue when they wake."
           settingKeys={["snoozeLimitedThreads"]}
           control={
-            <ScopedSwitch
-              settingKeys={["snoozeLimitedThreads"]}
+            <Switch
               checked={settings.snoozeLimitedThreads}
               onCheckedChange={(checked) =>
                 updateSettings({ snoozeLimitedThreads: Boolean(checked) })
@@ -1255,7 +1240,6 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
         />
 
         <SettingsRow
-          clientSetting
           {...searchableSetting("working-shelf")}
           description="Fold working and monitoring threads into a Working section. They return to the top of the inbox when they need you."
           resetAction={
@@ -1286,7 +1270,6 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
       <SettingsSection id="behavior" title="Behavior">
         <NotificationSettings />
         <SettingsRow
-          clientSetting
           {...searchableSetting("in-app-notifications")}
           description="Show a toast when another thread finishes, fails, or needs input or approval while this app has focus."
           control={
@@ -1298,7 +1281,6 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
           }
         />
         <SettingsRow
-          clientSetting
           {...searchableSetting("time-format")}
           description="System default follows your browser or OS clock preference."
           resetAction={
@@ -1343,11 +1325,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
           serverScoped
           settingKeys={["responseStreamingMode"]}
           {...searchableSetting("response-streaming")}
-          description={
-            mixedResponseStreamingMode
-              ? "The selected targets use different streaming modes."
-              : RESPONSE_STREAMING_MODE_DESCRIPTIONS[settings.responseStreamingMode]
-          }
+          description={RESPONSE_STREAMING_MODE_DESCRIPTIONS[settings.responseStreamingMode]}
           resetAction={
             settings.responseStreamingMode !== DEFAULT_UNIFIED_SETTINGS.responseStreamingMode ? (
               <SettingResetButton
@@ -1362,7 +1340,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
           }
           control={
             <Select
-              value={mixedResponseStreamingMode ? null : settings.responseStreamingMode}
+              value={settings.responseStreamingMode}
               onValueChange={(value) => {
                 if (value === "turn" || value === "paragraph") {
                   updateSettings({ responseStreamingMode: value });
@@ -1371,9 +1349,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
             >
               <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Response streaming">
                 <SelectValue>
-                  {(value: ResponseStreamingMode | null) =>
-                    value === null ? "Mixed" : RESPONSE_STREAMING_MODE_LABELS[value]
-                  }
+                  {(value: ResponseStreamingMode) => RESPONSE_STREAMING_MODE_LABELS[value]}
                 </SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -1388,7 +1364,6 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
           }
         />
         <SettingsRow
-          clientSetting
           {...searchableSetting("skills-in-slash-menu")}
           description="Also include skills in the / command menu. Skills always appear when you type $."
           resetAction={
@@ -1415,7 +1390,6 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
         />
 
         <SettingsRow
-          clientSetting
           {...searchableSetting("composer-rich-text")}
           description="Show formatted Markdown as you type."
           resetAction={
@@ -1444,7 +1418,6 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
 
         {dictationSupported ? (
           <SettingsRow
-            clientSetting
             {...searchableSetting("composer-dictation")}
             description="Show the composer's mic button and its shortcut. Speech is transcribed on this Mac."
             resetAction={
@@ -1470,7 +1443,6 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
         ) : null}
 
         <SettingsRow
-          clientSetting
           {...searchableSetting("send-shortcut")}
           description="Choose when Enter sends a prompt or inserts a new line"
           resetAction={
@@ -1518,7 +1490,6 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
         />
 
         <SettingsRow
-          clientSetting
           {...searchableSetting("follow-up-behavior")}
           description={
             "Steer the current run with follow-ups or queue them until the agent finishes. " +
@@ -1579,8 +1550,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
             ) : null
           }
           control={
-            <ScopedSwitch
-              settingKeys={["enableProviderUpdateChecks"]}
+            <Switch
               checked={settings.enableProviderUpdateChecks}
               onCheckedChange={(checked) =>
                 updateSettings({ enableProviderUpdateChecks: Boolean(checked) })
@@ -1616,8 +1586,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
             ) : null
           }
           control={
-            <ScopedSwitch
-              settingKeys={["continueThreadsAfterServerUpdate"]}
+            <Switch
               checked={settings.continueThreadsAfterServerUpdate}
               disabled={!supportsRestartContinuation}
               onCheckedChange={(checked) =>
@@ -1653,10 +1622,10 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
           control={
             <>
               <Select
-                value={mixedBackgroundActivity ? null : backgroundActivityProfileOption}
+                value={backgroundActivityProfileOption}
                 onValueChange={(value) => {
                   if (value === "advanced") {
-                    if (isEnvironmentScope) setBackgroundActivityDialogOpen(true);
+                    if (hasMachine) setBackgroundActivityDialogOpen(true);
                     return;
                   }
                   if (
@@ -1674,8 +1643,8 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
                   aria-label="Background activity profile"
                 >
                   <SelectValue>
-                    {(value: BackgroundActivityProfileOption | null) =>
-                      value === null ? "Mixed" : BACKGROUND_ACTIVITY_PROFILE_OPTION_LABELS[value]
+                    {(value: BackgroundActivityProfileOption) =>
+                      BACKGROUND_ACTIVITY_PROFILE_OPTION_LABELS[value]
                     }
                   </SelectValue>
                 </SelectTrigger>
@@ -1689,14 +1658,14 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
                   <SelectItem hideIndicator value="battery-saver">
                     {BACKGROUND_ACTIVITY_PROFILE_LABELS["battery-saver"]}
                   </SelectItem>
-                  <SelectItem hideIndicator value="advanced" disabled={!isEnvironmentScope}>
-                    {isEnvironmentScope
+                  <SelectItem hideIndicator value="advanced" disabled={!hasMachine}>
+                    {hasMachine
                       ? BACKGROUND_ACTIVITY_PROFILE_OPTION_LABELS.advanced
                       : `${BACKGROUND_ACTIVITY_PROFILE_OPTION_LABELS.advanced} (one machine)`}
                   </SelectItem>
                 </SelectPopup>
               </Select>
-              {backgroundActivityProfileOption === "advanced" && isEnvironmentScope ? (
+              {backgroundActivityProfileOption === "advanced" && hasMachine ? (
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -1714,7 +1683,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
                 </Tooltip>
               ) : null}
               <BackgroundActivityAdvancedDialog
-                open={backgroundActivityDialogOpen && isEnvironmentScope}
+                open={backgroundActivityDialogOpen && hasMachine}
                 onOpenChange={setBackgroundActivityDialogOpen}
               />
             </>
@@ -1724,7 +1693,6 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
 
       <SettingsSection id="confirmations" title="Confirmations">
         <SettingsRow
-          clientSetting
           {...searchableSetting("archive-confirmation")}
           description="Require a second click on the inline archive action before a thread is archived."
           resetAction={
@@ -1751,7 +1719,6 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
         />
 
         <SettingsRow
-          clientSetting
           {...searchableSetting("delete-confirmation")}
           description="Ask before deleting a thread and its chat history."
           resetAction={
@@ -1779,7 +1746,6 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
 
         {isElectron ? (
           <SettingsRow
-            clientSetting
             {...searchableSetting("quit-confirmation")}
             description="Hold mode also quits on two quick presses."
             resetAction={
@@ -1838,8 +1804,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
             ) : null
           }
           control={
-            <ScopedSwitch
-              settingKeys={["aiGreetings"]}
+            <Switch
               checked={settings.aiGreetings}
               onCheckedChange={(checked) => updateSettings({ aiGreetings: Boolean(checked) })}
               aria-label="AI greetings"
@@ -1894,21 +1859,11 @@ export function ArchivedThreadsPanel() {
   } = useArchivedThreadSnapshots(scope.environmentIds);
 
   const { groups: archivedGroups, hasMultipleEnvironments } = useMemo(() => {
-    const selectedProjectKeys =
-      scope.kind === "project"
-        ? new Set(scope.members.map((member) => `${member.environmentId}:${member.id}`))
-        : null;
     const projectsByEnvironmentAndId = new Map(
       archivedSnapshots.flatMap(({ environmentId, snapshot }) =>
-        snapshot.projects
-          .filter(
-            (project) =>
-              selectedProjectKeys === null ||
-              selectedProjectKeys.has(`${environmentId}:${project.id}`),
-          )
-          .map(
-            (project) => [`${environmentId}:${project.id}`, { ...project, environmentId }] as const,
-          ),
+        snapshot.projects.map(
+          (project) => [`${environmentId}:${project.id}`, { ...project, environmentId }] as const,
+        ),
       ),
     );
     const environmentLabels = new Map(
@@ -1983,7 +1938,7 @@ export function ArchivedThreadsPanel() {
       }),
     }));
     return { groups: sortedGroups, hasMultipleEnvironments };
-  }, [archivedSnapshots, environments, projectGroups, scope]);
+  }, [archivedSnapshots, environments, projectGroups]);
 
   const handleArchivedThreadContextMenu = useCallback(
     async (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {

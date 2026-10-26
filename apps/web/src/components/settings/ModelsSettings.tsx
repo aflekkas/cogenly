@@ -28,11 +28,7 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { useScopedModelDisabledReason } from "./useScopedModelAvailability";
-import {
-  useScopedSettings,
-  useScopedSettingsMixed,
-  useUpdateScopedSettings,
-} from "./useScopedSettings";
+import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 
@@ -52,7 +48,7 @@ function TextGenerationModelRow() {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
   const navigate = useNavigate();
-  const { environment, connectedEnvironments, target } = useSettingsScope();
+  const { environment, connectedEnvironments } = useSettingsScope();
   // The representative environment supplies the provider list for the picker.
   const environmentId = environment?.environmentId ?? null;
   const hasServerTargets = connectedEnvironments.length > 0;
@@ -68,11 +64,7 @@ function TextGenerationModelRow() {
   const textGenModel = textGenerationModelSelection.model;
   const textGenModelOptions = textGenerationModelSelection.options;
   const textGenerationModelInstanceEntries = sortProviderInstanceEntries(
-    applyProviderInstanceSettings(
-      deriveProviderInstanceEntries(textGenerationProviders),
-      settings,
-      target?.projectId ?? null,
-    ),
+    applyProviderInstanceSettings(deriveProviderInstanceEntries(textGenerationProviders), settings),
   );
   const hasTextGenerationProvider = textGenerationModelInstanceEntries.some(
     (entry) => entry.enabled && entry.isAvailable,
@@ -96,7 +88,6 @@ function TextGenerationModelRow() {
     settings,
     textGenerationModelInstanceEntries,
   );
-  const mixedTextGenerationModel = useScopedSettingsMixed(["textGenerationModelSelection"]);
 
   return (
     <SettingsRow
@@ -135,7 +126,6 @@ function TextGenerationModelRow() {
               instanceEntries={textGenerationModelInstanceEntries}
               modelOptionsByInstance={textGenerationModelOptionsByInstance}
               triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-              {...(mixedTextGenerationModel ? { triggerLabel: "Mixed" } : {})}
               getModelDisabledReason={textGenerationModelDisabledReason}
               {...(environmentId
                 ? {

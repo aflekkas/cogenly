@@ -18,11 +18,9 @@ import {
   type EnvironmentId,
   PROVIDER_DISPLAY_NAMES,
   ProviderDriverKind,
-  type ProjectId,
   type ProviderInstanceConfig,
   type ProviderInstanceId,
   resolveEnvironmentMachineKind,
-  resolveProjectProviderInstanceEnabled,
   resolveProviderInstanceEnabled,
 } from "@cogenly/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@cogenly/contracts/settings";
@@ -52,7 +50,6 @@ import {
 import { resolveProviderInstanceAccentColors } from "../../providerInstances";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { useEnvironmentSessionState } from "../../state/session";
-import { useServerConfigs } from "../../state/entities";
 import { useAtomCommand } from "../../state/use-atom-command";
 import {
   ConnectionStatusDot,
@@ -81,8 +78,6 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
 import { ExpandableText } from "./ExpandableText";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
-import { ProjectOverridesPopover } from "./SettingInheritance";
-import { useProviderInstanceOverrides } from "./useScopedSettings";
 import { ProviderAuthenticationSection } from "./ProviderAuthenticationSection";
 import { CodexSetupSection, CodexManagedRuntimeFields } from "./CodexSetupSection";
 import { readCodexSetupMode } from "./CodexSetupSection.logic";
@@ -106,7 +101,6 @@ import {
 } from "./settingsLayout";
 import {
   buildProviderEnvironmentOptions,
-  buildProviderInstanceOverridePatch,
   classifyProviderEnvironmentAccess,
   isProviderSettingsEnvironmentAvailable,
   type ProviderEnvironmentAccess,
@@ -229,31 +223,11 @@ function EnvironmentUnavailablePlaceholder({
   );
 }
 
-/**
- * The projects that turn one provider on or off for themselves, beside its
- * machine-wide switch, with a reset that clears them on every machine.
- */
-function ProviderInstanceProjectOverrides({
-  instanceId,
-  canClear,
-}: {
-  instanceId: ProviderInstanceId;
-  canClear: boolean;
-}) {
-  const { onClear, ...overrides } = useProviderInstanceOverrides(instanceId);
-  return <ProjectOverridesPopover {...overrides} {...(canClear ? { onClear } : {})} />;
-}
-
 interface ProviderSettingsTarget {
   readonly environmentId?: EnvironmentId;
   readonly instanceId?: ProviderInstanceId;
   readonly scoped?: boolean;
   readonly environmentIds?: readonly EnvironmentId[];
-  /**
-   * The project's checkouts on the selected environment, if a project is in
-   * scope. The enable toggle writes each one's override so they never diverge.
-   */
-  readonly projectIds?: readonly ProjectId[];
 }
 
 export function ProviderSettingsPanel(target: ProviderSettingsTarget) {
@@ -405,7 +379,6 @@ function ProviderSettingsPanelContent(target: ProviderSettingsTarget) {
               ? target.instanceId
               : undefined
           }
-          projectIds={target.projectIds ?? []}
         />
       ) : null}
     </>
@@ -416,19 +389,16 @@ function SelectedEnvironmentProviderSettings({
   environment,
   deviceTabs,
   targetInstanceId,
-  projectIds,
 }: {
   readonly environment: EnvironmentPresentation;
   readonly deviceTabs?: ReactNode;
   readonly targetInstanceId?: ProviderInstanceId | undefined;
-  readonly projectIds: readonly ProjectId[];
 }) {
   return (
     <RemoteSessionGatedProviderSettings
       environment={environment}
       deviceTabs={deviceTabs}
       targetInstanceId={targetInstanceId}
-      projectIds={projectIds}
     />
   );
 }
@@ -437,12 +407,10 @@ function RemoteSessionGatedProviderSettings({
   environment,
   deviceTabs,
   targetInstanceId,
-  projectIds,
 }: {
   readonly environment: EnvironmentPresentation;
   readonly deviceTabs?: ReactNode;
   readonly targetInstanceId?: ProviderInstanceId | undefined;
-  readonly projectIds: readonly ProjectId[];
 }) {
   const sessionState = useEnvironmentSessionState(environment.environmentId);
   const operateAccess = resolveRemoteOperateAccess({
@@ -456,7 +424,6 @@ function RemoteSessionGatedProviderSettings({
       operateAccess={operateAccess}
       deviceTabs={deviceTabs}
       targetInstanceId={targetInstanceId}
-      projectIds={projectIds}
     />
   );
 }
@@ -466,13 +433,11 @@ function AccessGatedProviderSettings({
   operateAccess,
   deviceTabs,
   targetInstanceId,
-  projectIds,
 }: {
   readonly environment: EnvironmentPresentation;
   readonly operateAccess: ProviderOperateAccess;
   readonly deviceTabs?: ReactNode;
   readonly targetInstanceId?: ProviderInstanceId | undefined;
-  readonly projectIds: readonly ProjectId[];
 }) {
   const access = classifyProviderEnvironmentAccess({
     connectionPhase: environment.connection.phase,
@@ -495,7 +460,6 @@ function AccessGatedProviderSettings({
       readOnly={access.kind === "read-only"}
       deviceTabs={deviceTabs}
       targetInstanceId={targetInstanceId}
-      projectIds={projectIds}
     />
   );
 }
@@ -506,14 +470,11 @@ export function EnvironmentProviderSettings({
   readOnly = false,
   deviceTabs,
   targetInstanceId,
-  projectIds = [],
 }: {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;
   readonly deviceTabs?: ReactNode;
   readonly targetInstanceId?: ProviderInstanceId | undefined;
-  /** The project's checkouts on this environment, if a project is in scope. */
-  readonly projectIds?: readonly ProjectId[];
   /**
    * Grey out and freeze every write control when this session's credential
    * lacks `providers:manage` on the environment. Selecting providers
@@ -530,12 +491,6 @@ export function EnvironmentProviderSettings({
   const persistProviderInstance = usePersistEnvironmentProviderInstanceMutation(environmentId);
   const serverProviders =
     useAtomValue(serverEnvironment.providersValueAtom(environmentId)) ?? EMPTY_SERVER_PROVIDERS;
-  // Older servers decode an unknown providerInstances key away, so sending
-  // a project override patch would silently do nothing. Hide the switch
-  // instead of offering a control that can never take effect.
-  const supportsProjectProviderOverrides =
-    useServerConfigs().get(environmentId)?.environment.capabilities
-      .projectProviderInstanceOverrides === true;
   const refreshServerProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
   });
@@ -816,47 +771,10 @@ export function EnvironmentProviderSettings({
       modelOrder: [],
     };
     const resetLabel = driverOption?.label ?? String(row.driver);
-    const representativeProjectId = projectIds[0];
-    const writeProjectOverride = (next: boolean | undefined) => {
-      updateSettings({
-        projectSettingsOverrides: buildProviderInstanceOverridePatch(
-          settings,
-          projectIds,
-          row.instanceId,
-          next,
-        ),
-      });
-    };
-    const projectOverride =
-      representativeProjectId === undefined || !supportsProjectProviderOverrides
-        ? undefined
-        : {
-            value:
-              settings.projectSettingsOverrides[representativeProjectId]?.providerInstances?.[
-                row.instanceId
-              ]?.enabled,
-            effectiveEnabled: resolveProjectProviderInstanceEnabled(
-              settings,
-              representativeProjectId,
-              row.instanceId,
-            ),
-            onChange: (next: boolean) => writeProjectOverride(next),
-            onReset: () => writeProjectOverride(undefined),
-          };
-
     return (
       <ProviderInstanceCard
         key={row.instanceId}
         environmentId={environmentId}
-        projectOverride={projectOverride}
-        projectOverrides={
-          projectOverride === undefined && supportsProjectProviderOverrides ? (
-            <ProviderInstanceProjectOverrides
-              instanceId={row.instanceId}
-              canClear={!readOnly && canWriteSettings}
-            />
-          ) : undefined
-        }
         instanceId={row.instanceId}
         instance={row.instance}
         driverOption={driverOption}

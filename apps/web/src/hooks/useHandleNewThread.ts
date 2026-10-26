@@ -30,7 +30,10 @@ import {
   getProjectOrderKey,
   selectProjectGroupingSettings,
 } from "../logicalProject";
-import { resolveNewThreadEnvMode, resolveProjectSettings } from "@cogenly/shared/projectSettings";
+import {
+  resolveNewThreadEnvMode,
+  resolveProjectFileSettings,
+} from "@cogenly/shared/projectSettings";
 import {
   readProject,
   readProjects,
@@ -170,16 +173,9 @@ export function useNewThreadHandler() {
       // after that belongs to a project that no longer exists.
       const abandonedSinceRequest = () =>
         routeChangedSinceRequest() || (project !== undefined && readProject(projectRef) === null);
-      // The resolver applies project overrides and, until the server has
-      // folded them, the aggregate's own legacy fields.
-      const projectSettings = resolveProjectSettings(
-        targetServerSettings,
-        project?.id ?? null,
-        project,
-      );
       // A chat is a quick conversation: it starts supervised whatever the project defaults say.
       const defaultRuntimeMode = "full-access";
-      const projectDefaultModelSelection = projectSettings.settings.defaultModelSelection;
+      const projectDefaultModelSelection = targetServerSettings.defaultModelSelection;
       const resolveModelSelectionOverride = (destinationDraftId: DraftId) =>
         resolveNewThreadModelSelectionOverride({
           projectDefaultSelection: projectDefaultModelSelection ?? null,
@@ -193,14 +189,12 @@ export function useNewThreadHandler() {
       // query atom caches per project after the first call.
       const resolveDefaultEnvMode = async (): Promise<DraftThreadEnvMode> => {
         const consultProjectFile =
-          project !== undefined && projectSettings.settings.defaultThreadEnvMode === null;
+          project !== undefined && targetServerSettings.defaultThreadEnvMode === null;
         const projectFile = consultProjectFile
           ? await readProjectConfigFile(project.environmentId, project.workspaceRoot)
           : null;
-        const resolvedProjectSettings = resolveProjectSettings(
+        const resolvedProjectSettings = resolveProjectFileSettings(
           targetServerSettings,
-          project?.id ?? null,
-          project,
           projectFile,
         );
         const preferWorktree = workPrefersNewWorktree({
@@ -340,7 +334,7 @@ export function useNewThreadHandler() {
               envMode: defaultEnvMode,
               startFromOrigin: resolveNewDraftStartFromOrigin({
                 envMode: defaultEnvMode,
-                newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
+                newWorktreesStartFromOrigin: targetServerSettings.newWorktreesStartFromOrigin,
               }),
             };
           }
@@ -502,7 +496,7 @@ export function useNewThreadHandler() {
             options?.startFromOrigin ??
             resolveNewDraftStartFromOrigin({
               envMode: initialEnvMode,
-              newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
+              newWorktreesStartFromOrigin: targetServerSettings.newWorktreesStartFromOrigin,
             }),
           runtimeMode: defaultRuntimeMode,
           ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),

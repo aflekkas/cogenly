@@ -19,7 +19,6 @@ export function NotificationSettings() {
 
   return (
     <SettingsRow
-      clientSetting
       {...searchableSetting("thread-notifications")}
       description={
         permissionMessage ??
