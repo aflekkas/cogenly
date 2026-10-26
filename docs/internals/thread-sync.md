@@ -39,13 +39,15 @@ Batches carry events and metadata as plain JSON, and the receiver decodes each
 item, because a newer build's event type must not stall the stream on an older
 one. A thread with an item the receiver cannot decode is held whole: that item
 and every later one for the thread wait in `thread_replication_deferred`, in
-order, while other threads keep applying and the cursor advances. Startup
-replays a held thread once every item of it decodes, so after an update it
-catches up in its original order. Readable events keep their raw JSON when
+order, while other threads keep applying and the cursor advances. Replay runs
+at startup, hourly, on a peer version change, and through machine health Fix.
+A held thread catches up in its original order once every item decodes. Readable events keep their raw JSON when
 schema decoding drops fields; event data, metadata extensions and command
 receipts survive relaying and later ownership changes. Receipts travel with
 events and remap their result sequence to the receiving log. A projection
-failure refuses the batch without advancing its cursor; it never skips history.
+failure quarantines that thread's items with a reason, preserving its history
+while other threads advance. Lock timeouts retry without advancing the cursor
+or quarantining the batch.
 
 ## Continuing a thread from another machine
 

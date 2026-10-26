@@ -10230,11 +10230,22 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       if (projection.thread.deletedAt !== null) return;
       // Dispatch holds the thread lock. A report or service read can be stale:
       // only the exact turns it named, still in flight here, may be interrupted.
+      const hasLiveSession = (
+        providerThreadId: OrchestrationV2ProviderThread["id"] | null | undefined,
+      ) =>
+        Effect.gen(function* () {
+          const sessionId = projection.providerThreads.find(
+            (candidate) => candidate.id === providerThreadId,
+          )?.providerSessionId;
+          if (sessionId === null || sessionId === undefined) return false;
+          return yield* providerSessions.isLive(sessionId);
+        });
       let cancelledStart = false;
       for (const runId of new Set(command.runIds ?? [])) {
         const run = projection.runs.find((candidate) => candidate.id === runId);
         if (run === undefined || !["preparing", "starting", "running"].includes(run.status))
           continue;
+        if (yield* hasLiveSession(run.providerThreadId)) continue;
         const cancellation = yield* dispatchRunInterrupt(
           {
             type: "run.interrupt",
@@ -10248,16 +10259,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         );
         cancelledStart ||= cancellation !== undefined;
       }
-      const hasLiveSession = (
-        providerThreadId: OrchestrationV2ProviderThread["id"] | null | undefined,
-      ) =>
-        Effect.gen(function* () {
-          const sessionId = projection.providerThreads.find(
-            (candidate) => candidate.id === providerThreadId,
-          )?.providerSessionId;
-          if (sessionId === null || sessionId === undefined) return false;
-          return yield* providerSessions.isLive(sessionId);
-        });
       const unreachable = new Set(command.unreachableChildThreadIds ?? []);
       const childIsLive = (childThreadId: ThreadId | null) =>
         childThreadId === null || unreachable.has(childThreadId)

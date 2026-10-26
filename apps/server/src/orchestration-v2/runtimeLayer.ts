@@ -1,3 +1,4 @@
+import * as StaleRunRecoveryWorker from "../health/StaleRunRecoveryWorker.ts";
 import * as WorktreeLifecycle from "../workspace/WorktreeLifecycle.ts";
 import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
 import * as GoogleTokenStore from "../integrations/local/GoogleTokenStore.ts";
@@ -639,6 +640,7 @@ const layerProductionBase = Layer.mergeAll(
   layerAccountAccessProvided,
   layerCliCredentialsProvided,
   layerAccountConnectionsProvided,
+  StaleRunRecoveryWorker.layer.pipe(Layer.provide(layerThreadManagementProvided)),
   UsageLimitRecoveryWorker.layer.pipe(
     Layer.provide(AgentStore.layer),
     Layer.provide(

@@ -12,6 +12,7 @@ import {
   ThreadReplicationError,
 } from "@cogenly/contracts";
 import * as Context from "effect/Context";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
@@ -139,17 +140,35 @@ const make = Effect.gen(function* () {
               Effect.logWarning("Thread replication to a paired machine deferred", {
                 peer: machine.environmentId,
                 reason: error.reason,
+                cause: error.cause,
               }),
           }),
         );
   }).pipe(
     Effect.catchTags({
       ThreadReplicationError: (error) =>
-        Effect.logWarning("Thread replication deferred", { reason: error.reason }),
+        Effect.logWarning("Thread replication deferred", {
+          reason: error.reason,
+          cause: error.cause,
+        }),
     }),
   );
 
-  yield* scheduler.register("thread-replication", catchUp);
+  let replayedAt = 0;
+  let peerVersions = "";
+  const replayDue = Effect.gen(function* () {
+    const now = yield* Clock.currentTimeMillis;
+    const view = yield* topology;
+    const versions = view.machines
+      .map((machine) => `${machine.environmentId}:${machine.serverVersion ?? ""}`)
+      .sort()
+      .join("|");
+    if (now - replayedAt < 60 * 60 * 1000 && versions === peerVersions) return;
+    yield* replication.replayHeld;
+    replayedAt = now;
+    peerVersions = versions;
+  }).pipe(Effect.catch((cause) => Effect.logWarning("Thread replay deferred", { cause })));
+  yield* scheduler.register("thread-replication", replayDue.pipe(Effect.andThen(catchUp)));
   // A streaming turn commits many events; a sliding queue of one coalesces
   // them into at most one pending pass behind the running one.
   const pending = yield* Queue.sliding<void>(1);
@@ -157,7 +176,12 @@ const make = Effect.gen(function* () {
     Stream.runForEach(() => Queue.offer(pending, undefined)),
     Effect.forkScoped,
   );
-  yield* Queue.take(pending).pipe(Effect.andThen(catchUp), Effect.forever, Effect.forkScoped);
+  yield* Queue.take(pending).pipe(
+    Effect.andThen(replayDue),
+    Effect.andThen(catchUp),
+    Effect.forever,
+    Effect.forkScoped,
+  );
   return ThreadSync.of({ sync, syncThrough, catchUp });
 });
 

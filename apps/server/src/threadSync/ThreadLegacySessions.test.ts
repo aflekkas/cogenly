@@ -21,7 +21,6 @@ import * as Schema from "effect/Schema";
 import { pair } from "../machines/testkit.ts";
 import { CodexProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
 import migrateImportIdentities from "../persistence/Migrations/106_LegacyImportProviderIdentity.ts";
-import * as EventSink from "../orchestration-v2/EventSink.ts";
 import { startThreadMachine as start, threadCreated } from "./testkit.ts";
 
 const shared = ProviderSessionId.make("provider-session:provider-instance:codex:shared");
@@ -263,11 +262,11 @@ it.live("a peer still cannot claim another thread's machine-scoped session", () 
     yield* hub.sink.write({ events: history(local, at, sessionId) });
     yield* mac.sink.write({ events: history(remote, at, sessionId) });
     const batch = yield* mac.replication.readBatch({ events: 0, meta: 0 }, hub.environmentId, true);
-    const failure = yield* Effect.flip(hub.replication.receive(batch, mac.environmentId, false));
-    expect(failure).toMatchObject({
-      cause: { cause: expect.any(EventSink.ThreadOwnedElsewhereError) },
-    });
-    expect((yield* hub.replication.cursors(mac.environmentId)).received.events).toBe(0);
+    yield* hub.replication.receive(batch, mac.environmentId, false);
+    expect(
+      (yield* hub.sql`SELECT DISTINCT reason FROM thread_replication_deferred`)[0]?.reason,
+    ).toBe("projection");
+    expect((yield* hub.replication.cursors(mac.environmentId)).received).toEqual(batch.cursor);
     expect(
       (yield* hub.sql`SELECT event_id FROM orchestration_events WHERE stream_id = ${remote}`)
         .length,
@@ -497,9 +496,13 @@ it.live.each(["startup", "shutdown", "unrecognized"])(
         true,
       );
       if (trigger === "unrecognized") {
+        yield* hub.replication.receive(batch, mac.environmentId, false);
         expect(
-          (yield* Effect.result(hub.replication.receive(batch, mac.environmentId, false)))._tag,
-        ).toBe("Failure");
+          (yield* hub.sql`SELECT DISTINCT reason FROM thread_replication_deferred`)[0]?.reason,
+        ).toBe("invalid-batch");
+        expect(yield* hub.sql`SELECT 1 FROM orchestration_events WHERE event_id = ${id}`).toEqual(
+          [],
+        );
       } else {
         yield* hub.replication.receive(batch, mac.environmentId, false);
         expect(
@@ -552,7 +555,7 @@ it.live.each(["moved-first", "moved-last"])(
     }).pipe(Effect.scoped),
 );
 
-it.live("malformed replica receipt origins fail as invalid batches without defects", () =>
+it.live("malformed replica receipt origins are quarantined without defects", () =>
   Effect.gen(function* () {
     const hub = yield* start("bad-receipt-hub", "cloud-server");
     const mac = yield* start("bad-receipt-mac", "computer");
@@ -573,10 +576,11 @@ it.live("malformed replica receipt origins fail as invalid batches without defec
         },
       };
     });
+    yield* hub.replication.receive({ ...batch, events }, mac.environmentId, false);
     expect(
-      yield* Effect.flip(hub.replication.receive({ ...batch, events }, mac.environmentId, false)),
-    ).toMatchObject({ reason: "invalid-batch" });
-    expect((yield* hub.replication.cursors(mac.environmentId)).received.events).toBe(0);
+      (yield* hub.sql`SELECT DISTINCT reason FROM thread_replication_deferred`)[0]?.reason,
+    ).toBe("invalid-batch");
+    expect((yield* hub.replication.cursors(mac.environmentId)).received).toEqual(batch.cursor);
   }).pipe(Effect.scoped),
 );
 

@@ -421,6 +421,14 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
             ),
           ),
         );
+  const scheduled = new Map<string, Effect.Effect<void>>();
+  const register: Scheduler.Scheduler["Service"]["register"] = Effect.fnUntraced(function* <E, R>(
+    name: string,
+    work: Effect.Effect<void, E, R>,
+  ) {
+    const services = yield* Effect.context<R>();
+    scheduled.set(name, work.pipe(Effect.provideContext(services), Effect.orDie));
+  });
   const context = yield* inStores(
     Layer.build(
       Layer.mergeAll(
@@ -478,7 +486,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
         Layer.provide(
           Layer.succeed(Machines.Machines, { ...machine.machines, subscribe: Stream.never }),
         ),
-        Layer.provide(Layer.succeed(Scheduler.Scheduler, { register: () => Effect.void })),
+        Layer.provide(Layer.succeed(Scheduler.Scheduler, { register })),
         Layer.provide(threads),
         Layer.provide(
           Option.isSome(engine)
@@ -533,6 +541,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
     remoteLaunch,
     launched,
     restartReplication,
+    scheduled,
     sink,
     projections,
     sql,

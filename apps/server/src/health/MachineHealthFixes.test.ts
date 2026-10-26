@@ -67,12 +67,25 @@ const fromVps: MachineHealthFixResult = {
   outcomes: [{ itemKey: "stuck-runs:thread:a", status: "fixed", message: "Stopped." }],
 };
 
+const syncCheck = {
+  id: "sync",
+  status: "fail",
+  summary: "",
+  items: [
+    item(`sync:quarantined:${vps}`, "retry-sync", {
+      _tag: "machine",
+      environmentId: vps,
+    }),
+  ],
+} as const;
+
 const harness = (
   withVersionItem = false,
   capability: "boot-service" | "desktop-managed" | null = "boot-service",
 ) =>
   Effect.gen(function* () {
     const ran: Array<string> = [];
+    const retried: Array<EnvironmentId> = [];
     const peerCalls: Array<{ environmentId: EnvironmentId; channel: string; payload: unknown }> =
       [];
     const self: MachineSelfReport = {
@@ -132,10 +145,15 @@ const harness = (
                             }),
                           ],
                         },
+                        syncCheck,
                       ],
                     }
-                  : report,
+                  : { ...report, checks: [...report.checks, syncCheck] },
               ),
+              retrySync: ({ environmentId }) =>
+                Effect.sync(() => {
+                  retried.push(environmentId);
+                }),
             }),
             Layer.mock(Machines.Machines)({
               list: Effect.succeed({
@@ -162,10 +180,25 @@ const harness = (
     );
     const fixes = yield* MachineHealthFixes.MachineHealthFixes.pipe(Effect.provideContext(context));
     const channels = yield* PeerChannels.PeerChannels.pipe(Effect.provideContext(context));
-    return { fixes, channels, ran, peerCalls };
+    return { fixes, channels, ran, peerCalls, retried };
   });
 
 describe("MachineHealthFixes", () => {
+  it.effect("retries quarantine through the peer Fix channel on the receiving machine", () =>
+    Effect.gen(function* () {
+      const { channels, retried } = yield* harness();
+      const served = yield* channels.dispatch({
+        channel: MachineHealthFixRun.name,
+        payload: { itemKeys: [`sync:quarantined:${vps}`] },
+        caller: { environmentId: vps, scopes: [AuthPeerDelegateScope] },
+      });
+      expect(retried).toEqual([vps]);
+      expect(served).toMatchObject({
+        outcomes: [{ itemKey: `sync:quarantined:${vps}`, status: "fixed" }],
+      });
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("runs direct fixes here and hands the rest to an agent", () =>
     Effect.gen(function* () {
       const { fixes, ran, peerCalls } = yield* harness();

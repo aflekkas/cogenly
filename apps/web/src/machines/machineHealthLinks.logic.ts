@@ -315,6 +315,9 @@ function legacyHealthCommand(
         ? { kind: "setupSandbox", itemKey, environmentId: origin }
         : null;
     case "retry-sync": {
+      // Quarantine is stored on the receiving machine. An older intermediary
+      // can retry its own outgoing sync, but cannot replay the origin's held rows.
+      if (itemKey.startsWith("sync:quarantined:") && !context.isConnected(origin)) return null;
       const peer =
         target?._tag === "machine" && target.environmentId !== origin
           ? target.environmentId
