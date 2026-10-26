@@ -265,6 +265,19 @@ const make = Effect.gen(function* () {
               Effect.as({ itemKey, status: "fixed", message: "Started a new run." } as const),
               Effect.catch((error) => Effect.succeed(failed(error.message))),
             );
+      case "discard-quarantined":
+        return target?._tag !== "thread"
+          ? Effect.succeed(failed("The thread to discard incoming changes for is missing."))
+          : health.discardQuarantined(target.threadId).pipe(
+              Effect.map((count) => ({
+                itemKey,
+                status: "fixed" as const,
+                message: `Discarded ${count} quarantined incoming items for ${item.title.replace("Discard quarantined changes for ", "")}. Local thread data was kept.`,
+              })),
+              Effect.catch(() =>
+                Effect.succeed(failed("Quarantined changes could not be discarded.")),
+              ),
+            );
       case "retry-sync":
         return target?._tag !== "machine"
           ? Effect.succeed(failed("The machine to sync with is missing."))

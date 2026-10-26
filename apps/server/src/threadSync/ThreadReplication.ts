@@ -57,6 +57,10 @@ export class ThreadReplication extends Context.Service<
   ThreadReplication,
   {
     readonly replayHeld: Effect.Effect<void>;
+    /** Drops only incoming quarantine rows, never local history or projections. */
+    readonly discardQuarantined: (
+      threadId: string,
+    ) => Effect.Effect<number, ThreadReplicationError>;
     readonly environmentId: EnvironmentId;
     /** The recorded owner; undefined for a thread created here and never handed off. */
     readonly owner: (threadId: ThreadId) => Effect.Effect<ThreadOwnerRecord | undefined>;
@@ -952,9 +956,10 @@ const make = Effect.gen(function* () {
     for (const item of [...metas, ...events])
       if (item.threadId === undefined) reasons.set(undefined, "missing-thread");
     for (const item of events)
-      if (!metaThreads.has(item.threadId)) reasons.set(item.threadId, "missing-meta");
+      if (item.threadId !== undefined && !metaThreads.has(item.threadId))
+        reasons.set(item.threadId, "missing-meta");
     for (const item of metas)
-      if (!trustedRelay && rawField(item.raw, "owner") !== source)
+      if (item.threadId !== undefined && !trustedRelay && rawField(item.raw, "owner") !== source)
         reasons.set(item.threadId, "wrong-owner");
     for (const item of [...metas, ...events]) {
       if (item.decoded._tag === "None") held.add(item.threadId!);
@@ -980,20 +985,24 @@ const make = Effect.gen(function* () {
 
   const receivePriority: ThreadReplication["Service"]["receivePriority"] = Effect.fn(
     "ThreadReplication.receivePriority",
-  )(function* (threadId, batch, source, trustedRelay) {
-    if ([...batch.events, ...batch.meta].some((raw) => rawThreadId(raw) !== threadId))
-      return yield* new ThreadReplicationError({ reason: "invalid-batch" });
-    const split = yield* splitBatch(batch, source, trustedRelay);
-    if (split.deferred.length > 0)
-      return yield* new ThreadReplicationError({ reason: "invalid-batch" });
-    yield* applyItems(
-      split.metas,
-      split.events,
-      source,
-      `priority:${encodeURIComponent(threadId)}:${batch.cursor.events}`,
-      trustedRelay,
-    );
-  }, Effect.mapError(storage));
+  )(
+    function* (threadId, batch, source, trustedRelay) {
+      if ([...batch.events, ...batch.meta].some((raw) => rawThreadId(raw) !== threadId))
+        return yield* new ThreadReplicationError({ reason: "invalid-batch" });
+      const split = yield* splitBatch(batch, source, trustedRelay);
+      if (split.deferred.length > 0)
+        return yield* new ThreadReplicationError({ reason: "invalid-batch" });
+      yield* applyItems(
+        split.metas,
+        split.events,
+        source,
+        `priority:${encodeURIComponent(threadId)}:${batch.cursor.events}`,
+        trustedRelay,
+      );
+    },
+    Effect.mapError(storage),
+    replayPermit.withPermits(1),
+  );
 
   const receive: ThreadReplication["Service"]["receive"] = Effect.fn("ThreadReplication.receive")(
     function* (batch, source, trustedRelay) {
@@ -1014,19 +1023,43 @@ const make = Effect.gen(function* () {
         items: ReadonlyArray<{ kind: "meta" | "event"; raw: unknown }>,
       ) =>
         Effect.gen(function* () {
-          for (const item of items)
+          // Keep appending, but retain at most 1,000 items / 16 MiB per thread.
+          // Once trimmed, history requires an explicit discard, never partial replay.
+          const inherited = (yield* sql<{
+            reason: string | null;
+          }>`SELECT reason FROM thread_replication_deferred
+            WHERE thread_id = ${threadId} AND reason IS NOT NULL LIMIT 1`)[0]?.reason;
+          for (const item of items) {
+            const json = encodeJson(item.raw);
+            const oversized = Buffer.byteLength(json) > 16 * 1024 * 1024;
             yield* sql`INSERT INTO thread_replication_deferred(thread_id, item_kind, source_env, trusted_relay, item_json, reason)
-              SELECT ${threadId}, ${item.kind}, ${source}, ${trustedRelay ? 1 : 0}, ${encodeJson(item.raw)}, ${reason}
+              SELECT ${threadId}, ${item.kind}, ${source}, ${trustedRelay ? 1 : 0}, ${oversized ? encodeJson({ threadId, discardedOversizedItem: true }) : json}, ${oversized ? "capacity" : (reason ?? inherited ?? null)}
               WHERE NOT EXISTS (SELECT 1 FROM thread_replication_deferred
                 WHERE thread_id = ${threadId} AND source_env = ${source}
-                  AND item_kind = ${item.kind} AND item_json = ${encodeJson(item.raw)})`;
+                  AND item_kind = ${item.kind} AND item_json = ${json})`;
+          }
+          const removed = yield* sql`DELETE FROM thread_replication_deferred WHERE seq IN (
+            SELECT seq FROM (
+              SELECT seq, ROW_NUMBER() OVER (ORDER BY seq DESC) AS n,
+                SUM(length(CAST(item_json AS BLOB))) OVER (ORDER BY seq DESC) AS bytes
+              FROM thread_replication_deferred WHERE thread_id = ${threadId})
+            WHERE n > 1000 OR bytes > ${16 * 1024 * 1024}) RETURNING seq`;
+          if (removed.length > 0) {
+            yield* sql`UPDATE thread_replication_deferred SET reason = 'capacity' WHERE thread_id = ${threadId}`;
+            yield* Effect.logWarning("Thread quarantine capacity reached", {
+              threadId,
+              droppedItems: removed.length,
+            });
+          }
         });
-      for (const item of split.deferred)
-        yield* hold(
-          item.threadId ?? `invalid:${source}`,
-          split.reasons.get(item.threadId) ?? null,
-          [item],
-        );
+      const deferredByThread = new Map<string | undefined, typeof split.deferred>();
+      for (const item of split.deferred) {
+        const items = deferredByThread.get(item.threadId) ?? [];
+        items.push(item);
+        deferredByThread.set(item.threadId, items);
+      }
+      for (const [threadId, items] of deferredByThread)
+        yield* hold(threadId ?? `invalid:${source}`, split.reasons.get(threadId) ?? null, items);
       for (const { meta, raw } of split.metas) {
         const events = split.events.filter(({ event }) => event.threadId === meta.threadId);
         yield* sql
@@ -1121,6 +1154,21 @@ const make = Effect.gen(function* () {
       if (next === undefined) return;
       const { thread_id: threadId, through } = next;
       afterThread = threadId;
+      // Older builds stored structural failures as unreadable version skew.
+      yield* sql`UPDATE thread_replication_deferred SET reason = CASE
+        WHEN json_type(item_json, '$.threadId') IS NOT 'text' THEN 'missing-thread'
+        WHEN item_kind = 'meta' AND trusted_relay = 0
+          AND json_extract(item_json, '$.owner') IS NOT source_env THEN 'wrong-owner'
+        WHEN item_kind = 'event' AND NOT EXISTS (
+          SELECT 1 FROM thread_replication_deferred m WHERE m.thread_id = ${threadId} AND m.item_kind = 'meta'
+        ) THEN 'missing-meta' ELSE reason END
+        WHERE thread_id = ${threadId} AND reason IS NULL AND json_valid(item_json)`;
+      if (
+        (yield* sql`SELECT 1 FROM thread_replication_deferred WHERE thread_id = ${threadId}
+        AND reason IN ('capacity', 'missing-thread', 'missing-meta', 'wrong-owner') LIMIT 1`)
+          .length > 0
+      )
+        continue;
       if (!(yield* readableHeld(threadId, through))) continue;
       for (;;) {
         const page = (yield* heldPage(threadId, 0, through)).map(decodeHeld);
@@ -1191,6 +1239,25 @@ const make = Effect.gen(function* () {
     Effect.catchCause((cause) =>
       Effect.logWarning("Could not replay held replicated threads", { cause }),
     ),
+    replayPermit.withPermits(1),
+  );
+
+  const discardQuarantined: ThreadReplication["Service"]["discardQuarantined"] = Effect.fn(
+    "ThreadReplication.discardQuarantined",
+  )(
+    function* (threadId) {
+      const removed =
+        yield* sql`DELETE FROM thread_replication_deferred WHERE thread_id = ${threadId}
+      AND EXISTS (SELECT 1 FROM thread_replication_deferred WHERE thread_id = ${threadId} AND reason IS NOT NULL)
+      RETURNING seq`;
+      yield* Effect.logWarning("Discarded quarantined incoming thread changes", {
+        threadId,
+        itemCount: removed.length,
+        environmentId,
+      });
+      return removed.length;
+    },
+    Effect.mapError(storage),
     replayPermit.withPermits(1),
   );
 
@@ -1473,6 +1540,7 @@ const make = Effect.gen(function* () {
   yield* sql.withTransaction(projectReplicaFilings()).pipe(Effect.orDie);
   return ThreadReplication.of({
     replayHeld,
+    discardQuarantined,
     environmentId,
     owner,
     remoteOwners,

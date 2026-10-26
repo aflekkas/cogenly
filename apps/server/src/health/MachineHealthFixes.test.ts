@@ -12,6 +12,7 @@ import {
   type MachineSelfReport,
   type PeerChannel,
   ScheduledTaskId,
+  ThreadId,
 } from "@cogenly/contracts";
 import { NodeCrypto } from "@effect/platform-node";
 import * as DateTime from "effect/DateTime";
@@ -72,6 +73,10 @@ const syncCheck = {
   status: "fail",
   summary: "",
   items: [
+    item("sync:quarantined-thread:thread:bad", "discard-quarantined", {
+      _tag: "thread",
+      threadId: ThreadId.make("thread:bad"),
+    }),
     item(`sync:quarantined:${vps}`, "retry-sync", {
       _tag: "machine",
       environmentId: vps,
@@ -150,6 +155,11 @@ const harness = (
                     }
                   : { ...report, checks: [...report.checks, syncCheck] },
               ),
+              discardQuarantined: (threadId) =>
+                Effect.sync(() => {
+                  ran.push(`discard:${threadId}`);
+                  return 7;
+                }),
               retrySync: ({ environmentId }) =>
                 Effect.sync(() => {
                   retried.push(environmentId);
@@ -184,6 +194,23 @@ const harness = (
   });
 
 describe("MachineHealthFixes", () => {
+  it.effect("discards only the named quarantine through the peer Fix channel", () =>
+    Effect.gen(function* () {
+      const { channels, ran, retried } = yield* harness();
+      const served = yield* channels.dispatch({
+        channel: MachineHealthFixRun.name,
+        payload: { itemKeys: ["sync:quarantined-thread:thread:bad"] },
+        caller: { environmentId: vps, scopes: [AuthPeerDelegateScope] },
+      });
+      expect(ran).toEqual(["discard:thread:bad"]);
+      expect(retried).toEqual([]);
+      expect(served).toMatchObject({
+        outcomes: [
+          { status: "fixed", message: expect.stringContaining("7 quarantined incoming items") },
+        ],
+      });
+    }).pipe(Effect.scoped),
+  );
   it.effect("retries quarantine through the peer Fix channel on the receiving machine", () =>
     Effect.gen(function* () {
       const { channels, retried } = yield* harness();

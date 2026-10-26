@@ -57,6 +57,22 @@ function problem(overrides: Partial<MachineHealthProblem> = {}): MachineHealthPr
 }
 
 describe("healthFixAction", () => {
+  it("routes a named quarantine discard through the connected peer", () => {
+    const quarantine = problem({
+      itemKey: "sync:quarantined-thread:thread-1",
+      checkId: "sync",
+      title: "Discard quarantined changes for Brakes",
+      detail: "7 incoming items (2048 bytes)",
+      fix: "discard-quarantined",
+    });
+    expect(
+      healthFixAction([quarantine], context([LAPTOP], { viaEnvironmentId: LAPTOP })),
+    ).toMatchObject({
+      kind: "fix",
+      originEnvironmentId: HUB,
+      direct: { environmentId: LAPTOP, itemKeys: [quarantine.itemKey] },
+    });
+  });
   it("runs a direct fix on the origin when this client reaches it", () => {
     expect(healthFixAction([problem()], context([HUB, LAPTOP]))).toMatchObject({
       kind: "fix",

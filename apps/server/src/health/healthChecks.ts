@@ -159,11 +159,18 @@ export function buildReport(input: {
 /**
  * What a Fix without named items fixes (MCP without `itemKeys`, `cogenly health
  * --fix`): every bad item with a fix the server runs without the owner.
+ * Discarding held history requires naming the item explicitly.
  */
 export const directlyFixableItemKeys = (report: MachineHealthReport) =>
   report.checks
     .flatMap((entry) => entry.items)
-    .filter((entry) => entry.status !== "ok" && entry.fix !== null && entry.fix !== "sign-in")
+    .filter(
+      (entry) =>
+        entry.status !== "ok" &&
+        entry.fix !== null &&
+        entry.fix !== "sign-in" &&
+        entry.fix !== "discard-quarantined",
+    )
     .map((entry) => entry.key)
     .slice(0, MACHINE_HEALTH_FIX_MAX_ITEMS);
 
@@ -481,6 +488,22 @@ export function trackSyncProgress(
   };
 }
 
+/** A discard names one thread and the exact retained incoming volume. */
+export const quarantinedThreadItem = (input: {
+  readonly threadId: ThreadId;
+  readonly title: string | null;
+  readonly count: number;
+  readonly bytes: number;
+}): MachineHealthItem =>
+  item({
+    key: `sync:quarantined-thread:${input.threadId}`,
+    status: "fail",
+    title: `Discard quarantined changes for ${input.title ?? input.threadId}`,
+    detail: `${input.count} incoming items (${input.bytes} bytes). Discard removes only these held changes; local thread data is kept. Later events can sync. Retention is capped at 1,000 items or 16 MiB per thread.`,
+    target: { _tag: "thread", threadId: input.threadId },
+    fix: "discard-quarantined",
+  });
+
 export function syncCheck(input: {
   readonly peers: ReadonlyArray<{
     readonly sample: SyncPeerSample;
@@ -499,9 +522,8 @@ export function syncCheck(input: {
           status: "fail",
           title: `${plural(sample.quarantined!, "change")} from ${sample.name} quarantined`,
           detail:
-            "Invalid thread history could not be applied. Fix retries it; other threads continue syncing.",
+            "Invalid thread history could not be applied. Review the per-thread discard actions; other threads continue syncing.",
           target,
-          fix: "retry-sync",
         }),
       );
     }
