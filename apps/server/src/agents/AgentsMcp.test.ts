@@ -19,6 +19,7 @@ import * as Access from "../mcp/McpToolAccess.ts";
 import { liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
 import * as Labels from "../projectLabels/ProjectLabelService.ts";
 import * as Service from "./AgentService.ts";
+import * as AgentStore from "./AgentStore.ts";
 import * as AgentsMcp from "./AgentsMcp.ts";
 import { agentFixture } from "./agent.testkit.ts";
 
@@ -39,6 +40,7 @@ const clientScope = (access: "read-only" | "full-access") =>
 const organizer = (access: "read-only" | "full-access", moves: Array<unknown>) =>
   Layer.mergeAll(
     clientScope(access),
+    Layer.mock(AgentStore.AgentStore)({ forThread: () => Effect.succeed(null) }),
     Layer.mock(Threads.ThreadManagementService)({
       getThreadShell: (id) => Effect.succeed(liveThreadShell(id)),
     }),
@@ -157,6 +159,7 @@ it.effect.each([
         Layer.mock(Threads.ThreadManagementService)({
           getThreadShell: (id) => Effect.succeed(id === threadId ? shell : null),
         }),
+        Layer.mock(AgentStore.AgentStore)({ forThread: () => Effect.succeed(null) }),
         Layer.mock(Service.AgentService)({
           builderStart: (input) =>
             Effect.sync(() => {

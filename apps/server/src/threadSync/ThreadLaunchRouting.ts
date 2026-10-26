@@ -782,8 +782,13 @@ const make = Effect.gen(function* () {
     }),
   );
 
-  yield* registry.registerAgentDelete((machine, agentId) =>
-    routing.callMachine(machine, ThreadAgentDelete, { target: machine, agentId }, LAUNCH_TIMEOUT),
+  yield* registry.registerAgentDelete((machine, agentId, callerAgentId) =>
+    routing.callMachine(
+      machine,
+      ThreadAgentDelete,
+      { target: machine, agentId, ...(callerAgentId ? { callerAgentId } : {}) },
+      LAUNCH_TIMEOUT,
+    ),
   );
   yield* channels.register(ThreadAgentDelete, (payload, caller) =>
     Effect.gen(function* () {
@@ -804,7 +809,7 @@ const make = Effect.gen(function* () {
           detail: "This server cannot delete agents.",
         });
       const result = yield* agentService.value
-        .delete(payload.agentId)
+        .delete(payload.agentId, payload.callerAgentId)
         .pipe(
           Effect.mapError(
             (cause) => new ThreadRemoteError({ reason: "rejected", detail: cause.message }),
@@ -815,7 +820,7 @@ const make = Effect.gen(function* () {
       return result;
     }),
   );
-  yield* registry.registerAgentCreate((machine, input, agentId) =>
+  yield* registry.registerAgentCreate((machine, input, agentId, callerAgentId) =>
     Effect.gen(function* () {
       const view = yield* topology;
       yield* nextHop(view, machine);
@@ -835,7 +840,13 @@ const make = Effect.gen(function* () {
       return yield* routing.callMachine(
         machine,
         ThreadAgentCreate,
-        { target: machine, agentId, project, input: portable },
+        {
+          target: machine,
+          agentId,
+          ...(callerAgentId ? { callerAgentId } : {}),
+          project,
+          input: portable,
+        },
         LAUNCH_TIMEOUT,
       );
     }),
@@ -871,8 +882,20 @@ const make = Effect.gen(function* () {
             ),
           );
       const projectId = yield* localProject(payload.project);
+      if (
+        payload.callerAgentId !== undefined &&
+        (payload.input.permissions !== undefined || payload.input.runtimeMode !== undefined)
+      )
+        return yield* new ThreadRemoteError({
+          reason: "rejected",
+          detail: "Only the owner can change agent permissions or runtime mode.",
+        });
       const result = yield* agentService.value
-        .upsert({ ...payload.input, projectId, ownerMachine: self }, payload.agentId)
+        .upsert(
+          { ...payload.input, projectId, ownerMachine: self },
+          payload.agentId,
+          payload.callerAgentId,
+        )
         .pipe(
           Effect.mapError(
             (error) => new ThreadRemoteError({ reason: "rejected", detail: error.message }),

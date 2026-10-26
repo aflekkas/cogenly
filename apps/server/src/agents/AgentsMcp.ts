@@ -18,12 +18,14 @@ import * as Invocation from "../mcp/McpInvocationContext.ts";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import * as Labels from "../projectLabels/ProjectLabelService.ts";
 import * as Service from "./AgentService.ts";
+import * as AgentStore from "./AgentStore.ts";
 
 const shared = {
   failure: OrchestratorMcpFailure,
   failureMode: "return" as const,
   dependencies: [
     Service.AgentService,
+    AgentStore.AgentStore,
     Invocation.McpInvocationContext,
     Threads.ThreadManagementService,
   ],
@@ -85,16 +87,28 @@ const unavailable = (cause: unknown) =>
     code: "orchestration_error",
     message: hasMessage(cause) ? cause.message : "Could not reach agent management.",
   });
+/** The persistent agent calling through this thread, if any. Owner chats have none. */
+const callerAgentId = Effect.gen(function* () {
+  const scope = yield* Invocation.McpInvocationContext;
+  if (scope.thread === undefined) return undefined;
+  const store = yield* AgentStore.AgentStore;
+  const agent = yield* store
+    .forThread(scope.thread.threadId)
+    .pipe(Effect.orElseSucceed(() => null));
+  return agent?.id;
+});
 export const handlers = Access.toLayer(toolkit, {
   update_agent: Access.writes((input) =>
     Effect.gen(function* () {
-      return yield* (yield* Service.AgentService).update(input).pipe(Effect.mapError(unavailable));
+      return yield* (yield* Service.AgentService)
+        .update(input, yield* callerAgentId)
+        .pipe(Effect.mapError(unavailable));
     }),
   ),
   delete_agent: Access.writes((input) =>
     Effect.gen(function* () {
       return yield* (yield* Service.AgentService)
-        .delete(input.id)
+        .delete(input.id, yield* callerAgentId)
         .pipe(Effect.mapError(unavailable));
     }),
   ),

@@ -218,6 +218,14 @@ const make = Effect.gen(function* () {
           return yield* denied(
             "Only the owner can change agent authority. Use request_agent_approval for your own permissions.",
           );
+        if (
+          (name === "update_agent" || name === "delete_agent") &&
+          typeof params.id === "string" &&
+          params.id !== agent.id
+        )
+          return yield* denied(
+            "A persistent agent can only edit or delete itself. Ask the owner to change other agents.",
+          );
         if (name === "update_agent_project" && params.id !== agent.id)
           return yield* denied(
             "An agent can only move its own conversation between projects. Ask the owner to move other agents.",

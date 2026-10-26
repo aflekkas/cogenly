@@ -42,6 +42,7 @@ import {
   MessageId,
   RunId,
   ScheduledTaskId,
+  AgentId,
   ThreadId,
   TurnItemId,
   type OrchestrationV2Run,
@@ -2654,6 +2655,41 @@ it.effect(
         ).toMatchObject({ _tag: "Failure" });
       }).pipe(Effect.provide(h.layer));
     }),
+);
+
+it.effect("a persistent agent caller can edit only itself; the owner can edit any agent", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const store = yield* Store.AgentStore;
+      const agents = yield* Agents.AgentService;
+      const self = yield* store.save(h.fixture);
+      const other = yield* store.save({
+        ...h.fixture,
+        id: AgentId.make("agent:other"),
+        conversationThreadId: ThreadId.make("agent-conversation:other"),
+      });
+      // Agent A cannot edit or delete agent B.
+      expect(
+        yield* agents.update({ id: other.id, name: "Hijacked" }, self.id).pipe(Effect.result),
+      ).toMatchObject({ _tag: "Failure" });
+      expect(yield* agents.delete(other.id, self.id).pipe(Effect.result)).toMatchObject({
+        _tag: "Failure",
+      });
+      // Nor change its own authority.
+      expect(
+        yield* agents
+          .update({ id: self.id, permissions: self.permissions }, self.id)
+          .pipe(Effect.result),
+      ).toMatchObject({ _tag: "Failure" });
+      // It can edit itself, and the owner's chat (no caller) can edit anyone.
+      const renamed = yield* agents.update({ id: self.id, name: "Renamed" }, self.id);
+      expect(renamed.agent.name).toBe("Renamed");
+      const ownerEdit = yield* agents.update({ id: other.id, name: "Owner edit" });
+      expect(ownerEdit.agent.name).toBe("Owner edit");
+      expect((yield* agents.delete(other.id)).deleted).toBe(true);
+    }).pipe(Effect.provide(h.layer));
+  }),
 );
 
 it.effect("sweeps busy-turn results once through the queue and coalesces repeated PR updates", () =>

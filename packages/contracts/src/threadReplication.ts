@@ -570,6 +570,8 @@ export const ThreadAgentCreate = makePeerChannel({
   payload: Schema.Struct({
     target: EnvironmentId,
     agentId: AgentId,
+    /** Set when a persistent agent (not the owner) authored this edit; the owner machine enforces it. */
+    callerAgentId: Schema.optionalKey(AgentId),
     project: ThreadLaunchProject,
     input: Schema.Struct(PortableAgentFields),
   }),
@@ -581,7 +583,11 @@ export const ThreadAgentCreate = makePeerChannel({
 export const ThreadAgentDelete = makePeerChannel({
   name: "threads.agent-delete.v1",
   scope: AuthPeerDelegateScope,
-  payload: Schema.Struct({ target: EnvironmentId, agentId: AgentId }),
+  payload: Schema.Struct({
+    target: EnvironmentId,
+    agentId: AgentId,
+    callerAgentId: Schema.optionalKey(AgentId),
+  }),
   success: Schema.Struct({ deleted: Schema.Boolean }),
   error: ThreadRemoteError,
 });

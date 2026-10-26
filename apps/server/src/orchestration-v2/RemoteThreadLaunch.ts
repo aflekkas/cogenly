@@ -54,11 +54,13 @@ export type RemoteAgentCreate = (
   machine: EnvironmentId,
   input: AgentUpsertInput,
   agentId: AgentId,
+  callerAgentId?: AgentId,
 ) => Effect.Effect<AgentMutationResult, ThreadRemoteError>;
 
 export type RemoteAgentDelete = (
   machine: EnvironmentId,
   id: AgentId,
+  callerAgentId?: AgentId,
 ) => Effect.Effect<{ deleted: boolean }, ThreadRemoteError>;
 
 export type RemoteTaskBranch = (
@@ -157,17 +159,17 @@ export const layer = Layer.effect(
         Effect.acquireRelease(Ref.set(agentDeletion, remove), () =>
           Ref.set(agentDeletion, undefined),
         ),
-      deleteAgent: (machine, id) =>
+      deleteAgent: (machine, id, callerAgentId) =>
         Ref.get(agentDeletion).pipe(
           Effect.flatMap((remove) =>
             remove === undefined
               ? Effect.fail(new ThreadRemoteError({ reason: "offline" }))
-              : remove(machine, id),
+              : remove(machine, id, callerAgentId),
           ),
         ),
       registerAgentCreate: (create) =>
         Effect.acquireRelease(Ref.set(agents, create), () => Ref.set(agents, undefined)),
-      createAgent: (machine, input, agentId) =>
+      createAgent: (machine, input, agentId, callerAgentId) =>
         Ref.get(agents).pipe(
           Effect.flatMap((create) =>
             create === undefined
@@ -177,7 +179,7 @@ export const layer = Layer.effect(
                     detail: "Machine agent creation is unavailable.",
                   }),
                 )
-              : create(machine, input, agentId),
+              : create(machine, input, agentId, callerAgentId),
           ),
         ),
       registerResultPending: (reader) =>

@@ -95,8 +95,12 @@ export class AgentService extends Context.Service<
     readonly upsert: (
       input: AgentUpsertInput,
       creationId?: AgentId,
+      callerAgentId?: AgentId,
     ) => Effect.Effect<{ agent: Agent }, AgentError>;
-    readonly update: (input: AgentUpdateInput) => Effect.Effect<{ agent: Agent }, AgentError>;
+    readonly update: (
+      input: AgentUpdateInput,
+      callerAgentId?: AgentId,
+    ) => Effect.Effect<{ agent: Agent }, AgentError>;
     /** Re-file the agent's conversation in a project folder, or unfile it with null. */
     readonly setProject: (
       input: AgentSetProjectInput,
@@ -109,7 +113,10 @@ export class AgentService extends Context.Service<
       readonly threadId: ThreadId;
       readonly proposal: AgentBuilderProposal;
     }) => Effect.Effect<{ proposal: AgentBuilderProposal }, AgentError>;
-    readonly delete: (id: AgentId) => Effect.Effect<{ deleted: boolean }, AgentError>;
+    readonly delete: (
+      id: AgentId,
+      callerAgentId?: AgentId,
+    ) => Effect.Effect<{ deleted: boolean }, AgentError>;
     readonly send: (input: AgentSendInput) => Effect.Effect<
       {
         threadId: ThreadId;
@@ -286,8 +293,28 @@ const make = Effect.gen(function* () {
       yield* store.markPosted(run.id);
       yield* changed;
     });
-  const removeAgent = (id: AgentId) =>
+  // A persistent agent caller may edit or delete only itself, and may never
+  // touch permissions or runtime mode even on itself. Owner chats and the UI
+  // pass no callerAgentId and stay unrestricted. Forwarded (remote) edits
+  // carry the caller id over the peer channel and are checked again here.
+  const agentCallerDenial = (
+    callerAgentId: AgentId | undefined,
+    targetId: AgentId,
+    authority: { readonly permissions?: unknown; readonly runtimeMode?: unknown },
+  ): AgentError | undefined =>
+    callerAgentId === undefined
+      ? undefined
+      : callerAgentId !== targetId
+        ? new AgentError({ message: "A persistent agent can only edit or delete itself." })
+        : authority.permissions !== undefined || authority.runtimeMode !== undefined
+          ? new AgentError({
+              message: "Only the owner can change agent permissions or runtime mode.",
+            })
+          : undefined;
+  const removeAgent = (id: AgentId, callerAgentId?: AgentId) =>
     Effect.gen(function* () {
+      const denial = agentCallerDenial(callerAgentId, id, {});
+      if (denial) return yield* denial;
       const agent = (yield* store.list()).find((candidate) => candidate.id === id);
       if (agent === undefined) return { deleted: false };
       if (agent.ownerMachine !== undefined && agent.ownerMachine !== shared.environmentId) {
@@ -295,18 +322,20 @@ const make = Effect.gen(function* () {
           return yield* new AgentError({
             message: "The owner machine is offline. Reconnect it to delete this agent.",
           });
-        const result = yield* remoteLaunch.value.deleteAgent(agent.ownerMachine, id).pipe(
-          Effect.mapError(
-            (cause) =>
-              new AgentError({
-                message:
-                  cause.reason === "offline"
-                    ? "The owner machine is offline. Reconnect it to delete this agent."
-                    : cause.message,
-                cause,
-              }),
-          ),
-        );
+        const result = yield* remoteLaunch.value
+          .deleteAgent(agent.ownerMachine, id, callerAgentId)
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new AgentError({
+                  message:
+                    cause.reason === "offline"
+                      ? "The owner machine is offline. Reconnect it to delete this agent."
+                      : cause.message,
+                  cause,
+                }),
+            ),
+          );
         yield* changed;
         return result;
       }
@@ -544,8 +573,18 @@ const make = Effect.gen(function* () {
         yield* inbox.sweep(agent);
       }
     }).pipe(Effect.mapError(failure));
-  const upsert: AgentService["Service"]["upsert"] = (input, creationId) =>
+  const upsert: AgentService["Service"]["upsert"] = (input, creationId, callerAgentId) =>
     Effect.gen(function* () {
+      if (callerAgentId !== undefined) {
+        // Target check only: update() already checked the raw authority
+        // fields, and its merged upsert input always carries stored ones.
+        const targetId = input.id ?? creationId;
+        const denial =
+          targetId === undefined
+            ? new AgentError({ message: "A persistent agent cannot create other agents." })
+            : agentCallerDenial(callerAgentId, targetId, {});
+        if (denial) return yield* denial;
+      }
       const at = DateTime.formatIso(yield* DateTime.now);
       const existing =
         input.id === undefined
@@ -574,7 +613,7 @@ const make = Effect.gen(function* () {
             )?.name ?? ownerMachine)
           : ownerMachine;
         const result = yield* remoteLaunch.value
-          .createAgent(ownerMachine, { ...input, ownerMachine }, id)
+          .createAgent(ownerMachine, { ...input, ownerMachine }, id, callerAgentId)
           .pipe(
             Effect.mapError(
               (cause) =>
@@ -764,26 +803,32 @@ const make = Effect.gen(function* () {
         }),
       ),
     upsert,
-    update: (input) =>
+    update: (input, callerAgentId) =>
       Effect.gen(function* () {
+        const denial = agentCallerDenial(callerAgentId, input.id, input);
+        if (denial) return yield* denial;
         const existing = yield* store.get(input.id);
-        return yield* upsert({
-          ...existing,
-          ...input,
-          name: input.name ?? existing.name,
-          instructions: input.instructions ?? existing.instructions,
-          modelSelection: input.modelSelection ?? existing.modelSelection,
-          runtimeMode: input.runtimeMode ?? existing.runtimeMode,
-          dailyRunCap: input.dailyRunCap ?? existing.dailyRunCap,
-          avatar:
-            input.avatar === undefined
-              ? existing.avatar
-              : {
-                  ...existing.avatar,
-                  ...input.avatar,
-                  seed: input.avatar.seed ?? existing.avatar.seed,
-                },
-        });
+        return yield* upsert(
+          {
+            ...existing,
+            ...input,
+            name: input.name ?? existing.name,
+            instructions: input.instructions ?? existing.instructions,
+            modelSelection: input.modelSelection ?? existing.modelSelection,
+            runtimeMode: input.runtimeMode ?? existing.runtimeMode,
+            dailyRunCap: input.dailyRunCap ?? existing.dailyRunCap,
+            avatar:
+              input.avatar === undefined
+                ? existing.avatar
+                : {
+                    ...existing.avatar,
+                    ...input.avatar,
+                    seed: input.avatar.seed ?? existing.avatar.seed,
+                  },
+          },
+          undefined,
+          callerAgentId,
+        );
       }).pipe(Effect.mapError(failure)),
     setProject: (input) =>
       Effect.gen(function* () {
