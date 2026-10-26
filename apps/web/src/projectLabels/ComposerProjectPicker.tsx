@@ -120,6 +120,8 @@ export function ComposerProjectPicker(props: {
   readonly draftId: DraftId | null;
   readonly size: ComposerControlSize;
   readonly disabled?: boolean;
+  /** Looks as usual but does not open, for a moment too brief to dim it for. */
+  readonly locked?: boolean;
   /**
    * `hero` is the new-chat greeting's " · in <project>" tail: the same picker,
    * opened from the project's name, and nothing to click without a project.
@@ -228,7 +230,7 @@ export function ComposerProjectPicker(props: {
   };
 
   const choose = async (option: ProjectOption) => {
-    if (busy) return;
+    if (busy || props.locked) return;
     if (option.kind === "new" || option.kind === "create") {
       setOpen(false);
       setQuery("");
@@ -269,6 +271,7 @@ export function ComposerProjectPicker(props: {
       open={open}
       onOpenChange={(next, details) => {
         if (!next && details.reason === "item-press") return;
+        if (next && props.locked) return;
         setOpen(next);
         if (!next) setQuery("");
       }}

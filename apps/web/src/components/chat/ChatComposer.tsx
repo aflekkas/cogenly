@@ -4742,7 +4742,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   threadId={activeThreadId}
                   draftId={routeKind === "draft" ? draftId : null}
                   size={composerControlsCollapsed ? "xs" : "sm"}
-                  disabled={isSendBusy}
+                  // A draft's first send has already read its pick, so one made mid-send
+                  // would be dropped; it stays shut without dimming for that moment.
+                  locked={isSendBusy && routeKind === "draft"}
                 />
               </>
             ),
@@ -4759,7 +4761,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 environmentId={environmentId}
                 projectLabelId={composerProjectLabelId}
                 size={composerControlsCollapsed ? "xs" : "sm"}
-                disabled={isSendBusy}
                 open={sourcesPickerOpen}
                 anchor={sourcesPicker.anchor}
                 onOpenChange={onSourcesPickerOpenChangeStable}
@@ -4805,7 +4806,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         environmentId={environmentId}
         compact={false}
         isComposerOwned
-        disabled={providerCatalogPending || isSendBusy}
+        // Not tied to a send: the send has already read the model, so a pick made while it
+        // is in flight goes to the next turn, as the effort picker's does.
+        disabled={providerCatalogPending}
         {...(routeKind === "draft" && supportsMultipleModels
           ? {
               ...(multipleModelSelections !== null
