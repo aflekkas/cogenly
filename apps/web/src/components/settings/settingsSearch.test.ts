@@ -313,6 +313,7 @@ describe("searchSettings", () => {
     ["agent browser access", "agent-browser-access", "/settings/integrations"],
     ["computer use", "agent-computer-use", "/settings/integrations"],
     ["connect a service", "integration-add", "/settings/integrations"],
+    ["add integration", "integration-add", "/settings/integrations"],
     ["tab size", "browser-default-viewport", "/settings/integrations"],
     ["browser viewport", "browser-default-viewport", "/settings/integrations"],
     ["show clicks", "browser-recording-mouse-presses", "/settings/integrations"],

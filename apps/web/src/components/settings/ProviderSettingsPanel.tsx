@@ -1,6 +1,12 @@
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { SettingsGroup } from "./SettingsGroup";
 import {
+  SETTINGS_MASTER_DETAIL_HEIGHT,
+  SettingsMasterDetail,
+  SettingsMasterDetailAddRow,
+  SettingsMasterDetailEditor,
+} from "./SettingsMasterDetail";
+import {
   AuthSettingsWriteScope,
   AuthProvidersManageScope,
   AuthOrchestrationReadScope,
@@ -131,10 +137,7 @@ function providerEnvironmentDetail(environment: EnvironmentPresentation): string
   return environment.displayUrl ?? "Remote machine";
 }
 
-// Shared by the editor grid and the placeholder states so switching machines
-// never changes the card's footprint.
-const providerCardHeightClassName =
-  "@min-[48rem]/settings-page:h-[min(44rem,calc(100dvh-11rem))] @min-[48rem]/settings-page:min-h-[32rem]";
+const providerCardHeightClassName = SETTINGS_MASTER_DETAIL_HEIGHT.page;
 
 /**
  * Same chrome as the provider editor (section heading, floating machine tabs,
@@ -942,44 +945,23 @@ export function EnvironmentProviderSettings({
             />
           </SettingsGroup>
         ) : null}
-        <SettingsGroup
-          divided={false}
-          className={cn(
-            providerCardHeightClassName,
-            "overflow-hidden @min-[48rem]/settings-page:grid @min-[48rem]/settings-page:grid-cols-[17rem_minmax(0,1fr)]",
-          )}
-        >
-          <div className="border-b border-border/60 bg-muted/10 @min-[48rem]/settings-page:flex @min-[48rem]/settings-page:min-h-0 @min-[48rem]/settings-page:flex-col @min-[48rem]/settings-page:border-r @min-[48rem]/settings-page:border-b-0">
-            <ScrollArea
-              scrollFade
-              chainVerticalScroll
-              className="@min-[48rem]/settings-page:min-h-0 @min-[48rem]/settings-page:flex-1"
-            >
-              <div className="divide-y divide-border/50">
-                {rows.map((row) => renderProviderInstance(row, "list"))}
-                {!readOnly ? (
-                  <button
-                    type="button"
-                    className="flex w-full cursor-pointer items-center gap-3 px-3 py-3 text-left text-sm text-muted-foreground transition-colors outline-none hover:bg-muted/25 hover:text-foreground focus-visible:bg-muted/25 focus-visible:text-foreground sm:px-4"
-                    onClick={() => setIsAddInstanceDialogOpen(true)}
-                  >
-                    <PlusIcon className="size-4 shrink-0" />
-                    Add provider
-                  </button>
-                ) : null}
-              </div>
-            </ScrollArea>
-          </div>
-
-          <div className="min-w-0 @min-[48rem]/settings-page:min-h-0">
-            {selectedRow ? (
-              <ScrollArea
-                scrollFade
-                chainVerticalScroll
-                className="@min-[48rem]/settings-page:h-full"
-              >
-                <div className="space-y-6 p-4">{renderProviderInstance(selectedRow, "editor")}</div>
-              </ScrollArea>
+        <SettingsMasterDetail
+          size="page"
+          list={
+            <>
+              {rows.map((row) => renderProviderInstance(row, "list"))}
+              {!readOnly ? (
+                <SettingsMasterDetailAddRow onClick={() => setIsAddInstanceDialogOpen(true)}>
+                  Add provider
+                </SettingsMasterDetailAddRow>
+              ) : null}
+            </>
+          }
+          detail={
+            selectedRow ? (
+              <SettingsMasterDetailEditor>
+                {renderProviderInstance(selectedRow, "editor")}
+              </SettingsMasterDetailEditor>
             ) : (
               <SettingsEmpty
                 title={targetInstanceMissing ? "Provider not found" : "No providers yet"}
@@ -1001,9 +983,9 @@ export function EnvironmentProviderSettings({
                   )
                 }
               />
-            )}
-          </div>
-        </SettingsGroup>
+            )
+          }
+        />
       </SettingsSection>
 
       <SettingsSection title="Advanced">

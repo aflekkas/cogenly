@@ -678,18 +678,10 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "integration-add",
     // Its row waits for the account list; the section is always there.
     targetId: "integration-services",
-    title: "Connect a service",
+    title: "Add integration",
     to: "/settings/integrations",
     searchTerms: [
-      "connect with an agent new service account custom mcp server setup oauth client id secret api key personal access token slack app manifest google cloud install uv",
-    ],
-  },
-  {
-    id: "provider-connectors",
-    title: "Use only Cogenly integrations",
-    to: "/settings/integrations",
-    searchTerms: [
-      "claude.ai connectors chatgpt apps codex plugins mcp servers duplicate native gmail slack notion linear repo .mcp.json",
+      "connect a service with an agent new account custom mcp server setup oauth client id secret api key personal access token slack app manifest google cloud install uv",
     ],
   },
   {
