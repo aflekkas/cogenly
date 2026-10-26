@@ -5050,6 +5050,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         projection,
         command.dispatchMode,
         command.deliveryIntent,
+        DateTime.toEpochMillis(projection.updatedAt),
       );
       const inlineCardAnswer =
         command.createdBy === "agent" &&

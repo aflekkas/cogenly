@@ -36,6 +36,8 @@ import {
   type TurnItemId,
 } from "@cogenly/contracts";
 import { threadTranscriptHeader } from "@cogenly/shared/threadTranscript";
+import { activeProviderBackoff } from "./ProviderBackoff.ts";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -844,18 +846,32 @@ const make = Effect.gen(function* () {
 
   const sendToThread: ThreadManagementServiceShape["sendToThread"] = (input) =>
     Effect.gen(function* () {
-      const target = yield* getProjectThreadRecords(input, ["runs", "providerTurns"]);
+      const target = yield* getProjectThreadRecords(input, ["runs", "providerTurns", "turnItems"]);
       if (target.thread.archivedAt !== null) {
         return yield* new ThreadManagementThreadArchivedError({
           threadId: input.threadId,
         });
       }
-      const steerableRun = latestSteerableRun(target);
+      // A steer into a provider waiting out a 429 makes it retry at once and
+      // earn another 429; queue the message behind the turn instead. Only
+      // `restart` (interrupt and start over) still goes through immediately.
+      const backingOff =
+        input.mode !== "restart" &&
+        activeProviderBackoff({
+          runs: target.runs,
+          turnItems: target.turnItems,
+          nowMs: yield* Clock.currentTimeMillis,
+        }) !== null;
+      const steerableRun = backingOff ? undefined : latestSteerableRun(target);
       let dispatchMode: Extract<
         OrchestrationV2Command,
         { readonly type: "message.dispatch" }
       >["dispatchMode"];
-      if (input.mode === "steer" || input.mode === "restart") {
+      if (backingOff) {
+        // Queued behind the backing-off turn, even for an explicit steer:
+        // delivering it now would only trigger another 429.
+        dispatchMode = { type: "queue_after_active" };
+      } else if (input.mode === "steer" || input.mode === "restart") {
         if (steerableRun === undefined) {
           return yield* new ThreadManagementNoSteerableRunError({
             threadId: input.threadId,

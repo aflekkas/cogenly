@@ -64,6 +64,29 @@ describe("resolveComposerDispatchMode", () => {
     },
   );
 
+  it("queues every send while the provider waits out a rate limit", () => {
+    // Steering into a backoff makes the provider retry at once and earn
+    // another 429, so even the alternate (steer) send queues.
+    expect(
+      resolveComposerDispatchMode({ running: true, alternateModifier: false, backingOff: true }),
+    ).toBe("queue");
+    expect(
+      resolveComposerDispatchMode({ running: true, alternateModifier: true, backingOff: true }),
+    ).toBe("queue");
+    expect(
+      resolveComposerDispatchMode({
+        running: true,
+        alternateModifier: false,
+        activeTurnDefault: "restart",
+        backingOff: true,
+      }),
+    ).toBe("queue");
+    // Idle sends are unaffected.
+    expect(
+      resolveComposerDispatchMode({ running: false, alternateModifier: false, backingOff: true }),
+    ).toBe("auto");
+  });
+
   it("names the alternate action so the affordance can be labelled", () => {
     expect(alternateComposerDispatchAction("queue")).toBe("steer");
     expect(alternateComposerDispatchAction("steer")).toBe("queue");

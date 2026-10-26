@@ -19,6 +19,7 @@ import {
   type MachineInfo,
   type MachineLinkState,
   type MachineSetupStatus,
+  type ProviderInstanceId,
   type ScheduledTask,
   type ServerProvider,
   type ThreadId,
@@ -362,6 +363,46 @@ export function providersCheck(input: {
     `${signedIn} of ${plural(enabled.length, "provider")} signed in`,
     items,
   );
+}
+
+/** Rate-limit hits in the last hour at which an account counts as repeatedly throttled. */
+export const RATE_LIMIT_REPEAT_THRESHOLD = 3;
+
+export interface RateLimitStreak {
+  readonly providerInstanceId: ProviderInstanceId;
+  /** Rate-limit retry/failure items recorded in the window. */
+  readonly count: number;
+  readonly latestAt: DateTime.Utc;
+}
+
+/**
+ * One warning per account being rate-limited over and over. The usual cause
+ * is too many concurrent threads sharing one provider account, so the item
+ * says so instead of just naming the symptom.
+ */
+export function rateLimitItems(input: {
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly streaks: ReadonlyArray<RateLimitStreak>;
+}): MachineHealthItem[] {
+  const items: MachineHealthItem[] = [];
+  for (const streak of input.streaks) {
+    if (streak.count < RATE_LIMIT_REPEAT_THRESHOLD) continue;
+    const provider = input.providers.find(
+      (candidate) => candidate.instanceId === streak.providerInstanceId,
+    );
+    const name = provider?.displayName ?? streak.providerInstanceId;
+    items.push(
+      item({
+        key: `providers:${streak.providerInstanceId}:rate-limited`,
+        status: "warn",
+        title: `${name} is being rate-limited repeatedly`,
+        detail: `${streak.count} rate limits in the last hour. The likely cause is too many concurrent threads on one account; let some finish, or spread work across accounts.`,
+        since: streak.latestAt,
+        target: { _tag: "provider", instanceId: streak.providerInstanceId },
+      }),
+    );
+  }
+  return items;
 }
 
 // ---------------------------------------------------------------------------

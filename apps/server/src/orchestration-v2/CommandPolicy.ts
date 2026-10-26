@@ -10,6 +10,7 @@ import {
   RunId,
   ThreadId,
 } from "@cogenly/contracts";
+import { activeProviderBackoff } from "./ProviderBackoff.ts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -121,6 +122,7 @@ export function resolveMessageDispatchIntent(
   projection: OrchestrationV2ThreadProjection,
   requestedMode: MessageDispatchMode,
   deliveryIntent?: "auto" | "steer" | "restart",
+  nowMs?: number,
 ): MessageDispatchMode {
   if (deliveryIntent === undefined) return requestedMode;
 
@@ -132,6 +134,19 @@ export function resolveMessageDispatchIntent(
       run.status === "waiting",
   );
   if (activeRun === undefined) return { type: "start_immediately" };
+  // Steering a provider that is waiting out a 429 makes it retry at once and
+  // earn another 429. Queue instead; the message runs when the turn ends.
+  // Restart stays available as the explicit escape hatch.
+  if (
+    deliveryIntent !== "restart" &&
+    activeProviderBackoff({
+      runs: projection.runs,
+      turnItems: projection.turnItems,
+      ...(nowMs === undefined ? {} : { nowMs }),
+    }) !== null
+  ) {
+    return { type: "queue_after_active" };
+  }
   if (deliveryIntent === "steer") {
     return { type: "steer_active", targetRunId: activeRun.id };
   }

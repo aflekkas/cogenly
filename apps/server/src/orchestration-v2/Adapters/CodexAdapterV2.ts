@@ -850,6 +850,28 @@ export function buildCodexTurnStartParams(input: {
   });
 }
 
+type CodexAdditionalContext = NonNullable<
+  CodexTurnStartParamsWithCollaborationMode["additionalContext"]
+>;
+
+/**
+ * The entries of `next` that are new or changed against what this native
+ * thread was last sent. Unchanged instruction/project entries are omitted
+ * so they are not re-sent every turn; a thread with no previous entries
+ * (new provider session, rotation, handoff) receives the full set.
+ */
+export function diffCodexAdditionalContext(
+  previous: CodexAdditionalContext | undefined,
+  next: CodexAdditionalContext,
+): CodexAdditionalContext {
+  if (previous === undefined) return next;
+  return Object.fromEntries(
+    Object.entries(next).filter(
+      ([key, entry]) => JSON.stringify(previous[key]) !== JSON.stringify(entry),
+    ),
+  );
+}
+
 function providerSession(input: {
   readonly providerSessionId: OrchestrationV2ProviderSession["id"];
   readonly providerInstanceId: ProviderInstanceId;
@@ -1175,6 +1197,41 @@ function parseCodexRetryProgress(
     return null;
   }
   return { attempt, maxAttempts };
+}
+
+/**
+ * The wait Codex names before trying again, e.g. the CLI's logged
+ * `429 Too Many Requests, retrying in 368.99s`. The app-server error
+ * notification carries the same text in its message or details but no
+ * structured delay, so the number is parsed back out. Null when the
+ * notification names no wait.
+ */
+export function parseCodexRetryDelayMs(message: string): number | null {
+  const match =
+    /(?:retrying in|retry after|retry-after)\s*:?\s*(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|sec(?:onds?)?|m|min(?:utes?)?|h|hours?)?/iu.exec(
+      message,
+    );
+  if (match?.[1] === undefined) return null;
+  const value = Number.parseFloat(match[1]);
+  if (!Number.isFinite(value) || value < 0) return null;
+  const unit = (match[2] ?? "s").toLowerCase();
+  const factor =
+    unit.startsWith("ms") || unit.startsWith("millisecond")
+      ? 1
+      : unit.startsWith("h")
+        ? 3_600_000
+        : unit.startsWith("m")
+          ? 60_000
+          : 1_000;
+  return Math.round(value * factor);
+}
+
+/** A retry caused by a 429 throttle rather than a spent usage window. */
+export function isCodexRateLimitRetry(input: {
+  readonly code: string | null;
+  readonly message: string;
+}): boolean {
+  return input.code === "rateLimitExceeded" || /\b429\b|too many requests/iu.test(input.message);
 }
 
 function codexErrorInfoCode(value: unknown): string | null {
@@ -4799,13 +4856,17 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             const updatedAt = yield* DateTime.now;
             const previous = (yield* Ref.get(providerRetries)).get(context.providerTurnId);
             const progress = parseCodexRetryProgress(payload.error.message);
+            const code = codexErrorInfoCode(payload.error.codexErrorInfo);
+            const additionalDetails = payload.error.additionalDetails?.trim();
+            const retryText = `${payload.error.message} ${additionalDetails ?? ""}`;
+            const retryDelayMs =
+              parseCodexRetryDelayMs(retryText) ?? previous?.retry.retryDelayMs ?? null;
+            const rateLimited = isCodexRateLimitRetry({ code, message: retryText });
             const retry: OrchestrationV2ProviderRetry = {
               attempt: progress?.attempt ?? (previous?.retry.attempt ?? 0) + 1,
               maxAttempts: progress?.maxAttempts ?? previous?.retry.maxAttempts ?? null,
-              retryDelayMs: null,
+              retryDelayMs,
             };
-            const code = codexErrorInfoCode(payload.error.codexErrorInfo);
-            const additionalDetails = payload.error.additionalDetails?.trim();
             const failure = makeProviderFailure({
               message:
                 additionalDetails === undefined || additionalDetails.length === 0
@@ -4813,12 +4874,23 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   : additionalDetails,
               code,
               class:
-                code === "usageLimitExceeded" || code === "rateLimitExceeded"
+                code === "usageLimitExceeded" || code === "rateLimitExceeded" || rateLimited
                   ? "usage_limit"
                   : code?.startsWith("http") === true || code?.startsWith("responseStream") === true
                     ? "transport_error"
                     : "provider_error",
               retryable: true,
+              ...(rateLimited
+                ? {
+                    limitKind: "rate_limit" as const,
+                    resetAt:
+                      retryDelayMs === null
+                        ? null
+                        : DateTime.formatIso(
+                            DateTime.makeUnsafe(DateTime.toEpochMillis(updatedAt) + retryDelayMs),
+                          ),
+                  }
+                : {}),
             });
             const itemOrdinal =
               previous?.itemOrdinal ??
@@ -6124,6 +6196,14 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               updated.set(threadId, turnInput);
               return updated;
             });
+            // Instructions and project context go once per provider
+            // session: later turns send only the entries whose value
+            // changed, so an unchanged 11k instruction block is not
+            // re-rendered into the context every turn. A new native
+            // thread (session rotation, handoff) has no stored entries
+            // and gets the full set again; compaction restores from the
+            // stored full set in `restoreAdditionalContext`.
+            const previousContext = (yield* Ref.get(additionalContextByThread)).get(threadId);
             yield* Ref.update(additionalContextByThread, (current) => {
               const next = new Map(current);
               if (turnStartParams.additionalContext)
@@ -6131,7 +6211,21 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               else next.delete(threadId);
               return next;
             });
-            const started = yield* client.request("turn/start", turnStartParams);
+            const changedContext =
+              turnStartParams.additionalContext === undefined
+                ? undefined
+                : diffCodexAdditionalContext(previousContext, turnStartParams.additionalContext);
+            const { additionalContext: _fullContext, ...turnStartRest } = turnStartParams;
+            const wireTurnStartParams =
+              changedContext === undefined
+                ? turnStartParams
+                : yield* decodeCodexTurnStartParamsWithCollaborationMode({
+                    ...turnStartRest,
+                    ...(Object.keys(changedContext).length === 0
+                      ? {}
+                      : { additionalContext: changedContext }),
+                  });
+            const started = yield* client.request("turn/start", wireTurnStartParams);
             yield* registerRootTurn({
               turnInput,
               nativeTurnId: started.turn.id,

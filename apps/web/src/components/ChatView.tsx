@@ -104,6 +104,7 @@ import {
   deriveRunlessWorkStartedAt,
   deriveThreadActivityRun,
   deriveLatestThreadRun,
+  deriveProviderBackoff,
   deriveThreadRuntime,
   presentPendingBackgroundWork,
   presentProviderGoal,
@@ -478,6 +479,7 @@ import type {
 } from "./chat/ComposerBannerStack";
 import { BackgroundWorkBanner } from "./chat/BackgroundWorkBanner";
 import { useThreadApprovalBannerItems } from "./chat/useThreadApprovalBannerItems";
+import { ProviderBackoffTitle } from "./chat/ProviderBackoffTitle";
 import { ThreadStatusLine } from "./chat/ThreadStatusLine";
 import { classifyThreadKind, hasRightPanel, threadCapabilities } from "../threadCapabilities";
 import {
@@ -5789,6 +5791,29 @@ export default function ChatView(props: ChatViewProps) {
     );
   };
   const sendStandaloneCommandStable = useStableCallback(sendStandaloneCommand);
+  // A provider waiting out a 429: the banner names the retry time and the
+  // composer queues sends instead of steering into another 429.
+  const providerBackoff = useMemo(
+    // nowMinute re-derives once a minute so an expired backoff clears even
+    // when nothing else re-renders the thread.
+    () =>
+      serverProjection === null
+        ? null
+        : deriveProviderBackoff(serverProjection, Date.parse(`${nowMinute}:00.000Z`)),
+    [serverProjection, nowMinute],
+  );
+  const backoffBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
+    if (!activeThread || providerBackoff === null) return null;
+    return {
+      id: `provider-backoff:${activeThread.id}`,
+      variant: "warning",
+      priority: "activity",
+      icon: <AlarmClockIcon />,
+      title: <ProviderBackoffTitle backoff={providerBackoff} />,
+      description:
+        "Steering now would make it retry immediately and hit the limit again, so new messages queue until the turn ends.",
+    };
+  }, [activeThread, providerBackoff]);
   // A native /goal keeps the agent working across turns. Stop pauses a Codex
   // goal; once the thread is idle the row offers the native follow-ups.
   const activeGoal = activeThreadShell?.goal ?? null;
@@ -6092,6 +6117,7 @@ export default function ChatView(props: ChatViewProps) {
   >(() => {
     const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];
     const backgroundWorkItems = [
+      backoffBannerItem,
       subagentBannerItem,
       childInputBannerItem,
       goalBannerItem,
@@ -6169,6 +6195,7 @@ export default function ChatView(props: ChatViewProps) {
     handleRestoreThreadBranchStable,
     isRestoringThreadBranch,
     backgroundWorkBannerItem,
+    backoffBannerItem,
     childInputBannerItem,
     subagentBannerItem,
     goalBannerItem,
@@ -9916,6 +9943,7 @@ export default function ChatView(props: ChatViewProps) {
                             isPreparingWorktree={isPreparingWorktree && !sendQueuesBehindSetup}
                             queuedRunsControl={queuedRunsControl}
                             bannerItems={composerBannerItems}
+                            providerBackoffActive={providerBackoff !== null}
                             resumeCompactionTokens={resumeCompactionTokens}
                             keepFullHistory={keepFullHistory}
                             onToggleKeepFullHistory={toggleKeepFullHistoryStable}
