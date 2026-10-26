@@ -64,7 +64,6 @@ import { constVoid } from "effect/Function";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
-import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Exit from "effect/Exit";
 import * as Scope from "effect/Scope";
@@ -81,6 +80,8 @@ import type {
 } from "playwright-core";
 
 import { PENDING_ATTACHMENT_THREAD_SEGMENT } from "../attachmentStore.ts";
+import * as Vault from "../vault/Vault.ts";
+import { redactPreview } from "./PreviewRedactor.ts";
 import * as ServerConfig from "../config.ts";
 import { resolveRootCliCommand } from "../cli/invocation.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -250,6 +251,18 @@ export interface ServerBrowserViewer {
 export class ServerBrowser extends Context.Service<
   ServerBrowser,
   {
+    readonly capture: (
+      input: import("@cogenly/contracts").PreviewVaultCaptureInput & {
+        readonly threadId: ThreadId;
+        readonly agentSessionId: string;
+      },
+    ) => Effect.Effect<
+      import("@cogenly/contracts").VaultItemResult,
+      | import("@cogenly/contracts").VaultError
+      | ServerBrowserTabNotFoundError
+      | ServerBrowserLaunchError
+      | ServerBrowserPage.ServerBrowserOperationError
+    >;
     readonly attachViewer: (input: {
       readonly threadId: string;
       readonly tabId: string;
@@ -339,7 +352,7 @@ interface ServerTab {
   /** Sessions of the page's frames that run in their own process. */
   readonly frameSessions: Map<Frame, CDPSession>;
   readonly createdAt: number;
-  /** The agent's latest request on this tab; idle agent tabs close. */
+  /** The agent's latest request on this tab; tabs remain until explicitly closed. */
   usedAt: number;
   readonly viewers: Set<ViewerState>;
   readonly consoleEntries: Array<PreviewAutomationConsoleEntry>;
@@ -426,11 +439,8 @@ const DESKTOP_PERMISSION_CHANGE_TIMEOUT_MS = 5_000;
 
 const AGENT_TAB_LIMIT = 8;
 const SERVER_TAB_LIMIT = 32;
-/** Agent tabs nobody watches close after this long without an agent request. */
-const AGENT_TAB_IDLE_MS = 30 * 60 * 1000;
 /** How often one tab may ask the panel to show it. */
 const PANEL_REVEAL_INTERVAL_MS = 5_000;
-const IDLE_SWEEP_INTERVAL = "1 minute";
 
 const DOWNLOAD_LIMIT = 20;
 /** How long an aborted navigation waits for the download that usually explains it. */
@@ -540,6 +550,7 @@ const CLIPBOARD_SCRIPT = `(() => {
 })();`;
 
 const make = Effect.gen(function* () {
+  const vault = yield* Vault.Vault;
   const config = yield* ServerConfig.ServerConfig;
   const host = { platform: yield* HostProcess.Platform, arch: yield* HostProcess.Architecture };
   const manager = yield* PreviewManager.PreviewManager;
@@ -1545,14 +1556,6 @@ const make = Effect.gen(function* () {
       );
   };
 
-  /** Closes agent tabs that no one watches and the agent stopped using. */
-  const closeIdleAgentTabs = () => {
-    const cutoff = Date.now() - AGENT_TAB_IDLE_MS;
-    for (const tab of tabs.values()) {
-      if (tab.control.agentId !== null && !isShown(tab) && tab.usedAt < cutoff) dropTab(tab, true);
-    }
-  };
-
   /**
    * The tab a request without a tabId means: the caller's newest tab, else the
    * thread's tab the user is looking at or used last, so "this page" works.
@@ -2052,7 +2055,7 @@ const make = Effect.gen(function* () {
 
   /**
    * Any request, even a failed one, keeps the agent's tabs on the thread from
-   * idling out. The tab it targeted becomes the thread's most recently used.
+   * losing their recent-use order. The tab it targeted becomes the thread's most recently used.
    */
   const markUsed = (request: PreviewAutomationRequest) => {
     const now = Date.now();
@@ -2115,7 +2118,6 @@ const make = Effect.gen(function* () {
         const navigationTimeout = Math.min(request.timeoutMs, NAVIGATION_TIMEOUT_MS);
         const profileId = existing ? undefined : resolveOpenProfile(open.profileId);
         if (!existing) {
-          closeIdleAgentTabs();
           assertTabCapacity(request.agentSessionId);
         }
         const background = (open.open ?? open.show) === false;
@@ -2177,7 +2179,7 @@ const make = Effect.gen(function* () {
               .waitForLoadState("load", { timeout: navigationTimeout })
               .catch(constVoid);
           }
-          return statusWithTitle(tab, request.agentSessionId);
+          return Targeting.openHandoffStatus(await statusWithTitle(tab, request.agentSessionId));
         });
       }
       case "recordingStop": {
@@ -2338,6 +2340,14 @@ const make = Effect.gen(function* () {
     return { ...view, ...(errors.length ? { errors } : {}) };
   };
   const executeWithOutput = async (tab: ServerTab, request: PreviewAutomationRequest) => {
+    const passwords = await ServerBrowserPage.passwordValues(tab.page);
+    const result = await executeRawWithOutput(tab, request);
+    return redactPreview(result, [
+      ...passwords,
+      ...(await ServerBrowserPage.passwordValues(tab.page)),
+    ]);
+  };
+  const executeRawWithOutput = async (tab: ServerTab, request: PreviewAutomationRequest) => {
     if (!outputActions.has(request.operation)) return executeTabOperation(tab, request);
     const options = request.input as import("@cogenly/contracts").PreviewAutomationOutputOptions;
     const key = baselineKey(request, options);
@@ -3063,10 +3073,6 @@ const make = Effect.gen(function* () {
     ),
     Effect.forkScoped,
   );
-  yield* Effect.sync(closeIdleAgentTabs).pipe(
-    Effect.repeat(Schedule.spaced(IDLE_SWEEP_INTERVAL)),
-    Effect.forkScoped,
-  );
   const environmentId = yield* environment.getEnvironmentId;
   const hostSession = broker
     .connect(
@@ -3130,6 +3136,37 @@ const make = Effect.gen(function* () {
     );
 
   return ServerBrowser.of({
+    capture: (input) =>
+      Effect.gen(function* () {
+        const tab =
+          input.tabId === undefined
+            ? latestThreadTab(input.threadId, input.agentSessionId)
+            : yield* findTab(input.threadId, input.tabId);
+        if (!tab)
+          return yield* new ServerBrowserTabNotFoundError({
+            threadId: input.threadId,
+            tabId: input.tabId ?? "",
+          });
+        const save = (value: string) =>
+          vault.saveSecretValue({
+            name: input.name,
+            type: input.kind,
+            domains: input.domains ?? [new URL(tab.page.url()).hostname],
+            value,
+          });
+        return yield* ServerBrowserPage.capture(tab.page, input, (value) =>
+          input.clientIdLocator
+            ? ServerBrowserPage.capture(tab.page, { locator: input.clientIdLocator }, (clientId) =>
+                save(
+                  JSON.stringify({
+                    client_id: clientId.trim(),
+                    client_secret: /GOCSPX-[A-Za-z0-9_-]+/.exec(value)?.[0] ?? value.trim(),
+                  }),
+                ),
+              )
+            : save(value),
+        );
+      }),
     attachViewer,
     cookieSources: cookieReader.listSources,
     importCookies: (input) =>

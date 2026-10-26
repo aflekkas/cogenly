@@ -718,7 +718,10 @@ export const OrchestratorMcpRequestSecretInput = Schema.Struct({
   }),
   timeoutMs: Schema.optional(
     Schema.Int.check(Schema.isBetween({ minimum: 1_000, maximum: 60 * 60 * 1_000 })),
-  ).annotate({ description: "How long to wait for the user. Default 10 minutes." }),
+  ).annotate({
+    description:
+      "How long the tool waits. Default 10 minutes; the card remains answerable after this wait ends.",
+  }),
   clientRequestId: Schema.optional(OrchestratorMcpClientRequestId).annotate({
     description:
       "Reuse when retrying a call that lost its result, so the user sees one card and its answer is returned again. Use a new id to ask again after timed_out or cancelled.",
@@ -761,7 +764,7 @@ export const OrchestratorMcpRequestSecretResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literals(["declined", "cancelled", "timed_out"]).annotate({
       description:
-        "declined: the user chose not to. cancelled: the request ended with the run. timed_out: the user did not answer in time; the card is closed, so ask again with a new clientRequestId if still needed.",
+        "declined: the user chose not to. cancelled: the card was explicitly cancelled or closed by an older server. timed_out: the bounded tool wait ended; the card stays answerable and a later answer notifies this thread. Retry with the same clientRequestId to await it, or a new id to re-post a cancelled legacy card.",
     }),
   }),
 ]);
@@ -796,7 +799,7 @@ export const OrchestratorMcpRequestLoginInput = Schema.Struct({
     Schema.Int.check(Schema.isBetween({ minimum: 1_000, maximum: 60 * 60 * 1_000 })),
   ).annotate({
     description:
-      "How long to wait for the user. Default 10 minutes; use the 1 hour maximum in scheduled runs, where the user may be away.",
+      "How long to wait for the user. Default 10 minutes; maximum 1 hour. This bounds only the tool call; the card stays answerable until answered or cancelled.",
   }),
   clientRequestId: Schema.optional(OrchestratorMcpClientRequestId).annotate({
     description:
@@ -819,13 +822,13 @@ export const OrchestratorMcpRequestLoginResult = Schema.Union([
     }),
     kept: Schema.Boolean.annotate({
       description:
-        "False when the user chose not to keep it: it is removed once this run ends, so use it now.",
+        "False when the user chose not to keep it: it stays machine-only and is removed after this thread has no active work.",
     }),
   }),
   Schema.Struct({
     status: Schema.Literals(["declined", "cancelled", "timed_out"]).annotate({
       description:
-        "declined: the user chose not to sign in; continue without it or ask again later with a new clientRequestId if they ask you to. cancelled: the request ended with the run. timed_out: nobody answered in time; the card is closed.",
+        "declined: the user chose not to sign in; continue without it or ask again later with a new clientRequestId if they ask you to. cancelled: the card was explicitly cancelled or closed by an older server. timed_out: only the tool wait ended; the card remains answerable, and its answer automatically notifies this thread.",
     }),
   }),
 ]);

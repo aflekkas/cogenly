@@ -1,3 +1,4 @@
+import * as InlineCardEvents from "../../orchestration-v2/InlineCardEvents.ts";
 import * as GoogleTokens from "./GoogleTokenStore.ts";
 import {
   IntegrationError,
@@ -129,6 +130,7 @@ const mapLocalError = (cause: Runner.LocalMcpError) =>
   });
 
 const make = Effect.gen(function* () {
+  const cardEvents = yield* InlineCardEvents.optional;
   const runner = yield* Runner.LocalMcpRunner;
   const googleTokens = yield* GoogleTokens.GoogleTokenStore;
   const credentialCapabilities = new Map<string, string>();
@@ -179,7 +181,12 @@ const make = Effect.gen(function* () {
   };
   const tickets = new Map<
     string,
-    { readonly integration: Integration; readonly expires: number; readonly fromAgent: boolean }
+    {
+      readonly integration: Integration;
+      readonly expires: number;
+      readonly fromAgent: boolean;
+      readonly threadId?: import("@cogenly/contracts").ThreadId | undefined;
+    }
   >();
   const states = new Map<
     string,
@@ -188,6 +195,7 @@ const make = Effect.gen(function* () {
       readonly expires: number;
       readonly url: string;
       readonly fromAgent: boolean;
+      threadId?: import("@cogenly/contracts").ThreadId | undefined;
     }
   >();
   const active = new Map<string, ProjectLabelId | null | undefined>();
@@ -663,7 +671,8 @@ const make = Effect.gen(function* () {
           for (const [ticket, entry] of tickets)
             if (
               entry.integration.id === integration.id &&
-              entry.fromAgent === (from?.fromAgent === true)
+              entry.fromAgent === (from?.fromAgent === true) &&
+              entry.threadId === from?.threadId
             )
               return link(ticket);
           if (
@@ -676,6 +685,7 @@ const make = Effect.gen(function* () {
             integration,
             expires: now + AUTH_LIFETIME_MS,
             fromAgent: from?.fromAgent === true,
+            threadId: from?.threadId,
           });
           return link(ticket);
         }),
@@ -694,9 +704,14 @@ const make = Effect.gen(function* () {
           if (yield* signedIn(entry.integration.id)) return { connected: true };
           const pending = [...states.values()].find(
             (state) =>
-              state.integration.id === entry.integration.id && state.fromAgent === entry.fromAgent,
+              state.integration.id === entry.integration.id &&
+              state.fromAgent === entry.fromAgent &&
+              (state.threadId === undefined || state.threadId === entry.threadId),
           );
-          if (pending) return { connected: false, url: pending.url };
+          if (pending) {
+            pending.threadId = entry.threadId;
+            return { connected: false, url: pending.url };
+          }
           yield* rpc(
             entry.integration,
             "tools/call",
@@ -710,13 +725,16 @@ const make = Effect.gen(function* () {
           );
           const auth = [...states.values()].find(
             (state) =>
-              state.integration.id === entry.integration.id && state.fromAgent === entry.fromAgent,
+              state.integration.id === entry.integration.id &&
+              state.fromAgent === entry.fromAgent &&
+              (state.threadId === undefined || state.threadId === entry.threadId),
           );
           if (!auth)
             return yield* new IntegrationError({
               operation: "start Google sign-in",
               reason: "upstream_error",
             });
+          auth.threadId = entry.threadId;
           return { connected: false, url: auth.url };
         }),
       ),
@@ -766,16 +784,31 @@ const make = Effect.gen(function* () {
         if (
           !entry ||
           entry.expires <= (yield* Clock.currentTimeMillis) ||
-          !params.get("code") ||
-          params.has("error")
+          (!params.get("code") && !params.has("error"))
         )
           return false;
         // Consume before forwarding: an uncertain exchange is never replayed automatically.
         states.delete(state!);
+        const threadId = entry.threadId;
+        if (params.has("error")) {
+          if (threadId)
+            yield* cardEvents.answered({
+              threadId,
+              key: InlineCardEvents.signInAnswerKey(state!),
+              summary: "Google Workspace sign-in denied or cancelled",
+            });
+          return false;
+        }
         const success = yield* runner
           .callback(entry.integration.id, params.toString())
           .pipe(Effect.mapError(mapLocalError));
         const connected = success && (yield* hasCredentials(entry.integration.id));
+        if (threadId)
+          yield* cardEvents.answered({
+            threadId,
+            key: InlineCardEvents.signInAnswerKey(state!),
+            summary: connected ? "Google Workspace signed in" : "Google Workspace sign-in failed",
+          });
         if (connected) {
           for (const [key, pending] of states)
             if (pending.integration.id === entry.integration.id) states.delete(key);

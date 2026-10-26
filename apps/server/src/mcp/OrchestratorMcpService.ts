@@ -969,86 +969,39 @@ const make = Effect.gen(function* () {
   const vault = yield* Vault.Vault;
   const accountConnections = yield* AccountConnections.AccountConnections;
 
-  /**
-   * Waits for the user to answer a pending secret card (secrets.answerRequest
-   * or secrets.answerLoginRequest), or for it to end with the run; polled like
-   * a delegated task. Only the waiting call hands the agent the outcome, so
-   * the card must not outlive it: a timeout, a failed wait or an aborted call
-   * closes it as cancelled. If even that fails, the server still refuses an
-   * answer once the run ends.
-   */
+  /** The tool wait is bounded; the durable card remains answerable after it returns. */
   const awaitSecretCard = (input: {
     readonly threadId: ThreadId;
-    readonly runId: RunId;
     readonly turnItemId: TurnItemId;
     readonly timeoutMs: number | undefined;
-    readonly record: (
-      secretStatus: "pending" | "cancelled",
-    ) => Effect.Effect<unknown, OrchestratorMcpFailure>;
   }) =>
     Effect.gen(function* () {
-      const { threadId, runId, turnItemId, record } = input;
-      const closeCard = record("cancelled").pipe(
-        Effect.catch((error) =>
-          Effect.logWarning("Could not close a secret request card", { error: error.message }),
-        ),
-      );
-      const answered = yield* Effect.gen(function* () {
+      const wait = Effect.gen(function* () {
         while (true) {
           const projection = yield* threadManagement
-            .getThreadRecords(threadId, ["runs", "turnItems"], {
+            .getThreadRecords(input.threadId, ["turnItems"], {
               turnItemTypes: ["secret_request"],
               messageRoles: [],
             })
             .pipe(
-              Effect.mapError((error) =>
-                failure(
-                  "orchestration_error",
-                  `Unable to read the secret request: ${errorMessage(error)}`,
-                ),
+              Effect.mapError(() =>
+                failure("orchestration_error", "Unable to read the secret request."),
               ),
             );
-          const item = projection.turnItems.find((candidate) => candidate.id === turnItemId);
-          if (item?.type === "secret_request" && item.secretStatus !== "pending") {
+          const item = projection.turnItems.find((candidate) => candidate.id === input.turnItemId);
+          if (item?.type === "secret_request" && item.secretStatus !== "pending")
             return item.secretStatus;
-          }
-          const current = projection.runs.find((candidate) => candidate.id === runId);
-          if (
-            current === undefined ||
-            ThreadManagementService.isTerminalRunStatus(current.status)
-          ) {
-            yield* record("cancelled");
-            return "cancelled" as const;
-          }
           yield* Effect.sleep(Duration.millis(SECRET_REQUEST_POLL_INTERVAL_MS));
         }
-      }).pipe(
+      });
+      const answered = yield* wait.pipe(
         Effect.timeoutOption(
           Duration.millis(
             Math.min(input.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS, MAX_WAIT_TIMEOUT_MS),
           ),
         ),
-        Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : closeCard)),
       );
-      if (Option.isNone(answered)) yield* closeCard;
-      // An answer that raced the timeout still wins: the card is answered once.
-      return Option.isSome(answered)
-        ? answered.value
-        : yield* threadManagement
-            .getThreadRecords(threadId, ["turnItems"], {
-              turnItemTypes: ["secret_request"],
-              messageRoles: [],
-            })
-            .pipe(
-              Effect.map((records) => {
-                const item = records.turnItems.find((candidate) => candidate.id === turnItemId);
-                return item?.type === "secret_request" &&
-                  (item.secretStatus === "saved" || item.secretStatus === "declined")
-                  ? item.secretStatus
-                  : ("timed_out" as const);
-              }),
-              Effect.orElseSucceed(() => "timed_out" as const),
-            );
+      return Option.isSome(answered) ? answered.value : ("timed_out" as const);
     });
 
   const requireCapability = (scope: McpInvocationScope) =>
@@ -2060,28 +2013,34 @@ const make = Effect.gen(function* () {
           : undefined;
         const runId = run.id;
         const nodeId = run.rootNodeId;
-        // The answer is consumed when it is stored, so a taken name must fail
-        // before the user types anything rather than after.
-        if (input.saveToVault) {
-          const name = input.saveToVault.name;
-          const { items } = yield* vault
-            .list({})
-            .pipe(
-              Effect.mapError(() => failure("orchestration_error", "Unable to read the vault.")),
-            );
-          if (items.some((item) => item.name === name)) {
-            return yield* failure(
-              "invalid_request",
-              `A vault item named "${name}" already exists. Pick another name, or use the existing item.`,
-            );
-          }
-        }
         const key = yield* requestKey(input.clientRequestId);
-        // Turn item ids are global; scope the key to this thread. A retry with
-        // the same clientRequestId finds this card, answered or not.
         const turnItemId = TurnItemId.make(
           `turn-item:secret-request:${stablePart(threadId)}:${stablePart(key)}`,
         );
+        if (input.saveToVault) {
+          const previous = yield* threadManagement
+            .getThreadRecords(threadId, ["turnItems"], {
+              turnItemTypes: ["secret_request"],
+              messageRoles: [],
+            })
+            .pipe(
+              Effect.mapError(() =>
+                failure("orchestration_error", "Unable to read the private request."),
+              ),
+            );
+          if (!previous.turnItems.some((item) => item.id === turnItemId)) {
+            const { items } = yield* vault
+              .list({})
+              .pipe(
+                Effect.mapError(() => failure("orchestration_error", "Unable to read the vault.")),
+              );
+            if (items.some((item) => item.name === input.saveToVault!.name))
+              return yield* failure(
+                "invalid_request",
+                "That vault item name is already taken. Choose another name or use the existing item.",
+              );
+          }
+        }
         yield* accountConnections
           .bindSecretRequest(threadScope.thread, turnItemId, input.saveToAccount?.connectionId)
           .pipe(Effect.mapError((cause) => failure("invalid_request", cause.message)));
@@ -2141,6 +2100,7 @@ const make = Effect.gen(function* () {
               reason: accountTarget ? `${accountTarget.reason} ${input.reason}` : input.reason,
               ...(input.placeholder === undefined ? {} : { placeholder: input.placeholder }),
               secretStatus,
+              ...(input.saveToVault ? { secretVault: input.saveToVault } : {}),
             })
             .pipe(
               Effect.mapError((error) =>
@@ -2153,14 +2113,30 @@ const make = Effect.gen(function* () {
         yield* record("pending");
         const status = yield* awaitSecretCard({
           threadId,
-          runId,
           turnItemId,
           timeoutMs: input.timeoutMs,
-          record,
         });
         yield* Effect.annotateCurrentSpan({ "secret_request.status": status });
         yield* Metrics.increment(Metrics.secretRequestsTotal, { status });
         if (status !== "saved") return { status };
+        const answeredCard = yield* threadManagement
+          .getThreadRecords(threadId, ["turnItems"], {
+            turnItemTypes: ["secret_request"],
+            messageRoles: [],
+          })
+          .pipe(
+            Effect.mapError(() =>
+              failure("orchestration_error", "Unable to read the saved secret request."),
+            ),
+          );
+        const savedCard = answeredCard.turnItems.find((item) => item.id === turnItemId);
+        if (savedCard?.type === "secret_request" && savedCard.secretVault?.savedItemId) {
+          return {
+            status,
+            vaultItemId: savedCard.secretVault.savedItemId,
+            vaultItemName: savedCard.secretVault.savedItemName,
+          };
+        }
         // Saved means the value was stored before the card said so; a missing
         // value is a storage fault, not an answer the agent can act on.
         const secretRef = yield* secretRequests.savedRef({ threadId: threadId, turnItemId });
@@ -2296,10 +2272,8 @@ const make = Effect.gen(function* () {
         yield* record("pending");
         const status = yield* awaitSecretCard({
           threadId,
-          runId,
           turnItemId,
           timeoutMs: input.timeoutMs,
-          record,
         });
         yield* Effect.annotateCurrentSpan({ "login_request.status": status });
         yield* Metrics.increment(Metrics.secretRequestsTotal, { status });

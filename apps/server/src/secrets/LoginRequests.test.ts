@@ -20,6 +20,8 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as Vault from "../vault/Vault.ts";
+import * as InlineCardNotifications from "../orchestration-v2/InlineCardNotifications.ts";
+import * as SecretRequests from "./SecretRequests.ts";
 import * as LoginRequests from "./LoginRequests.ts";
 
 const threadId = ThreadId.make("thread:login");
@@ -47,8 +49,13 @@ const memoryStore = () => {
  * One thread with a live run and a pending sign-in card. Every command the
  * service dispatches is kept as JSON: that is what becomes events.
  */
-const fixture = (login: OrchestrationV2LoginRequest, runStatus = "running") => {
+const fixture = (
+  login: OrchestrationV2LoginRequest | undefined,
+  runStatus = "running",
+  extra: Record<string, unknown> = {},
+) => {
   const commands: Array<string> = [];
+  const notifications: string[] = [];
   const card = {
     type: "secret_request",
     id: turnItemId,
@@ -60,6 +67,7 @@ const fixture = (login: OrchestrationV2LoginRequest, runStatus = "running") => {
     reason: "Open the repository settings.",
     secretStatus: "pending",
     login,
+    ...extra,
   };
   const records = {
     thread: { projectId: "project:1" },
@@ -73,7 +81,12 @@ const fixture = (login: OrchestrationV2LoginRequest, runStatus = "running") => {
         commands.push(JSON.stringify(command));
         if (command.type === "secret_request.record") {
           records.turnItems = [
-            { ...card, secretStatus: command.secretStatus, login: command.login ?? login },
+            {
+              ...card,
+              secretStatus: command.secretStatus,
+              login: command.login ?? login,
+              secretVault: command.secretVault,
+            },
           ];
         }
         return { sequence: 0, storedEvents: [] } as never;
@@ -89,18 +102,24 @@ const fixture = (login: OrchestrationV2LoginRequest, runStatus = "running") => {
     }),
   );
   const vault = Vault.layer.pipe(Layer.provideMerge(base));
-  const layer = LoginRequests.layer.pipe(
+  const layer = Layer.mergeAll(LoginRequests.layer, SecretRequests.layer).pipe(
     Layer.provideMerge(
       Layer.mergeAll(
         vault,
         threads,
+        Layer.succeed(InlineCardNotifications.InlineCardNotifications, {
+          answered: (input) =>
+            Effect.sync(() => {
+              notifications.push(input.summary);
+            }),
+        }),
         Layer.mock(AgentStore.AgentStore)({ forThread: () => Effect.succeed(null) }),
       ),
     ),
   );
   const card_ = () =>
     records.turnItems[0] as { secretStatus: string; login: OrchestrationV2LoginRequest };
-  return { commands, layer, card: card_ };
+  return { commands, notifications, layer, card: card_ };
 };
 
 const github: OrchestrationV2LoginRequest = {
@@ -248,7 +267,7 @@ describe("LoginRequests", () => {
     }).pipe(Effect.provide(layer));
   });
 
-  it.effect("refuses an empty save and an answer after the agent stopped", () =>
+  it.effect("refuses an empty save but delivers an answer after the agent stopped", () =>
     Effect.gen(function* () {
       const empty = fixture(github);
       const emptyError = yield* LoginRequests.LoginRequests.pipe(
@@ -266,7 +285,7 @@ describe("LoginRequests", () => {
       expect(emptyError.reason).toBe("login_empty");
 
       const stopped = fixture(github, "completed");
-      const stoppedError = yield* LoginRequests.LoginRequests.pipe(
+      yield* LoginRequests.LoginRequests.pipe(
         Effect.flatMap((logins) =>
           logins.answer({
             threadId,
@@ -274,11 +293,41 @@ describe("LoginRequests", () => {
             answer: { type: "save", password: PASSWORD, keep: true },
           }),
         ),
-        Effect.flip,
         Effect.provide(stopped.layer),
       );
-      expect(stoppedError.reason).toBe("agent_stopped");
-      expect(stopped.card().secretStatus).toBe("pending");
+      expect(stopped.card().secretStatus).toBe("saved");
+      expect(stopped.notifications).toHaveLength(1);
+      expect(stopped.notifications[0]).toContain("Login saved:");
     }),
   );
+});
+
+it.effect("a late secret answer goes directly to the vault and emits metadata only", () => {
+  const box = fixture(undefined, "completed", {
+    secretVault: { name: "late-key", type: "api_key", domains: ["example.test"] },
+  });
+  return Effect.gen(function* () {
+    const requests = yield* SecretRequests.SecretRequests;
+    const vault = yield* Vault.Vault;
+    const fakeSecret = "GOCSPX-fakeOnly_0123456789abCDef";
+    yield* requests.answer({ threadId, turnItemId, answer: { type: "save", secret: fakeSecret } });
+    const item = (yield* vault.list({})).items.find((item) => item.name === "late-key")!;
+    expect(item).toBeDefined();
+    const saved = yield* vault.readCredential(item.id);
+    expect(saved.secretFields.value === fakeSecret).toBe(true);
+    expect(box.commands.join("").includes(fakeSecret)).toBe(false);
+    expect(box.notifications.join("").includes(fakeSecret)).toBe(false);
+    expect(box.card().secretStatus).toBe("saved");
+    expect(box.notifications).toHaveLength(1);
+  }).pipe(Effect.provide(box.layer));
+});
+
+it.effect("a declined private request notifies the thread without storing a value", () => {
+  const box = fixture(undefined, "completed");
+  return Effect.gen(function* () {
+    const requests = yield* SecretRequests.SecretRequests;
+    yield* requests.answer({ threadId, turnItemId, answer: { type: "decline" } });
+    expect(box.notifications[0]).toContain("declined");
+    expect((yield* (yield* Vault.Vault).list({})).items).toHaveLength(0);
+  }).pipe(Effect.provide(box.layer));
 });

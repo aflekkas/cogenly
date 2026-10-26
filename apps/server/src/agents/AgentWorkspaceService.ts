@@ -32,6 +32,7 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
+import * as InlineCardNotifications from "../orchestration-v2/InlineCardNotifications.ts";
 import * as ApprovalChanges from "./ApprovalChanges.ts";
 import * as Store from "./AgentStore.ts";
 import * as Agents from "./AgentService.ts";
@@ -192,6 +193,30 @@ const make = Effect.gen(function* () {
   const integrations = yield* Effect.serviceOption(Integrations.Integrations);
   const approvalChanges = yield* ApprovalChanges.optional;
   const notifyApprovals = approvalChanges.notify;
+  const cardNotifications = yield* InlineCardNotifications.optional;
+  const notifyDecision = (approval: AgentApproval) =>
+    Effect.gen(function* () {
+      const action = approval.action;
+      const threadId =
+        action.actionKind === "vault_use"
+          ? action.payload.threadId
+          : action.actionKind === "integration_add" || action.actionKind === "integration_update"
+            ? action.threadId
+            : null;
+      const target =
+        threadId ??
+        (approval.agentId ? (yield* store.get(approval.agentId)).conversationThreadId : null);
+      if (!target) return;
+      const description =
+        action.actionKind === "vault_use"
+          ? `use vault credential on ${action.payload.domain ?? "the approved destination"}; retry vault_fill if still needed`
+          : action.actionKind.replaceAll("_", " ");
+      yield* cardNotifications.answered({
+        threadId: target,
+        key: `approval:${approval.id}`,
+        summary: `Approval ${approval.status === "approved" ? "granted" : "denied"}: ${description}`,
+      });
+    });
   const lock = yield* Semaphore.make(1);
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const uuid = (prefix: string) =>
@@ -713,6 +738,7 @@ const make = Effect.gen(function* () {
         )
         .pipe(
           Effect.tap(() => notifyApprovals),
+          Effect.tap(({ approval }) => notifyDecision(approval)),
           Effect.mapError(wrap),
         ),
     reject: (id) =>
@@ -728,6 +754,7 @@ const make = Effect.gen(function* () {
         )
         .pipe(
           Effect.tap(() => notifyApprovals),
+          Effect.tap(({ approval }) => notifyDecision(approval)),
           Effect.mapError(wrap),
         ),
     activity: (agentId) =>

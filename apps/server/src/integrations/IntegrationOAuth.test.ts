@@ -2,7 +2,7 @@ import { loopbackHttpsPolicy } from "./https.testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeCrypto as EffectNodeCrypto } from "@effect/platform-node";
-import { EnvironmentId, IntegrationName, type IntegrationId } from "@cogenly/contracts";
+import { EnvironmentId, IntegrationName, ThreadId, type IntegrationId } from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -24,6 +24,8 @@ import * as Sqlite from "../persistence/Sqlite.ts";
 import * as Vault from "../vault/Vault.ts";
 import * as Credentials from "./IntegrationCredentials.ts";
 import { CALLBACK_PATH } from "./IntegrationOAuth.ts";
+import * as InlineCardEvents from "../orchestration-v2/InlineCardEvents.ts";
+import * as Queue from "effect/Queue";
 import * as Integrations from "./Integrations.ts";
 import * as IntegrationOAuthHttp from "./integrationOAuthHttp.ts";
 import * as IntegrationSyncPeers from "./IntegrationSyncPeers.ts";
@@ -47,6 +49,7 @@ const gatewayLayer = (
 ) => {
   const stored = new Map<string, Uint8Array>();
   return Integrations.layer.pipe(
+    Layer.provideMerge(InlineCardEvents.layer),
     // The mock servers listen on loopback, which production refuses.
     Layer.provide(Layer.succeed(IntegrationEndpointPolicy, loopbackHttpsPolicy)),
     Layer.provideMerge(Credentials.layer),
@@ -792,3 +795,30 @@ describe("Integration OAuth sign-in", () => {
     ).pipe(Effect.provide(gatewayLayer())),
   );
 });
+
+it.effect.each([false, true])(
+  "OAuth sign-in answer notifies its originating thread (denied: %s)",
+  (denied) =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const mock = yield* startMockAuthServer;
+      const integration = yield* addLinear(mock, "notify-linear");
+      const service = yield* Integrations.Integrations;
+      const events = yield* InlineCardEvents.InlineCardEvents;
+      const threadId = ThreadId.make("thread:oauth-answer");
+      const link = yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN, threadId });
+      const callback = yield* consent(link.authorizationUrl, "spawn");
+      const result = yield* service
+        .completeSignIn(
+          denied ? { ...callback, code: undefined, error: "access_denied" } : callback,
+        )
+        .pipe(Effect.result);
+      expect(result._tag).toBe(denied ? "Failure" : "Success");
+      const answer = yield* Queue.take(events.answers);
+      expect(answer.threadId).toBe(threadId);
+      expect(answer.summary).toContain(denied ? "denied" : "signed in");
+      expect(answer.key.includes(callback.state!)).toBe(false);
+      yield* service.completeSignIn(callback).pipe(Effect.ignore);
+      expect(yield* Queue.size(events.answers)).toBe(0);
+    }).pipe(Effect.scoped, Effect.provide(gatewayLayer())),
+);

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "@effect/vitest";
+import * as Effect from "effect/Effect";
 import type { Page } from "playwright-core";
 import * as BrowserPage from "./ServerBrowserPage.ts";
 
@@ -200,4 +201,92 @@ it("extracts bounded JSON without a tree or image and quotes selectors and attri
     omitted: 1,
   });
   expect(send).toHaveBeenCalledTimes(1);
+});
+
+describe("vault capture", () => {
+  it.effect("saves a page value but returns only vault metadata", () => {
+    const fakeSecret = "GOCSPX-fakeOnly_0123456789abCDef";
+    let saved = false;
+    const page = { locator: () => ({ evaluate: async () => fakeSecret }) } as unknown as Page;
+    return BrowserPage.capture(page, { locator: "input" }, (value) => {
+      saved = value === fakeSecret;
+      return Effect.succeed({ item: { id: "vault:captured", name: "google-oauth-client" } });
+    }).pipe(
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(saved).toBe(true);
+          expect(JSON.stringify(result).includes(fakeSecret)).toBe(false);
+          expect(result.item.id).toBe("vault:captured");
+        }),
+      ),
+    );
+  });
+  it.effect("does not leak page errors through capture failures", () => {
+    const page = {
+      locator: () => ({
+        evaluate: async () => {
+          throw new Error("GOCSPX-fakeOnly_0123456789abCDef");
+        },
+      }),
+    } as unknown as Page;
+    return BrowserPage.capture(page, { locator: "input" }, () => Effect.succeed({})).pipe(
+      Effect.flip,
+      Effect.tap((error) => Effect.sync(() => expect(error.message).not.toContain("fakeOnly"))),
+    );
+  });
+});
+
+describe("checkbox click fallback and selector lists", () => {
+  const checkboxPage = (pointerWorks: boolean) => {
+    const control = {
+      tagName: "INPUT",
+      type: "checkbox",
+      checked: false,
+      disabled: false,
+      click: () => {
+        control.checked = !control.checked;
+      },
+      matches: () => true,
+    };
+    let fallback = 0;
+    const nativeClick = control.click;
+    control.click = () => {
+      fallback++;
+      nativeClick();
+    };
+    const locator = {
+      evaluate: async (fn: (element: unknown, args: unknown) => unknown, args: unknown) =>
+        fn(control, args),
+      scrollIntoViewIfNeeded: async () => {},
+      boundingBox: async () => ({ x: 0, y: 0, width: 20, height: 20 }),
+      click: async () => {
+        if (pointerWorks) control.checked = !control.checked;
+      },
+    };
+    const select = vi.fn(() => locator);
+    const page = { locator: select, once: () => {}, off: () => {} } as unknown as Page;
+    return { page, control, select, fallback: () => fallback };
+  };
+  it.each([false, true])("toggles once when pointer click works: %s", async (pointerWorks) => {
+    const fixture = checkboxPage(pointerWorks);
+    const result = await BrowserPage.click(fixture.page, { locator: "mat-checkbox" });
+    expect(fixture.control.checked).toBe(true);
+    expect(fixture.fallback()).toBe(pointerWorks ? 0 : 1);
+    expect(result.strategy).toBe(pointerWorks ? "pointer" : "input.click");
+    expect(result.clicked).toBe("mat-checkbox");
+  });
+  it("passes CSS selector lists to the browser", async () => {
+    const fixture = checkboxPage(true);
+    await BrowserPage.click(fixture.page, { locator: 'input[type="checkbox"], label' });
+    expect(fixture.select).toHaveBeenCalledWith('input[type="checkbox"], label');
+  });
+  it("explains that snapshot refs and role locators cannot be comma-joined", async () => {
+    const fixture = checkboxPage(true);
+    await expect(
+      BrowserPage.click(fixture.page, { locator: "aria-ref=one, aria-ref=two" }),
+    ).rejects.toThrow("Use one snapshot aria-ref");
+    await expect(
+      BrowserPage.click(fixture.page, { locator: "role=checkbox, role=button" }),
+    ).rejects.toThrow("CSS selectors only");
+  });
 });

@@ -7,7 +7,7 @@
  * projections, events or model context.
  *
  * A login the user chose not to keep is saved machine-only and removed once
- * the run that asked has ended.
+ * the thread has no active work.
  *
  * @module LoginRequests
  */
@@ -27,9 +27,11 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Semaphore from "effect/Semaphore";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 
+import * as InlineCardNotifications from "../orchestration-v2/InlineCardNotifications.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -87,6 +89,7 @@ export class LoginRequests extends Context.Service<
 
 const make = Effect.gen(function* () {
   const threadManagement = yield* ThreadManagementService.ThreadManagementService;
+  const notifications = yield* InlineCardNotifications.optional;
   const vault = yield* Vault.Vault;
   const agents = yield* AgentStore.AgentStore;
   const store = yield* ServerSecretStore.ServerSecretStore;
@@ -116,13 +119,14 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  const answerLock = yield* Semaphore.make(1);
   const answer: LoginRequests["Service"]["answer"] = (input) =>
     Effect.gen(function* () {
       yield* Effect.annotateCurrentSpan({
         "orchestration_v2.thread_id": input.threadId,
         "login_request.answer": input.answer.type,
       });
-      const { records, item } = yield* loadCard(input.threadId, input.turnItemId);
+      const { item } = yield* loadCard(input.threadId, input.turnItemId);
       if (item?.type !== "secret_request" || item.runId === null || item.nodeId === null) {
         return yield* new SecretRequestError({ reason: "not_found" });
       }
@@ -130,12 +134,6 @@ const make = Effect.gen(function* () {
       if (login === undefined) return yield* new SecretRequestError({ reason: "not_a_login" });
       if (item.secretStatus !== "pending") {
         return yield* new SecretRequestError({ reason: "already_answered" });
-      }
-      // The agent waits inside the run that asked; once it has ended nobody
-      // will sign in with this, and a declined or saved answer means nothing.
-      const run = records.runs.find((candidate) => candidate.id === item.runId);
-      if (run === undefined || ThreadManagementService.isTerminalRunStatus(run.status)) {
-        return yield* new SecretRequestError({ reason: "agent_stopped" });
       }
       const runId = item.runId;
       const nodeId = item.nodeId;
@@ -157,7 +155,16 @@ const make = Effect.gen(function* () {
             Effect.mapError((cause) => new SecretRequestError({ reason: "record_failed", cause })),
           );
 
-      if (input.answer.type === "decline") return yield* record("declined", login);
+      const notify = (summary: string) =>
+        notifications.answered({
+          threadId: input.threadId,
+          key: `login:${input.threadId}:${item.id}`,
+          summary,
+        });
+      if (input.answer.type === "decline") {
+        yield* record("declined", login);
+        return yield* notify(`Sign-in declined: ${login.siteName ?? login.origin}`);
+      }
 
       const secretFields = loginSecretFields(login.fields, input.answer);
       if (Object.keys(secretFields).length === 0) {
@@ -202,8 +209,10 @@ const make = Effect.gen(function* () {
         savedItemName: saved.item.name,
         kept: keep,
       }).pipe(Effect.tapError(() => undo));
-      // A request is answered once: if the agent's wait closed the card first,
-      // the record changed nothing and nobody is waiting for this login.
+      yield* notify(
+        `Login saved: ${saved.item.name}. Use vault_fill to sign in to ${login.origin}`,
+      );
+      // A concurrent explicit cancellation must not leave an unused login behind.
       const after = yield* loadCard(input.threadId, item.id).pipe(
         Effect.mapError((cause) => new SecretRequestError({ reason: "record_failed", cause })),
       );
@@ -211,9 +220,9 @@ const make = Effect.gen(function* () {
         yield* undo;
         return yield* new SecretRequestError({ reason: "agent_stopped" });
       }
-    }).pipe(Effect.withSpan("LoginRequests.answer"));
+    }).pipe(answerLock.withPermits(1), Effect.withSpan("LoginRequests.answer"));
 
-  /** Removes temporary logins whose run has ended. */
+  /** Removes temporary logins once the thread has finished using them. */
   const sweepTemporary = Effect.gen(function* () {
     if (store.directory === undefined) return;
     const names = (yield* fileSystem.readDirectory(store.directory)).flatMap((file) => {
@@ -234,8 +243,7 @@ const make = Effect.gen(function* () {
             // A thread that is gone has no run left to use the login.
             Effect.orElseSucceed(() => []),
           );
-        const run = runs.find((candidate) => candidate.id === entry.value.runId);
-        if (run !== undefined && !ThreadManagementService.isTerminalRunStatus(run.status)) continue;
+        if (runs.some((run) => !ThreadManagementService.isTerminalRunStatus(run.status))) continue;
         yield* removeItem(entry.value.itemId);
       }
       yield* store.remove(name).pipe(Effect.ignore);

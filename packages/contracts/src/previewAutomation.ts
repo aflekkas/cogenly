@@ -138,6 +138,7 @@ export type PreviewAutomationTabSummary = typeof PreviewAutomationTabSummary.Typ
 
 export const PreviewAutomationStatus = Schema.Struct({
   available: Schema.Boolean,
+  status: Schema.optional(Schema.Literals(["pending_panel"])),
   /** Advisory: whether the user can see this tab. Never a reason to stop or to ask the user. */
   visible: Schema.Boolean,
   tabId: Schema.NullOr(PreviewTabId),
@@ -1388,3 +1389,18 @@ export const PreviewUrlResolution = Schema.Struct({
   environmentId: EnvironmentId,
 });
 export type PreviewUrlResolution = typeof PreviewUrlResolution.Type;
+
+/** A page value goes directly into the vault; never through a preview tool result. */
+export const PreviewVaultCaptureInput = Schema.Struct({
+  tabId: Schema.optional(PreviewTabId),
+  locator: Schema.String.check(Schema.isNonEmpty()),
+  attribute: Schema.optional(Schema.String),
+  clientIdLocator: Schema.optional(Schema.String).annotate({
+    description:
+      "For Google OAuth: capture the client ID from this second locator and save client_id/client_secret JSON without exposing either value.",
+  }),
+  name: Schema.String.check(Schema.isNonEmpty()),
+  kind: Schema.Literals(["api_key", "note"]),
+  domains: Schema.optional(Schema.Array(Schema.String)),
+});
+export type PreviewVaultCaptureInput = typeof PreviewVaultCaptureInput.Type;
