@@ -1,3 +1,5 @@
+import { assertRunOwnership } from "./runOwnership.ts";
+import { derivePendingBackgroundWork } from "@cogenly/shared/orchestrationV2PendingBackgroundWork";
 import * as AccountConnections from "../accounts/AccountConnections.ts";
 import {
   CommandId,
@@ -1075,7 +1077,11 @@ const make = Effect.gen(function* () {
           "contextTransfers",
           "turnItems",
         ],
-        { turnItemTypes: [], messageRoles: ["user"] },
+        {
+          turnItemTypes: ["command_execution", "dynamic_tool", "subagent"],
+          turnItemStatuses: ["pending", "running", "waiting"],
+          messageRoles: ["user"],
+        },
       )
       .pipe(
         Effect.mapError((error) =>
@@ -1103,7 +1109,11 @@ const make = Effect.gen(function* () {
           "contextTransfers",
           "turnItems",
         ],
-        { turnItemTypes: [], messageRoles: ["user"] },
+        {
+          turnItemTypes: ["command_execution", "dynamic_tool", "subagent"],
+          turnItemStatuses: ["pending", "running", "waiting"],
+          messageRoles: ["user"],
+        },
       )
       .pipe(Effect.mapError(threadManagementFailure));
 
@@ -1187,7 +1197,9 @@ const make = Effect.gen(function* () {
    */
   const assertLiveCallerForOtherThread = (
     scope: McpInvocationScope,
-    parent: Pick<OrchestrationV2ThreadProjection, "thread" | "runs"> | undefined,
+    parent:
+      | Pick<OrchestrationV2ThreadProjection, "thread" | "runs" | "providerThreads" | "turnItems">
+      | undefined,
     target: Pick<OrchestrationV2ThreadProjection, "thread">,
   ) =>
     parent === undefined || target.thread.id === parent.thread.id
@@ -1197,26 +1209,68 @@ const make = Effect.gen(function* () {
   /** Scheduled work outside the caller's own project needs the same live run. */
   const assertLiveCallerForOtherProject = (
     scope: McpInvocationScope,
-    parent: Pick<OrchestrationV2ThreadProjection, "thread" | "runs"> | undefined,
+    parent:
+      | Pick<OrchestrationV2ThreadProjection, "thread" | "runs" | "providerThreads" | "turnItems">
+      | undefined,
     projectId: ProjectId,
   ) =>
     parent === undefined || projectId === parent.thread.projectId
       ? Effect.void
       : assertLiveCaller(scope, parent);
 
-  const assertLiveCaller = (
+  const assertLiveCaller = Effect.fn("OrchestratorMcpService.assertLiveCaller")(function* (
     scope: McpInvocationScope,
-    parent: Pick<OrchestrationV2ThreadProjection, "thread" | "runs">,
-  ) => {
-    const activeRun = ThreadManagementService.latestActiveRun(parent);
-    return parent.thread.archivedAt !== null ||
-      activeRun === undefined ||
-      activeRun.providerInstanceId !== scope.thread?.providerInstanceId
-      ? Effect.fail(
-          failure("parent_not_active", "The calling provider no longer owns an active thread run."),
-        )
-      : Effect.void;
-  };
+    parent: Pick<
+      OrchestrationV2ThreadProjection,
+      "thread" | "runs" | "providerThreads" | "turnItems"
+    >,
+  ) {
+    const activeRun = parent.runs
+      .filter(
+        (run) =>
+          run.status === "preparing" || run.status === "starting" || run.status === "running",
+      )
+      .toSorted((a, b) => b.ordinal - a.ordinal)[0];
+    const latestRun = parent.runs
+      .filter((run) => run.status !== "queued")
+      .toSorted((a, b) => b.ordinal - a.ordinal)[0];
+    yield* assertRunOwnership({
+      caller: {
+        ...parent.thread,
+        providerInstanceId: activeRun?.providerInstanceId ?? parent.thread.providerInstanceId,
+        activeRunId: activeRun?.id ?? null,
+        latestRunId: latestRun?.id ?? null,
+        pendingBackgroundTasks: derivePendingBackgroundWork({
+          latestRun,
+          providerThreads: parent.providerThreads,
+          turnItems: parent.turnItems,
+          activeProviderThreadId: parent.thread.activeProviderThreadId,
+          runs: parent.runs,
+          pullRequests: parent.thread.pullRequests,
+        }),
+      },
+      scope,
+      threads: threadManagement,
+    });
+  });
+
+  const ownedRun = Effect.fn("OrchestratorMcpService.ownedRun")(function* (
+    scope: McpInvocationScope,
+    parent: Pick<
+      OrchestrationV2ThreadProjection,
+      "thread" | "runs" | "providerThreads" | "turnItems"
+    >,
+  ) {
+    yield* assertLiveCaller(scope, parent);
+    return (
+      ThreadManagementService.latestActiveRun({
+        runs: parent.runs.filter((run) => run.status !== "waiting"),
+      }) ??
+      parent.runs
+        .filter((run) => run.status !== "queued")
+        .toSorted((a, b) => b.ordinal - a.ordinal)[0]
+    );
+  });
 
   const loadReadableThread = (scope: McpInvocationScope, threadId: ThreadId) =>
     Effect.gen(function* () {
@@ -1813,7 +1867,9 @@ const make = Effect.gen(function* () {
   const summarizeScheduledTask = (
     scope: McpInvocationScope,
     caller: {
-      readonly parent: Pick<OrchestrationV2ThreadProjection, "thread" | "runs"> | undefined;
+      readonly parent:
+        | Pick<OrchestrationV2ThreadProjection, "thread" | "runs" | "providerThreads" | "turnItems">
+        | undefined;
       readonly limits: {
         readonly runtimeMode: RuntimeMode;
         readonly interactionMode: ProviderInteractionMode;
@@ -2037,7 +2093,7 @@ const make = Effect.gen(function* () {
         // The card is shown in, and answered from, the caller's own thread.
         const { scope: threadScope, parent } = yield* loadThreadCaller(scope, "request_secret");
         const threadId = threadScope.thread.threadId;
-        const run = ThreadManagementService.latestActiveRun(parent);
+        const run = yield* ownedRun(threadScope, parent);
         if (
           run === undefined ||
           run.rootNodeId === null ||
@@ -2445,9 +2501,7 @@ const make = Effect.gen(function* () {
         const machine = yield* resolveMachine(input.machine).pipe(
           Effect.mapError((error) => failure("invalid_request", error.message)),
         );
-        const parentRun = parent.runs
-          .filter(ThreadManagementService.isActiveRun)
-          .toSorted((left, right) => right.ordinal - left.ordinal)[0];
+        const parentRun = yield* ownedRun(scope, parent);
         if (
           parentRun === undefined ||
           parentRun.rootNodeId === null ||
@@ -2811,7 +2865,7 @@ const make = Effect.gen(function* () {
     createThreads: (callerScope, input) =>
       Effect.gen(function* () {
         const { scope, parent } = yield* loadThreadCaller(callerScope, "create_threads");
-        const parentRun = ThreadManagementService.latestActiveRun(parent);
+        const parentRun = yield* ownedRun(scope, parent);
         if (
           parentRun === undefined ||
           parentRun.rootNodeId === null ||

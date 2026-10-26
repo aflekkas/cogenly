@@ -5,6 +5,7 @@ import {
   ProviderInstanceId,
   ProviderInteractionMode,
   RuntimeMode,
+  RunId,
   ThreadId,
 } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
@@ -17,7 +18,7 @@ import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.t
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
-import { liveThreadShell } from "./McpToolAccess.testkit.ts";
+import { idleThreadProjection, liveThreadShell } from "./McpToolAccess.testkit.ts";
 
 const supervisedThreadId = ThreadId.make("thread:supervised");
 const planThreadId = ThreadId.make("thread:plan");
@@ -335,4 +336,63 @@ it.effect("refuses a change when the calling thread cannot be read", () =>
       ),
     ),
   ),
+);
+
+it.effect.each(
+  ["claude", "codex"].flatMap((provider) =>
+    (["subagent", "monitor", "background_task", "command"] as const).map((kind) => ({
+      provider,
+      kind,
+    })),
+  ),
+)(
+  "$provider $kind background work retains every writing declaration until completion",
+  ({ provider, kind }) => {
+    const id = ThreadId.make(`background:${provider}`);
+    let shell = {
+      ...liveThreadShell(id, { activeRunId: null }),
+      providerInstanceId: ProviderInstanceId.make(provider),
+      latestRunId: RunId.make("settled"),
+      pendingBackgroundTasks: [{ taskId: "task", kind }],
+    };
+    const scope = {
+      ...threadCaller(id),
+      thread: { ...threadCaller(id).thread!, providerInstanceId: shell.providerInstanceId },
+    };
+    return Effect.gen(function* () {
+      for (const tool of [
+        "acts_as_caller",
+        "acts_as_work_caller",
+        "writes",
+        "writes_with_capability",
+        "writes_threads",
+        "starts_threads",
+        "writes_environment",
+      ]) {
+        expect(yield* call(tool, scope)).toBe(
+          tool === "starts_threads" ? "full-access/default" : "ran",
+        );
+        expect(
+          yield* call(tool, {
+            ...scope,
+            thread: { ...scope.thread, providerInstanceId: ProviderInstanceId.make("other") },
+          }),
+        ).toBe("parent_not_active");
+      }
+      const live = shell;
+      shell = { ...shell, archivedAt: shell.updatedAt };
+      expect(yield* call("acts_as_caller", scope)).toBe("parent_not_active");
+      shell = { ...live, pendingBackgroundTasks: [] };
+      expect(yield* call("acts_as_caller", scope)).toBe("parent_not_active");
+    }).pipe(
+      Effect.provide(
+        probeServer(
+          Layer.mock(ThreadManagement.ThreadManagementService)({
+            getThreadShell: () => Effect.succeed(shell),
+            getThreadRecords: () => Effect.succeed(idleThreadProjection(shell)),
+          }),
+        ),
+      ),
+    );
+  },
 );
