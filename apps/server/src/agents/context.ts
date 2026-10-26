@@ -3,27 +3,9 @@ import type { ModelSelection } from "@cogenly/contracts";
 export const CONVERSATION_RECENT_MESSAGES = 20;
 export const CONVERSATION_SESSION_RUNS = 40;
 
-export function conversationCarryOver(
-  previous: string,
-  messages: ReadonlyArray<{ role: string; text: string }>,
-) {
-  const older = messages
-    .slice(0, -CONVERSATION_RECENT_MESSAGES)
-    .map((m) => `${m.role}: ${m.text.slice(0, 500)}`)
-    .join("\n");
-  return {
-    summary: [previous, older].filter(Boolean).join("\n").slice(-12000),
-    recent: messages
-      .slice(-CONVERSATION_RECENT_MESSAGES)
-      .map((m) => `${m.role}: ${m.text.slice(0, 2000)}`)
-      .join("\n")
-      .slice(-16000),
-  };
-}
-
 /**
  * A persistent agent starts a fresh native session every CONVERSATION_SESSION_RUNS owner turns
- * and whenever its provider or model changes. The fresh session gets the stored summary,
+ * and whenever its provider or model changes. The fresh session gets the validated handoff brief,
  * memory and recent texts instead of resuming another model's native history.
  * Effort and other options stay on the same session.
  */

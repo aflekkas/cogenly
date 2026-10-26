@@ -1,3 +1,4 @@
+import { AgentHandoffBrief } from "@cogenly/contracts";
 import * as AccountAccess from "../accounts/AccountAccess.ts";
 import * as Access from "./AgentAccessScope.ts";
 import {
@@ -88,6 +89,7 @@ const wrap = (cause: unknown) =>
             : "Could not access agent workspace state.",
         cause,
       });
+const decodeHandoffBrief = Schema.decodeUnknownEffect(Schema.fromJsonString(AgentHandoffBrief));
 export class AgentWorkspaceService extends Context.Service<
   AgentWorkspaceService,
   {
@@ -770,7 +772,21 @@ const make = Effect.gen(function* () {
           yield* sql`SELECT id, agent_id AS agentId, run_id AS runId, kind, target_id AS targetId, at FROM agent_run_actions WHERE agent_id = ${agentId} ORDER BY at DESC, id LIMIT 500`.pipe(
             Effect.flatMap((rows) => Effect.forEach(rows, (r) => decodeRunAction(r))),
           );
-        return { runs, actions };
+        const briefRows = yield* sql<{
+          payload_json: string;
+        }>`SELECT payload_json FROM agent_handoff_briefs WHERE agent_id = ${agentId} ORDER BY version DESC LIMIT 10`;
+        const handoffBriefs = yield* Effect.forEach(briefRows, (r) =>
+          decodeHandoffBrief(r.payload_json),
+        );
+        let briefChars = 0;
+        return {
+          runs,
+          actions,
+          handoffBriefs: handoffBriefs.filter((brief) => {
+            briefChars += brief.text.length;
+            return briefChars <= 200_000;
+          }),
+        };
       }).pipe(Effect.mapError(wrap)),
   });
 });

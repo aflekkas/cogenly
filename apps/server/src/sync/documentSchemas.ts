@@ -61,6 +61,7 @@ export const AgentFields = Schema.Struct({
   name: Agent.fields.name,
   avatar: Agent.fields.avatar,
   instructions: Agent.fields.instructions,
+  coreMemory: Schema.optionalKey(Agent.fields.coreMemory),
   responsibility: Agent.fields.responsibility,
   permissions: Agent.fields.permissions,
   notifyPolicy: Agent.fields.notifyPolicy,

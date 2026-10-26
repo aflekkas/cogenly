@@ -1,4 +1,6 @@
 import { withAutomaticCompaction } from "./AutomaticCompaction.ts";
+import * as AgentHandoff from "../agents/AgentHandoff.ts";
+import { fallbackChainOf } from "../agents/providerFallback.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import { agentSessionSeedItems, shouldRotateAgentSession } from "../agents/context.ts";
 import { modelSelectionsEqual } from "@cogenly/shared/model";
@@ -61,6 +63,16 @@ export class ProviderTurnStartError extends Schema.TaggedError<ProviderTurnStart
   },
 ) {}
 
+export class AgentHandoffPendingError extends Schema.TaggedError<AgentHandoffPendingError>()(
+  "AgentHandoffPendingError",
+  { runId: RunId },
+) {}
+
+/** Wrapped by the provider-start and effect-execution boundaries. */
+export const isAgentHandoffPendingError = (error: unknown): boolean =>
+  Predicate.isTagged(error, "AgentHandoffPendingError") ||
+  (Predicate.hasProperty(error, "cause") && isAgentHandoffPendingError(error.cause));
+
 const isProviderTurnStartError = Schema.is(ProviderTurnStartError);
 
 /** The adapter found no native conversation to resume (another cwd or account, or none written). */
@@ -94,6 +106,7 @@ export class ProviderTurnStartServiceV2 extends Context.Service<
 export const layer: Layer.Layer<
   ProviderTurnStartServiceV2,
   never,
+  | AgentHandoff.AgentHandoff
   | AgentStore.AgentStore
   | MachinesTurnContext.MachinesTurnContext
   | EventSink.EventSinkV2
@@ -110,6 +123,7 @@ export const layer: Layer.Layer<
   ProviderTurnStartServiceV2,
   Effect.gen(function* () {
     const agentStore = yield* AgentStore.AgentStore;
+    const agentHandoff = yield* AgentHandoff.AgentHandoff;
     const machinesTurnContext = yield* MachinesTurnContext.MachinesTurnContext;
     const eventSink = yield* EventSink.EventSinkV2;
     const contextHandoffService = yield* ContextHandoffService.ContextHandoffServiceV2;
@@ -607,7 +621,7 @@ export const layer: Layer.Layer<
         .filter((source) => source.ordinal < run.ordinal && source.startedAt !== null)
         .toSorted((a, b) => a.ordinal - b.ordinal)
         .at(-1);
-      const rotateAgentSession =
+      let rotateAgentSession =
         persistentAgent?.conversationThreadId === input.threadId &&
         shouldRotateAgentSession({
           runOrdinal: run.ordinal,
@@ -615,11 +629,38 @@ export const layer: Layer.Layer<
           previous: previousAgentRun?.modelSelection,
           next: run.modelSelection,
         });
-      if (rotateAgentSession && persistentAgent !== null) {
-        const transcript = yield* projectionStore.getThreadRecords(input.threadId, ["messages"]);
-        yield* agentStore
-          .carryOver(persistentAgent.id, run.ordinal - 1, transcript.messages)
+      const isAgentConversation = persistentAgent?.conversationThreadId === input.threadId;
+      if (
+        isAgentConversation &&
+        persistentAgent !== null &&
+        (rotateAgentSession || run.ordinal - latestSummaryOrdinal >= AgentHandoff.HANDOFF_SOFT_RUNS)
+      ) {
+        yield* agentHandoff
+          .request({
+            agent: persistentAgent,
+            ordinal: run.ordinal - 1,
+            cwd: resolvedRuntimePolicy.cwd ?? ".",
+            selections: fallbackChainOf(persistentAgent),
+          })
           .pipe(Effect.mapError((cause) => new ProviderTurnStartError({ runId, cause })));
+      }
+      const agentBrief =
+        rotateAgentSession && persistentAgent !== null
+          ? yield* agentHandoff
+              .prepare(persistentAgent.id, run.ordinal - 1)
+              .pipe(Effect.mapError((cause) => new ProviderTurnStartError({ runId, cause })))
+          : null;
+      if (rotateAgentSession && agentBrief === null) {
+        const switching =
+          previousAgentRun !== undefined &&
+          (previousAgentRun.modelSelection.instanceId !== run.modelSelection.instanceId ||
+            previousAgentRun.modelSelection.model !== run.modelSelection.model);
+        if (switching)
+          return yield* new ProviderTurnStartError({
+            runId,
+            cause: new AgentHandoffPendingError({ runId }),
+          });
+        rotateAgentSession = false;
       }
       let effectiveHandoffs = handoffs;
       // Seeds a fresh native session with portable history, recording the handoff before delivery.
@@ -640,7 +681,7 @@ export const layer: Layer.Layer<
               .filter((source) => source.ordinal < run.ordinal)
               .map((source) => source.id),
           );
-          const handoff = yield* contextHandoffService.prepareProviderHandoff({
+          const preparedHandoff = yield* contextHandoffService.prepareProviderHandoff({
             threadId: projection.thread.id,
             targetRunId: run.id,
             transferId,
@@ -656,6 +697,10 @@ export const layer: Layer.Layer<
               : history.filter((item) => item.runId === null || earlierRunIds.has(item.runId)),
             createdAt,
           });
+          const handoff =
+            agentBrief === null
+              ? preparedHandoff
+              : { ...preparedHandoff, summaryText: agentBrief.text };
           // A rotated agent session replaces handoffs aimed at the session it leaves behind.
           const superseded = rotateAgentSession ? effectiveHandoffs : [];
           effectiveHandoffs = rotateAgentSession ? [handoff] : [handoff, ...effectiveHandoffs];
@@ -1026,9 +1071,11 @@ export const layer: Layer.Layer<
       const routableSubagents = projection.subagents.filter((subagent) =>
         RunExecutionService.canRouteRelatedSubagent(subagent.status),
       );
-      const turnContext = yield* agentStore
+      const retrievedTurnContext = yield* agentStore
         .context(input.threadId, runId)
         .pipe(Effect.mapError((cause) => new ProviderTurnStartError({ runId, cause })));
+      // Exact state bypasses retrieval and history truncation budgets.
+      const turnContext = [agentBrief?.text, retrievedTurnContext].filter(Boolean).join("\n\n");
       // Per turn, in the user message: a machine going offline then changes
       // only the newest turn and never invalidates the cached prefix.
       const machinesContext = yield* machinesTurnContext.read;

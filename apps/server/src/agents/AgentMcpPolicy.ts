@@ -416,7 +416,9 @@ const make = Effect.gen(function* () {
                 : /send|comment|review|reply|reaction/.test(name) &&
                     !["thread_send", "thread_send_attachments"].includes(name)
                   ? "send"
-                  : /fact_(propose|supersede)|memory_(remember|write)|html_|attachment_/.test(name)
+                  : /agent_core_memory_update|fact_(propose|supersede)|memory_(remember|write)|html_|attachment_/.test(
+                        name,
+                      )
                     ? "draft"
                     : "execute";
         if (!agent.permissions[grant]) return yield* denied(`This agent has no ${grant} grant.`);

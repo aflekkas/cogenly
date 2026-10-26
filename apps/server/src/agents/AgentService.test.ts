@@ -2289,3 +2289,58 @@ describe("event-driven agent triggers", () => {
       }),
   );
 });
+
+it.effect("sweeps busy-turn results once through the queue and coalesces repeated PR updates", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const agents = yield* Agents.AgentService;
+      const store = yield* Store.AgentStore;
+      const sql = yield* SqlClient.SqlClient;
+      yield* store.save(h.fixture);
+      const start = "2026-01-01T00:00:00.000Z";
+      const during = "2026-01-01T00:00:01.000Z";
+      const end = "2026-01-01T00:00:02.000Z";
+      yield* sql`UPDATE agent_continuity_epoch SET installed_at = ${start}`;
+      yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id, thread_id, ordinal, provider, status, requested_at, payload_json) VALUES ('busy:1',${h.fixture.conversationThreadId},1,'codex','running',${start},'{}')`;
+      yield* sql`INSERT INTO orchestration_v2_projection_messages(message_id, thread_id, role, streaming, created_at, updated_at, payload_json) VALUES ('passive:1',${h.fixture.conversationThreadId},'assistant',0,${during},${during},'{}')`;
+      const postback = JSON.stringify({
+        text: "Child finished; do NOT retry the send.",
+        senderThreadId: "child:1",
+      });
+      yield* sql`UPDATE orchestration_v2_projection_messages SET payload_json = ${postback} WHERE message_id = 'passive:1'`;
+      for (const revision of [1, 2]) {
+        const key = `pr:${revision}`;
+        const context = JSON.stringify({
+          kind: "pr.updated",
+          refs: { prUrl: "https://github.com/example/repo/pull/1" },
+          occurredAt: during,
+          revision,
+        });
+        yield* sql`INSERT INTO agent_events(event_key,payload_json,occurred_at) VALUES (${key},${context},${during})`;
+        yield* sql`INSERT INTO agent_event_deliveries(agent_id,event_key,work_thread_id,context_json) VALUES (${h.fixture.id},${key},${`event-work:${revision}`},${context})`;
+      }
+      yield* agents.reconcile();
+      expect(h.commands).toHaveLength(0);
+      yield* sql`UPDATE orchestration_v2_projection_runs SET status = 'completed', completed_at = ${end} WHERE run_id = 'busy:1'`;
+      yield* agents.reconcile();
+      expect(h.commands).toHaveLength(1);
+      expect(h.commands[0]).toMatchObject({
+        type: "message.dispatch",
+        dispatchMode: { type: "queue_after_active" },
+        notification: { source: { kind: "system" } },
+      });
+      expect("text" in h.commands[0]! ? h.commands[0].text : "").toContain(
+        "Child finished; do NOT retry the send.",
+      );
+      expect("text" in h.commands[0]! ? h.commands[0].text : "").toContain("(2 updates; latest)");
+      expect("text" in h.commands[0]! ? h.commands[0].text : "").toContain('"revision":2');
+      expect("text" in h.commands[0]! ? h.commands[0].text : "").not.toContain('"revision":1');
+      yield* agents.reconcile();
+      expect(h.commands).toHaveLength(1);
+      expect(yield* sql`SELECT delivered FROM agent_inbox_sweeps WHERE run_id = 'busy:1'`).toEqual([
+        { delivered: 1 },
+      ]);
+    }).pipe(Effect.provide(h.layer));
+  }),
+);

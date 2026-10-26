@@ -803,6 +803,7 @@ describe("SharedState", () => {
         const sql = yield* SqlClient.SqlClient;
         const fixture = {
           ...agentFixture(),
+          coreMemory: "Never email Ada. Ceiling 1750.",
           fallbackIndex: 2,
           fallbackUntil: "2026-02-01T00:00:00.000Z",
         };
@@ -821,6 +822,7 @@ describe("SharedState", () => {
         yield* state.bootstrap();
         const doc = yield* state.get("agent", fixture.id);
         expect(doc?.fields.ownerMachine).toBe(local);
+        expect(doc?.fields.coreMemory).toBe("Never email Ada. Ceiling 1750.");
         expect(doc?.fields.fallbackChain).toEqual([]);
         for (const key of [
           "projectId",
