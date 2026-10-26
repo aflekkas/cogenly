@@ -729,7 +729,11 @@ export const make = Effect.gen(function* () {
       // and idle active threads without resurrecting active status.
       for (const providerThread of projection.providerThreads ?? []) {
         // Delegated children can appear through the parent's subagent roster.
-        if (providerThread.appThreadId !== projection.thread.id) continue;
+        if (
+          providerThread.appThreadId !== null &&
+          providerThread.appThreadId !== projection.thread.id
+        )
+          continue;
         const needsIdle = providerThread.status === "active";
         const needsRosterClear = providerThreadHasPendingBackgroundTasks(providerThread);
         if (!needsIdle && !needsRosterClear) {

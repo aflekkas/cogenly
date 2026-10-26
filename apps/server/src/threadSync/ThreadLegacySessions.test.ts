@@ -20,7 +20,7 @@ import * as Schema from "effect/Schema";
 
 import { pair } from "../machines/testkit.ts";
 import { CodexProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
-import migrateImportIdentities from "../persistence/Migrations/105_LegacyImportProviderIdentity.ts";
+import migrateImportIdentities from "../persistence/Migrations/106_LegacyImportProviderIdentity.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import { startThreadMachine as start, threadCreated } from "./testkit.ts";
 
@@ -376,9 +376,9 @@ it.live("pre-fix replica history keeps its writer after handoff without an origi
   }).pipe(Effect.scoped),
 );
 
-it.live(
-  "independent native imports keep separate provider threads and references through relay",
-  () =>
+it.live.each(["codex", "codex-work"])(
+  "independent %s imports keep separate provider threads and references through relay",
+  (instance) =>
     Effect.gen(function* () {
       const hub = yield* start("native-import-hub", "cloud-server");
       const mac = yield* start("native-import-mac", "computer");
@@ -408,7 +408,7 @@ it.live(
               ? { ...event, payload: { ...event.payload, activeProviderThreadId: nativeId } }
               : event,
         );
-      const hubId = ThreadId.make("import:codex:imported-conversation");
+      const hubId = ThreadId.make(`import:${instance}:imported-conversation`);
       const macId = ThreadId.make("thread:provider:codex:native-thread:imported-conversation");
       yield* hub.sink.write({ events: imported(hubId) });
       yield* mac.sink.write({ events: imported(macId) });
@@ -416,7 +416,7 @@ it.live(
       yield* hub.sync.sync(mac.environmentId);
       yield* hub.sync.sync(other.environmentId);
       for (const [id, expectedId] of [
-        [hubId, "provider-thread:import:codex:imported-conversation"],
+        [hubId, `provider-thread:import:${instance}:imported-conversation`],
         [macId, nativeId],
       ] as const) {
         const projection = yield* other.projections.getThreadProjection(id);
@@ -428,7 +428,7 @@ it.live(
         });
       }
       expect((yield* hub.projections.getThreadProjection(hubId)).providerThreads[0]?.id).toBe(
-        "provider-thread:import:codex:imported-conversation",
+        `provider-thread:import:${instance}:imported-conversation`,
       );
       // A handoff and fresh owner update preserve the same identity on every peer.
       for (const machine of [hub, mac]) {
@@ -455,7 +455,7 @@ it.live(
       for (const machine of [hub, mac]) {
         expect(
           (yield* machine.projections.getThreadProjection(hubId)).providerThreads.map((p) => p.id),
-        ).toEqual(["provider-thread:import:codex:imported-conversation"]);
+        ).toEqual([`provider-thread:import:${instance}:imported-conversation`]);
       }
     }).pipe(Effect.scoped),
 );
@@ -643,17 +643,17 @@ it.live.each(["machine", "legacy"])(
     }).pipe(Effect.scoped),
 );
 
-it.live(
-  "legacy import projections migrate before partial replay without duplicating provider threads",
-  () =>
+it.live.each(["codex", "codex-work"])(
+  "legacy %s import projections migrate before partial replay without duplicating provider threads",
+  (instance) =>
     Effect.gen(function* () {
       const machine = yield* start("import-migration", "computer");
       const at = yield* DateTime.now;
-      const id = ThreadId.make("import:codex:migration-native");
+      const id = ThreadId.make(`import:${instance}:migration-native`);
       const legacy = ProviderThreadId.make(
         "provider-thread:provider:codex:native-thread:migration-native",
       );
-      const canonical = "provider-thread:import:codex:migration-native";
+      const canonical = `provider-thread:import:${instance}:migration-native`;
       const events = history(id, at).map((event) =>
         event.type === "provider-thread.updated"
           ? { ...event, payload: { ...event.payload, id: legacy } }
@@ -754,4 +754,85 @@ it.live(
         }
       }
     }).pipe(Effect.scoped),
+);
+
+it.live.each([
+  "legacy-newer",
+  "canonical-newer",
+  "equal",
+  "canonical-references",
+  "missing",
+  "no-history",
+])("import migration repairs conflicting and lost provider rows (%s)", (scenario) =>
+  Effect.gen(function* () {
+    const machine = yield* start(`import-repair-${scenario}`, "computer");
+    const at = yield* DateTime.now;
+    const id = ThreadId.make("import:codex-work:repair-native");
+    const legacy = "provider-thread:provider:codex:native-thread:repair-native";
+    const canonical = "provider-thread:import:codex-work:repair-native";
+    const events = history(id, at).map((event) =>
+      event.type === "provider-thread.updated"
+        ? { ...event, payload: { ...event.payload, id: ProviderThreadId.make(legacy) } }
+        : event.type === "thread.created"
+          ? {
+              ...event,
+              payload: {
+                ...event.payload,
+                activeProviderThreadId: ProviderThreadId.make(legacy),
+              },
+            }
+          : event,
+    );
+    yield* machine.sink.write({ events });
+    yield* machine.sql`UPDATE orchestration_v2_projection_threads SET active_provider_thread_id = ${legacy},
+      payload_json = json_set(payload_json, '$.activeProviderThreadId', ${legacy}) WHERE thread_id = ${id}`;
+    if (scenario === "missing" || scenario === "no-history") {
+      // A native child overwrote the import row under the old shared id.
+      yield* machine.sql`UPDATE orchestration_v2_projection_provider_threads SET provider_thread_id = ${legacy},
+        thread_id = 'thread:provider:codex:native-thread:repair-native',
+        payload_json = json_set(payload_json, '$.id', ${legacy}, '$.appThreadId', 'thread:provider:codex:native-thread:repair-native')
+        WHERE provider_thread_id = ${canonical}`;
+      if (scenario === "no-history")
+        yield* machine.sql`DELETE FROM orchestration_events WHERE stream_id = ${id} AND event_type = 'provider-thread.updated'`;
+    } else {
+      const older = "2000-01-01T00:00:00.000Z";
+      const newer = "2001-01-01T00:00:00.000Z";
+      yield* machine.sql`UPDATE orchestration_v2_projection_provider_threads SET updated_at = ${scenario === "canonical-newer" ? newer : older},
+        payload_json = json_set(payload_json, '$.status', 'active', '$.futureField', 'canonical') WHERE provider_thread_id = ${canonical}`;
+      if (scenario === "canonical-references") {
+        yield* machine.sql`UPDATE orchestration_v2_projection_provider_threads SET
+          payload_json = json_set(payload_json, '$.forkedFrom', json_object('providerThreadId', ${legacy}))
+          WHERE provider_thread_id = ${canonical}`;
+      } else
+        yield* machine.sql`INSERT INTO orchestration_v2_projection_provider_threads
+        (provider_thread_id, thread_id, owner_node_id, provider, provider_session_id, status,
+         first_run_ordinal, last_run_ordinal, updated_at, payload_json, driver, provider_instance_id)
+        SELECT ${legacy}, thread_id, owner_node_id, provider, provider_session_id, 'idle', first_run_ordinal,
+          last_run_ordinal, ${scenario === "legacy-newer" ? newer : older},
+          json_set(payload_json, '$.id', ${legacy}, '$.status', 'idle', '$.futureField', 'legacy'), driver, provider_instance_id
+        FROM orchestration_v2_projection_provider_threads WHERE provider_thread_id = ${canonical}`;
+    }
+    yield* machine.run(migrateImportIdentities);
+    const rows = yield* machine.sql<{
+      provider_thread_id: string;
+      payload_json: string;
+    }>`SELECT provider_thread_id, payload_json
+      FROM orchestration_v2_projection_provider_threads WHERE thread_id = ${id}`;
+    const projection = yield* machine.projections.getThreadProjection(id);
+    expect(projection.thread.activeProviderThreadId).toBe(
+      scenario === "no-history" ? null : canonical,
+    );
+    expect(rows).toHaveLength(scenario === "no-history" ? 0 : 1);
+    if (scenario !== "missing" && scenario !== "no-history") {
+      expect(JSON.parse(rows[0]!.payload_json)).toMatchObject({
+        id: canonical,
+        futureField: scenario === "legacy-newer" ? "legacy" : "canonical",
+      });
+    }
+    if (scenario === "canonical-references")
+      expect(JSON.parse(rows[0]!.payload_json).forkedFrom).toEqual({ providerThreadId: canonical });
+    const before = (yield* machine.sql<{ n: number }>`SELECT total_changes() AS n`)[0]!.n;
+    yield* machine.run(migrateImportIdentities);
+    expect((yield* machine.sql<{ n: number }>`SELECT total_changes() AS n`)[0]!.n).toBe(before);
+  }).pipe(Effect.scoped),
 );

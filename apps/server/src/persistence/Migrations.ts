@@ -1,4 +1,5 @@
-import Migration0105 from "./Migrations/105_LegacyImportProviderIdentity.ts";
+import Migration0106 from "./Migrations/106_LegacyImportProviderIdentity.ts";
+import Migration0105 from "./Migrations/105_ThreadHandoffRepositories.ts";
 import Migration0104 from "./Migrations/104_RepoMcpTrust.ts";
 import Migration0103 from "./Migrations/103_ProjectMergeFiles.ts";
 import Migration0102 from "./Migrations/102_ScheduledTaskProjectFolder.ts";
@@ -237,7 +238,8 @@ export const migrationEntries = [
   [102, "ScheduledTaskProjectFolder", Migration0102],
   [103, "ProjectMergeFiles", Migration0103],
   [104, "RepoMcpTrust", Migration0104],
-  [105, "LegacyImportProviderIdentity", Migration0105],
+  [105, "ThreadHandoffRepositories", Migration0105],
+  [106, "LegacyImportProviderIdentity", Migration0106],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

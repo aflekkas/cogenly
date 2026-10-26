@@ -1,6 +1,6 @@
 import { ProviderThreadId, type OrchestrationV2DomainEvent } from "@cogenly/contracts";
 
-// The old `import:<driver>:<native>` app-thread namespace is distinct from
+// The old `import:<instance>:<native>` app-thread namespace is distinct from
 // `thread:provider:<driver>:native-thread:<native>`. Only the former needs
 // a different provider identity; ordinary adapter-created conversations keep
 // their native-derived id, including when their app thread changes machines.
@@ -9,10 +9,18 @@ export const normalizeLegacyProviderThread = (
 ): OrchestrationV2DomainEvent => {
   const imported = /^import:([^:]+):(.+)$/.exec(event.threadId);
   if (imported === null) return event;
-  const [, driver, nativeId] = imported;
-  const legacyId = `provider-thread:provider:${driver}:native-thread:${nativeId}`;
-  const scope = (id: ProviderThreadId) =>
-    id === legacyId ? ProviderThreadId.make(`provider-thread:import:${driver}:${nativeId}`) : id;
+  const [, instance, nativeId] = imported;
+  // The import namespace contains an instance id, not a driver. References
+  // retain the driver even on events that have no driver field themselves.
+  const driver = event.driver ?? ("driver" in event.payload ? event.payload.driver : undefined);
+  const scope = (id: ProviderThreadId) => {
+    const legacy = /^provider-thread:provider:([^:]+):native-thread:(.+)$/.exec(id);
+    return legacy !== null &&
+      legacy[2] === nativeId &&
+      (driver === undefined || legacy[1] === driver)
+      ? ProviderThreadId.make(`provider-thread:import:${instance}:${nativeId}`)
+      : id;
+  };
   let payload = event.payload;
   const set = (key: string, value: unknown) => {
     payload = { ...payload, [key]: value } as typeof payload;

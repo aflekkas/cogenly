@@ -688,42 +688,45 @@ it("keeps historical recovery updates for a different app thread out of the clie
   expect(applyOrchestrationV2ProjectionEvent(emptyProjection, event)).toBe(emptyProjection);
 });
 
-it("replays old imported provider identities over a current snapshot without adding an alias", () => {
-  const id = ThreadId.make("import:codex:client-native");
-  const canonical = ProviderThreadId.make("provider-thread:import:codex:client-native");
-  const providerThread: OrchestrationV2ProviderThread = {
-    id: canonical,
-    driver: ProviderDriverKind.make("codex"),
-    providerInstanceId: ProviderInstanceId.make("codex"),
-    providerSessionId: null,
-    appThreadId: id,
-    ownerNodeId: null,
-    nativeThreadRef: null,
-    nativeConversationHeadRef: null,
-    status: "active",
-    firstRunOrdinal: null,
-    lastRunOrdinal: null,
-    handoffIds: [],
-    forkedFrom: null,
-    createdAt: now,
-    updatedAt: now,
-  };
-  const projection = {
-    ...emptyProjection,
-    thread: { ...emptyProjection.thread, id, activeProviderThreadId: canonical },
-    providerThreads: [providerThread],
-  };
-  const next = applyOrchestrationV2ProjectionEvent(projection, {
-    id: EventId.make("event:client-import-replay"),
-    type: "provider-thread.updated",
-    threadId: id,
-    occurredAt: now,
-    payload: {
-      ...providerThread,
-      id: ProviderThreadId.make("provider-thread:provider:codex:native-thread:client-native"),
-      status: "idle",
-    },
-  });
-  expect(next?.providerThreads).toEqual([{ ...providerThread, status: "idle" }]);
-  expect(next?.thread.activeProviderThreadId).toBe(canonical);
-});
+it.each(["codex", "codex-work"])(
+  "replays old %s import identities over a current snapshot without adding an alias",
+  (instance) => {
+    const id = ThreadId.make(`import:${instance}:client-native`);
+    const canonical = ProviderThreadId.make(`provider-thread:import:${instance}:client-native`);
+    const providerThread: OrchestrationV2ProviderThread = {
+      id: canonical,
+      driver: ProviderDriverKind.make("codex"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      providerSessionId: null,
+      appThreadId: id,
+      ownerNodeId: null,
+      nativeThreadRef: null,
+      nativeConversationHeadRef: null,
+      status: "active",
+      firstRunOrdinal: null,
+      lastRunOrdinal: null,
+      handoffIds: [],
+      forkedFrom: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const projection = {
+      ...emptyProjection,
+      thread: { ...emptyProjection.thread, id, activeProviderThreadId: canonical },
+      providerThreads: [providerThread],
+    };
+    const next = applyOrchestrationV2ProjectionEvent(projection, {
+      id: EventId.make("event:client-import-replay"),
+      type: "provider-thread.updated",
+      threadId: id,
+      occurredAt: now,
+      payload: {
+        ...providerThread,
+        id: ProviderThreadId.make("provider-thread:provider:codex:native-thread:client-native"),
+        status: "idle",
+      },
+    });
+    expect(next?.providerThreads).toEqual([{ ...providerThread, status: "idle" }]);
+    expect(next?.thread.activeProviderThreadId).toBe(canonical);
+  },
+);

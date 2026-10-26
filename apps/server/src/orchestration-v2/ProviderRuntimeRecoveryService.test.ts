@@ -692,3 +692,64 @@ it.effect.each(["startup", "shutdown"] as const)(
       expect(projection.providerThreads[0]?.pendingBackgroundTasks).toEqual([]);
     }).pipe(Effect.provide(runtime)),
 );
+
+it.effect("recovery idles an unbound provider thread in the local roster", () =>
+  Effect.gen(function* () {
+    const sink = yield* EventSink.EventSinkV2;
+    const recovery = yield* Recovery.ProviderRuntimeRecoveryService;
+    const sql = yield* SqlClient.SqlClient;
+    const at = yield* DateTime.now;
+    const childId = ThreadId.make("thread:recovery-unbound");
+    const providerThreadId = ProviderThreadId.make("provider-thread:recovery-unbound");
+    const base = idleThreadProjection(liveThreadShell(childId)).thread;
+    yield* sink.write({
+      events: [
+        {
+          id: EventId.make("event:create:unbound"),
+          type: "thread.created",
+          threadId: childId,
+          occurredAt: at,
+          payload: { ...base, activeProviderThreadId: providerThreadId },
+        },
+      ],
+    });
+    yield* sink.write({
+      events: [
+        {
+          id: EventId.make("event:recovery-child-provider"),
+          type: "provider-thread.updated",
+          threadId: childId,
+          occurredAt: at,
+          payload: {
+            id: providerThreadId,
+            driver: ProviderDriverKind.make("codex"),
+            providerInstanceId: base.providerInstanceId,
+            providerSessionId: null,
+            appThreadId: null,
+            ownerNodeId: null,
+            nativeThreadRef: null,
+            nativeConversationHeadRef: null,
+            status: "active",
+            firstRunOrdinal: null,
+            lastRunOrdinal: null,
+            handoffIds: [],
+            forkedFrom: null,
+            createdAt: at,
+            updatedAt: at,
+            pendingBackgroundTasks: [],
+          },
+        },
+      ],
+    });
+
+    // Historical unbound rows can still belong to a thread's projection roster.
+    yield* sql`UPDATE orchestration_v2_projection_provider_threads SET thread_id = ${childId} WHERE provider_thread_id = ${providerThreadId}`;
+    yield* recovery.recover;
+    const rows = yield* sql<{
+      status: string;
+      payload_json: string;
+    }>`SELECT status, payload_json FROM orchestration_v2_projection_provider_threads WHERE provider_thread_id = ${providerThreadId}`;
+    expect(rows[0]?.status).toBe("idle");
+    expect(JSON.parse(rows[0]!.payload_json).appThreadId).toBeNull();
+  }).pipe(Effect.provide(runtime)),
+);
