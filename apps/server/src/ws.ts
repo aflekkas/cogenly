@@ -1802,7 +1802,8 @@ const makeWsRpcHandlers = (
       [WS_METHODS.machinesHealthAlertsSubscribe]: () => healthAlerts.subscribe,
       [WS_METHODS.machinesHealthRetrySync]: (input) =>
         machineHealth.retrySync(input).pipe(Effect.as({})),
-      [WS_METHODS.machinesHealthFix]: (input) => machineHealthFixes.fix(input),
+      [WS_METHODS.machinesHealthFix]: (input) =>
+        machineHealthFixes.fix(input, currentSession.scopes),
       [WS_METHODS.machinesHealthTestAlertChannels]: () => healthAlerts.testChannels,
       [WS_METHODS.factsList]: (input) => facts.list(input),
       [WS_METHODS.factsCreate]: (input) => facts.create(input),

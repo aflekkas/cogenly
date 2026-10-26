@@ -15,6 +15,8 @@ import {
   type MachineHealthFixResult,
   MachineHealthFixRun,
   MachineVersionUpdate,
+  requiredScopeForMachineHealthFix,
+  type AuthEnvironmentScope,
   type MachineHealthItem,
   type ThreadId,
   isOrchestrationV2WorkActive,
@@ -43,8 +45,14 @@ import { readStaleRuns } from "./staleRuns.ts";
 export class MachineHealthFixes extends Context.Service<
   MachineHealthFixes,
   {
+    /**
+     * `callerScopes` is the original caller's authority: each selected fix is
+     * checked against its own required scope before it runs here or is
+     * forwarded to a peer. Omit only for owner-equivalent internal callers.
+     */
     readonly fix: (
       input: MachineHealthFixInput,
+      callerScopes?: ReadonlyArray<AuthEnvironmentScope>,
     ) => Effect.Effect<MachineHealthFixResult, MachineHealthError>;
   }
 >()("cogenly-server/health/MachineHealthFixes") {}
@@ -348,6 +356,7 @@ const make = Effect.gen(function* () {
 
   const fixHere = Effect.fn("MachineHealthFixes.fixHere")(function* (
     itemKeys: ReadonlyArray<string>,
+    callerScopes?: ReadonlyArray<AuthEnvironmentScope>,
   ) {
     const report = yield* health.report;
     const items = new Map(
@@ -356,6 +365,17 @@ const make = Effect.gen(function* () {
     const outcomes: Array<MachineHealthFixOutcome> = [];
     for (const itemKey of new Set(itemKeys)) {
       const entry = items.get(itemKey);
+      if (entry !== undefined && entry.status !== "ok" && callerScopes !== undefined) {
+        const required = requiredScopeForMachineHealthFix(entry.fix);
+        if (!callerScopes.includes(required)) {
+          outcomes.push({
+            itemKey,
+            status: "failed",
+            message: `This fix needs the ${required} permission, which the caller does not have.`,
+          });
+          continue;
+        }
+      }
       outcomes.push(
         entry === undefined || entry.status === "ok"
           ? { itemKey, status: "resolved", message: "This has already cleared." }
@@ -372,20 +392,31 @@ const make = Effect.gen(function* () {
     } satisfies MachineHealthFixResult;
   });
 
-  yield* channels.register(MachineHealthFixRun, (payload) => fixHere(payload.itemKeys));
+  yield* channels.register(MachineHealthFixRun, (payload) =>
+    fixHere(payload.itemKeys, payload.callerScopes),
+  );
 
-  const fixThere = (environmentId: EnvironmentId, itemKeys: ReadonlyArray<string>) =>
-    machines.call(environmentId, MachineHealthFixRun, { itemKeys }).pipe(
-      Effect.timeout(PEER_FIX_TIMEOUT),
-      // Offline, an older Cogenly without Fix, or a fix that timed out there.
-      Effect.mapError((cause) => new MachineHealthError({ reason: "unavailable", cause })),
-    );
+  const fixThere = (
+    environmentId: EnvironmentId,
+    itemKeys: ReadonlyArray<string>,
+    callerScopes?: ReadonlyArray<AuthEnvironmentScope>,
+  ) =>
+    machines
+      .call(environmentId, MachineHealthFixRun, {
+        itemKeys,
+        ...(callerScopes === undefined ? {} : { callerScopes: [...callerScopes] }),
+      })
+      .pipe(
+        Effect.timeout(PEER_FIX_TIMEOUT),
+        // Offline, an older Cogenly without Fix, or a fix that timed out there.
+        Effect.mapError((cause) => new MachineHealthError({ reason: "unavailable", cause })),
+      );
 
   const fix: MachineHealthFixes["Service"]["fix"] = Effect.fn("MachineHealthFixes.fix")(
-    function* (input) {
+    function* (input, callerScopes) {
       const self = yield* identity.self;
       if (input.environmentId === undefined || input.environmentId === self.environmentId) {
-        return yield* fixHere(input.itemKeys);
+        return yield* fixHere(input.itemKeys, callerScopes);
       }
       const view = yield* machines.list.pipe(
         Effect.mapError((cause) => new MachineHealthError({ reason: "unavailable", cause })),
@@ -396,7 +427,7 @@ const make = Effect.gen(function* () {
           (candidate.relation === "hub" || candidate.relation === "spoke"),
       );
       if (machine === undefined) return yield* new MachineHealthError({ reason: "not-paired" });
-      return yield* fixThere(machine.environmentId, input.itemKeys);
+      return yield* fixThere(machine.environmentId, input.itemKeys, callerScopes);
     },
   );
 

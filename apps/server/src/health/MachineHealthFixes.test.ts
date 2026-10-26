@@ -1,5 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import {
+  AuthEnvironmentMaintainScope,
+  AuthOrchestrationOperateScope,
   AuthPeerDelegateScope,
   AuthSyncReplicateScope,
   EnvironmentId,
@@ -278,6 +280,41 @@ describe("MachineHealthFixes", () => {
       expect(error.reason).toBe("forbidden");
       expect(ran).toEqual([]);
     }).pipe(Effect.scoped),
+  );
+
+  it.effect("refuses an update fix for a caller without environment:maintain", () =>
+    Effect.gen(function* () {
+      const { fixes, ran } = yield* harness(true);
+      const denied = yield* fixes.fix({ itemKeys: [`machine-version:${laptop}`] }, [
+        AuthOrchestrationOperateScope,
+      ]);
+      expect(ran).toEqual([]);
+      expect(denied.outcomes).toMatchObject([{ status: "failed" }]);
+      const allowed = yield* fixes.fix({ itemKeys: [`machine-version:${laptop}`] }, [
+        AuthOrchestrationOperateScope,
+        AuthEnvironmentMaintainScope,
+      ]);
+      expect(allowed.outcomes).toMatchObject([{ status: "fixed" }]);
+      expect(ran).toEqual(["update:0.3.4"]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "checks forwarded caller scopes on the receiving machine, not the peer credential",
+    () =>
+      Effect.gen(function* () {
+        const { channels, ran } = yield* harness(true);
+        const denied = yield* channels.dispatch({
+          channel: MachineHealthFixRun.name,
+          payload: {
+            itemKeys: [`machine-version:${laptop}`],
+            callerScopes: [AuthOrchestrationOperateScope],
+          },
+          caller: { environmentId: vps, scopes: [AuthPeerDelegateScope] },
+        });
+        expect(ran).toEqual([]);
+        expect(denied).toMatchObject({ outcomes: [{ status: "failed" }] });
+      }).pipe(Effect.scoped),
   );
 
   it.effect("serves a paired machine's Fix from this machine's own report", () =>

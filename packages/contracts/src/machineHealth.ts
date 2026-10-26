@@ -1,6 +1,12 @@
 import * as Schema from "effect/Schema";
 
-import { AuthPeerDelegateScope, AuthSyncReplicateScope } from "./auth.ts";
+import {
+  AuthEnvironmentMaintainScope,
+  AuthEnvironmentScope,
+  AuthOrchestrationOperateScope,
+  AuthPeerDelegateScope,
+  AuthSyncReplicateScope,
+} from "./auth.ts";
 import { EnvironmentId, ScheduledTaskId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { makePeerChannel } from "./machine.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
@@ -70,6 +76,30 @@ export const MachineHealthFix = Schema.Literals([
   "kill-orphans",
 ]);
 export type MachineHealthFix = typeof MachineHealthFix.Type;
+
+/**
+ * The scope each fix actually needs, checked per selected item before the
+ * fix runs locally or is forwarded to a peer. `machinesHealthFix` itself is
+ * gated on `orchestration:operate`, which must not silently grant updating
+ * Cogenly, installing the sandbox, or killing processes.
+ */
+export const MACHINE_HEALTH_FIX_REQUIRED_SCOPES: Record<MachineHealthFix, AuthEnvironmentScope> = {
+  "sign-in": AuthOrchestrationOperateScope,
+  "run-now": AuthOrchestrationOperateScope,
+  resume: AuthOrchestrationOperateScope,
+  "stop-runs": AuthOrchestrationOperateScope,
+  "send-queue": AuthOrchestrationOperateScope,
+  "retry-sync": AuthOrchestrationOperateScope,
+  "discard-quarantined": AuthOrchestrationOperateScope,
+  "setup-sandbox": AuthEnvironmentMaintainScope,
+  "update-machine": AuthEnvironmentMaintainScope,
+  // Killing processes is the same capability as serverKillAgentProcess.
+  "kill-orphans": AuthEnvironmentMaintainScope,
+};
+export const requiredScopeForMachineHealthFix = (
+  fix: MachineHealthFix | null,
+): AuthEnvironmentScope =>
+  fix === null ? AuthOrchestrationOperateScope : MACHINE_HEALTH_FIX_REQUIRED_SCOPES[fix];
 
 export const MachineHealthItem = Schema.Struct({
   /** Stable across reports, e.g. `providers:claude`; alert state is keyed on it. */
@@ -235,7 +265,11 @@ export const MachineHealthRead = makePeerChannel({
 export const MachineHealthFixRun = makePeerChannel({
   name: "health.fix.v1",
   scope: AuthPeerDelegateScope,
-  payload: Schema.Struct({ itemKeys: MachineHealthFixItemKeys }),
+  payload: Schema.Struct({
+    itemKeys: MachineHealthFixItemKeys,
+    /** The original caller's scopes, forwarded so the peer checks them, not its peer credential. */
+    callerScopes: Schema.optionalKey(Schema.Array(AuthEnvironmentScope)),
+  }),
   success: MachineHealthFixResult,
   error: MachineHealthError,
 });
