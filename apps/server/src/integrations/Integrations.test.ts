@@ -190,6 +190,23 @@ describe("resolveHeaderTemplates", () => {
   );
 });
 
+describe("parseRpcBody", () => {
+  it("reads plain JSON and SSE events whatever order their fields come in", () => {
+    const response = { jsonrpc: "2.0", id: 1, result: { tools: [] } };
+    const json = JSON.stringify(response);
+    expect(Integrations.parseRpcBody(json)).toEqual(response);
+    expect(Integrations.parseRpcBody(`data: ${json}\n\n`)).toEqual(response);
+    expect(Integrations.parseRpcBody(`event: message\r\nid: 7\r\ndata: ${json}\r\n\r\n`)).toEqual(
+      response,
+    );
+    // A payload split over data lines is one event.
+    expect(
+      Integrations.parseRpcBody(`: keepalive\nevent: message\ndata: {"result":\ndata: 1}\n\n`),
+    ).toEqual({ result: 1 });
+    expect(Integrations.parseRpcBody("event: message\n\n")).toBeUndefined();
+  });
+});
+
 describe("Integrations gateway", () => {
   it.effect(
     "binds credentials to the approved origin and refuses unapproved destination edits",

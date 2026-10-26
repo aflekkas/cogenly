@@ -229,15 +229,30 @@ interface JsonRpcResponse {
   readonly error?: { readonly message?: unknown };
 }
 
-const parseRpcBody = (text: string): JsonRpcResponse | undefined => {
-  const trimmed = text.trim();
-  const candidates = trimmed.startsWith("data:")
-    ? trimmed
-        .split("\n")
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice("data:".length).trim())
-    : [trimmed];
-  for (const candidate of candidates.toReversed()) {
+/**
+ * The JSON payloads of a response body: the body itself, or for an SSE stream
+ * each event's data, however the event orders its fields.
+ */
+const rpcPayloads = (text: string): ReadonlyArray<string> => {
+  const lines = text.split(/\r\n|\r|\n/);
+  if (!lines.some((line) => line.startsWith("data:"))) return [text.trim()];
+  const events: Array<string> = [];
+  let data: Array<string> = [];
+  for (const line of [...lines, ""]) {
+    if (line === "") {
+      if (data.length > 0) events.push(data.join("\n"));
+      data = [];
+    } else if (line.startsWith("data:")) {
+      const value = line.slice("data:".length);
+      data.push(value.startsWith(" ") ? value.slice(1) : value);
+    }
+    // Other fields (event:, id:, retry:) and comments carry no payload.
+  }
+  return events;
+};
+
+export const parseRpcBody = (text: string): JsonRpcResponse | undefined => {
+  for (const candidate of rpcPayloads(text).toReversed()) {
     try {
       const parsed: unknown = JSON.parse(candidate);
       if (typeof parsed === "object" && parsed !== null) return parsed as JsonRpcResponse;
