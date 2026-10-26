@@ -39,13 +39,21 @@ export function integrationErrorText(error: unknown): string {
     : "The server rejected the change.";
 }
 
-/** The server words a failed test as "Could not connect (<reason>)."; this makes it plain. */
+/**
+ * Plain text for a failed test, from its reason code (or the "Could not connect (<reason>)."
+ * the server words it as); a message with no known code reads as is.
+ */
 export function testResultReason(result: IntegrationTestResult): string | null {
   if (result.status === "connected") return null;
-  const token = /\(([a-z_]+)\)/.exec(result.message)?.[1];
+  const token = result.reason ?? /\(([a-z_]+)\)/.exec(result.message)?.[1];
   return token !== undefined && token in REASON_TEXT
     ? REASON_TEXT[token as IntegrationError["reason"]]
     : result.message;
+}
+
+/** "3 tools available": a passed test's toast. */
+export function testResultToolsText(result: IntegrationTestResult): string {
+  return `${result.toolCount} ${result.toolCount === 1 ? "tool" : "tools"} available`;
 }
 
 export interface IntegrationStatusView {

@@ -32,6 +32,8 @@ import {
   integrationStatus,
   integrationTitle,
   scopeLabel,
+  testResultReason,
+  testResultToolsText,
   type IntegrationStatusView,
 } from "./integrationServices.logic";
 import { SettingsGroup } from "./SettingsGroup";
@@ -304,10 +306,19 @@ function IntegrationDetail({
   const runTest = async () => {
     const result = await test({ environmentId, input: { id: integration.id } });
     if (result._tag === "Success")
-      toastManager.add({
-        type: result.value.status === "connected" ? "success" : "error",
-        title: result.value.message,
-      });
+      toastManager.add(
+        result.value.status === "connected"
+          ? {
+              type: "success",
+              title: `Connected ${integrationTitle(integration)}`,
+              description: testResultToolsText(result.value),
+            }
+          : {
+              type: "error",
+              title: `Couldn't connect ${integrationTitle(integration)}`,
+              description: testResultReason(result.value),
+            },
+      );
     else if (!isAtomCommandInterrupted(result))
       setError(integrationErrorText(squashAtomCommandFailure(result)));
   };
