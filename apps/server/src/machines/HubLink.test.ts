@@ -120,3 +120,33 @@ it.live("leave awaits a reconnect's pending write before removing its credential
     }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
   }).pipe(Effect.scoped),
 );
+
+it.live("persists pushed hub routes ahead of paired routes and retains fallbacks", () =>
+  Effect.gen(function* () {
+    const persisted = yield* Deferred.make<void>();
+    const hub = yield* startMachine("hub", "cloud-server", undefined, {
+      endpoints: () => Effect.succeed([{ kind: "tailnet", httpBaseUrl: "http://127.0.0.2:3773/" }]),
+    });
+    const spoke = yield* startMachine("spoke", "computer", undefined, {
+      secrets: (secrets) => ({
+        ...secrets,
+        set: (name, value) =>
+          secrets
+            .set(name, value)
+            .pipe(
+              Effect.andThen(
+                name === "machine-hub-link" && new TextDecoder().decode(value).includes("127.0.0.2")
+                  ? Deferred.succeed(persisted, undefined)
+                  : Effect.void,
+              ),
+            ),
+      }),
+    });
+    yield* pair(hub, spoke);
+    yield* Deferred.await(persisted);
+    const view = yield* spoke.hubLink.view;
+    assert.isTrue(Option.isSome(view));
+    if (Option.isSome(view))
+      assert.deepEqual(view.value.link.routes, ["http://127.0.0.2:3773/", hub.url]);
+  }).pipe(Effect.scoped),
+);

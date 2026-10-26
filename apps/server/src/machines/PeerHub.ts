@@ -43,6 +43,9 @@ import type * as Scope from "effect/Scope";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 
+import * as DirectEndpoints from "../environment/DirectEndpoints.ts";
+import { advertisedPeerRoutes } from "./peerRoutes.ts";
+
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as SessionStore from "../auth/SessionStore.ts";
@@ -182,6 +185,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const auth = yield* EnvironmentAuth.EnvironmentAuth;
   const sessions = yield* SessionStore.SessionStore;
+  const endpoints = yield* DirectEndpoints.DirectEndpoints;
   const identity = yield* MachineIdentity.MachineIdentity;
   const channels = yield* PeerChannels.PeerChannels;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
@@ -322,8 +326,13 @@ const make = Effect.gen(function* () {
     if (live.size === 0) return;
     const machines = yield* hubView.pipe(Effect.option);
     if (Option.isNone(machines)) return;
+    const hubRoutes = advertisedPeerRoutes(yield* endpoints.resolve());
     for (const connection of live.values()) {
-      Queue.offerUnsafe(connection.outbox, { _tag: "Machines", machines: machines.value });
+      Queue.offerUnsafe(connection.outbox, {
+        _tag: "Machines",
+        machines: machines.value,
+        hubRoutes,
+      });
     }
   });
 
