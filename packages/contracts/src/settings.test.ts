@@ -563,6 +563,14 @@ describe("ServerSettings retired auto-settle", () => {
   });
 });
 
+it("accepts the retired machine action list on decode without exposing or patching it", () => {
+  const stored = { defaultProjectScripts: [{ command: "legacy" }] };
+  const decoded = decodeServerSettings(stored);
+  expect(decoded).not.toHaveProperty("defaultProjectScripts");
+  expect(encodeServerSettings(decoded)).not.toHaveProperty("defaultProjectScripts");
+  expect(decodeServerSettingsPatch(stored)).toEqual({});
+});
+
 describe("ServerSettings retired project overrides", () => {
   // Settings files and patches from before 0.3.2, valid or not: settings are
   // global now, so every per-project value is dropped on decode.

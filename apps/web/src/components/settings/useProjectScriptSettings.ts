@@ -11,7 +11,6 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@cogenly/client-runtime/state/runtime";
-import { resolveProjectScripts } from "@cogenly/shared/projectScripts";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import { useRef, useState } from "react";
@@ -115,7 +114,7 @@ export function useProjectScriptSettings(members: readonly SidebarProjectGroupMe
     try {
       const handledEnvironments = new Set<EnvironmentId>();
       for (const { member, config } of targets) {
-        const current = resolveProjectScripts(config.settings, member);
+        const current = member.scripts;
         const nextScripts = transform(current);
         const result = await updateProject({
           environmentId: member.environmentId,
@@ -143,7 +142,7 @@ export function useProjectScriptSettings(members: readonly SidebarProjectGroupMe
               (other) =>
                 other.environmentId === member.environmentId &&
                 !members.some((candidate) => candidate.id === other.id) &&
-                resolveProjectScripts(config.settings, other).some((script) => script.id === id),
+                other.scripts.some((script) => script.id === id),
             );
           const bindingResult = next
             ? await upsertKeybinding({
@@ -166,10 +165,7 @@ export function useProjectScriptSettings(members: readonly SidebarProjectGroupMe
 
   function submit(scriptId: string | null, input: NewProjectScriptInput) {
     const existingIds = projects.flatMap((project) => {
-      const config = configOf(project.environmentId);
-      return [...project.scripts, ...(config ? config.settings.defaultProjectScripts : [])].map(
-        (script) => script.id,
-      );
+      return project.scripts.map((script) => script.id);
     });
     const id = scriptId ?? nextProjectScriptId(input.name, existingIds);
     const next = buildProjectScript(id, input);

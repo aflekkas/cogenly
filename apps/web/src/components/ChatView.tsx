@@ -138,7 +138,7 @@ import {
   resolvePromptInjectedEffort,
   resolveSelectableModel,
 } from "@cogenly/shared/model";
-import { projectScriptCwd, resolveProjectScripts } from "@cogenly/shared/projectScripts";
+import { projectScriptCwd } from "@cogenly/shared/projectScripts";
 import { derivePendingBackgroundWork } from "@cogenly/shared/orchestrationV2PendingBackgroundWork";
 import {
   latestUnheldRun,
@@ -1909,8 +1909,8 @@ export default function ChatView(props: ChatViewProps) {
   const runtimeMode =
     composerRuntimeMode ?? activeThread?.runtimeMode ?? settings.defaultRuntimeMode;
   const activeProjectScripts = useMemo(
-    () => (activeProject ? resolveProjectScripts(settings, activeProject) : []),
-    [activeProject, settings],
+    () => (activeProject ? activeProject.scripts : []),
+    [activeProject],
   );
   // A project added by cloning exists before its files do. The draft stays
   // editable throughout; only sending waits for the clone, and a failed

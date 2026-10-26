@@ -13,6 +13,7 @@ import {
   PeerAuthenticatedFrame,
   isAuthPeerScope,
   makePeerChannel,
+  MachineHealthFixRun,
 } from "@cogenly/contracts";
 
 import * as Effect from "effect/Effect";
@@ -753,6 +754,58 @@ describe("machines", () => {
         false,
       );
       assert.strictEqual(view.link._tag === "spoke" && view.link.status, "revoked");
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("carries health Fix both ways with the scopes issued by 0.3.0 pairings", () =>
+    Effect.gen(function* () {
+      const hub = yield* startMachine("hub", "cloud-server");
+      const spoke = yield* startMachine("laptop", "computer");
+      yield* pair(hub, spoke);
+      const link = Option.getOrThrow(yield* spoke.run(readHubLink));
+      assert.deepStrictEqual(link.scopes, ["sync:replicate", "peer:delegate"]);
+      const sessions = yield* hub.run(
+        EnvironmentAuth.EnvironmentAuth.pipe(Effect.flatMap((auth) => auth.listSessions())),
+      );
+      assert.isTrue(
+        sessions.some(
+          (session) =>
+            session.scopes.includes("sync:replicate") && session.scopes.includes("peer:delegate"),
+        ),
+      );
+      for (const [machine, name] of [
+        [hub, "hub"],
+        [spoke, "laptop"],
+      ] as const) {
+        yield* machine.run(
+          PeerChannels.PeerChannels.pipe(
+            Effect.flatMap((channels) =>
+              channels.register(MachineHealthFixRun, ({ itemKeys }) =>
+                Effect.succeed({
+                  environmentId: machine.environmentId,
+                  machineName: name,
+                  summary: "Resolved",
+                  outcomes: itemKeys.map((itemKey) => ({
+                    itemKey,
+                    status: "resolved" as const,
+                    message: "Already resolved",
+                  })),
+                }),
+              ),
+            ),
+          ),
+        );
+      }
+      for (const [from, to] of [
+        [spoke, hub],
+        [hub, spoke],
+      ]) {
+        const result = yield* from!.machines.call(to!.environmentId, MachineHealthFixRun, {
+          itemKeys: ["sync:stuck"],
+        });
+        assert.strictEqual(result.environmentId, to!.environmentId);
+        assert.strictEqual(result.outcomes[0]?.status, "resolved");
+      }
     }).pipe(Effect.scoped),
   );
 
