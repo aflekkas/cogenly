@@ -40,6 +40,9 @@ import {
 import { openSignInPage } from "./openIntegrationSignIn";
 import { useStatusFade } from "./integrationStatusMotion";
 import { useEnvironmentMachineList } from "../../machines/useMachines";
+import { useOpenMachineHealthAlerts } from "../../machines/machineHealthAlertsStore";
+import { integrationAttentionTone } from "./settingsAttention.logic";
+import { SettingsAttentionTitle } from "./SettingsAttentionTitle";
 import { Switch } from "../ui/switch";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { SettingsEmpty, SettingsRow, SettingsSection } from "./settingsLayout";
@@ -169,6 +172,11 @@ function IntegrationListRow({
   const statusRef = useStatusFade<HTMLSpanElement>(status.label);
   const entry = integrationCatalogEntryFor(integration);
   const account = integration.accountLabel?.trim();
+  const attention = integrationAttentionTone(
+    useOpenMachineHealthAlerts(),
+    environmentId,
+    integration.name,
+  );
   const setEnabled = async (enabled: boolean) => {
     setPending(true);
     try {
@@ -195,9 +203,11 @@ function IntegrationListRow({
         </span>
       }
       title={
-        <span className="truncate text-sm font-medium text-foreground">
-          {integration.displayName}
-        </span>
+        <SettingsAttentionTitle tone={attention}>
+          <span className="truncate text-sm font-medium text-foreground">
+            {integration.displayName}
+          </span>
+        </SettingsAttentionTitle>
       }
       description={
         <>

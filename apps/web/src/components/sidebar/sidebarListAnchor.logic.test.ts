@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { offsetFromEdge, scrollTopForOffset, sidebarListEdge } from "./sidebarListAnchor.logic";
+import {
+  offsetFromEdge,
+  scrollTopForOffset,
+  sidebarListEdge,
+  stepSearchResultIndex,
+} from "./sidebarListAnchor.logic";
 
 // 1000px of rows in a 400px viewport: scrollTop runs 0..600.
 const box = { scrollHeight: 1000, clientHeight: 400 };
@@ -37,7 +42,27 @@ describe("sidebarListEdge", () => {
     expect(bottom("tasks", "snoozed")).toBe("top");
     expect(bottom("chats", null)).toBe("top");
     expect(bottom("tasks", null, true)).toBe("top");
-    expect(bottom("settings", null, true)).toBe("top");
+  });
+
+  it("stacks Settings search up from its input in the bottom layout only", () => {
+    const search = (layout: "top" | "bottom") =>
+      sidebarListEdge({ layout, searching: true, mode: "settings", shelf: null });
+    expect(search("bottom")).toBe("bottom");
+    expect(search("top")).toBe("top");
+  });
+});
+
+describe("stepSearchResultIndex", () => {
+  it("moves down the ranking with ArrowDown when results read down from the input", () => {
+    expect(stepSearchResultIndex("ArrowDown", 0, 3, "top")).toBe(1);
+    expect(stepSearchResultIndex("ArrowUp", 0, 3, "top")).toBe(2);
+  });
+
+  it("moves up, away from the input, to lower matches when results stack above it", () => {
+    expect(stepSearchResultIndex("ArrowUp", 0, 3, "bottom")).toBe(1);
+    expect(stepSearchResultIndex("ArrowUp", 2, 3, "bottom")).toBe(0);
+    expect(stepSearchResultIndex("ArrowDown", 1, 3, "bottom")).toBe(0);
+    expect(stepSearchResultIndex("ArrowDown", 0, 3, "bottom")).toBe(2);
   });
 });
 
