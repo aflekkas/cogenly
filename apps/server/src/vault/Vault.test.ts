@@ -9,6 +9,8 @@ import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeCrypto } from "@effect/platform-node";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -388,6 +390,58 @@ describe("Vault service", () => {
       );
     }).pipe(Effect.provide(layer)),
   );
+
+  it.effect("a scrub load that overlaps a write does not publish a stale set", () => {
+    const values = new Map<string, Uint8Array>();
+    // Holds the next key-pair read until the test opens it.
+    const gate: { reached?: Deferred.Deferred<void>; open?: Deferred.Deferred<void> } = {};
+    const store = Layer.mock(ServerSecretStore.ServerSecretStore)({
+      get: (name) =>
+        Effect.gen(function* () {
+          if (gate.reached && gate.open) {
+            yield* Deferred.succeed(gate.reached, undefined);
+            yield* Deferred.await(gate.open);
+          }
+          return Option.fromUndefinedOr(values.get(name));
+        }),
+      create: (name, value) => Effect.sync(() => void values.set(name, value)),
+    });
+    return Effect.gen(function* () {
+      const id = yield* Vault.Vault.pipe(
+        Effect.flatMap((vault) =>
+          vault.create({ name: "A", type: "api_key", secretFields: { value: "alpha-value-123" } }),
+        ),
+        Effect.map(({ item }) => item.id),
+        Effect.provide(Vault.layer),
+      );
+      // A second instance has no key pair cached, so its load stops at the gate.
+      yield* Effect.gen(function* () {
+        const vault = yield* Vault.Vault;
+        gate.reached = yield* Deferred.make<void>();
+        gate.open = yield* Deferred.make<void>();
+        const loading = yield* vault.scrubText("warm").pipe(Effect.forkChild);
+        yield* Deferred.await(gate.reached);
+        yield* vault.delete({ id });
+        yield* Deferred.succeed(gate.open, undefined);
+        yield* Fiber.join(loading);
+        // Never delivered, so once deleted there is nothing left to scrub.
+        expect(yield* vault.scrubText("alpha-value-123")).toBe("alpha-value-123");
+      }).pipe(Effect.provide(Vault.layer));
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          store,
+          Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+            getEnvironmentId: Effect.succeed(EnvironmentId.make("env:test")),
+          }),
+        ).pipe(
+          Layer.provideMerge(Sqlite.layerMemory),
+          Layer.provideMerge(NodeServices.layer),
+          Layer.provideMerge(NodeCrypto.layer),
+        ),
+      ),
+    );
+  });
 
   it.effect("withholds tool output when the secrets to scrub cannot be loaded", () =>
     Effect.gen(function* () {
