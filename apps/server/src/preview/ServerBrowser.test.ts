@@ -32,6 +32,7 @@ import * as Channel from "./DesktopBrowserChannel.ts";
 import * as Manager from "./Manager.ts";
 import * as Browser from "./PreviewBrowser.ts";
 import * as BrowserHost from "./PreviewBrowserHost.ts";
+import * as Extensions from "./BrowserExtensions.ts";
 import * as ServerBrowser from "./ServerBrowser.ts";
 import { ServerBrowserContexts } from "./ServerBrowserContexts.ts";
 
@@ -133,6 +134,11 @@ const rig = (native = false, autoOpen = true) =>
         Layer.mock(Browser.PreviewBrowser)({
           executable: Effect.die("No real browser in this test"),
           installed: Effect.succeedNone,
+        }),
+        Layer.mock(Extensions.BrowserExtensions)({
+          loadable: () => Effect.succeed([]),
+          profiles: Effect.succeed([]),
+          changes: Stream.empty,
         }),
         Layer.mock(Channel.DesktopBrowserChannel)({
           available: true,

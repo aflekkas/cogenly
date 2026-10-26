@@ -1,3 +1,4 @@
+import * as BrowserExtensions from "../../../preview/BrowserExtensions.ts";
 import * as ServerBrowser from "../../../preview/ServerBrowser.ts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -203,6 +204,41 @@ const handlers = {
   browser_import_cookies: McpToolAccess.actsAsCaller(
     (input: import("@cogenly/contracts").BrowserCookieImportInput) =>
       Effect.flatMap(ServerBrowser.ServerBrowser, (browser) => browser.importCookies(input)),
+  ),
+  browser_extensions_list: McpToolAccess.readsAsCaller(
+    (input: import("@cogenly/contracts").BrowserExtensionsListInput) =>
+      Effect.flatMap(BrowserExtensions.BrowserExtensions, (extensions) => extensions.list(input)),
+  ),
+  browser_extension_install: McpToolAccess.actsAsCaller(
+    (input: import("@cogenly/contracts").BrowserExtensionInstallInput) =>
+      Effect.flatMap(BrowserExtensions.BrowserExtensions, (extensions) =>
+        extensions.install(input),
+      ),
+  ),
+  browser_extension_toggle: McpToolAccess.actsAsCaller(
+    (input: import("@cogenly/contracts").BrowserExtensionToggleInput) =>
+      Effect.flatMap(BrowserExtensions.BrowserExtensions, (extensions) => extensions.toggle(input)),
+  ),
+  browser_extension_remove: McpToolAccess.actsAsCaller(
+    (input: import("@cogenly/contracts").BrowserExtensionRemoveInput) =>
+      Effect.flatMap(BrowserExtensions.BrowserExtensions, (extensions) => extensions.remove(input)),
+  ),
+  // Resolves the page, then opens it like preview_open, so the tab and its
+  // output follow every preview_* rule, redaction included.
+  browser_extension_open: McpToolAccess.actsAsCaller(({ id, page, profileId, open, tabId }) =>
+    Effect.gen(function* () {
+      const extensions = yield* BrowserExtensions.BrowserExtensions;
+      const url = yield* extensions.pageUrl({ id, page, profileId });
+      return yield* invokeTargeted<PreviewAutomationStatus>(
+        "open",
+        normalizePreviewOpenInput({
+          url,
+          ...(tabId === undefined ? { reuseExistingTab: false } : { tabId }),
+          ...(profileId === undefined ? {} : { profileId }),
+          ...(open === undefined ? {} : { open }),
+        }),
+      );
+    }),
   ),
   preview_dialog: McpToolAccess.actsAsCaller((input) =>
     invokeTargeted<PreviewAutomationStatus>("dialog", input),

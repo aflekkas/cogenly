@@ -3,6 +3,16 @@ import {
   BrowserCookieImportResult,
   BrowserCookieImportError,
 } from "./browserCookies.ts";
+import {
+  BrowserExtension,
+  BrowserExtensionError,
+  BrowserExtensionInstallInput,
+  BrowserExtensionInstallResult,
+  BrowserExtensionRemoveInput,
+  BrowserExtensionToggleInput,
+  BrowserExtensionsListInput,
+  BrowserExtensionsListResult,
+} from "./browserExtensions.ts";
 import { BrowserImportSource } from "./browserImport.ts";
 import * as RepoMcpTrust from "./repoMcpTrust.ts";
 import * as Search from "./search.ts";
@@ -480,6 +490,10 @@ export const WS_METHODS = {
   previewClose: "preview.close",
   previewList: "preview.list",
   browserCookieSources: "browser.cookieSources",
+  browserExtensionsList: "browser.extensions.list",
+  browserExtensionInstall: "browser.extensions.install",
+  browserExtensionRemove: "browser.extensions.remove",
+  browserExtensionToggle: "browser.extensions.toggle",
   browserImportCookies: "browser.importCookies",
   previewClearProfile: "preview.clearProfile",
   previewReportProfiles: "preview.reportProfiles",
@@ -1718,6 +1732,27 @@ const WsBrowserImportCookiesRpc = Rpc.make(WS_METHODS.browserImportCookies, {
   payload: BrowserCookieImportInput,
   success: BrowserCookieImportResult,
   error: Schema.Union([BrowserCookieImportError, EnvironmentAuthorizationError]),
+});
+
+const WsBrowserExtensionsListRpc = Rpc.make(WS_METHODS.browserExtensionsList, {
+  payload: BrowserExtensionsListInput,
+  success: BrowserExtensionsListResult,
+  error: Schema.Union([BrowserExtensionError, EnvironmentAuthorizationError]),
+});
+const WsBrowserExtensionInstallRpc = Rpc.make(WS_METHODS.browserExtensionInstall, {
+  payload: BrowserExtensionInstallInput,
+  success: BrowserExtensionInstallResult,
+  error: Schema.Union([BrowserExtensionError, EnvironmentAuthorizationError]),
+});
+const WsBrowserExtensionRemoveRpc = Rpc.make(WS_METHODS.browserExtensionRemove, {
+  payload: BrowserExtensionRemoveInput,
+  success: BrowserExtensionsListResult,
+  error: Schema.Union([BrowserExtensionError, EnvironmentAuthorizationError]),
+});
+const WsBrowserExtensionToggleRpc = Rpc.make(WS_METHODS.browserExtensionToggle, {
+  payload: BrowserExtensionToggleInput,
+  success: BrowserExtension,
+  error: Schema.Union([BrowserExtensionError, EnvironmentAuthorizationError]),
 });
 
 const WsPreviewClearProfileRpc = Rpc.make(WS_METHODS.previewClearProfile, {
@@ -3151,6 +3186,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsPreviewCloseRpc,
   WsPreviewListRpc,
   WsBrowserCookieSourcesRpc,
+  WsBrowserExtensionsListRpc,
+  WsBrowserExtensionInstallRpc,
+  WsBrowserExtensionRemoveRpc,
+  WsBrowserExtensionToggleRpc,
   WsBrowserImportCookiesRpc,
   WsPreviewClearProfileRpc,
   WsPreviewReportProfilesRpc,

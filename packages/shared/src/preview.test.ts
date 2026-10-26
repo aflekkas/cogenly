@@ -91,6 +91,15 @@ describe("normalizePreviewUrl", () => {
     expect(normalizePreviewUrl("http://example.com/path?q=1")).toBe("http://example.com/path?q=1");
   });
 
+  it("opens pages inside an extension, and only by a real extension ID", () => {
+    const page = `chrome-extension://${"a".repeat(32)}/popup.html`;
+    expect(normalizePreviewUrl(page)).toBe(page);
+    expect(() => normalizePreviewUrl("chrome-extension://not-an-id/popup.html")).toThrow(
+      PreviewUrlNormalizationError,
+    );
+    expect(() => normalizePreviewUrl("chrome://settings")).toThrow(PreviewUrlNormalizationError);
+  });
+
   it("rejects empty input", () => {
     try {
       normalizePreviewUrl("   ");

@@ -317,6 +317,7 @@ describe("searchSettings", () => {
     ["tab size", "browser-default-viewport", "/settings/integrations"],
     ["browser viewport", "browser-default-viewport", "/settings/integrations"],
     ["show clicks", "browser-recording-mouse-presses", "/settings/integrations"],
+    ["chrome web store", "browser-extensions", "/settings/integrations"],
     ["screen recording", "agent-computer-use", "/settings/integrations"],
     ["connect a machine", "remote-environments", "/settings/connections"],
     ["private access", "machines", "/settings/machines"],

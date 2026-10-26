@@ -55,6 +55,7 @@ import { useRightPanelStore } from "~/rightPanelStore";
 
 import { previewBridge } from "./previewBridge";
 import { subscribePreviewAction } from "./previewActionBus";
+import { addBrowserSurface } from "./addBrowserSurface";
 import { closePreviewSession } from "./closePreviewSession";
 import { openPreviewSession } from "./openPreviewSession";
 import { showPreviewPopup } from "./showPreviewPopup";
@@ -579,6 +580,33 @@ export function PreviewView({
     await closePreviewSession({ closePreview, snapshot, tabId, threadRef });
   }, [closePreview, moveTarget, open, snapshot, tabId, threadRef, url, viewport]);
 
+  // An extension's popup or options page opens beside this tab, in its profile
+  // and its browser, which is where the extension is loaded.
+  const activeRuntime = snapshot?.runtime;
+  const openExtensionPage = useCallback(
+    async (pageUrl: string) => {
+      const result = await addBrowserSurface({
+        threadRef,
+        openPreview: open,
+        profileId: activeProfileId,
+        url: pageUrl,
+        runtime: activeRuntime,
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        toastManager.add({
+          type: "error",
+          title: "Unable to open the extension page",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        });
+      }
+    },
+    [activeProfileId, activeRuntime, open, threadRef],
+  );
+  const activeProfileIncognito =
+    browserDefaults.profiles.find((profile) => profile.id === activeProfileId)?.kind ===
+    "incognito";
+
   /**
    * The menu's actions. A server tab, streamed or rendered natively here, runs
    * them through its environment, so every client and agent sees one state.
@@ -920,6 +948,12 @@ export function PreviewView({
               onToggleDeviceToolbar={handleToggleDeviceToolbar}
               nativePictureInPicture={desktopOverlay?.pictureInPicture ?? false}
               onShowMiniPreview={showMiniPreview}
+              extensions={{
+                environmentId: threadRef.environmentId,
+                profileId: activeProfileId,
+                incognito: activeProfileIncognito,
+                openPage: (pageUrl) => void openExtensionPage(pageUrl),
+              }}
             />
           ) : null
         }

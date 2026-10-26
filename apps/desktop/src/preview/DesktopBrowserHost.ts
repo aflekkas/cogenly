@@ -273,6 +273,18 @@ export const make = Effect.gen(function* () {
         );
         return;
       }
+      if (command.value.type === "extensions") {
+        const { environmentId, profileId, extensions, requestId } = command.value;
+        runFork(
+          browserSession.loadExtensions(environmentId, profileId, extensions).pipe(
+            Effect.flatMap((success) =>
+              PubSub.publish(outbox, { type: "browserStorageResult", requestId, success }),
+            ),
+            Effect.asVoid,
+          ),
+        );
+        return;
+      }
       const tab = tabs.get(keyOf(command.value));
       if (command.value.type === "permission") {
         const { threadId, tabId, requestId, change } = command.value;

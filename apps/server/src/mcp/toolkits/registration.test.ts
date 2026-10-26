@@ -1,5 +1,6 @@
 import * as ProviderAuthService from "../../provider/ProviderAuthService.ts";
 import * as ProviderSignInRequests from "../../provider/ProviderSignInRequests.ts";
+import * as BrowserExtensions from "../../preview/BrowserExtensions.ts";
 import * as ServerBrowser from "../../preview/ServerBrowser.ts";
 import * as StorageCleanup from "../../storageCleanup.ts";
 import * as Accounts from "../../accounts/Accounts.ts";
@@ -371,6 +372,13 @@ const smokeCases = [
     expected: { targetProfileId: "default", dryRun: true, available: 2, imported: 0 },
   },
   {
+    toolkit: "browserExtensions",
+    names: [],
+    tool: "browser_extensions_list",
+    args: {},
+    expected: { profileId: "default", extensions: [] },
+  },
+  {
     toolkit: "search",
     names: ["search"],
     tool: "search",
@@ -688,6 +696,11 @@ const smokeCases = [
     toolkit: "preview",
     names: [
       "browser_cookie_sources",
+      "browser_extension_install",
+      "browser_extension_open",
+      "browser_extension_remove",
+      "browser_extension_toggle",
+      "browser_extensions_list",
       "browser_import_cookies",
       "preview_click",
       "preview_dialog",
@@ -949,6 +962,12 @@ it.effect.each(smokeCases)(
                   warnings: [],
                   reloadRequired: false,
                 }),
+            }),
+          ),
+          Layer.provide(
+            Layer.mock(BrowserExtensions.BrowserExtensions)({
+              list: (input) =>
+                Effect.succeed({ profileId: input.profileId ?? "default", extensions: [] }),
             }),
           ),
           Layer.provide(PreviewBrowser.layer),

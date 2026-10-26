@@ -155,7 +155,7 @@ export function normalizePreviewUrl(rawUrl: string): string {
       cause,
     });
   }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:" && !isExtensionPageUrl(parsed)) {
     throw new PreviewUrlNormalizationError({
       inputLength: rawUrl.length,
       reason: "unsupported-protocol",
@@ -164,3 +164,10 @@ export function normalizePreviewUrl(rawUrl: string): string {
   }
   return parsed.href;
 }
+
+/**
+ * A page inside an installed extension, such as its popup or options page.
+ * The browser itself refuses an extension the profile does not run.
+ */
+export const isExtensionPageUrl = (url: URL) =>
+  url.protocol === "chrome-extension:" && /^[a-p]{32}$/.test(url.hostname);
