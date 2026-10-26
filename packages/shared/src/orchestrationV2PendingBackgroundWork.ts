@@ -114,6 +114,10 @@ type PendingBackgroundWorkTurnItem = {
   readonly childThreadId?: ThreadId | null;
 };
 
+function isActiveRun(run: PendingBackgroundWorkRun): boolean {
+  return run.status === "preparing" || run.status === "starting" || run.status === "running";
+}
+
 function isLatestRunSettledForBackgroundWait(
   latestRun: PendingBackgroundWorkRun | null | undefined,
 ): boolean {
@@ -234,12 +238,7 @@ export function derivePendingBackgroundWork(input: {
   readonly runs?: ReadonlyArray<PendingBackgroundWorkRun>;
   readonly pullRequests?: ReadonlyArray<PendingBackgroundWorkPullRequest> | undefined;
 }): ReadonlyArray<PendingBackgroundWorkTask> {
-  const hasActiveRun =
-    input.hasActiveRun ??
-    input.runs?.some(
-      (run) => run.status === "preparing" || run.status === "starting" || run.status === "running",
-    ) ??
-    false;
+  const hasActiveRun = input.hasActiveRun ?? input.runs?.some(isActiveRun) ?? false;
   if (hasActiveRun) {
     return [];
   }
@@ -250,7 +249,41 @@ export function derivePendingBackgroundWork(input: {
   if (!isLatestRunSettledForBackgroundWait(input.latestRun)) {
     return [];
   }
+  return collectPendingBackgroundWork(input, pendingBackgroundTurnItems(input));
+}
 
+/**
+ * The background work a thread shows the user, such as the composer's
+ * "Waiting on 4 subagents" strip. Unlike `derivePendingBackgroundWork`, an
+ * active run does not hide it: subagents and monitors an earlier run left
+ * behind keep running while the user steers or the agent wakes, so the strip
+ * stays until the last of them ends. The active run's own turn items stay out;
+ * they are that turn's foreground work. Server policy (completion holds, Stop
+ * targets) keeps using `derivePendingBackgroundWork`.
+ */
+export function deriveVisibleBackgroundWork(
+  input: Parameters<typeof derivePendingBackgroundWork>[0],
+): ReadonlyArray<PendingBackgroundWorkTask> {
+  const activeRunIds = new Set(
+    [...(input.runs ?? []), ...(input.latestRun == null ? [] : [input.latestRun])]
+      .filter(isActiveRun)
+      .map((run) => String(run.id)),
+  );
+  if (activeRunIds.size === 0 && input.hasActiveRun !== true) {
+    return derivePendingBackgroundWork(input);
+  }
+  return collectPendingBackgroundWork(
+    input,
+    pendingBackgroundTurnItems(input).filter(
+      (item) => item.runId == null || !activeRunIds.has(String(item.runId)),
+    ),
+  );
+}
+
+function collectPendingBackgroundWork(
+  input: Parameters<typeof derivePendingBackgroundWork>[0],
+  turnItems: ReadonlyArray<PendingBackgroundWorkTurnItem>,
+): ReadonlyArray<PendingBackgroundWorkTask> {
   const byTaskId = new Map<string, PendingBackgroundWorkTask>();
 
   const providerThreads =
@@ -272,7 +305,7 @@ export function derivePendingBackgroundWork(input: {
     }
   }
 
-  for (const item of pendingBackgroundTurnItems(input)) {
+  for (const item of turnItems) {
     const taskId = nativeTaskIdFromTurnItem(item);
     if (byTaskId.has(taskId)) {
       continue;
