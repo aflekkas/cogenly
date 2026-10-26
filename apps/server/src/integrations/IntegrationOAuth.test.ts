@@ -854,6 +854,13 @@ describe("Integration OAuth sign-in", () => {
         expect(missing._tag).toBe("Failure");
         if (missing._tag === "Failure")
           expect(missing.failure.cause).toContain("inline integration card");
+        // The agent's result is a plain sign-in step: the card signs in from the browser's own origin.
+        const prepared = yield* restarted.prepareSignIn(other.id, {
+          origin: "http://localhost:3000",
+          fromAgent: true,
+        });
+        expect(prepared.setup).toMatchObject({ type: "sign_in" });
+        expect(prepared.signIn).toBeUndefined();
         const explicit = yield* restarted.beginSignIn(other.id, {
           origin: "http://localhost:3000",
           fromAgent: true,

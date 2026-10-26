@@ -42,7 +42,8 @@ export function IntegrationSetupCard({
       : integrationCatalogEntryFor(summary.integration)?.id === target?.setup?.catalogId &&
         summary.integration.accountLabel === target?.accountLabel,
   );
-  const setup = summary?.setup ?? target?.setup;
+  // The live account wins over the step recorded when the card was posted.
+  const setup = summary !== undefined ? summary.setup : target?.setup;
   const catalogId = setup?.catalogId;
   const saveKey = useOrchestrationCommand(integrationsRpc.saveApiKey, { reportFailure: false });
   const saveClient = useOrchestrationCommand(integrationsRpc.saveOAuthClient, {
@@ -55,8 +56,8 @@ export function IntegrationSetupCard({
   const canUpdate = useAtomValue(integrationsRpc.update.permissionAtom(environmentId));
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // A "fix" step names a field, so its editor starts open.
-  const [editing, setEditing] = useState(target?.setup?.type === "fix");
+  // Until the user toggles it, the editor follows the account's current step: a "fix" opens it.
+  const [editingChoice, setEditing] = useState<boolean | null>(null);
   const [url, setUrl] = useState<string | null>(null);
   const [clientId, setClientId] = useState<string | null>(null);
   const [credential, setCredential] = useState("");
@@ -65,6 +66,7 @@ export function IntegrationSetupCard({
     onToggle?.(!open);
     setEditing(open);
   };
+  const editing = editingChoice ?? setup?.type === "fix";
   const connected = summary?.status === "connected";
   if (item.secretStatus !== "pending" || connected || visibility !== "local")
     return (

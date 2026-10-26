@@ -3049,14 +3049,18 @@ const make = (options: IntegrationsOptions = {}) =>
           if (signIn._tag === "Success") return { integration, signIn: signIn.success };
           const error = signIn.failure;
           if (error.reason === "approval_required") return { integration, ...keep };
+          // A loopback agent can't know the browser's address; the inline card's
+          // Sign in starts from the browser itself, so this is a plain sign-in step.
+          const noCallbackOrigin = error.operation === "start sign-in";
           const setup = setupActionFor({
             entry: integrationCatalogEntryFor(stored),
             integration: stored,
             status: "needs_sign_in",
-            reason: error.reason,
-            // A refused callback origin explains itself; anything else gets the plain status text.
-            message:
-              error.reason === "invalid_request" && typeof error.cause === "string"
+            reason: noCallbackOrigin ? "sign_in_required" : error.reason,
+            // A refused request explains itself; anything else gets the plain status text.
+            message: noCallbackOrigin
+              ? undefined
+              : error.reason === "invalid_request" && typeof error.cause === "string"
                 ? error.cause
                 : checkMessage(error),
             redirectUri:

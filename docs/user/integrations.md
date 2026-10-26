@@ -8,6 +8,12 @@ where you approve access. If it needs a login or secret you haven't saved, enter
 it in the private request the agent opens. Never paste credentials into a
 conversation.
 
+When a step needs you, a card appears in the chat. **Sign in** opens the
+service's sign-in page in your default browser; once you approve, the card
+shows Connected and the agent carries on. **Fix** shows the setting that needs
+changing, and changes that need your approval show **Approve integration** above
+the composer. Persistent agents ask the same way, in their own conversation.
+
 Anything an agent creates for you, such as a Google Cloud project, an OAuth
 client or a Slack app, is named **Cogenly**, so you can recognize it in the
 service's console. When one already exists, the agent reuses it instead of
@@ -34,7 +40,7 @@ Google Workspace connects Gmail, Calendar, Drive, Docs and Sheets. The first
 connection needs a Google Cloud OAuth client. The agent creates it in the
 browser panel: a project named Cogenly, the five APIs, a published consent
 screen, and a Web application client with the right redirect address, saved to
-your vault. Then open its consent link and choose the Google account to
+your vault. Then choose **Sign in** on the card and pick the Google account to
 connect. A Workspace organization may also need an administrator's approval.
 
 Setup happens on the machine running Cogenly. The agent can install uv there
@@ -45,7 +51,7 @@ publishes the app. If you are signed out weekly, ask an agent to check it.
 
 ## Wispr Flow
 
-Ask “Connect Wispr Flow,” then open the sign-in link and approve access. No API
+Ask “Connect Wispr Flow,” then choose **Sign in** on the card and approve access. No API
 key is needed. Your account needs Notetaker and Cloud Sync. Enterprise accounts
 may require an administrator to enable the MCP connector and Scratchpad access;
 HIPAA-covered accounts do not support it. The connection reads meeting notes,
