@@ -77,6 +77,7 @@ import {
   ToolActivitySource,
 } from "./providerRuntime.ts";
 import { ThreadTokenUsageSnapshot } from "./providerRuntime.ts";
+import { ThreadSourcesInput, ThreadSourcesResult } from "./threadSources.ts";
 import { VisualState, VisualStateJson } from "./visual.ts";
 import { WorkTask, WorkTaskId, WorkTaskOutcome } from "./work.ts";
 
@@ -3692,6 +3693,7 @@ export const ORCHESTRATION_V2_WS_METHODS = {
   getWorkflowScript: "orchestration.getWorkflowScript",
   stopWorkflow: "orchestration.stopWorkflow",
   getTurnItem: "orchestration.getTurnItem",
+  getThreadSources: "orchestration.getThreadSources",
   launchThread: "orchestration.launchThread",
   subscribeArchivedShell: "orchestration.subscribeArchivedShell",
   subscribeShell: "orchestration.subscribeShell",
@@ -4268,6 +4270,10 @@ export const OrchestrationV2RpcSchemas = {
   getTurnItem: {
     input: OrchestrationV2GetTurnItemInput,
     output: OrchestrationV2GetTurnItemResult,
+  },
+  getThreadSources: {
+    input: ThreadSourcesInput,
+    output: ThreadSourcesResult,
   },
   launchThread: {
     input: OrchestrationV2ThreadLaunchInput,

@@ -1461,6 +1461,17 @@ const makeWsRpcHandlers = (
               }),
           ),
         ),
+      [ORCHESTRATION_V2_WS_METHODS.getThreadSources]: (input) =>
+        threadManagement.getThreadSources(input.threadId).pipe(
+          Effect.mapError(
+            (cause) =>
+              new OrchestrationV2GetThreadProjectionError({
+                threadId: input.threadId,
+                message: "Failed to load thread sources",
+                cause,
+              }),
+          ),
+        ),
       [ORCHESTRATION_V2_WS_METHODS.getTurnDiff]: (input) =>
         checkpointDiffQuery.getTurnDiff(input).pipe(
           Effect.mapError(

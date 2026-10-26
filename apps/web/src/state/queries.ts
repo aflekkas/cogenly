@@ -382,6 +382,24 @@ export function useCheckpointDiff(
   return fullThreadTarget === null ? turn : fullThread;
 }
 
+/** What a thread used and made, fetched only while its details show. */
+export function useThreadSources(
+  target: {
+    readonly environmentId: EnvironmentId;
+    readonly threadId: ThreadId;
+    readonly revision: string;
+  } | null,
+) {
+  return useEnvironmentQuery(
+    target === null
+      ? null
+      : orchestrationEnvironment.threadSources({
+          environmentId: target.environmentId,
+          input: { threadId: target.threadId, revision: target.revision },
+        }),
+  );
+}
+
 /** Full input and output of one timeline item, fetched only while its row is open. */
 export function useTurnItemDetail(
   target: {

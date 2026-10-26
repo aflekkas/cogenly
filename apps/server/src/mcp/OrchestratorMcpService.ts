@@ -3135,6 +3135,11 @@ const make = Effect.gen(function* () {
             }
           }
         }
+        const sources = input.includeSources
+          ? yield* threadManagement
+              .getThreadSources(input.threadId)
+              .pipe(Effect.mapError(threadManagementFailure))
+          : undefined;
         return {
           thread: threadDetail(
             target,
@@ -3157,6 +3162,7 @@ const make = Effect.gen(function* () {
           ),
           nextPosition: page.at(-1)?.position ?? null,
           hasMore: timeline.hasMore,
+          ...(sources === undefined ? {} : { sources }),
         } satisfies OrchestratorMcpThreadReadResult;
       }),
     sendToThread: (scope, input) =>

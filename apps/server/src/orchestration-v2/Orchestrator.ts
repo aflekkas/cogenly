@@ -58,6 +58,7 @@ import {
   type OrchestrationV2Subagent,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2TurnItem,
+  type ThreadSourcesResult,
   VISUAL_STATE_MAX_BYTES,
   type VisualState,
   latestProviderTurnForAttempt,
@@ -73,6 +74,7 @@ import {
   ThreadRemoteError,
   type TurnItemId,
 } from "@cogenly/contracts";
+import { deriveThreadSources } from "./ThreadSources.ts";
 import { modelSelectionsEqual } from "@cogenly/shared/model";
 import {
   formatVisualSubmitMessage,
@@ -356,6 +358,10 @@ export interface OrchestratorV2Shape {
     readonly threadId: ThreadId;
     readonly itemId: TurnItemId;
   }) => Effect.Effect<OrchestrationV2TurnItem | null, OrchestratorV2Error>;
+  /** What the thread used and made, derived from its persisted rows. */
+  readonly getThreadSources: (
+    threadId: ThreadId,
+  ) => Effect.Effect<ThreadSourcesResult, OrchestratorV2Error>;
   readonly getThreadRecords: <K extends ProjectionRecordField>(
     threadId: ThreadId,
     fields: ReadonlyArray<K>,
@@ -13463,6 +13469,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             (cause) => new OrchestratorProjectionError({ threadId: input.threadId, cause }),
           ),
         ),
+    getThreadSources: (threadId) =>
+      projectionStore.getThreadSourceRecords(threadId).pipe(
+        Effect.map(deriveThreadSources),
+        Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })),
+      ),
     getThreadRecords: (threadId, fields, filter) =>
       projectionStore
         .getThreadRecords(threadId, fields, filter)
@@ -13596,6 +13607,7 @@ const layerUnavailable: Layer.Layer<OrchestratorV2> = Layer.succeed(
     getTimelinePage: (threadId) => Effect.fail(new OrchestratorProjectionError({ threadId })),
     getMessageCount: (threadId) => Effect.fail(new OrchestratorProjectionError({ threadId })),
     getTurnItem: ({ threadId }) => Effect.fail(new OrchestratorProjectionError({ threadId })),
+    getThreadSources: (threadId) => Effect.fail(new OrchestratorProjectionError({ threadId })),
     getThreadRecords: (threadId) => Effect.fail(new OrchestratorProjectionError({ threadId })),
     getThreadProjection: (threadId) =>
       Effect.fail(

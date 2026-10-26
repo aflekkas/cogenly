@@ -89,6 +89,11 @@ import type * as Statement from "effect/sql/Statement";
 import { MCP_APP_OUTPUT_KEY } from "@cogenly/shared/mcpApp";
 import { threadHtmlRenderAttachmentIds } from "../attachmentStore.ts";
 import {
+  threadSourceRecordsFromProjection,
+  type ThreadSourceRecords,
+  type ThreadSourceToolRow,
+} from "./ThreadSources.ts";
+import {
   isThreadHistoryUserTurn,
   isConversationHistoryItem,
   threadHistoryTurnStarts,
@@ -371,6 +376,10 @@ export interface ProjectionStoreV2Shape {
   readonly getThreadAttachmentIds: (
     threadId: ThreadId,
   ) => Effect.Effect<ReadonlyArray<string>, ProjectionStoreV2Error>;
+  /** The compact rows `deriveThreadSources` reads: no tool outputs beyond the few that name a thing. */
+  readonly getThreadSourceRecords: (
+    threadId: ThreadId,
+  ) => Effect.Effect<ThreadSourceRecords, ProjectionStoreV2Error>;
   readonly getThreadHistoryPage: (
     threadId: ThreadId,
     cursor: string,
@@ -1194,6 +1203,10 @@ const isProjectionStoreReadError = Schema.is(ProjectionStoreReadError);
 
 function parseEncodedPayload(json: string): Record<string, unknown> {
   return JSON.parse(json) as Record<string, unknown>;
+}
+
+function parseNullableJson(json: string | null): unknown {
+  return json === null ? null : JSON.parse(json);
 }
 
 function stringField(payload: Record<string, unknown>, field: string): string {
@@ -5171,6 +5184,126 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         Effect.mapError((cause) => new ProjectionStoreReadError({ threadId, cause })),
       );
 
+    const getThreadSourceRecords: ProjectionStoreV2Shape["getThreadSourceRecords"] = (threadId) =>
+      Effect.all([
+        // Bulky text (a written file, a prompt, an upstream call's arguments) is
+        // dropped from inputs in SQL, so long threads stay cheap to read.
+        sql<{
+          readonly type: ThreadSourceToolRow["type"];
+          readonly status: string;
+          readonly at: string;
+          readonly tool_name: string | null;
+          readonly input_json: string | null;
+          readonly output_json: string | null;
+          readonly tool_source_json: string | null;
+          readonly file_name: string | null;
+          readonly additions: number | null;
+          readonly deletions: number | null;
+          readonly changes_json: string | null;
+          readonly patterns_json: string | null;
+          readonly results_json: string | null;
+        }>`
+      SELECT type, status, updated_at AS at,
+        json_extract(payload_json, '$.toolName') AS tool_name,
+        CASE WHEN json_type(payload_json, '$.input') = 'object'
+          AND length(json_remove(json_extract(payload_json, '$.input'), '$.text', '$.content', '$.arguments', '$.html', '$.body', '$.message', '$.prompt', '$.old_string', '$.new_string')) <= 16384
+          THEN json_remove(json_extract(payload_json, '$.input'), '$.text', '$.content', '$.arguments', '$.html', '$.body', '$.message', '$.prompt', '$.old_string', '$.new_string')
+        END AS input_json,
+        CASE WHEN (json_extract(payload_json, '$.toolName') LIKE '%html_render'
+            OR json_extract(payload_json, '$.toolName') LIKE '%vault_fill')
+          AND length(json_extract(payload_json, '$.output')) <= 65536
+          THEN CASE WHEN json_type(payload_json, '$.output') IN ('object', 'array')
+            THEN json_extract(payload_json, '$.output')
+            ELSE json_quote(json_extract(payload_json, '$.output')) END
+        END AS output_json,
+        CASE WHEN json_type(payload_json, '$.toolSource') = 'object'
+          THEN json_extract(payload_json, '$.toolSource') END AS tool_source_json,
+        json_extract(payload_json, '$.fileName') AS file_name,
+        json_extract(payload_json, '$.additions') AS additions,
+        json_extract(payload_json, '$.deletions') AS deletions,
+        CASE WHEN json_type(payload_json, '$.changes') = 'array'
+          AND length(json_extract(payload_json, '$.changes')) <= 65536
+          THEN json_extract(payload_json, '$.changes') END AS changes_json,
+        CASE WHEN json_type(payload_json, '$.patterns') = 'array'
+          THEN json_extract(payload_json, '$.patterns') END AS patterns_json,
+        CASE WHEN json_type(payload_json, '$.results') = 'array'
+          AND length(json_extract(payload_json, '$.results')) <= 65536
+          THEN json_extract(payload_json, '$.results') END AS results_json
+      FROM orchestration_v2_projection_turn_items
+      WHERE thread_id = ${threadId}
+        AND (type IN ('file_change', 'web_search')
+          OR (type = 'dynamic_tool' AND (
+            json_extract(payload_json, '$.toolName') = 'Read'
+            OR json_extract(payload_json, '$.toolName') LIKE 'mcp%'
+            OR json_extract(payload_json, '$.toolName') LIKE 'cogenly%'
+            OR json_extract(payload_json, '$.toolName') LIKE 't3%'
+            OR json_type(payload_json, '$.toolSource') = 'object')))
+    `,
+        sql<{
+          readonly role: string;
+          readonly at: string;
+          readonly attachments_json: string | null;
+          readonly records_json: string | null;
+        }>`
+      SELECT role, created_at AS at,
+        CASE WHEN json_array_length(payload_json, '$.attachments') > 0
+          THEN json_extract(payload_json, '$.attachments') END AS attachments_json,
+        (SELECT json_group_array(json(record.value))
+          FROM json_each(payload_json, '$.context.records') AS record
+          WHERE json_extract(record.value, '$.kind') IN ('thread', 'integration', 'project-folder', 'mention')
+        ) AS records_json
+      FROM orchestration_v2_projection_messages
+      WHERE thread_id = ${threadId} AND role IN ('user', 'assistant')
+        AND (json_array_length(payload_json, '$.attachments') > 0
+          OR json_array_length(payload_json, '$.context.records') > 0)
+    `,
+        sql<{ readonly at: string; readonly status: string; readonly files_json: string | null }>`
+      SELECT captured_at AS at, status, json_extract(payload_json, '$.files') AS files_json
+      FROM orchestration_v2_projection_checkpoints
+      WHERE thread_id = ${threadId}
+    `,
+        sql<{ readonly pull_requests_json: string | null }>`
+      SELECT json_extract(payload_json, '$.pullRequests') AS pull_requests_json
+      FROM orchestration_v2_projection_threads
+      WHERE thread_id = ${threadId}
+    `,
+      ]).pipe(
+        Effect.map(([tools, messages, checkpoints, threads]): ThreadSourceRecords => ({
+          threadId,
+          tools: tools.map((row) => ({
+            type: row.type,
+            status: row.status,
+            at: row.at,
+            toolName: row.tool_name,
+            input: parseNullableJson(row.input_json),
+            output: parseNullableJson(row.output_json),
+            toolSource: parseNullableJson(row.tool_source_json),
+            fileName: row.file_name,
+            additions: row.additions,
+            deletions: row.deletions,
+            changes: parseNullableJson(row.changes_json),
+            patterns: parseNullableJson(row.patterns_json),
+            results: parseNullableJson(row.results_json),
+          })),
+          messages: messages.map((row) => ({
+            role: row.role,
+            at: row.at,
+            attachments: parseNullableJson(row.attachments_json),
+            contextRecords: parseNullableJson(row.records_json),
+          })),
+          checkpoints: checkpoints.map((row) => ({
+            at: row.at,
+            status: row.status,
+            files: parseNullableJson(row.files_json),
+          })),
+          pullRequests: (() => {
+            const links = parseNullableJson(threads[0]?.pull_requests_json ?? null);
+            return Array.isArray(links) ? links : [];
+          })(),
+        })),
+        Effect.mapError((cause) => new ProjectionStoreReadError({ threadId, cause })),
+      );
+
     const getThreadRecords: ProjectionStoreV2Shape["getThreadRecords"] = (
       threadId,
       fields,
@@ -6393,6 +6526,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       searchThreadStream,
       getThreadAttachmentIds: (...args: Parameters<typeof getThreadAttachmentIds>) =>
         getThreadAttachmentIds(...args).pipe(NodeSqliteClient.readOnly),
+      getThreadSourceRecords: (...args: Parameters<typeof getThreadSourceRecords>) =>
+        getThreadSourceRecords(...args).pipe(NodeSqliteClient.readOnly),
     } satisfies ProjectionStoreV2Shape;
   }),
 );
@@ -6671,6 +6806,10 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
               state.projections.get(threadId)?.turnItems.find((item) => item.id === itemId) ?? null,
           ),
         ),
+      getThreadSourceRecords: (threadId) =>
+        service
+          .getThreadProjection(threadId)
+          .pipe(Effect.map((projection) => threadSourceRecordsFromProjection(projection))),
       getThreadAttachmentIds: (threadId) =>
         service.getThreadProjection(threadId).pipe(
           Effect.map((projection) => [

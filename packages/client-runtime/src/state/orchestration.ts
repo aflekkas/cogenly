@@ -103,6 +103,13 @@ export function createOrchestrationEnvironmentAtoms<R, E>(
       staleTimeMs: 60_000,
       idleTtlMs: 60_000,
     }),
+    // Keyed by the thread revision, so open details refetch as the thread works.
+    threadSources: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:orchestration:thread-sources",
+      tag: ORCHESTRATION_V2_WS_METHODS.getThreadSources,
+      staleTimeMs: 30_000,
+      idleTtlMs: 60_000,
+    }),
     fullThreadDiff: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:orchestration:full-thread-diff",
       tag: ORCHESTRATION_V2_WS_METHODS.getFullThreadDiff,

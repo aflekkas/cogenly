@@ -2,6 +2,7 @@ import { ProjectLabelId } from "./projectLabel.ts";
 import { MachineInfo } from "./machine.ts";
 import { AgentId } from "./agent.ts";
 import { VaultIconUrl } from "./vault.ts";
+import { ThreadSourcesResult } from "./threadSources.ts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
@@ -413,6 +414,8 @@ export const OrchestratorMcpThreadReadInput = Schema.Struct({
   limit: Schema.optional(PositiveInt.check(Schema.isLessThanOrEqualTo(100))),
   runLimit: Schema.optional(PositiveInt.check(Schema.isLessThanOrEqualTo(50))),
   maxCharsPerItem: Schema.optional(PositiveInt.check(Schema.isLessThanOrEqualTo(50_000))),
+  /** Also return what the thread used and made (`sources`). */
+  includeSources: Schema.optional(Schema.Boolean),
 });
 export type OrchestratorMcpThreadReadInput = typeof OrchestratorMcpThreadReadInput.Type;
 
@@ -491,6 +494,7 @@ export const OrchestratorMcpThreadReadResult = Schema.Struct({
   items: Schema.Array(OrchestratorMcpThreadTimelineItem),
   nextPosition: Schema.NullOr(NonNegativeInt),
   hasMore: Schema.Boolean,
+  sources: Schema.optional(ThreadSourcesResult),
 });
 export type OrchestratorMcpThreadReadResult = typeof OrchestratorMcpThreadReadResult.Type;
 
