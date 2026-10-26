@@ -18,6 +18,8 @@ import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import { VaultToolkit } from "./tools.ts";
 
 const isVaultError = Schema.is(VaultError);
+/** How long vault_fill waits for its field to appear before saying no element matches. */
+const FIELD_PROBE_MS = 2_000;
 const failure = (message: string, code: OrchestratorMcpFailure["code"] = "invalid_request") =>
   new OrchestratorMcpFailure({ code, message });
 const toFailure = (cause: unknown) =>
@@ -106,6 +108,38 @@ export const layer = McpToolAccess.toLayer(VaultToolkit, {
       const domain = status.url ? normalizeHost(status.url) || null : null;
       if (!domain || !status.tabId)
         return yield* failure("vault_fill needs an active preview tab with a page URL.");
+      // Typing into a field that isn't there waits out the whole request timeout, so check
+      // the field exists first. Only a host's own "not found in time" answer fails the fill;
+      // a host that can't check leaves it to typing, as before.
+      const target = rest.locator ?? rest.selector;
+      if (target !== undefined) {
+        const missing = yield* broker
+          .invoke({
+            scope,
+            operation: "waitFor",
+            input: {
+              ...(rest.locator ? { locator: rest.locator } : {}),
+              ...(rest.selector ? { selector: rest.selector } : {}),
+              timeoutMs: FIELD_PROBE_MS,
+            },
+            tabId: status.tabId,
+            timeoutMs: FIELD_PROBE_MS + 5_000,
+          })
+          .pipe(
+            Effect.as(false),
+            Effect.catch((cause) =>
+              Effect.succeed(
+                cause._tag === "PreviewAutomationTimeoutError" &&
+                  cause.remoteTag !== undefined &&
+                  cause.tabState?.automationConnected !== false,
+              ),
+            ),
+          );
+        if (missing)
+          return yield* failure(
+            `No element matches the locator ${target} on ${domain}. Nothing was filled. Call preview_snapshot to find the field, then call vault_fill with its locator.`,
+          );
+      }
       const agent = yield* agents
         .forThread(scope.thread.threadId)
         .pipe(

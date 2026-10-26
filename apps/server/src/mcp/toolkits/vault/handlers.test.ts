@@ -116,20 +116,29 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
                       message: "Typing failed after input",
                     },
                   }
-                : {
-                    ok: true,
-                    result:
-                      request.operation === "evaluate"
-                        ? "321-drowssap-otco"
-                        : {
-                            available: true,
-                            visible: true,
-                            tabId: request.tabId ?? tabId,
-                            url: pageUrl,
-                            title: "Login",
-                            loading: false,
-                          },
-                  }),
+                : request.operation === "waitFor" &&
+                    (request.input as { locator?: string }).locator === "input[name=missing]"
+                  ? {
+                      ok: false,
+                      error: {
+                        _tag: "PreviewAutomationTimeoutError",
+                        message: "Waited 2000ms without every condition holding.",
+                      },
+                    }
+                  : {
+                      ok: true,
+                      result:
+                        request.operation === "evaluate"
+                          ? "321-drowssap-otco"
+                          : {
+                              available: true,
+                              visible: true,
+                              tabId: request.tabId ?? tabId,
+                              url: pageUrl,
+                              title: "Login",
+                              loading: false,
+                            },
+                    }),
             });
           }),
           Effect.forkChild,
@@ -270,6 +279,21 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
       expect(evaluated).toBe(2);
       failTyping = false;
 
+      // A locator that matches nothing fails at once, naming it, and types nothing.
+      const missing = yield* call("vault_fill", {
+        name: "GitHub",
+        field: "password",
+        locator: "input[name=missing]",
+        tabId: freshTab,
+      });
+      expect(missing).toMatchObject({
+        code: "invalid_request",
+        message: expect.stringMatching(
+          /^No element matches the locator input\[name=missing\] on github\.com\..*preview_snapshot/,
+        ),
+      });
+      expect(typed).toHaveLength(2);
+
       pageUrl = "https://evil.test/login";
       const denied = yield* call("vault_fill", {
         name: "GitHub",
@@ -322,7 +346,7 @@ it.effect("vault_fill fills card fields by field and never returns them", () =>
                   loading: false,
                 } as never)
               : Effect.sync(() => {
-                  typed.push(request.input);
+                  if (request.operation === "type") typed.push(request.input);
                   return {} as never;
                 }),
         }),
