@@ -3,10 +3,14 @@ import { NodeCrypto } from "@effect/platform-node";
 import {
   EnvironmentId,
   NodeId,
+  type OrchestratorMcpDelegateTaskInput,
+  ProviderDriverKind,
   ProviderInstanceId,
   RunId,
   SecretRef,
+  type ServerProvider,
   ThreadId,
+  ThreadRemoteError,
   VaultError,
   VaultItemId,
 } from "@cogenly/contracts";
@@ -27,6 +31,7 @@ import * as Secrets from "../secrets/SecretRequests.ts";
 import * as Vault from "../vault/Vault.ts";
 import * as Accounts from "../accounts/AccountConnections.ts";
 import * as Machines from "../machines/Machines.ts";
+import * as RemoteLaunch from "../orchestration-v2/RemoteThreadLaunch.ts";
 
 it.effect("a failed saveToVault leaves the private answer available for retry", () => {
   let available = true,
@@ -119,6 +124,215 @@ it.effect("a failed saveToVault leaves the private answer available for retry", 
     });
     expect(available).toBe(false);
   }).pipe(Effect.provide(Orchestrator.layer.pipe(Layer.provide(dependencies))));
+});
+
+const serverProvider = (
+  instanceId: string,
+  driver: string,
+  models: ReadonlyArray<string>,
+): ServerProvider => ({
+  instanceId: ProviderInstanceId.make(instanceId),
+  driver: ProviderDriverKind.make(driver),
+  enabled: true,
+  installed: true,
+  version: null,
+  status: "ready",
+  auth: { status: "authenticated" },
+  checkedAt: "2026-10-23T11:00:00.000Z",
+  models: models.map((slug) => ({ slug, name: slug, isCustom: false, capabilities: null })),
+  slashCommands: [],
+  skills: [],
+});
+
+const pairedMachine = (id: string, name: string) => ({
+  environmentId: EnvironmentId.make(id),
+  name,
+  kind: "cloud-server" as const,
+  hardware: "server" as const,
+  platform: "linux" as const,
+  providers: [],
+  relation: "hub" as const,
+  online: true,
+  lastSeenAt: null,
+  pairedAt: null,
+  pairing: "paired" as const,
+});
+
+/**
+ * A thread running on this machine's `claude-personal`, paired with a cloud
+ * server whose own instances are named differently.
+ */
+const crossMachineFixture = (remote: (machine: EnvironmentId) => ReadonlyArray<ServerProvider>) => {
+  const threadId = ThreadId.make("cross-machine");
+  const instanceId = ProviderInstanceId.make("claude-personal");
+  const shell = liveThreadShell(threadId);
+  const projection = idleThreadProjection({
+    ...shell,
+    providerInstanceId: instanceId,
+    modelSelection: { instanceId, model: "claude-opus-4-5" },
+  });
+  const records = {
+    ...projection,
+    runs: [
+      {
+        id: RunId.make("run:cross"),
+        status: "running",
+        rootNodeId: NodeId.make("root"),
+        providerInstanceId: instanceId,
+      } as never,
+    ],
+  };
+  const dispatched: Array<unknown> = [];
+  const dependencies = Layer.mergeAll(
+    NodeCrypto.layer,
+    Layer.mock(Threads.ThreadManagementService)({
+      getThreadRecords: () => Effect.succeed(records),
+      hasReceipt: () => Effect.succeed(false),
+      dispatch: (command) =>
+        Effect.sync(() => {
+          dispatched.push(command);
+          return { sequence: 0, storedEvents: [] };
+        }),
+    }),
+    Layer.mock(Launch.ThreadLaunchService)({}),
+    Layer.mock(Adapters.ProviderAdapterRegistryV2)({
+      list: () => Effect.succeed([instanceId, ProviderInstanceId.make("codex")]),
+    }),
+    Layer.mock(Providers.ProviderRegistry)({
+      getProviders: Effect.succeed([
+        serverProvider("claude-personal", "claude", ["claude-opus-4-5"]),
+        serverProvider("codex", "codex", ["gpt-5"]),
+      ]),
+    }),
+    Layer.mock(Schedules.ScheduledTaskService)({}),
+    Layer.mock(Projects.ProjectService)({}),
+    Layer.mock(Git.GitVcsDriver)({}),
+    Layer.mock(Settings.ServerSettingsService)({
+      getSettings: Effect.succeed({ modelEffortDefaults: {} } as never),
+    }),
+    Layer.mock(Accounts.AccountConnections)({}),
+    Layer.mock(Secrets.SecretRequests)({}),
+    Layer.mock(Vault.Vault)({}),
+    Layer.mock(Machines.Machines)({
+      list: Effect.succeed({
+        machines: [pairedMachine("cloud", "Cloud server"), pairedMachine("old", "Old server")],
+        link: { _tag: "spoke", hubEnvironmentId: EnvironmentId.make("cloud") } as never,
+      }),
+    }),
+    Layer.mock(RemoteLaunch.RemoteThreadLaunch)({
+      catalog: (machine) =>
+        machine === "old"
+          ? Effect.fail(
+              new ThreadRemoteError({ reason: "offline", detail: "Old server did not answer." }),
+            )
+          : Effect.succeed(Option.some(remote(machine))),
+    }),
+  );
+  const scope = {
+    environmentId: EnvironmentId.make("test"),
+    requestNamespace: "test",
+    issuedAt: 0,
+    capabilities: new Set(["orchestration" as const]),
+    client: undefined,
+    thread: { threadId, providerInstanceId: instanceId, providerSessionId: "session" },
+  };
+  const selections = () =>
+    dispatched.map((command) => (command as { modelSelection: unknown }).modelSelection);
+  return {
+    scope,
+    selections,
+    provide: <A, E>(effect: Effect.Effect<A, E, Orchestrator.OrchestratorMcpService>) =>
+      effect.pipe(Effect.provide(Orchestrator.layer.pipe(Layer.provideMerge(dependencies)))),
+  };
+};
+
+it.effect("delegating to another machine picks its instance of the requested driver", () => {
+  const fixture = crossMachineFixture(() => [
+    serverProvider("claude", "claude", ["claude-sonnet-4-5", "claude-opus-4-5"]),
+    serverProvider("codex", "codex", ["gpt-6.1-sol"]),
+  ]);
+  return fixture.provide(
+    Effect.gen(function* () {
+      const service = yield* Orchestrator.OrchestratorMcpService;
+      const delegate = (input: Partial<OrchestratorMcpDelegateTaskInput>) =>
+        service
+          .delegateTask(fixture.scope, {
+            machine: "Cloud server",
+            task: "Audit the code",
+            mode: "async",
+            ...input,
+          })
+          .pipe(Effect.exit);
+      // Named here, absent there: the same driver there, its first model.
+      yield* delegate({
+        clientRequestId: "named",
+        target: { providerInstanceId: ProviderInstanceId.make("claude-personal") },
+      });
+      // Inherited: the parent's model, which that instance also offers.
+      yield* delegate({ clientRequestId: "inherited" });
+      // An instance that exists there resolves as named.
+      yield* delegate({
+        clientRequestId: "exact",
+        target: { providerInstanceId: ProviderInstanceId.make("codex"), model: "gpt-6.1-sol" },
+      });
+      expect(fixture.selections()).toEqual([
+        { instanceId: "claude", model: "claude-sonnet-4-5" },
+        { instanceId: "claude", model: "claude-opus-4-5" },
+        { instanceId: "codex", model: "gpt-6.1-sol" },
+      ]);
+    }),
+  );
+});
+
+it.effect("delegating to another machine without that driver lists what it has", () => {
+  const fixture = crossMachineFixture(() => [serverProvider("codex", "codex", ["gpt-6.1-sol"])]);
+  return fixture.provide(
+    Effect.gen(function* () {
+      const service = yield* Orchestrator.OrchestratorMcpService;
+      const refused = yield* service
+        .delegateTask(fixture.scope, {
+          machine: "Cloud server",
+          task: "Audit the code",
+          mode: "async",
+          target: { providerInstanceId: ProviderInstanceId.make("claude-personal") },
+        })
+        .pipe(Effect.flip);
+      expect(refused).toMatchObject({
+        code: "provider_unavailable",
+        message:
+          "Cloud server has no provider instance claude-personal or other claude instance that can run a child task. Available there: codex (codex). See orchestrator_capabilities.",
+      });
+      expect(fixture.selections()).toEqual([]);
+    }),
+  );
+});
+
+it.effect("capabilities list each paired machine's providers compactly", () => {
+  const fixture = crossMachineFixture(() => [serverProvider("codex", "codex", ["gpt-6.1-sol"])]);
+  return fixture.provide(
+    Effect.gen(function* () {
+      const service = yield* Orchestrator.OrchestratorMcpService;
+      const { machines } = yield* service.capabilities(fixture.scope);
+      expect(
+        machines?.map(({ name, catalog, catalogError }) => ({ name, catalog, catalogError })),
+      ).toEqual([
+        {
+          name: "Cloud server",
+          catalog: [
+            {
+              providerInstanceId: "codex",
+              driverKind: "codex",
+              displayName: null,
+              models: ["gpt-6.1-sol"],
+              canRunChildTask: true,
+            },
+          ],
+          catalogError: undefined,
+        },
+        { name: "Old server", catalog: undefined, catalogError: "Old server did not answer." },
+      ]);
+    }),
+  );
 });
 
 it.effect("remote delegation retries without clientRequestId reuse their command identity", () => {
