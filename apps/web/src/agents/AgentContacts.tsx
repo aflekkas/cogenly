@@ -550,7 +550,7 @@ function AgentRow({
       { id: "open", label: "Open", icon: "mail-open" },
       { id: "details", label: "Open details", icon: "settings" },
       { id: "rename", label: "Rename", icon: "pencil", disabled: !canWrite },
-      { id: "face", label: "Change face…", disabled: !canWrite },
+      { id: "face", label: "Change face…", icon: "smile", disabled: !canWrite },
       ...(folders.length > 0 || currentFolderId !== null
         ? [
             {
