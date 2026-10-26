@@ -10,6 +10,7 @@
  * Output is matched only for Tailscale's own links and failure kinds; it is
  * never logged, since it can carry auth keys and node names.
  */
+import { ensureTailscaleServe } from "@cogenly/tailscale";
 import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
@@ -288,6 +289,26 @@ export const make = Effect.gen(function* () {
 
   const run: TailscaleHost["Service"]["run"] = (operation, input) =>
     Effect.gen(function* () {
+      if (operation === "serve" && (yield* probe).status?.httpsEnabled === true) {
+        // Once HTTPS is approved the shared idempotent ensure needs no user handoff.
+        const done = ensureTailscaleServe(input).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.as({ _tag: "ok" } as TailscaleCommandOutcome),
+          Effect.catch((error) =>
+            Effect.succeed<TailscaleCommandOutcome>({
+              _tag: "failed",
+              reason:
+                error._tag === "TailscaleCommandTimeoutError"
+                  ? "timed-out"
+                  : error._tag === "TailscaleCommandExitError" &&
+                      error.stderrDiagnostic === "permission-denied"
+                    ? "permission-denied"
+                    : "other",
+            }),
+          ),
+        );
+        return { url: null, done };
+      }
       const located = yield* locate;
       const command = operationCommand(operation, {
         cli: located?.cli ?? (platform === "win32" ? "tailscale.exe" : "tailscale"),

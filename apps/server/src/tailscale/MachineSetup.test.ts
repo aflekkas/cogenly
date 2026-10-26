@@ -481,4 +481,35 @@ describe("MachineSetup", () => {
       }).pipe(Effect.provide(harness.layer));
     }),
   );
+  it.effect("restores a mapping removed after startup without rewriting a healthy one", () =>
+    Effect.gen(function* () {
+      const ensured = yield* Deferred.make<void>();
+      const harness = yield* makeHarness({
+        mappings: [ours()],
+        mode: { enabled: true, servePort: 443, localPort: 3773 },
+        runs: {
+          serve: [
+            (input, probe) =>
+              Ref.update(probe, (current) => ({
+                ...current,
+                serveMappings: [ours(input.localPort)],
+              })).pipe(
+                Effect.andThen(Deferred.succeed(ensured, undefined)),
+                Effect.andThen(finished()),
+              ),
+          ],
+        },
+      });
+      yield* Effect.gen(function* () {
+        const setup = yield* MachineSetup.MachineSetup;
+        yield* setup.start(3773);
+        yield* TestClock.adjust("30 seconds");
+        assert.equal((yield* Ref.get(harness.calls)).length, 0);
+        yield* Ref.update(harness.probe, (probe) => ({ ...probe, serveMappings: [] }));
+        yield* TestClock.adjust("30 seconds");
+        yield* Deferred.await(ensured);
+        assert.isTrue((yield* setup.status).tailscale.served);
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
 });
