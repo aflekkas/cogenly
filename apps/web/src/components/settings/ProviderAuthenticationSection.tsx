@@ -32,14 +32,19 @@ export function ProviderAuthenticationSection({
   instanceId,
   provider,
   readOnly,
+  targetEnvironmentId,
 }: {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;
   readonly instanceId: ProviderInstanceId;
   readonly provider: ServerProvider;
   readonly readOnly: boolean;
+  readonly targetEnvironmentId?: EnvironmentId;
 }) {
-  const target = { environmentId, input: { instanceId } };
+  const target = {
+    environmentId,
+    input: { instanceId, ...(targetEnvironmentId ? { targetEnvironmentId } : {}) },
+  };
   const query = useEnvironmentQuery(serverEnvironment.providerAuthState(target));
   const commands = { reportFailure: false, reportDefect: false };
   const start = useAtomCommand(serverEnvironment.startProviderAuth, commands);
@@ -82,7 +87,9 @@ export function ProviderAuthenticationSection({
   const draftId = `${auth?.flowId ?? ""}:${interaction?.id ?? ""}`;
   const values = draft.id === draftId ? draft.values : {};
   const url =
-    interaction?.type === "browser" || interaction?.type === "deviceCode"
+    interaction?.type === "browser" ||
+    interaction?.type === "deviceCode" ||
+    interaction?.type === "credentials"
       ? interaction.url
       : auth?.authorizationUrl;
 
@@ -114,7 +121,13 @@ export function ProviderAuthenticationSection({
     return run(() =>
       respond({
         environmentId,
-        input: { instanceId, flowId: auth.flowId!, interactionId: interaction.id, response },
+        input: {
+          instanceId,
+          ...(targetEnvironmentId ? { targetEnvironmentId } : {}),
+          flowId: auth.flowId!,
+          interactionId: interaction.id,
+          response,
+        },
       }),
     );
   }
@@ -147,7 +160,7 @@ export function ProviderAuthenticationSection({
 
   return (
     <SettingsRow
-      title="Account"
+      title={targetEnvironmentId ? environmentLabel : "Account"}
       description={
         signedIn && !active && provider.auth.email?.trim() ? (
           <span>
@@ -242,7 +255,14 @@ export function ProviderAuthenticationSection({
                 disabled={disabled}
                 onClick={() =>
                   void run(() =>
-                    cancel({ environmentId, input: { instanceId, flowId: auth.flowId! } }),
+                    cancel({
+                      environmentId,
+                      input: {
+                        instanceId,
+                        ...(targetEnvironmentId ? { targetEnvironmentId } : {}),
+                        flowId: auth.flowId!,
+                      },
+                    }),
                   )
                 }
               >
@@ -259,6 +279,7 @@ export function ProviderAuthenticationSection({
                       environmentId,
                       input: {
                         instanceId,
+                        ...(targetEnvironmentId ? { targetEnvironmentId } : {}),
                         ...(methodId && auth?.methods?.some((method) => method.id === methodId)
                           ? { methodId }
                           : {}),
@@ -271,7 +292,7 @@ export function ProviderAuthenticationSection({
                   ? "Change account"
                   : auth?.phase === "failed" || auth?.phase === "cancelled"
                     ? "Retry sign-in"
-                    : "Sign in"}
+                    : `Sign in on ${environmentLabel}`}
               </Button>
             ) : null}
             {!active && signedIn && (provider.auth.canLogout ?? provider.setup?.canAuthenticate) ? (
@@ -330,6 +351,7 @@ export function ProviderAuthenticationSection({
                     ) {
                       terminalQueue.current.push({
                         instanceId,
+                        ...(targetEnvironmentId ? { targetEnvironmentId } : {}),
                         flowId: auth.flowId,
                         interactionId: interaction.id,
                         response: {
@@ -408,7 +430,12 @@ export function ProviderAuthenticationSection({
                 void run(() =>
                   complete({
                     environmentId,
-                    input: { instanceId, flowId: auth.flowId!, callbackUrl: values.callback! },
+                    input: {
+                      instanceId,
+                      ...(targetEnvironmentId ? { targetEnvironmentId } : {}),
+                      flowId: auth.flowId!,
+                      callbackUrl: values.callback!,
+                    },
                   }),
                 ).then((sent) => {
                   if (sent) setDraft({ id: "", values: {} });

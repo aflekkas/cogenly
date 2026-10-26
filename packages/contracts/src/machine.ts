@@ -38,6 +38,8 @@ export const MachineProvider = Schema.Struct({
   displayName: TrimmedNonEmptyString,
   enabled: Schema.Boolean,
   auth: ServerProviderAuthStatus,
+  installed: Schema.optionalKey(Schema.Boolean),
+  canAuthenticate: Schema.optionalKey(Schema.Boolean),
 });
 export type MachineProvider = typeof MachineProvider.Type;
 

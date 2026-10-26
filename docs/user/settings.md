@@ -17,6 +17,14 @@ Before 0.3.2 a setting could be overridden for one project. Those overrides no l
 every project now uses the global value. A repository's own actions moved to its Repository page.
 The old per-project values are kept in `legacy-project-settings.json` beside `settings.json`.
 
+## Providers on paired machines
+
+Add or edit a provider in **Settings → Providers** and its identity and model preferences follow you to your paired machines. CLI locations and sensitive environment values stay with their machine; use the vault for shared secrets.
+
+The provider's account section shows where it is signed in. Choose **Sign in on** a paired machine to start its official CLI login, then complete the sign-in in your browser here. Codex uses a device code; Claude may ask you to paste the code from its sign-in page. Each machine keeps an independent login, so a token refresh on one cannot consume a copied refresh token on another. Signing out affects the selected machine. Credentials use each official CLI's storage. On Linux, Claude protects its credential file with file permissions; use an encrypted disk if you need encryption at rest.
+
+A new additional account gets a separate CLI home on each machine. Muse and other providers that do not advertise in-app authentication still require their own setup on that machine.
+
 ## Worktree branch names
 
 New worktree branches are named when the worktree is created: a short slug

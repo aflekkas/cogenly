@@ -12,6 +12,7 @@
  *
  * @module provider/Drivers/ClaudeDriver
  */
+import * as CliProviderAuth from "../CliProviderAuth.ts";
 import { ClaudeSettings, ProviderDriverKind, UsageProviderKind } from "@cogenly/contracts";
 import * as Cache from "effect/Cache";
 import * as Duration from "effect/Duration";
@@ -67,6 +68,7 @@ import {
   type ProviderSnapshotSettings,
 } from "@cogenly/provider-core/server/snapshotSettings";
 import {
+  makeClaudeEnvironment,
   makeClaudeCapabilitiesCacheKey,
   makeClaudeContinuationGroupKey,
   resolveClaudeHomePath,
@@ -170,13 +172,15 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
           ? configDir
           : undefined,
       );
-      const stampIdentity = withInstanceIdentity({
+      const stamp = withInstanceIdentity({
         instanceId,
         driverKind: DRIVER_KIND,
         displayName,
         accentColor,
         continuationGroupKey,
       });
+      const stampIdentity = (draft: Parameters<typeof stamp>[0]) =>
+        stamp({ ...draft, setup: { canInstall: false, ...draft.setup, canAuthenticate: true } });
 
       const scopedLimitNames = yield* makeClaudeScopedLimitNames;
       const orchestrationAdapter = yield* createClaudeAdapterV2(
@@ -355,6 +359,16 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
           ),
         );
 
+      const auth = yield* CliProviderAuth.make({
+        instanceId,
+        driver: "claudeAgent",
+        binaryPath: effectiveConfig.binaryPath,
+        homePath: configDir,
+        environment: yield* makeClaudeEnvironment(effectiveConfig, processEnv),
+        onChanged: Cache.invalidateAll(capabilitiesProbeCache).pipe(
+          Effect.andThen(snapshot.refresh),
+        ),
+      });
       return {
         instanceId,
         driverKind: DRIVER_KIND,
@@ -365,6 +379,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
         displayName,
         accentColor,
         enabled,
+        auth,
         snapshot,
         invalidateCaches: Cache.invalidateAll(capabilitiesProbeCache),
         snapshotForCwd: (cwd: string) =>

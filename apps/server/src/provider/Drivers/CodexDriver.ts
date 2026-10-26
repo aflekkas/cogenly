@@ -21,6 +21,7 @@
  *
  * @module provider/Drivers/CodexDriver
  */
+import * as CliProviderAuth from "../CliProviderAuth.ts";
 import { CodexSettings, ProviderDriverKind, UsageProviderKind } from "@cogenly/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -163,13 +164,15 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv, Path.Pat
       const processEnv = yield* mergeProviderInstanceEnvironment(environment);
       const homeLayout = yield* resolveCodexHomeLayout(config);
       const continuationIdentity = codexContinuationIdentity(homeLayout);
-      const stampIdentity = withInstanceIdentity({
+      const stamp = withInstanceIdentity({
         instanceId,
         driverKind: DRIVER_KIND,
         displayName,
         accentColor,
         continuationGroupKey: continuationIdentity.continuationKey,
       });
+      const stampIdentity = (draft: Parameters<typeof stamp>[0]) =>
+        stamp({ ...draft, setup: { canInstall: false, ...draft.setup, canAuthenticate: true } });
       yield* materializeCodexShadowHome(homeLayout).pipe(
         Effect.mapError(
           (cause) =>
@@ -377,7 +380,16 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv, Path.Pat
             ),
           );
 
+      const auth = yield* CliProviderAuth.make({
+        instanceId,
+        driver: "codex",
+        binaryPath: effectiveConfig.binaryPath,
+        homePath: homeLayout.effectiveHomePath ?? homeLayout.sharedHomePath,
+        environment: processEnv,
+        onChanged: snapshot.refresh,
+      });
       return {
+        auth,
         instanceId,
         driverKind: DRIVER_KIND,
         continuationIdentity,

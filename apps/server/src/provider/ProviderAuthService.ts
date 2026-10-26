@@ -1,5 +1,10 @@
 import {
   ProviderSetupError,
+  ProviderMachineAuth,
+  type ProviderMachineAuthRequest,
+  type EnvironmentId,
+  type ProjectId,
+  type SecretRef,
   type ChatGptReconnectProfile,
   type ChatGptTransferredProfile,
   type ProviderAuthRespondInput,
@@ -8,10 +13,15 @@ import {
   type ProviderInstanceId,
   type ProviderSessionId,
 } from "@cogenly/contracts";
+import * as SecretRequests from "../secrets/SecretRequests.ts";
+import * as Machines from "../machines/Machines.ts";
+import * as PeerChannels from "../machines/PeerChannels.ts";
+import * as Equal from "effect/Equal";
+import * as Schedule from "effect/Schedule";
+import * as Option from "effect/Option";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 
@@ -24,11 +34,17 @@ export type { ProviderAuthController } from "@cogenly/provider-core/server/auth"
 
 interface ProviderAuthTarget {
   readonly instanceId: ProviderInstanceId;
+  readonly targetEnvironmentId?: EnvironmentId;
 }
 
 export class ProviderAuthService extends Context.Service<
   ProviderAuthService,
   {
+    readonly manageSignIn: (
+      request: ProviderMachineAuthRequest,
+      owner: string,
+      code?: { readonly ref: SecretRef; readonly projectId: ProjectId },
+    ) => Effect.Effect<ProviderAuthState, ProviderSetupError, SecretRequests.SecretRequests>;
     readonly reconnectProfile: (
       input: ProviderAuthTarget & { methodId: string },
     ) => Effect.Effect<ChatGptReconnectProfile | null, ProviderSetupError>;
@@ -196,7 +212,7 @@ export const makeProviderAuthService = Effect.gen(function* () {
     }
   });
 
-  return ProviderAuthService.of({
+  const local: Omit<ProviderAuthService["Service"], "manageSignIn"> = {
     reconnectProfile: Effect.fnUntraced(function* (input) {
       const auth = yield* getController(input.instanceId, "export");
       if (!auth.reconnectProfile)
@@ -298,6 +314,139 @@ export const makeProviderAuthService = Effect.gen(function* () {
         );
       },
     ),
+  };
+  const machines = yield* Machines.Machines;
+  const channels = yield* PeerChannels.PeerChannels;
+  const execute = (
+    request: ProviderMachineAuthRequest,
+    owner: string,
+  ): Effect.Effect<ProviderAuthState, ProviderSetupError> => {
+    const { targetEnvironmentId: _target, ...input } = request.input;
+    switch (request.operation) {
+      case "start":
+        return local.start(request.input, owner);
+      case "respond":
+        return local.respond(request.input, owner);
+      case "complete":
+        return local.complete(request.input, owner);
+      case "cancel":
+        return local.cancel(request.input, owner);
+      case "logout":
+        return local.logout(input);
+      case "read":
+        return Stream.runHead(local.subscribe(input, owner)).pipe(
+          Effect.flatMap((state) =>
+            Option.isSome(state)
+              ? Effect.succeed(state.value)
+              : Effect.fail(
+                  new ProviderSetupError({
+                    instanceId: input.instanceId,
+                    operation: "read",
+                    detail: "Sign-in state is unavailable.",
+                  }),
+                ),
+          ),
+        );
+    }
+  };
+  const unreachable = (request: ProviderMachineAuthRequest) =>
+    new ProviderSetupError({
+      instanceId: request.input.instanceId,
+      operation: request.operation,
+      detail:
+        "The paired machine could not complete this sign-in action. Check its connection and try again.",
+    });
+  const remote = (target: EnvironmentId, request: ProviderMachineAuthRequest, owner: string) =>
+    Effect.gen(function* () {
+      const list = yield* machines.list;
+      if (
+        list.machines.some(
+          (machine) => machine.environmentId === target && machine.relation === "this",
+        )
+      )
+        return yield* execute(request, owner);
+      const destination =
+        list.link._tag === "spoke" &&
+        list.machines.some(
+          (machine) => machine.environmentId === target && machine.relation === "peer",
+        )
+          ? list.link.hubEnvironmentId
+          : target;
+      return yield* machines.call(destination, ProviderMachineAuth, { owner, request });
+    }).pipe(Effect.mapError(() => unreachable(request)));
+  yield* channels.register(ProviderMachineAuth, ({ owner, request }, caller) =>
+    Effect.gen(function* () {
+      const namespacedOwner = `${caller.environmentId}:${owner}`;
+      const list = yield* machines.list.pipe(Effect.mapError(() => unreachable(request)));
+      const target = request.input.targetEnvironmentId;
+      const self = list.machines.find((machine) => machine.relation === "this");
+      if (target && target !== self?.environmentId) {
+        // Only a hub forwards a spoke's request to another directly paired spoke.
+        // A spoke never forwards again, so a bad target cannot create a routing loop.
+        if (
+          list.link._tag !== "hub" ||
+          !list.machines.some(
+            (machine) => machine.environmentId === target && machine.relation === "spoke",
+          )
+        )
+          return yield* unreachable(request);
+        return yield* remote(target, request, namespacedOwner);
+      }
+      return yield* execute(request, namespacedOwner);
+    }),
+  );
+  return ProviderAuthService.of({
+    ...local,
+    manageSignIn: (request, owner, code) => {
+      const run = (value: ProviderMachineAuthRequest) =>
+        value.input.targetEnvironmentId
+          ? remote(value.input.targetEnvironmentId, value, owner)
+          : execute(value, owner);
+      if (!code) return run(request);
+      if (request.operation !== "respond" || request.input.response.type !== "credentials")
+        return Effect.fail(unreachable(request));
+      const input = request.input;
+      return Effect.gen(function* () {
+        const secrets = yield* SecretRequests.SecretRequests;
+        return yield* secrets
+          .adopt(code, (value) =>
+            run({
+              operation: "respond",
+              input: { ...input, response: { type: "credentials", values: { code: value } } },
+            }),
+          )
+          .pipe(Effect.mapError(() => unreachable(request)));
+      });
+    },
+    start: (input, owner) =>
+      input.targetEnvironmentId
+        ? remote(input.targetEnvironmentId, { operation: "start", input }, owner)
+        : local.start(input, owner),
+    respond: (input, owner) =>
+      input.targetEnvironmentId
+        ? remote(input.targetEnvironmentId, { operation: "respond", input }, owner)
+        : local.respond(input, owner),
+    complete: (input, owner) =>
+      input.targetEnvironmentId
+        ? remote(input.targetEnvironmentId, { operation: "complete", input }, owner)
+        : local.complete(input, owner),
+    cancel: (input, owner) =>
+      input.targetEnvironmentId
+        ? remote(input.targetEnvironmentId, { operation: "cancel", input }, owner)
+        : local.cancel(input, owner),
+    logout: (input) =>
+      input.targetEnvironmentId
+        ? remote(input.targetEnvironmentId, { operation: "logout", input }, "logout")
+        : local.logout(input),
+    subscribe: (input, owner) =>
+      input.targetEnvironmentId
+        ? Stream.fromEffect(
+            remote(input.targetEnvironmentId, { operation: "read", input }, owner),
+          ).pipe(
+            Stream.repeat(Schedule.spaced("1 second")),
+            Stream.changesWith<ProviderAuthState>((a, b) => Equal.equals(a, b)),
+          )
+        : local.subscribe(input, owner),
   });
 });
 

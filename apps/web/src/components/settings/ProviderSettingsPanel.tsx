@@ -84,6 +84,7 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
 import { ExpandableText } from "./ExpandableText";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
+import { ProviderMachineSignIns } from "./ProviderMachineSignIns";
 import { ProviderAuthenticationSection } from "./ProviderAuthenticationSection";
 import { CodexSetupSection, CodexManagedRuntimeFields } from "./CodexSetupSection";
 import { readCodexSetupMode } from "./CodexSetupSection.logic";
@@ -800,43 +801,55 @@ export function EnvironmentProviderSettings({
         }
         canWriteSettings={canWriteSettings}
         setup={
-          mode === "editor" &&
-          row.driver === "codex" &&
-          readCodexSetupMode(row.instance.config) === "managed" ? (
-            <CodexSetupSection
-              environmentId={environmentId}
-              instanceId={row.instanceId}
-              provider={liveProvider}
-              mode={readCodexSetupMode(row.instance.config)}
-              enabled={resolveProviderInstanceEnabled(row.instance)}
-              readOnly={readOnly}
-              onModeChange={(setupMode) =>
-                updateProviderInstance(row, {
-                  ...row.instance,
-                  enabled: true,
-                  config: {
-                    ...(row.instance.config !== null && typeof row.instance.config === "object"
-                      ? row.instance.config
-                      : {}),
+          <>
+            {mode === "editor" &&
+            row.driver === "codex" &&
+            readCodexSetupMode(row.instance.config) === "managed" ? (
+              <CodexSetupSection
+                environmentId={environmentId}
+                instanceId={row.instanceId}
+                provider={liveProvider}
+                mode={readCodexSetupMode(row.instance.config)}
+                enabled={resolveProviderInstanceEnabled(row.instance)}
+                readOnly={readOnly}
+                onModeChange={(setupMode) =>
+                  updateProviderInstance(row, {
+                    ...row.instance,
                     enabled: true,
-                    setupMode,
-                  },
-                })
-              }
-            />
-          ) : mode === "editor" &&
-            !readOnly &&
-            liveProvider &&
-            liveProvider.setup?.canAuthenticate ? (
-            <ProviderAuthenticationSection
-              key={`${environmentId}:${row.instanceId}`}
-              environmentId={environmentId}
-              environmentLabel={environmentLabel}
-              instanceId={row.instanceId}
-              provider={liveProvider}
-              readOnly={readOnly}
-            />
-          ) : null
+                    config: {
+                      ...(row.instance.config !== null && typeof row.instance.config === "object"
+                        ? row.instance.config
+                        : {}),
+                      enabled: true,
+                      setupMode,
+                    },
+                  })
+                }
+              />
+            ) : mode === "editor" &&
+              !readOnly &&
+              liveProvider &&
+              liveProvider.setup?.canAuthenticate ? (
+              <>
+                <ProviderAuthenticationSection
+                  key={`${environmentId}:${row.instanceId}`}
+                  environmentId={environmentId}
+                  environmentLabel={environmentLabel}
+                  instanceId={row.instanceId}
+                  provider={liveProvider}
+                  readOnly={readOnly}
+                />
+              </>
+            ) : null}
+            {mode === "editor" && liveProvider ? (
+              <ProviderMachineSignIns
+                environmentId={environmentId}
+                instanceId={row.instanceId}
+                provider={liveProvider}
+                readOnly={readOnly}
+              />
+            ) : null}
+          </>
         }
         onUpdate={(next) => {
           const wasEnabled = resolveProviderInstanceEnabled(row.instance);

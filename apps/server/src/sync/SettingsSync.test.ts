@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { ProjectId } from "@cogenly/contracts";
+import { ProviderDriverKind, ProviderInstanceId, ProjectId } from "@cogenly/contracts";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -209,6 +209,65 @@ describe("settings sync between paired machines", () => {
           branchNamePrefix: "fix",
           accentTheme: "dark",
         });
+      }).pipe(Effect.scoped),
+    20000,
+  );
+  it.live(
+    "provider IDs, metadata and models converge without secrets entering shared events",
+    () =>
+      Effect.gen(function* () {
+        const hub = yield* start("provider-hub", "cloud-server", ProjectId.make("hub"));
+        const mac = yield* start("provider-mac", "computer", ProjectId.make("mac"));
+        yield* pair(hub, mac);
+        const id = ProviderInstanceId.make("claude-personal");
+        const driver = ProviderDriverKind.make("claudeAgent");
+        yield* mac.settings.updateSettings({
+          providerInstances: {
+            [id]: {
+              driver,
+              displayName: "Personal",
+              accentColor: "blue",
+              enabled: true,
+              config: {
+                homePath: "/mac-only",
+                customModels: ["private-model"],
+                password: "NEVER_IN_EVENTS",
+              },
+              environment: [
+                { name: "LANG", value: "C", sensitive: false },
+                { name: "TOKEN", value: "NEVER_IN_EVENTS", sensitive: true },
+              ],
+            },
+          },
+        });
+        yield* mac.reconcile;
+        yield* hub.reconcile;
+        yield* mac.sync.sync(hub.environmentId);
+        yield* hub.reconcile;
+        const copied = (yield* hub.settings.getSettings).providerInstances[id];
+        expect(copied).toMatchObject({
+          driver,
+          displayName: "Personal",
+          accentColor: "blue",
+          enabled: true,
+          environment: [{ name: "LANG", value: "C", sensitive: false }],
+          config: {
+            customModels: ["private-model"],
+            homePath: "~/.cogenly/provider-homes/claude-personal",
+          },
+        });
+        const sql = yield* hub.run(SqlClient.SqlClient);
+        expect(
+          (yield* sql<{
+            count: number;
+          }>`SELECT count(*) AS count FROM shared_changes WHERE change_json LIKE '%NEVER_IN_EVENTS%'`)[0]
+            ?.count,
+        ).toBe(0);
+        yield* hub.settings.updateSettings({ providerInstances: {} });
+        yield* hub.reconcile;
+        yield* mac.sync.sync(hub.environmentId);
+        yield* mac.reconcile;
+        expect((yield* mac.settings.getSettings).providerInstances[id]).toBeUndefined();
       }).pipe(Effect.scoped),
     20000,
   );
