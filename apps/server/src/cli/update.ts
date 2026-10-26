@@ -27,11 +27,17 @@ import {
   PINNED_RUNTIME_CHECKSUMS_STEP,
   pinnedRuntimeCommand,
   PinnedRuntimeInstallError,
+  PinnedRuntimePreflightBlockedError,
   pinnedRuntimePaths,
   type PinnedRuntimePaths,
   resolvePinnedRuntimeEntry,
 } from "../cloud/pinnedRuntime.ts";
-import { compareExactServiceVersions, isExactServiceVersion } from "../cloud/serviceProtocol.ts";
+import {
+  compareExactServiceVersions,
+  isExactServiceVersion,
+  SERVICE_LAUNCHER_PROTOCOL,
+} from "../cloud/serviceProtocol.ts";
+import { decodeServicePreflightResult } from "../cloud/servicePreflight.ts";
 import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { isProcessAlive, readPersistedServerRuntimeState } from "../serverRuntimeState.ts";
@@ -359,6 +365,7 @@ export const updateCommand = Command.make("update", {
       const config = yield* resolveCliAuthConfig(flags, logLevel);
       return yield* runUpdate({
         baseDir: config.baseDir,
+        dbPath: config.dbPath,
         logsDir: config.logsDir,
         serverRuntimeStatePath: config.serverRuntimeStatePath,
         channel: Option.getOrUndefined(flags.channel),
@@ -430,6 +437,7 @@ const belongsToBootService = Effect.fn("cli.update.belongs_to_boot_service")(fun
 
 export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   readonly baseDir: string;
+  readonly dbPath?: string;
   readonly logsDir: string;
   readonly serverRuntimeStatePath: string;
   readonly channel: CliReleaseChannel | undefined;
@@ -508,6 +516,7 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
       ? serviceVersion
       : currentVersion;
 
+  const dbPath = input.dbPath ?? path.join(input.baseDir, "userdata", "statev2.sqlite");
   const validateRuntime = (paths: PinnedRuntimePaths) =>
     runner
       .run({
@@ -529,6 +538,53 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
                   exitCode: Number(result.code),
                 }),
               ),
+        ),
+        Effect.andThen(() =>
+          serviceInstalled
+            ? runner
+                .run({
+                  command: pinnedRuntimeCommand(paths).command,
+                  args: [
+                    ...pinnedRuntimeCommand(paths).args,
+                    "__service-preflight",
+                    "--database-path",
+                    dbPath,
+                    "--launcher-protocol",
+                    String(SERVICE_LAUNCHER_PROTOCOL),
+                  ],
+                  timeout: Duration.seconds(30),
+                })
+                .pipe(
+                  Effect.mapError(
+                    () =>
+                      new PinnedRuntimeInstallError({
+                        step: "running the service update preflight",
+                      }),
+                  ),
+                  Effect.flatMap((result) => {
+                    let preflight;
+                    // @effect-diagnostics-next-line preferSchemaOverJson:off -- The shared launcher decoder validates this protocol.
+                    try {
+                      preflight = decodeServicePreflightResult(JSON.parse(result.stdout.trim()));
+                    } catch {
+                      /* Invalid output is refused below. */
+                    }
+                    return result.code === 0 &&
+                      preflight?.version === targetVersion &&
+                      preflight.status === "ready"
+                      ? Effect.void
+                      : Effect.fail(
+                          new PinnedRuntimePreflightBlockedError({
+                            version: targetVersion,
+                            reason:
+                              preflight?.status === "blocked"
+                                ? preflight.reason
+                                : "The service update preflight failed. The current install was left in place.",
+                          }),
+                        );
+                  }),
+                )
+            : Effect.void,
         ),
       );
 
@@ -675,12 +731,8 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   const repointed = yield* repointLauncher(launcherInput);
   const retired = yield* retireLegacyLauncher(launcherInput);
 
-  // The service switch runs in this process against the target version: the
-  // downloaded runtime has already proven it runs (the `--version` check
-  // above), and doing it here rather than through the target's own CLI means
-  // a downgrade to a version without today's commands still works. The unit
-  // is rewritten either way so a later `cogenly service restart` lands on the new
-  // version; only the restart itself waits for the user's answer.
+  // The service records a pending candidate, so its launcher backs up the
+  // database and rolls back if the trial fails to become ready.
   let serviceUpdated = false;
   if (serviceInstalled && !serviceCurrent) {
     yield* Console.log(
@@ -690,7 +742,11 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
     );
     yield* BootService.BootService.pipe(
       Effect.flatMap((target) =>
-        target.install({ allowDowngrade: input.allowDowngrade, start: restartService }),
+        target.install({
+          allowDowngrade: input.allowDowngrade,
+          start: restartService,
+          trialDatabasePath: dbPath,
+        }),
       ),
       Effect.provide(
         BootService.layer({
@@ -719,7 +775,7 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
     yield* Console.log(`  Run ${runtime.entryPath}\n`);
   }
   if (serviceUpdated) {
-    yield* Console.log(`  Background service restarted on ${targetVersion}`);
+    yield* Console.log(`  Background service restarted for a trial of ${targetVersion}`);
   } else if (serviceInstalled && serviceCurrent) {
     yield* Console.log(`  Background service already on ${targetVersion}`);
   } else if (serviceInstalled) {

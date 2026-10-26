@@ -4,6 +4,7 @@ import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as Path from "effect/Path";
 
 import { FetchHttpClient } from "effect/http";
@@ -218,5 +219,88 @@ describe("retireLegacyLauncher", () => {
       expect(yield* fs.readLink(legacy)).toBe(oldEntry);
       expect(yield* fs.readFileString(path.join(bin, "cogenly"))).toBe("#!/bin/sh\n");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
+
+describe("service update preflight", () => {
+  it.effect.each(["blocked", "invalid", "exit"])(
+    "refuses a %s preflight before changing the launcher or service",
+    (failure) =>
+      Effect.gen(function* () {
+        const { fs, path, oldEntry, newEntry, bin } = yield* setup();
+        const home = path.resolve(bin, "../home");
+        const launcher = path.join(bin, "cogenly");
+        yield* fs.symlink(oldEntry, launcher);
+        let installed = false;
+        const calls: string[] = [];
+        const error = yield* runUpdate({
+          baseDir: home,
+          logsDir: path.join(home, "logs"),
+          serverRuntimeStatePath: path.join(home, "runtime.json"),
+          channel: undefined,
+          requestedVersion: "0.2.0",
+          allowDowngrade: true,
+          assumeYes: true,
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              Layer.mock(BootService.BootService)({
+                status: Effect.succeed({
+                  supported: true,
+                  installed: true,
+                  current: false,
+                  installedVersion: "0.1.0",
+                  installedBaseDir: home,
+                  unitPath: "unit",
+                  logPath: "log",
+                }),
+                install: () =>
+                  Effect.sync(() => {
+                    installed = true;
+                    throw new Error("must not install");
+                  }),
+              }),
+              Layer.mock(ProcessRunner.ProcessRunner)({
+                run: (input) => {
+                  calls.push(input.args.join(" "));
+                  const preflight = input.args.includes("__service-preflight");
+                  return Effect.succeed({
+                    code: ChildProcessSpawner.ExitCode(preflight && failure === "exit" ? 1 : 0),
+                    stdout: preflight
+                      ? failure === "invalid"
+                        ? "invalid"
+                        : JSON.stringify({
+                            status: "blocked",
+                            version: "0.2.0",
+                            reason: "Migration blocked",
+                          })
+                      : "cogenly v0.2.0",
+                    stderr: "",
+                    timedOut: false,
+                    stdoutTruncated: false,
+                    stderrTruncated: false,
+                    stdoutInvalidUtf8: false,
+                    stderrInvalidUtf8: false,
+                  });
+                },
+              }),
+              Layer.succeed(HostProcess.Platform, "linux"),
+              Layer.succeed(HostProcess.Architecture, "arm64"),
+              Layer.succeed(HostProcess.IsExecutable, true),
+              Layer.succeed(HostProcess.InvokedAs, launcher),
+              Layer.succeed(HostProcess.WorkingDirectory, bin),
+              Layer.succeed(HostProcess.UserId, 1000),
+              Layer.succeed(HostProcess.Environment, { PATH: bin }),
+              FetchHttpClient.layer,
+            ),
+          ),
+          Effect.flip,
+        );
+        expect(error._tag).toBe("PinnedRuntimePreflightBlockedError");
+        expect(installed).toBe(false);
+        expect(calls.some((call) => call.includes("__service-preflight"))).toBe(true);
+        expect(yield* fs.readLink(launcher)).toBe(oldEntry);
+        expect(yield* fs.exists(newEntry)).toBe(true);
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

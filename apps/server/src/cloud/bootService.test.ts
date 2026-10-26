@@ -1,3 +1,14 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as HostProcess from "@cogenly/shared/HostProcess";
+import * as ConfigProvider from "effect/ConfigProvider";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import { FetchHttpClient } from "effect/http";
+import * as ProcessRunner from "../processRunner.ts";
+import * as BootService from "./bootService.ts";
+import { parseServiceState } from "./serviceProtocol.ts";
 import { describe, expect, it } from "@effect/vitest";
 
 import {
@@ -154,3 +165,73 @@ describe("bootServiceBaseDirOf", () => {
     expect(bootServiceBaseDirOf("[Service]\nExecStart=/bin/true\n")).toBeUndefined();
   });
 });
+
+it.effect.each([true, false])(
+  "stages an installed service update for a trial (start=%s)",
+  (start) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-service-trial-" });
+      const baseDir = path.join(root, "home");
+      const runtime = path.join(baseDir, "runtime/versions/0.3.3");
+      const unit = path.join(root, ".config/systemd/user/cogenly.service");
+      const stateFile = path.join(baseDir, "runtime/service-state.json");
+      yield* fs.makeDirectory(runtime, { recursive: true });
+      yield* fs.writeFileString(path.join(runtime, "cogenly"), "");
+      yield* fs.writeFileString(path.join(runtime, ".install-complete"), "0.3.3");
+      yield* fs.makeDirectory(path.dirname(unit), { recursive: true });
+      yield* fs.writeFileString(unit, "old unit");
+      yield* fs.writeFileString(stateFile, JSON.stringify({ protocol: 3, activeVersion: "0.3.2" }));
+      const commands: string[] = [];
+      yield* Effect.gen(function* () {
+        const service = yield* BootService.make({
+          baseDir,
+          logsDir: path.join(root, "logs"),
+          cliVersion: "0.3.3",
+        });
+        yield* service.install({
+          start,
+          trialDatabasePath: path.join(baseDir, "userdata/statev2.sqlite"),
+        });
+      }).pipe(
+        Effect.provideService(
+          ConfigProvider.ConfigProvider,
+          ConfigProvider.fromUnknown({ HOME: root, PATH: "" }),
+        ),
+        Effect.provideService(HostProcess.Platform, "linux"),
+        Effect.provideService(HostProcess.UserId, 1000),
+        Effect.provideService(HostProcess.IsExecutable, true),
+        Effect.provideService(HostProcess.Environment, { HOME: root, PATH: "" }),
+        Effect.provideService(
+          ProcessRunner.ProcessRunner,
+          ProcessRunner.ProcessRunner.of({
+            run: (input) => {
+              commands.push(input.args.join(" "));
+              return Effect.succeed({
+                code: ChildProcessSpawner.ExitCode(0),
+                stdout: input.args.includes("--version")
+                  ? "cogenly v0.3.3"
+                  : input.command === "loginctl"
+                    ? "yes"
+                    : "",
+                stderr: "",
+                timedOut: false,
+                stdoutTruncated: false,
+                stderrTruncated: false,
+                stdoutInvalidUtf8: false,
+                stderrInvalidUtf8: false,
+              });
+            },
+          }),
+        ),
+        Effect.provide(FetchHttpClient.layer),
+      );
+      expect(parseServiceState(yield* fs.readFileString(stateFile))).toMatchObject({
+        activeVersion: "0.3.2",
+        update: { fromVersion: "0.3.2", targetVersion: "0.3.3", status: "pending" },
+      });
+      expect(commands.some((command) => command.includes("stop"))).toBe(start);
+      expect(yield* fs.readFileString(unit)).toContain("0.3.3");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
