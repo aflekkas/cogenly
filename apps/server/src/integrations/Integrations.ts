@@ -209,6 +209,21 @@ export const integrationExecutableChanged = (
   (input.command !== undefined &&
     JSON.stringify(input.command) !== JSON.stringify(current.command));
 
+/**
+ * `integration` with its setup notes replaced by `text`, stamped `at`. An
+ * empty `text` clears them; undefined leaves them as they are.
+ */
+const withSetupNotes = (
+  integration: StoredIntegration,
+  text: string | undefined,
+  at: string,
+): StoredIntegration => {
+  if (text === undefined) return integration;
+  const { setupNotes: _, setupNotesUpdatedAt: _at, ...rest } = integration;
+  const trimmed = text.trim();
+  return trimmed === "" ? rest : { ...rest, setupNotes: trimmed, setupNotesUpdatedAt: at };
+};
+
 /** Account labels identify the signed-in account; agents need approval to change them. */
 export const integrationAccountLabelChanged = (
   current: Integration,
@@ -2345,6 +2360,7 @@ const make = (options: IntegrationsOptions = {}) =>
             updatedAt: at,
             deletedAt: null,
           };
+          integration = withSetupNotes(integration, request.setupNotes, at);
           integration = yield* protectLiterals(yield* protectEndpoint(integration));
           yield* persistDefinition(integration);
           // The process starts now so a sign-in link answers quickly; listing retries a failure.
@@ -2385,7 +2401,18 @@ const make = (options: IntegrationsOptions = {}) =>
           // Nothing to change (an agent asking for a fresh sign-in link): keep the
           // version, so a managed process and its pending sign-in keep running.
           if (Object.entries(masked).every(([key, value]) => key === "id" || value === undefined))
-            return { integration: redactIntegration(current), changed: false };
+            return { integration: redactIntegration(current), changed: false, notesOnly: false };
+          // Notes describe the setup and change nothing it runs with, so the
+          // process, its sign-in and its tokens stay as they are.
+          if (
+            Object.entries(masked).every(
+              ([key, value]) => key === "id" || key === "setupNotes" || value === undefined,
+            )
+          ) {
+            const integration = withSetupNotes(current, masked.setupNotes, yield* now);
+            yield* persistDefinition(integration, current);
+            return { integration: redactIntegration(integration), changed: true, notesOnly: true };
+          }
           // A masked value is one the caller left as it was.
           if (masked.command !== undefined) {
             const env = Object.fromEntries(
@@ -2535,17 +2562,19 @@ const make = (options: IntegrationsOptions = {}) =>
             credentialOrigin,
             approvedCredentialItems,
           };
+          integration = withSetupNotes(integration, input.setupNotes, integration.updatedAt);
           integration = yield* protectLiterals(yield* protectEndpoint(integration));
           yield* persistDefinition(integration, current);
           if (!keepSignIn) yield* dropTokens(current);
           yield* invalidate(integration.id);
-          return { integration: redactIntegration(integration), changed: true };
+          return { integration: redactIntegration(integration), changed: true, notesOnly: false };
         }).pipe(
           sql.withTransaction,
           integrationLock(masked.id).withPermits(1),
           // Once committed, the old process gives way; the next list starts the new version.
-          Effect.tap(({ integration, changed }) =>
+          Effect.tap(({ integration, changed, notesOnly }) =>
             changed &&
+            !notesOnly &&
             (integration.transport === "local" || integration.transport === "stdio") &&
             Option.isSome(local)
               ? local.value.stop(integration.id, integration)
