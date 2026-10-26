@@ -132,7 +132,7 @@ const inlineButtonVariants = cva(
          * underlines on hover, focus or while its menu is open.
          */
         sentence:
-          "group/inline-button gap-[0.12em] text-foreground underline decoration-transparent decoration-from-font underline-offset-[0.18em] hover:decoration-foreground/45 focus-visible:decoration-foreground/45 data-popup-open:decoration-foreground/45",
+          "group/inline-button gap-[0.06em] text-foreground underline decoration-transparent decoration-from-font underline-offset-[0.18em] hover:decoration-foreground/45 focus-visible:decoration-foreground/45 data-popup-open:decoration-foreground/45",
       },
     },
   },

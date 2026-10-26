@@ -11,9 +11,10 @@ export const HERO_HEADING_GROUP = "draft-heading";
 /**
  * The large sentence over an empty thread's composer, shared by chats ("<greeting>
  * · in <project>") and Work ("What should we build in <project> / <repository>?").
- * It is plain inline text, centred and balanced over the composer: a phrase that
- * no longer fits wraps to the next line whole, and names truncate before a
- * phrase outgrows its line, so the heading never runs past the column.
+ * It is plain inline text, centred over the composer: a phrase that no longer
+ * fits wraps to the next line whole (pretty, not balanced, so the words before
+ * it stay together), and names truncate before a phrase outgrows its line, so
+ * the heading never runs past the column.
  */
 export function HeroHeadline({
   ref,
@@ -34,7 +35,7 @@ export function HeroHeadline({
         ref={ref}
         style={{ fontSize: "clamp(var(--text-xl), 3cqw, var(--text-3xl))" }}
         aria-label={label}
-        className="w-full text-balance text-center font-normal text-xl text-foreground tracking-tight"
+        className="w-full text-pretty text-center font-normal text-xl text-foreground tracking-tight"
       >
         {/* A block, so the phrases inside measure against the column and never outgrow it. */}
         <FadeSwap group={HERO_HEADING_GROUP} swapKey={swapKey} className="block">
@@ -76,9 +77,9 @@ export function HeroPickerButton({ className, ...props }: ComponentProps<typeof 
 
 /**
  * A name in the sentence: its icon and text, truncating with an ellipsis. In a
- * picker (`chevron`) a chevron fades in on hover, focus and while open; its
- * space is always held, so nothing shifts. Touch screens show it at rest.
- * Read-only names (an existing Work thread) leave it out.
+ * picker (`chevron`) a faint chevron follows it and brightens on hover, focus
+ * and while open, so the name reads as a choice on touch screens too and
+ * nothing shifts. Read-only names (an existing Work thread) leave it out.
  */
 export function HeroName(props: {
   readonly text: string;
@@ -101,7 +102,8 @@ export function HeroName(props: {
       {props.chevron ? (
         <ChevronDownIcon
           aria-hidden
-          className="size-[0.5em] shrink-0 self-center text-muted-foreground opacity-0 transition-opacity duration-(--motion-duration-fast) ease-standard group-hover/inline-button:opacity-100 group-focus-visible/inline-button:opacity-100 group-data-popup-open/inline-button:opacity-100 pointer-coarse:opacity-70"
+          // The glyph's own side padding stands in for the space after it.
+          className="-me-[0.1em] size-[0.45em] shrink-0 self-center text-muted-foreground opacity-70 transition-opacity duration-(--motion-duration-fast) ease-standard group-hover/inline-button:opacity-100 group-focus-visible/inline-button:opacity-100 group-data-popup-open/inline-button:opacity-100"
         />
       ) : null}
     </>
