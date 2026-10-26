@@ -49,6 +49,7 @@ import * as NodeChildProcess from "node:child_process";
 import { parseCliArgs } from "@cogenly/shared/cliArgs";
 import { AgentScope } from "@cogenly/shared/AgentScope";
 import * as HostProcess from "@cogenly/shared/HostProcess";
+import * as AgentProcesses from "../../process/AgentProcesses.ts";
 import { applyClaudePromptEffortPrefix } from "@cogenly/shared/model";
 import {
   CLAUDE_RESUME_COMPACTION_NEVER_ANSWER,
@@ -265,7 +266,7 @@ const CLAUDE_MCP_REGISTRATION_TIMEOUT = "90 seconds";
  * before adding the tail to exit errors. Here stderr is dropped instead, so
  * exit errors carry only the code or signal.
  */
-function spawnClaudeProcessGroup(options: ClaudeSpawnOptions): ClaudeSpawnedProcess {
+function spawnClaudeProcessGroup(options: ClaudeSpawnOptions) {
   const child = NodeChildProcess.spawn(options.command, options.args, {
     cwd: options.cwd,
     env: options.env,
@@ -762,6 +763,30 @@ export const layerQueryRunner: Layer.Layer<
     const { native: nativeEventLogger } = yield* ProviderEventLoggers.ProviderEventLoggers;
     const agentScope = yield* AgentScope;
     const platform = yield* HostProcess.Platform;
+    const agentProcesses = yield* AgentProcesses.AgentProcesses;
+    const runFork = Effect.runForkWith(yield* Effect.context<never>());
+    // The CLI's group goes in the agent process ledger, so a server that dies
+    // mid-turn leaves nothing the next one cannot find and kill.
+    const spawnTrackedClaudeProcess =
+      (threadId: string) =>
+      (options: ClaudeSpawnOptions): ClaudeSpawnedProcess => {
+        const child = spawnClaudeProcessGroup(options);
+        const pid = child.pid;
+        if (pid !== undefined) {
+          const identity = { threadId, terminalId: `provider-claude-${pid}` };
+          runFork(
+            agentProcesses.register({
+              ...identity,
+              kind: "provider",
+              command: "claude",
+              pid,
+              keepRunning: false,
+            }),
+          );
+          child.once("exit", () => runFork(agentProcesses.terminate(identity)));
+        }
+        return child;
+      };
 
     return ClaudeAgentSdkQueryRunner.of({
       allocateSessionId: crypto
@@ -816,7 +841,7 @@ export const layerQueryRunner: Layer.Layer<
         // groups, so there the SDK spawns the CLI itself.
         const spawnClaudeCodeProcess =
           options.spawnClaudeCodeProcess ??
-          (platform === "win32" ? undefined : spawnClaudeProcessGroup);
+          (platform === "win32" ? undefined : spawnTrackedClaudeProcess(input.threadId));
         // The CLI is running once query() returns, so it is closed if anything
         // before the session is handed out fails or is interrupted.
         const queryRuntime = yield* Effect.uninterruptibleMask((restore) =>

@@ -75,6 +75,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.serverGetUsageSummary]: "server",
   [WS_METHODS.serverRefreshUsageRates]: "server",
   [WS_METHODS.serverSignalProcess]: "server",
+  [WS_METHODS.serverGetAgentProcesses]: "server",
+  [WS_METHODS.serverKillAgentProcess]: "server",
   [WS_METHODS.serverReportClientActivity]: "server",
   [WS_METHODS.serverReportHostPowerState]: "server",
   [WS_METHODS.serverGetBackgroundPolicy]: "server",

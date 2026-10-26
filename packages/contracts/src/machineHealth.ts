@@ -32,6 +32,7 @@ export const MachineHealthCheckId = Schema.Literals([
   "canary",
   "computer-use",
   "chat-terminal-sandbox",
+  "agent-processes",
 ]);
 export type MachineHealthCheckId = typeof MachineHealthCheckId.Type;
 
@@ -50,7 +51,8 @@ export type MachineHealthTarget = typeof MachineHealthTarget.Type;
  * A direct remedy, run by `machines.healthFix` on the machine the item is on:
  * `run-now` runs the scheduled task, `stop-runs` stops the thread's stale runs
  * and subagents, `retry-sync` retries sync with the target machine,
- * `setup-sandbox` installs the chat sandbox. `sign-in` needs the owner, so
+ * `setup-sandbox` installs the chat sandbox, `kill-orphans` kills commands an
+ * earlier server left running. `sign-in` needs the owner, so
  * clients open the provider or integration sign-in instead. Stuck-run reports
  * emit `resume` for 0.3.1 wire compatibility; 0.3.2 handles it as `stop-runs`.
  * An item without a fix gets an agent: clients start a chat to investigate it.
@@ -62,6 +64,7 @@ export const MachineHealthFix = Schema.Literals([
   "stop-runs",
   "retry-sync",
   "setup-sandbox",
+  "kill-orphans",
 ]);
 export type MachineHealthFix = typeof MachineHealthFix.Type;
 

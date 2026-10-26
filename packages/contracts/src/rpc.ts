@@ -311,6 +311,9 @@ import {
   ServerProcessResourceHistoryResult,
   ServerSignalProcessInput,
   ServerSignalProcessResult,
+  ServerAgentProcessesResult,
+  ServerKillAgentProcessInput,
+  ServerKillAgentProcessResult,
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
 } from "./server.ts";
@@ -521,6 +524,8 @@ export const WS_METHODS = {
   serverRetryResourceTelemetry: "server.retryResourceTelemetry",
   serverCheckOtlpEndpoint: "server.checkOtlpEndpoint",
   serverSignalProcess: "server.signalProcess",
+  serverGetAgentProcesses: "server.getAgentProcesses",
+  serverKillAgentProcess: "server.killAgentProcess",
   serverReportClientActivity: "server.reportClientActivity",
   serverReportHostPowerState: "server.reportHostPowerState",
   serverGetBackgroundPolicy: "server.getBackgroundPolicy",
@@ -1023,6 +1028,19 @@ const WsServerRefreshUsageRatesRpc = Rpc.make(WS_METHODS.serverRefreshUsageRates
 const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess, {
   payload: ServerSignalProcessInput,
   success: ServerSignalProcessResult,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsServerGetAgentProcessesRpc = Rpc.make(WS_METHODS.serverGetAgentProcesses, {
+  payload: Schema.Struct({}),
+  success: ServerAgentProcessesResult,
+  error: EnvironmentAuthorizationError,
+});
+
+/** Kills one agent command's whole process tree, terminal or orphan alike. */
+const WsServerKillAgentProcessRpc = Rpc.make(WS_METHODS.serverKillAgentProcess, {
+  payload: ServerKillAgentProcessInput,
+  success: ServerKillAgentProcessResult,
   error: EnvironmentAuthorizationError,
 });
 
@@ -2894,6 +2912,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetUsageSummaryRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
+  WsServerGetAgentProcessesRpc,
+  WsServerKillAgentProcessRpc,
   WsSearchQueryRpc,
   WsExportCreateRpc,
   WsExportValidateRpc,

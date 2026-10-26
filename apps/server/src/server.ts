@@ -58,6 +58,9 @@ import * as PeerHub from "./machines/PeerHub.ts";
 import { fixPath } from "./os-jank.ts";
 import * as Ws from "./ws.ts";
 import * as AgentScopeLive from "./process/agentScope.ts";
+import * as AgentProcesses from "./process/AgentProcesses.ts";
+import * as AgentProcessControl from "./process/AgentProcessControl.ts";
+import * as AgentProcessReaper from "./process/AgentProcessReaper.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as NodePtyAdapter from "./terminal/NodePtyAdapter.ts";
 import * as PullRequestHttp from "./pullRequest/http.ts";
@@ -579,6 +582,10 @@ const layerThreadSettlementWorker = Layer.effectDiscard(
   ThreadSettlementService.make.pipe(Effect.flatMap((service) => service.start())),
 ).pipe(Layer.provide(layerPullRequestService), Layer.provide(ProjectionStoreV2.layer));
 
+const layerAgentProcessControl = AgentProcessControl.layer.pipe(
+  Layer.provide(ProjectionStoreV2.layer),
+);
+
 const layerThreadPullRequestWorker = Layer.effectDiscard(
   ThreadPullRequestService.make.pipe(Effect.flatMap((service) => service.start())),
 ).pipe(Layer.provide(layerPullRequestService));
@@ -694,6 +701,12 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   // Asks Cogenly Connect to deliver webhooks it held while this environment was offline.
   HeldHooksWaker.layer,
   layerThreadSettlementWorker,
+  // Diagnostics' agent process list and Kill, and the idle sweep that uses them.
+  layerAgentProcessControl,
+  AgentProcessReaper.layer.pipe(
+    Layer.provide(layerAgentProcessControl),
+    Layer.provide(ProjectionStoreV2.layer),
+  ),
   StorageCleanup.layer.pipe(
     Layer.provide(ProjectionStoreV2.layer),
     Layer.provide(StorageInspection.layer),
@@ -1271,6 +1284,9 @@ const layerMakeServer = Layer.unwrap(
       Layer.provideMerge(FetchHttpClient.layer),
       // PR reads, Git operations, and WebSocket discovery share one process limiter.
       Layer.provide(VcsProcess.layer),
+      // The ledger of what agents started; terminals, cleanup, health and
+      // Diagnostics share this one instance.
+      Layer.provideMerge(AgentProcesses.layer),
       // Every agent and terminal spawn reads this, so it sits below everything.
       Layer.provideMerge(AgentScopeLive.layer),
       Layer.provideMerge(layerPlatformServices),

@@ -36,7 +36,7 @@ const result = Schema.Struct({
 const run = Tool.make("terminal_run", {
   ...shared,
   description:
-    "Run a shell command in a visible PTY owned by this thread (full-access/default mode required). Use this for all shell commands. cwd defaults to the thread workspace; cwd outside it, including symlink escapes, is rejected. Foreground waits up to timeoutMs (default 120000, max 600000), then kills the process tree. A command that may take more than about a minute, or may prompt (logins, cloud CLIs, installs, builds, test suites), runs with background=true and is polled with terminal_read, so the user's messages aren't blocked while it runs. background=true returns immediately for servers/watchers. Output retains a bounded head and tail with omitted-character markers. All agent PTYs and children are killed when the thread settles or is deleted.",
+    "Run a shell command in a visible PTY owned by this thread (full-access/default mode required). Use this for all shell commands. cwd defaults to the thread workspace; cwd outside it, including symlink escapes, is rejected. Foreground waits up to timeoutMs (default 120000, max 600000), then kills the process tree. A command that may take more than about a minute, or may prompt (logins, cloud CLIs, installs, builds, test suites), runs with background=true and is polled with terminal_read, so the user's messages aren't blocked while it runs. background=true returns immediately for servers/watchers. Output retains a bounded head and tail with omitted-character markers. A command and every process it starts, including ones that detach, are killed when the user stops the thread, the task is cancelled, the thread settles, is archived or deleted, or the thread sits idle for hours. keepRunning=true (background only) keeps a server the user asked to leave up past stop, settle and idle reaping; archive and delete still kill it.",
   parameters: Schema.Struct({
     command: TrimmedNonEmptyString.check(Schema.isMaxLength(65_536)),
     cwd: Schema.optional(TrimmedNonEmptyString),
@@ -44,6 +44,7 @@ const run = Tool.make("terminal_run", {
       Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 600_000 })),
     ),
     background: Schema.optional(Schema.Boolean),
+    keepRunning: Schema.optional(Schema.Boolean),
   }),
   success: result,
 });
@@ -67,13 +68,14 @@ const write = Tool.make("terminal_write", {
 const kill = Tool.make("terminal_kill", {
   ...shared,
   description:
-    "Kill this thread's agent terminal and its process group. Keeps its output available for terminal_read.",
+    "Kill this thread's agent terminal and every process it started, including ones that left its process group. Works on kept and already-exited terminals whose children still run. Keeps its output available for terminal_read.",
   parameters: Schema.Struct(identity),
   success: Schema.Struct({}),
 }).annotate(Tool.Destructive, true);
 const list = Tool.make("terminal_list", {
   ...shared,
-  description: "List only this thread's agent terminals, including retained finished terminals.",
+  description:
+    "List only this thread's agent terminals, including retained finished terminals. keepRunning marks commands started to outlive stop and settle.",
   parameters: Tool.EmptyParams,
   success: Schema.Struct({ terminals: Schema.Array(TerminalSummary) }),
 }).annotate(Tool.Readonly, true);

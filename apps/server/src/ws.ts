@@ -249,6 +249,7 @@ import { requiredScopeForDeviceList, rpcAuthorizationError } from "./auth/RpcAut
 import * as RpcAuthorization from "./auth/RpcAuthorization.ts";
 import { RpcInstrumentation, rpcInstrumentationLayer } from "./observability/RpcInstrumentation.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
+import * as AgentProcessControl from "./process/AgentProcessControl.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as HostResources from "./resourceTelemetry/HostResources.ts";
@@ -1214,6 +1215,7 @@ const makeWsRpcHandlers = (
     const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
     const sessions = yield* SessionStore.SessionStore;
     const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
+    const agentProcessControl = yield* AgentProcessControl.AgentProcessControl;
     const hostResources = yield* HostResources.HostResources;
     const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
     const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
@@ -2126,6 +2128,8 @@ const makeWsRpcHandlers = (
       [WS_METHODS.serverRetryResourceTelemetry]: (_input) => resourceTelemetry.retry,
       [WS_METHODS.serverCheckOtlpEndpoint]: (input) => otlpEndpointCheck.check(input),
       [WS_METHODS.serverSignalProcess]: (input) => processDiagnostics.signal(input),
+      [WS_METHODS.serverGetAgentProcesses]: (_input) => agentProcessControl.list,
+      [WS_METHODS.serverKillAgentProcess]: (input) => agentProcessControl.kill(input),
       [WS_METHODS.serverReportClientActivity]: (input, metadata) =>
         Ref.update(rpcClientIds, (clientIds) => {
           const next = new Set(clientIds);
@@ -2892,6 +2896,7 @@ type WsRequestServices =
   | PortScanner.PortDiscovery
   | PreviewManager.PreviewManager
   | ProcessDiagnostics.ProcessDiagnostics
+  | AgentProcessControl.AgentProcessControl
   | ProcessResourceMonitor.ProcessResourceMonitor
   | ProjectCloneTracker.ProjectCloneTracker
   | ProjectEnrichmentService.ProjectEnrichmentService

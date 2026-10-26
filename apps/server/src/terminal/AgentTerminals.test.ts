@@ -17,6 +17,7 @@ import * as Queue from "effect/Queue";
 import { TestClock } from "effect/testing";
 import type { PtyProcess, PtyExitEvent } from "@cogenly/shared/PtyAdapter";
 import * as ProcessRunner from "../processRunner.ts";
+import * as AgentProcesses from "../process/AgentProcesses.ts";
 import { processOutputRedactor } from "../vault/VaultRedactor.ts";
 import * as Manager from "./Manager.ts";
 import * as NodePtyAdapter from "./NodePtyAdapter.ts";
@@ -409,6 +410,115 @@ it.effect("foreground returns exit status and bounded head/tail output", () =>
       expect(ended.output.startsWith("H".repeat(8_000))).toBe(true);
       expect(ended.output.endsWith("T".repeat(24_000))).toBe(true);
       expect(ended.output).toContain("100000 characters omitted");
+    }),
+  ),
+);
+
+/** Records what the manager asks of the agent process ledger. */
+function makeFakeLedger() {
+  const registered: Array<{ terminalId: string; pid: number; keepRunning: boolean }> = [];
+  const terminated: Array<{ terminalId: string; reason: string | undefined }> = [];
+  const ledger: AgentProcesses.AgentProcessesShape = {
+    ...AgentProcesses.AgentProcesses.defaultValue(),
+    register: (input) =>
+      Effect.sync(() => {
+        registered.push({
+          terminalId: input.terminalId,
+          pid: input.pid,
+          keepRunning: input.keepRunning,
+        });
+      }),
+    terminate: (input) =>
+      Effect.sync(() => {
+        terminated.push({ terminalId: input.terminalId, reason: input.reason });
+        return [];
+      }),
+  };
+  return { ledger, registered, terminated };
+}
+
+it.effect("stopping a thread kills each agent command's whole tree, sparing kept ones", () =>
+  provide(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-terminal-test-" });
+      const process = new FakePty();
+      const { ledger, registered, terminated } = makeFakeLedger();
+      const manager = yield* Manager.makeWithOptions({
+        logsDir: cwd,
+        ptyAdapter: { spawn: () => Effect.succeed(process) },
+        processKillGraceMs: 0,
+        processTable: Effect.succeed([]),
+        processes: ledger,
+      });
+      const plain = yield* manager.runAgent({
+        threadId: "A",
+        command: "npm run dev &",
+        cwd,
+        background: true,
+      });
+      const kept = yield* manager.runAgent({
+        threadId: "A",
+        command: "npm run preview",
+        cwd,
+        background: true,
+        keepRunning: true,
+      });
+      expect(registered).toEqual([
+        { terminalId: plain.terminalId, pid: 12345, keepRunning: false },
+        { terminalId: kept.terminalId, pid: 12345, keepRunning: true },
+      ]);
+
+      // Stop, task cancel and settle: kept commands stay.
+      yield* manager.stopAgents("A");
+      expect(terminated).toEqual([{ terminalId: plain.terminalId, reason: "stopped" }]);
+      expect(process.signals).toContain("SIGKILL");
+      const listed = yield* manager.listAgents("A");
+      expect(listed.find((entry) => entry.terminalId === kept.terminalId)).toMatchObject({
+        status: "running",
+        keepRunning: true,
+      });
+
+      // Archive and delete include them. The exited terminal is asked again,
+      // for children it may have left; the ledger answers that from its records.
+      yield* manager.stopAgents("A", undefined, { includeKeepRunning: true });
+      expect(terminated.map((entry) => entry.terminalId)).toContain(kept.terminalId);
+    }),
+  ),
+);
+
+it.effect("an agent command that exits on its own takes its leftover children with it", () =>
+  provide(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-terminal-test-" });
+      const process = new FakePty();
+      const { ledger, terminated } = makeFakeLedger();
+      const manager = yield* Manager.makeWithOptions({
+        logsDir: cwd,
+        ptyAdapter: { spawn: () => Effect.succeed(process) },
+        processKillGraceMs: 0,
+        processTable: Effect.succeed([]),
+        processes: ledger,
+      });
+      const exited = yield* Deferred.make<void>();
+      yield* manager.subscribe((event) =>
+        event.type === "exited"
+          ? Deferred.succeed(exited, undefined).pipe(Effect.asVoid)
+          : Effect.void,
+      );
+      const started = yield* manager.runAgent({
+        threadId: "A",
+        command: "nohup server &",
+        cwd,
+        background: true,
+      });
+      process.finish(0);
+      yield* Deferred.await(exited);
+      // The tree kill runs in the manager's worker scope; let it start.
+      yield* Effect.yieldNow;
+      expect(process.signals).toContain("SIGKILL");
+      expect(terminated).toEqual([{ terminalId: started.terminalId, reason: undefined }]);
     }),
   ),
 );

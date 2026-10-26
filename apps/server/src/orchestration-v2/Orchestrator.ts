@@ -3689,6 +3689,24 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     }
   });
 
+  /**
+   * Kills the commands the thread's agent started before this command, except
+   * ones it marked keep-running. Stop, task cancel and stale-work settle use it.
+   */
+  const queueAgentTerminalCleanup = (
+    command: { readonly commandId: CommandId; readonly threadId: ThreadId },
+    effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+  ) =>
+    Ref.update(effects, (existing) => [
+      ...existing,
+      {
+        id: `effect:${command.commandId}:terminal.cleanup`,
+        commandId: command.commandId,
+        threadId: command.threadId,
+        request: { type: "terminal.cleanup", agentOnly: true },
+      } satisfies PendingOrchestrationEffectV2,
+    ]);
+
   const dispatchProviderSessionDetach = Effect.fn("orchestrationV2.dispatch.providerSessionDetach")(
     function* (
       command: Extract<OrchestrationV2Command, { readonly type: "provider-session.detach" }>,
@@ -12257,7 +12275,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       case "run.interrupt":
         cancelUnsettledEffects = yield* dispatchRunInterrupt(command, events, effects);
-        // Stop also stops every delegated task under the thread once it commits.
+        // Stop also stops every delegated task under the thread once it commits,
+        // and kills the commands its agent started.
         if (command.holdQueue === true) {
           yield* Ref.update(effects, (existing) => [
             ...existing,
@@ -12271,10 +12290,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               },
             } satisfies PendingOrchestrationEffectV2,
           ]);
+          yield* queueAgentTerminalCleanup(command, effects);
         }
         break;
       case "thread.stop":
         cancelUnsettledEffects = yield* dispatchThreadStop(command, events, effects);
+        yield* queueAgentTerminalCleanup(command, effects);
         break;
       case "queued-message.promote-to-steer":
         yield* dispatchQueuedMessagePromoteToSteer(command, events, effects);
@@ -12368,6 +12389,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       case "thread.stale-work.settle":
         cancelUnsettledEffects = yield* dispatchStaleWorkSettle(command, events, effects);
+        // Dead runs leave their commands running with nobody to stop them.
+        yield* queueAgentTerminalCleanup(command, effects);
         break;
       case "thread.fork":
         yield* dispatchThreadFork(command, events);

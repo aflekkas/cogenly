@@ -58,9 +58,11 @@ import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
 import * as HealthCanary from "./HealthCanary.ts";
 import * as ComputerUseService from "../computerUse/ComputerUseService.ts";
 import { readStaleRuns } from "./staleRuns.ts";
+import * as AgentProcesses from "../process/AgentProcesses.ts";
 import {
   type SyncPeerProgress,
   type SyncPeerSample,
+  agentProcessesCheck,
   bootServiceCheck,
   computerUseCheck,
   chatSandboxCheck,
@@ -262,6 +264,7 @@ const make = Effect.gen(function* () {
   const canary = yield* HealthCanary.HealthCanary;
   const computerUse = yield* ComputerUseService.ComputerUse;
   const sandbox = yield* ReadOnlySandbox.ReadOnlySandbox;
+  const agentProcesses = yield* AgentProcesses.AgentProcesses;
 
   const freeSpace = yield* Effect.cachedWithTTL(
     Effect.tryPromise(() => NodeFSP.statfs(config.stateDir)).pipe(
@@ -434,6 +437,7 @@ const make = Effect.gen(function* () {
         ),
         guarded("canary", canary.check),
         guarded("computer-use", Effect.map(computerUse.status(), computerUseCheck)),
+        guarded("agent-processes", Effect.map(agentProcesses.snapshot, agentProcessesCheck)),
       ],
       { concurrency: "unbounded" },
     );
