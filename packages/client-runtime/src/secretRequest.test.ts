@@ -1,5 +1,5 @@
 import { ThreadId, TurnItemId, type OrchestrationV2LoginRequest } from "@cogenly/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   loginRequestAnswerInput,
@@ -88,13 +88,14 @@ describe("login request card", () => {
           login: { ...login, updateItemId: "vault:1", savedItemName: "Work GitHub", kept: true },
         },
         "local",
-      ).label,
-    ).toBe("Updated Work GitHub in your vault");
+      ),
+    ).toMatchObject({ label: "Updated Work GitHub in your vault" });
     expect(
-      loginRequestDisplay({ secretStatus: "saved", login: { ...login, kept: false } }, "local")
-        .label,
-    ).toBe("Used for this task only, not kept");
-    expect(loginRequestDisplay({ secretStatus: "declined", login }, "local").label).toBe("Skipped");
+      loginRequestDisplay({ secretStatus: "saved", login: { ...login, kept: false } }, "local"),
+    ).toMatchObject({ label: "Used for this task only, not kept" });
+    expect(loginRequestDisplay({ secretStatus: "declined", login }, "local")).toMatchObject({
+      label: "Skipped",
+    });
     // A card nobody needs any more collapses to its outcome; the form is gone.
     expect(loginRequestDisplay({ secretStatus: "cancelled", login }, "local")).toMatchObject({
       kind: "answered",
