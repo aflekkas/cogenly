@@ -19,6 +19,7 @@ import {
   ComboboxSearchInput,
   ComboboxTrigger,
 } from "../components/ui/combobox";
+import { toastManager } from "../components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import type { DraftId } from "../composerDraftStore";
 import { cn } from "../lib/utils";
@@ -284,9 +285,20 @@ export function ComposerProjectPicker(props: {
     setBusy(true);
     try {
       await assign(option.kind === "project" ? { id: option.id, name: option.name } : null);
+    } catch (cause) {
+      // A refused move toasts itself; this is anything that threw on the way.
+      toastManager.add({
+        type: "error",
+        title:
+          option.kind === "project"
+            ? `Couldn't move to ${option.name}`
+            : "Couldn't remove from the project",
+        description: cause instanceof Error ? cause.message : undefined,
+      });
+    } finally {
+      // Closed whatever happened, so a failure doesn't leave the list hanging open.
       setOpen(false);
       setQuery("");
-    } finally {
       setBusy(false);
     }
   };
