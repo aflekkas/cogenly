@@ -95,6 +95,10 @@ Join modifiers and a key with `+`, such as `mod+shift+d` or `ctrl+l`.
 
 ## When conditions
 
+In **Settings → Keybindings**, each binding shows its condition beside the command
+name, or **Always** when it has none. Click it to edit the condition as text or
+with the condition builder.
+
 Available context keys are `terminalFocus`, `previewFocus`,
 `previewOpen`, `modelPickerOpen`, `usagePageOpen`, `composerFocus`, `composerDraft`,
 `turnRunning`, `editableFocus`, `isWeb`, and `isDesktop`.
