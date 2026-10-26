@@ -56,6 +56,7 @@ import * as MachineSetup from "../tailscale/MachineSetup.ts";
 import * as TailscaleServeMode from "../tailscale/TailscaleServeMode.ts";
 import * as ThreadSync from "../threadSync/ThreadSync.ts";
 import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
+import * as ChatGreetingService from "../greeting/ChatGreetingService.ts";
 import * as HealthCanary from "./HealthCanary.ts";
 import * as ComputerUseService from "../computerUse/ComputerUseService.ts";
 import { readStaleRuns, readStuckQueues } from "./staleRuns.ts";
@@ -264,6 +265,7 @@ const make = Effect.gen(function* () {
   const serveMode = yield* TailscaleServeMode.TailscaleServeMode;
   const launcher = yield* ServiceLauncherClient.ServiceLauncherClient;
   const canary = yield* HealthCanary.HealthCanary;
+  const greetings = yield* ChatGreetingService.ChatGreetingService;
   const computerUse = yield* ComputerUseService.ComputerUse;
   const sandbox = yield* ReadOnlySandbox.ReadOnlySandbox;
   const agentProcesses = yield* AgentProcesses.AgentProcesses;
@@ -414,7 +416,17 @@ const make = Effect.gen(function* () {
         guarded("disk", Effect.map(freeSpace, diskCheck)),
         guarded(
           "providers",
-          Effect.map(providers.getProviders, (list) => providersCheck({ providers: list, now })),
+          Effect.gen(function* () {
+            const check = providersCheck({ providers: yield* providers.getProviders, now });
+            const items = yield* greetings.healthItems;
+            return {
+              ...check,
+              status: check.status === "ok" && items.length > 0 ? ("warn" as const) : check.status,
+              summary:
+                items.length > 0 ? `${check.summary} AI greetings keep failing.` : check.summary,
+              items: [...check.items, ...items],
+            };
+          }),
         ),
         fromView("machine-links", (list) =>
           Effect.succeed(machineLinksCheck({ machines: list.machines, link: list.link, now })),
