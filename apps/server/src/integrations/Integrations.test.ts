@@ -6,7 +6,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as TestClock from "effect/testing/TestClock";
-import { FetchHttpClient } from "effect/http";
+import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -89,6 +89,12 @@ const fakeUpstreamWith = (redirectTo?: string) =>
             });
           } else if (body.method === "tools/call" && body.params?.name === "hang") {
             // Never answers: the gateway timeout must map this.
+          } else if (body.method === "tools/call" && body.params?.name === "huge") {
+            reply({
+              jsonrpc: "2.0",
+              id: body.id,
+              result: { content: [{ type: "text", text: "x".repeat(5 * 1024 * 1024) }] },
+            });
           } else if (body.method === "tools/call" && body.params?.name === "null-error") {
             reply({ jsonrpc: "2.0", id: body.id, error: null });
           } else if (body.method === "tools/call" && body.params?.name === "fail") {
@@ -390,7 +396,63 @@ describe("Integrations gateway", () => {
         if (timedOut._tag === "Failure") {
           expect(JSON.stringify(timedOut.failure)).toContain("upstream_timeout");
         }
+        // A body past the size bound is refused rather than buffered.
+        const huge = yield* service
+          .callTool(IntegrationName.make("errgw"), "huge", {}, null)
+          .pipe(Effect.result);
+        expect(huge._tag).toBe("Failure");
+        if (huge._tag === "Failure") {
+          expect(JSON.stringify(huge.failure)).toContain("upstream_error");
+        }
       }).pipe(Effect.provide(layerWith({ upstreamTimeoutMs: 50 }))),
+    ),
+  );
+
+  it.effect("times out a response whose body stalls after its headers", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      const { integration } = yield* service.create({
+        ...createInput("https://stalled.test/mcp"),
+        headers: {},
+      });
+      const call = yield* service
+        .callTool(integration.name, "echo", {}, null)
+        .pipe(Effect.result, Effect.forkChild);
+      yield* TestClock.adjust(Duration.millis(100));
+      const result = yield* Fiber.join(call);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(JSON.stringify(result.failure)).toContain("upstream_timeout");
+      }
+    }).pipe(
+      Effect.provide(
+        Integrations.layerWith({ upstreamTimeoutMs: 50 }).pipe(
+          Layer.provide(credentialsLayer),
+          Layer.provideMerge(database),
+          // Headers arrive at once; the body starts and never ends.
+          Layer.provide(
+            Layer.succeed(
+              HttpClient.HttpClient,
+              HttpClient.make((request) =>
+                Effect.succeed(
+                  HttpClientResponse.fromWeb(
+                    request,
+                    new Response(
+                      new ReadableStream({
+                        start: (controller) =>
+                          controller.enqueue(new TextEncoder().encode('{"jsonrpc":')),
+                      }),
+                      { status: 200 },
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Layer.provide(NodeServices.layer),
+        ),
+      ),
     ),
   );
 

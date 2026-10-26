@@ -18,12 +18,18 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
+import {
+  FetchHttpClient,
+  HttpClient,
+  HttpClientRequest,
+  type HttpClientResponse,
+} from "effect/http";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Stream from "effect/Stream";
 
 import * as Credentials from "./IntegrationCredentials.ts";
 
@@ -38,6 +44,7 @@ const failure =
 export const DEFAULT_TOOL_CACHE_TTL_MS = 60_000;
 export const DEFAULT_UPSTREAM_TIMEOUT_MS = 10_000;
 const MAX_UPSTREAM_MESSAGE_CHARS = 500;
+const MAX_UPSTREAM_BODY_BYTES = 4 * 1024 * 1024;
 
 const CREDENTIAL_REF = /\{\{credential:([^}]*)\}\}/g;
 
@@ -340,55 +347,44 @@ const make = (options: IntegrationsOptions = {}) =>
         };
       });
 
-    const post = (
-      integration: Integration,
-      headers: Record<string, string>,
+    /** Reads a response body, failing once it passes `MAX_UPSTREAM_BODY_BYTES`. */
+    const readBody = (response: HttpClientResponse.HttpClientResponse, method: string) =>
+      response.stream.pipe(
+        Stream.runFoldEffect(
+          () => ({ size: 0, chunks: [] as Array<Uint8Array> }),
+          (body, chunk) => {
+            const size = body.size + chunk.byteLength;
+            if (size > MAX_UPSTREAM_BODY_BYTES)
+              return Effect.fail(
+                new IntegrationError({ operation: method, reason: "upstream_error" }),
+              );
+            body.chunks.push(chunk);
+            return Effect.succeed({ size, chunks: body.chunks });
+          },
+        ),
+        Effect.map(({ chunks }) => new TextDecoder().decode(Buffer.concat(chunks))),
+        Effect.mapError((cause) =>
+          isError(cause)
+            ? cause
+            : new IntegrationError({ operation: method, reason: "upstream_error", cause }),
+        ),
+      );
+
+    const exchange = (
+      request: HttpClientRequest.HttpClientRequest,
       method: string,
-      params: unknown,
       sessionId: string | undefined,
     ) =>
       Effect.gen(function* () {
-        const id = yield* Ref.updateAndGet(requestIds, (value) => value + 1);
-        let request = HttpClientRequest.post(integration.url).pipe(
-          HttpClientRequest.setHeader("content-type", "application/json"),
-          HttpClientRequest.setHeader("accept", "application/json, text/event-stream"),
-          HttpClientRequest.bodyJsonUnsafe({
-            jsonrpc: "2.0",
-            id,
-            method,
-            params,
-          }),
-        );
-        for (const [name, value] of Object.entries(headers)) {
-          request = HttpClientRequest.setHeader(request, name, value);
-        }
-        if (sessionId !== undefined) {
-          request = HttpClientRequest.setHeader(request, "mcp-session-id", sessionId);
-        }
         const response = yield* client.execute(request).pipe(
           // Fetch otherwise forwards custom secret headers across redirects.
           Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
-          Effect.timeout(Duration.millis(timeoutMs)),
-          Effect.mapError((cause) =>
-            isError(cause)
-              ? cause
-              : typeof cause === "object" &&
-                  cause !== null &&
-                  "_tag" in cause &&
-                  cause._tag === "TimeoutError"
-                ? new IntegrationError({ operation: method, reason: "upstream_timeout" })
-                : new IntegrationError({
-                    operation: method,
-                    reason: "upstream_unreachable",
-                    cause,
-                  }),
-          ),
-        );
-        const text = yield* response.text.pipe(
           Effect.mapError(
-            (cause) => new IntegrationError({ operation: method, reason: "upstream_error", cause }),
+            (cause) =>
+              new IntegrationError({ operation: method, reason: "upstream_unreachable", cause }),
           ),
         );
+        const text = yield* readBody(response, method);
         if (response.status < 200 || response.status >= 300) {
           return yield* new IntegrationError({
             operation: method,
@@ -417,6 +413,43 @@ const make = (options: IntegrationsOptions = {}) =>
           result: body.result,
           sessionId: response.headers["mcp-session-id"] ?? sessionId,
         };
+      });
+
+    const post = (
+      integration: Integration,
+      headers: Record<string, string>,
+      method: string,
+      params: unknown,
+      sessionId: string | undefined,
+    ) =>
+      Effect.gen(function* () {
+        const id = yield* Ref.updateAndGet(requestIds, (value) => value + 1);
+        let request = HttpClientRequest.post(integration.url).pipe(
+          HttpClientRequest.setHeader("content-type", "application/json"),
+          HttpClientRequest.setHeader("accept", "application/json, text/event-stream"),
+          HttpClientRequest.bodyJsonUnsafe({
+            jsonrpc: "2.0",
+            id,
+            method,
+            params,
+          }),
+        );
+        for (const [name, value] of Object.entries(headers)) {
+          request = HttpClientRequest.setHeader(request, name, value);
+        }
+        if (sessionId !== undefined) {
+          request = HttpClientRequest.setHeader(request, "mcp-session-id", sessionId);
+        }
+        return yield* exchange(request, method, sessionId).pipe(
+          // The whole exchange is bounded, the body included: a server that
+          // sends headers and then stalls must not hold the call open.
+          Effect.timeout(Duration.millis(timeoutMs)),
+          Effect.mapError((cause) =>
+            isError(cause)
+              ? cause
+              : new IntegrationError({ operation: method, reason: "upstream_timeout" }),
+          ),
+        );
       });
 
     /** One upstream round trip: resolve credentials, handshake, then call. */
