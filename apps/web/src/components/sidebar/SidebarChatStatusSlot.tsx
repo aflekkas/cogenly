@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { cn } from "~/lib/utils";
+import { BadgeDot } from "../ui/badge-dot";
 import { Spinner } from "../ui/spinner";
 
 const CHAT_STATUS_SPINNER_EXIT_MS = 220;
@@ -15,6 +16,7 @@ const chatStatusLayerClassName =
  */
 export function SidebarChatStatusSlot(props: {
   isRunning: boolean;
+  /** Blue for an unread reply, amber (which wins) for a chat waiting on you. */
   dot: "info" | "warning" | null;
   /** Compact last-activity time; the parent refreshes it on its minute tick. */
   timeLabel?: string | undefined;
@@ -53,18 +55,8 @@ export function SidebarChatStatusSlot(props: {
           <Spinner size="xs" tone="muted" />
         </span>
       ) : null}
-      <span
-        className={cn(
-          chatStatusLayerClassName,
-          showDot ? "scale-100 opacity-100" : "scale-50 opacity-0",
-        )}
-      >
-        <span
-          className={cn(
-            "size-1.5 rounded-full transition-colors duration-(--motion-duration-base)",
-            props.dot === "warning" ? "bg-warning" : "bg-info",
-          )}
-        />
+      <span className="absolute inset-y-0 right-0 flex w-3 items-center justify-center">
+        <BadgeDot tone={showDot && props.dot} />
       </span>
     </span>
   );

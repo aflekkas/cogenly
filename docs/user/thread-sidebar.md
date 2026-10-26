@@ -141,8 +141,11 @@ while Chats is open, and **New chat** in the command palette all start one witho
 project; they never open a repository. Opening **Chats** returns to the chat you last
 had open there; the first time, or once that chat is archived or deleted, it shows your
 most recent chat, or a new one when you have none. Every tab in the rail works the same
-way, Settings included: switching away and back returns to where you were. A small dot marks a chat that is still running
-or waiting on you. Older chats load as you scroll, and search covers all of them. Add
+way, Settings included: switching away and back returns to where you were. A running chat
+shows a spinner. A blue dot and a brighter title mark a reply you have not read yet, and
+opening the chat clears it on every device. An amber dot means the chat is waiting on you,
+and it takes the place of the blue one. The rail's Chats, Work and Agents icons show the
+same dots when anything inside them is unread or waiting. Older chats load as you scroll, and search covers all of them. Add
 repositories from **Work** or the command palette.
 
 A chat is a conversation; Work is a coding session in a repository. Chats run in
@@ -170,7 +173,7 @@ Network access remains available for lookups. The sandbox does **not** prevent
 remote writes: chat agents are instructed never to run commands that change
 remote state, such as sending messages, changing issues or pushing commits.
 
-A chat's menu has **Start Work…**, rename, **Mark unread**, projects, copy and **Delete**,
+A chat's menu has **Start Work…**, rename, **Mark as read** or **Mark as unread**, projects, copy and **Delete**,
 which always asks first, while settling, snoozing, archiving, repository settings
 and the branch and worktree controls, the right panel with its browser and device, and the
 terminal panel belong to Work. When a
