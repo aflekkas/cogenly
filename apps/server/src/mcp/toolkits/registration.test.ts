@@ -443,7 +443,13 @@ const smokeCases = [
   },
   {
     toolkit: "agents",
-    names: ["list_agents", "start_agent_builder", "update_agent_project"],
+    names: [
+      "delete_agent",
+      "list_agents",
+      "start_agent_builder",
+      "update_agent",
+      "update_agent_project",
+    ],
     tool: "list_agents",
     args: {},
     expected: { agents: [] },
