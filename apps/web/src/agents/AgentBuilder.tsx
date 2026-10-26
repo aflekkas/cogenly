@@ -660,9 +660,9 @@ function Hero({
       data-leaving={leaving || undefined}
       inert={leaving}
     >
-      <div className="m-auto flex flex-col items-center gap-5">
+      <div className="m-auto flex w-full flex-col items-center gap-5">
         <AgentIdentityPerson face={face} name={name} size="hero" morphName />
-        <div data-hero-copy className="agent-conversation-empty gap-3">
+        <div data-hero-copy className="agent-conversation-empty w-full gap-3">
           <span className="text-base text-foreground">Tell me what to take care of.</span>
           <span>
             Describe the job in a sentence. I'll pick a face, a name and a schedule; change anything
@@ -670,9 +670,15 @@ function Hero({
           </span>
           <ul className="mt-2 flex flex-wrap justify-center gap-1.5" aria-label="Examples">
             {BUILDER_EXAMPLES.map((example) => (
-              <li key={example}>
-                <Button variant="outline" size="xs" onClick={() => onExample(example)}>
-                  {example}
+              <li key={example} className="grid max-w-full">
+                <Button
+                  variant="outline"
+                  size="xs"
+                  className="min-w-0"
+                  title={example}
+                  onClick={() => onExample(example)}
+                >
+                  <span className="truncate">{example}</span>
                 </Button>
               </li>
             ))}
@@ -718,7 +724,7 @@ function playHeroMove(hero: HTMLElement, header: HTMLElement): Animation[] {
     from.animate([{ opacity: 0 }, { opacity: 0 }], { duration: move.duration, fill: "forwards" }),
   );
   // The face and the pill each scale by their own ratio, so both land exactly.
-  for (const part of [":scope > svg", ".agent-identity-name"]) {
+  for (const part of [".agent-identity-face", ".agent-identity-name"]) {
     const start = from.querySelector(part)?.getBoundingClientRect();
     const target = header.querySelector<HTMLElement>(part);
     const end = target?.getBoundingClientRect();

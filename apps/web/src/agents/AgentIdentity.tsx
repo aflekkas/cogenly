@@ -96,7 +96,9 @@ export function AgentIdentityPerson({
       data-hidden={hidden || undefined}
       aria-hidden={hidden || undefined}
     >
-      <AgentFace {...face} size={size === "hero" ? 72 : 36} />
+      <span className="agent-identity-face">
+        <AgentFace {...face} size={size === "hero" ? 72 : 36} />
+      </span>
       {onDetails ? (
         <button type="button" className="agent-identity-name" onClick={onDetails}>
           {label}

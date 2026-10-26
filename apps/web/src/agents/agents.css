@@ -95,9 +95,15 @@
 .agent-identity-person[data-hidden] {
   visibility: hidden;
 }
+/* The face's own box: an HTML element, so a move on it composites with the
+   name pill's rather than running on the main thread as an SVG transform does. */
+@utility agent-identity-face {
+  display: block;
+  line-height: 0;
+}
 /* A face that changes colour in place (the builder's proposal, a picked colour)
    eases to it rather than snapping. */
-.agent-identity-person > svg rect {
+.agent-identity-face svg rect {
   transition: fill var(--motion-duration-base) var(--motion-ease-standard);
 }
 @utility agent-identity-name {
