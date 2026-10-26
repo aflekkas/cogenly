@@ -35,6 +35,7 @@ import {
   agentProcessesCheck,
   chatSandboxCheck,
   diskCheck,
+  databaseCheck,
   integrationsCheck,
   machineLinksCheck,
   providersCheck,
@@ -443,8 +444,26 @@ describe("sync tracking", () => {
     assert.strictEqual(still.pendingSinceMs, NOW_MS);
     const result = syncCheck({ peers: [{ sample: sample(), progress: still }], nowMs: later });
     assert.strictEqual(result.status, "fail");
-    assert.strictEqual(result.items[0]?.key, `sync:stuck:${vps}`);
-    assert.strictEqual(result.items[0]?.fix, "retry-sync");
+    assert.strictEqual(
+      result.items.find((entry) => entry.key === `sync:stuck:${vps}`)?.key,
+      `sync:stuck:${vps}`,
+    );
+    assert.strictEqual(
+      result.items.find((entry) => entry.key === `sync:stuck:${vps}`)?.fix,
+      "retry-sync",
+    );
+  });
+
+  it("shows catch-up progress, measured rate and estimated time remaining", () => {
+    const current = sample({ backlog: 300, ratePerSecond: 50 });
+    const result = syncCheck({
+      peers: [{ sample: current, progress: trackSyncProgress(undefined, current, NOW_MS) }],
+      nowMs: NOW_MS,
+    });
+    assert.strictEqual(result.items[0]?.title, "Catching up Contabo VPS");
+    assert.include(result.items[0]?.detail, "300 changes pending");
+    assert.include(result.items[0]?.detail, "50.0 changes/s");
+    assert.include(result.items[0]?.detail, "remaining");
   });
 
   it("restarts the clock when acknowledgements move, and clears it once in sync", () => {
@@ -895,4 +914,16 @@ it("names the quarantine and volume, and requires an explicit item for discard",
     checks: [{ id: "sync", status: "fail", summary: "Quarantined", items: [held] }],
   });
   expect(directlyFixableItemKeys(report)).toEqual([]);
+});
+
+it("reports a warning while database writes use the main-thread fallback", () => {
+  expect(
+    databaseCheck({ answered: true, sizeBytes: 4096, writerWorkerUnavailable: true }),
+  ).toMatchObject({
+    status: "warn",
+    items: [{ key: "database:writer-worker", status: "warn" }],
+  });
+  expect(
+    databaseCheck({ answered: true, sizeBytes: 4096, writerWorkerUnavailable: false }).status,
+  ).toBe("ok");
 });

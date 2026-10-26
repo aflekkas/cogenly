@@ -1,3 +1,4 @@
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 import { normalizeLegacyProviderThread } from "@cogenly/shared/legacyProviderThreadIdentity";
 import {
   CommandId,
@@ -503,9 +504,16 @@ const layerBase: Layer.Layer<
 
     const applyStoredEvents = (storedEvents: ReadonlyArray<OrchestrationV2StoredEvent>) =>
       Effect.gen(function* () {
-        yield* Effect.forEach(storedEvents, (stored) => projectionStore.apply(stored.event), {
-          concurrency: 1,
-        });
+        yield* Effect.forEach(
+          storedEvents,
+          (stored, index) =>
+            (index % 16 === 0 ? NodeSqliteClient.eventLoopTurn : Effect.void).pipe(
+              Effect.andThen(projectionStore.apply(stored.event)),
+            ),
+          {
+            concurrency: 1,
+          },
+        );
         const sequence = storedEvents.at(-1)?.sequence;
         if (sequence !== undefined) {
           const now = DateTime.formatIso(yield* DateTime.now);

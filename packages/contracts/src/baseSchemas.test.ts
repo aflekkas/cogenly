@@ -275,3 +275,15 @@ describe("trimmed non-empty strings", () => {
     });
   });
 });
+
+describe("ForwardCompatibleOptional", () => {
+  const value = Schema.Struct({
+    kind: BaseSchemas.ForwardCompatibleOptional(Schema.Literal("known")),
+  });
+  const wire = Schema.toCodecJson(value);
+  it("omits undefined optional values before JSON encoding", () => {
+    expect(Schema.encodeSync(wire)({ kind: undefined })).toEqual({});
+    expect(Schema.encodeSync(wire)({ kind: "known" })).toEqual({ kind: "known" });
+    expect(Schema.decodeUnknownSync(wire)({ kind: "future" })).toEqual({});
+  });
+});

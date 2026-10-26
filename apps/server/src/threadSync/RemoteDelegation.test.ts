@@ -491,6 +491,15 @@ it.live.each([
         Stream.take(1),
         Stream.runDrain,
       );
+      // Provider completion precedes the command that enqueues its checkpoint.
+      // Wait for that committed command before draining the effect worker.
+      yield* childEngine.streamStoredEventsFrom({ afterSequence: 0, threadId: childId }).pipe(
+        Stream.filter(
+          (row) => row.event.type === "run.updated" && row.event.payload.status === "waiting",
+        ),
+        Stream.take(1),
+        Stream.runDrain,
+      );
       yield* childWorker.drain();
       yield* childEngine.streamStoredEventsFrom({ afterSequence: 0, threadId: childId }).pipe(
         Stream.filter(
@@ -513,6 +522,9 @@ it.live.each([
             .pipe(Effect.as(false), Effect.orDie),
         );
       }
+      // A throttled pass may yield before the terminal event. Wait through the
+      // committed sequence, then run the scheduled result recovery explicitly.
+      yield* laptop.sync.syncThrough(hub.environmentId, yield* laptop.sink.latestSequence());
       yield* hub.tick("remote-delegated-results");
       yield* parent.streamStoredEventsFrom({ afterSequence: 0, threadId: parentId }).pipe(
         Stream.filter(

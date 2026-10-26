@@ -54,16 +54,14 @@ export type IsoDateTime = typeof IsoDateTime.Type;
  */
 export const ForwardCompatibleOptional = <Value extends Schema.Top>(value: Value) => {
   const decodeValue = Schema.decodeUnknownOption(value as never);
-  return Schema.optionalKey(
-    Schema.Unknown.pipe(
-      Schema.decodeTo(
-        Schema.UndefinedOr(value),
-        SchemaTransformation.transform<Value["Encoded"] | undefined, unknown>({
-          decode: (raw) =>
-            Option.isSome(decodeValue(raw)) ? (raw as Value["Encoded"]) : undefined,
-          encode: (raw) => raw,
-        }),
-      ),
+  return Schema.optionalKey(Schema.Unknown).pipe(
+    Schema.decodeTo(
+      Schema.optionalKey(Schema.UndefinedOr(value)),
+      SchemaTransformation.transformOptional<Value["Encoded"] | undefined, unknown>({
+        decode: (raw) => Option.filter(raw, (entry) => Option.isSome(decodeValue(entry))),
+        // An explicit undefined must be omitted before the JSON codec sees it.
+        encode: (raw) => Option.filter(raw, (entry) => entry !== undefined),
+      }),
     ),
   );
 };

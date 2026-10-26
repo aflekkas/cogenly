@@ -1,3 +1,4 @@
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 /**
  * Machines: this server, the hub it dials, and the spokes that dial it. The
  * one service every transport calls (WebSocket RPC, MCP, CLI). A server is
@@ -141,7 +142,7 @@ const make = Effect.gen(function* () {
     const link: MachineLinkState =
       spokes.length === 0 ? { _tag: "standalone" } : { _tag: "hub", spokes: spokes.length };
     return { machines: [thisMachine, ...spokes], link };
-  }).pipe(Effect.withSpan("Machines.list"));
+  }).pipe(NodeSqliteClient.readOnly, Effect.withSpan("Machines.list"));
 
   // The initial list runs alongside the change subscriptions, not before
   // them, so a change landing in between is not missed.

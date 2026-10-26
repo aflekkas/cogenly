@@ -1,3 +1,4 @@
+import * as BackfillBudget from "../sync/BackfillBudget.ts";
 /**
  * ThreadSync: moves thread replication batches over the machine link. Each
  * side pushes what the other has not acknowledged, after every local commit
@@ -60,6 +61,8 @@ const make = Effect.gen(function* () {
   const channels = yield* PeerChannels.PeerChannels;
   const scheduler = yield* Scheduler.Scheduler;
   const permit = yield* Semaphore.make(1);
+  const budget = yield* BackfillBudget.make;
+  const pending = yield* Queue.sliding<void>(1);
   const topology = machines.list.pipe(
     Effect.mapError((cause) => new ThreadReplicationError({ reason: "storage", cause })),
   );
@@ -97,27 +100,38 @@ const make = Effect.gen(function* () {
       )
         return;
       const spoke = view.link._tag === "spoke";
-      // A busy log yields after 64 batches; the durable cursor resumes next pass.
-      for (let count = 0; count < 64; count++) {
-        const { acknowledged } = yield* replication.cursors(peer);
-        const batch: ThreadReplicationBatch = yield* replication.readBatch(
-          acknowledged,
-          peer,
-          spoke,
-        );
-        if (batch.cursor.events === batch.after.events && batch.cursor.meta === batch.after.meta)
-          break;
-        const result = yield* machines
-          .call(peer, ThreadReplicationApply, batch)
-          .pipe(Effect.timeout("30 seconds"));
-        // Only a committed batch acknowledges; never trust a cursor past what was sent.
-        if (
-          result.acknowledged.events < batch.cursor.events ||
-          result.acknowledged.meta < batch.cursor.meta
-        )
-          return yield* new ThreadReplicationError({ reason: "invalid-cursor" });
-        yield* replication.acknowledge(peer, batch.cursor);
-      }
+      const more = yield* BackfillBudget.runPass(
+        Effect.gen(function* () {
+          yield* budget.ready;
+          const batchStarted = yield* Clock.currentTimeMillis;
+          const { acknowledged } = yield* replication.cursors(peer);
+          const batch: ThreadReplicationBatch = yield* replication.readBatch(
+            acknowledged,
+            peer,
+            spoke,
+            undefined,
+            budget.batchEvents(),
+          );
+          if (batch.cursor.events === batch.after.events && batch.cursor.meta === batch.after.meta)
+            return false;
+          const result = yield* machines
+            .call(peer, ThreadReplicationApply, batch)
+            .pipe(Effect.timeout("30 seconds"));
+          // Only a committed batch acknowledges; never trust a cursor past what was sent.
+          if (
+            result.acknowledged.events < batch.cursor.events ||
+            result.acknowledged.meta < batch.cursor.meta
+          )
+            return yield* new ThreadReplicationError({ reason: "invalid-cursor" });
+          yield* replication.acknowledge(peer, batch.cursor);
+          yield* budget.completed(
+            Math.max(batch.events.length, batch.meta.length),
+            (yield* Clock.currentTimeMillis) - batchStarted,
+          );
+          return true;
+        }),
+      );
+      if (more) yield* Queue.offer(pending, undefined);
     }).pipe(
       Effect.mapError((cause) =>
         isReplicationError(cause)
@@ -181,7 +195,6 @@ const make = Effect.gen(function* () {
   yield* scheduler.register("thread-replication", replayDue.pipe(Effect.andThen(catchUp)));
   // A streaming turn commits many events; a sliding queue of one coalesces
   // them into at most one pending pass behind the running one.
-  const pending = yield* Queue.sliding<void>(1);
   yield* Stream.merge(machines.subscribe.pipe(Stream.as(undefined)), replication.changes).pipe(
     Stream.runForEach(() => Queue.offer(pending, undefined)),
     Effect.forkScoped,

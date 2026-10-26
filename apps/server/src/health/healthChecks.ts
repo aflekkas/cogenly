@@ -211,6 +211,7 @@ export function serverCheck(input: {
 export function databaseCheck(input: {
   readonly answered: boolean;
   readonly sizeBytes: number | null;
+  readonly writerWorkerUnavailable?: boolean;
 }): MachineHealthCheck {
   if (!input.answered) {
     return check("database", "The database didn't answer", [
@@ -227,7 +228,17 @@ export function databaseCheck(input: {
     input.sizeBytes === null
       ? "Database answers"
       : `Database answers (${formatBytes(input.sizeBytes)})`,
-    [],
+    input.writerWorkerUnavailable
+      ? [
+          item({
+            key: "database:writer-worker",
+            status: "warn",
+            title: "Database writes are using the main thread",
+            detail:
+              "The background writer is unavailable. Writes still work, but may delay the client. Cogenly retries starting the worker on later writes.",
+          }),
+        ]
+      : [],
   );
 }
 
@@ -448,6 +459,7 @@ export interface SyncPeerSample {
   readonly online: boolean;
   /** Local shared-state changes and thread events the peer hasn't acknowledged. */
   readonly backlog: number;
+  readonly ratePerSecond?: number;
   /** The peer's acknowledged cursors, joined; a change means sync moved. */
   readonly acknowledged: string;
   /** Changes received from the peer that this build can't read yet. */
@@ -537,6 +549,22 @@ export function syncCheck(input: {
             sample.heldThreads > 0
               ? `They touch ${plural(sample.heldThreads, "thread")}. This machine can't read them yet; they apply once Cogenly is updated here.`
               : "This machine can't read them yet; they apply once Cogenly is updated here.",
+          target,
+        }),
+      );
+    }
+    if (sample.online && sample.backlog > 0) {
+      const rate = sample.ratePerSecond ?? 0;
+      items.push(
+        item({
+          key: `sync:catch-up:${sample.environmentId}`,
+          status: "ok",
+          title: `Catching up ${sample.name}`,
+          detail: `${plural(sample.backlog, "change")} pending. ${
+            rate > 0
+              ? `About ${rate.toFixed(1)} changes/s; estimated ${formatAgo((sample.backlog / rate) * 1000)} remaining.`
+              : "Measuring catch-up rate and time remaining."
+          }`,
           target,
         }),
       );

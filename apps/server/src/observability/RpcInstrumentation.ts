@@ -1,5 +1,7 @@
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 import { ORCHESTRATION_V2_WS_METHODS, WS_METHODS, type WsRpcGroup } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
+import * as RpcSchema from "effect/rpc/RpcSchema";
 import * as Layer from "effect/Layer";
 import * as References from "effect/References";
 import type * as RpcGroup from "effect/rpc/RpcGroup";
@@ -380,7 +382,12 @@ export class RpcInstrumentation extends RpcMiddleware.Service<RpcInstrumentation
  */
 export const rpcInstrumentationLayer = Layer.succeed(RpcInstrumentation)((effect, { rpc }) => {
   const method = rpc._tag;
-  const measured = effect.pipe(
+  // Subscription refreshes caused by replication are background work, not
+  // fresh user activity; counting them would keep an idle client throttled.
+  const request = RpcSchema.isStreamSchema(rpc.successSchema)
+    ? effect
+    : effect.pipe(NodeSqliteClient.interactive);
+  const measured = request.pipe(
     withMetrics({ counter: rpcRequestsTotal, timer: rpcRequestDuration, attributes: { method } }),
   );
 

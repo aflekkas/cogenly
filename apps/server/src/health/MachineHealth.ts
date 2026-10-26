@@ -1,3 +1,4 @@
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 // @effect-diagnostics nodeBuiltinImport:off -- Effect's FileSystem has no statfs; free disk space needs node:fs.
 /**
  * MachineHealth: the state of each subsystem an always-on machine depends on,
@@ -294,11 +295,13 @@ const make = Effect.gen(function* () {
     sql<{ readonly page_count: number }>`PRAGMA page_count`,
     sql<{ readonly page_size: number }>`PRAGMA page_size`,
   ]).pipe(
+    NodeSqliteClient.readOnly,
     Effect.map(([count, size]) => {
       const pages = count[0]?.page_count;
       const pageSize = size[0]?.page_size;
       return databaseCheck({
         answered: true,
+        writerWorkerUnavailable: NodeSqliteClient.load(sql)?.writerWorkerUnavailable ?? false,
         sizeBytes: pages === undefined || pageSize === undefined ? null : pages * pageSize,
       });
     }),
@@ -317,6 +320,7 @@ const make = Effect.gen(function* () {
   /** Sync progress per peer, remembered between samples; in memory since this start. */
   const replication = yield* ThreadReplication.ThreadReplication;
   const syncProgress = new Map<EnvironmentId, SyncPeerProgress>();
+  const syncRates = new Map<EnvironmentId, { acknowledged: number; at: number }>();
 
   const sampleSync = (peers: ReadonlyArray<MachineInfo>, nowMs: number) =>
     Effect.gen(function* () {
@@ -349,7 +353,15 @@ const make = Effect.gen(function* () {
           const sharedAck = row?.shared_ack ?? 0;
           const eventsAck = row?.events_ack ?? 0;
           const metaAck = row?.meta_ack ?? 0;
+          const acknowledged = sharedAck + eventsAck + metaAck;
+          const previous = syncRates.get(id);
+          const ratePerSecond =
+            previous !== undefined && nowMs > previous.at
+              ? (Math.max(0, acknowledged - previous.acknowledged) * 1000) / (nowMs - previous.at)
+              : 0;
+          syncRates.set(id, { acknowledged, at: nowMs });
           const sample: SyncPeerSample = {
+            ratePerSecond,
             environmentId: id,
             name: peer.name,
             online: peer.online,
@@ -396,7 +408,7 @@ const make = Effect.gen(function* () {
           ),
         ],
       };
-    });
+    }).pipe(NodeSqliteClient.readOnly);
 
   const activeRuns = (now: DateTime.Utc) =>
     Effect.gen(function* () {
@@ -410,7 +422,7 @@ const make = Effect.gen(function* () {
         summary: "Work needs attention",
         items: [...check.items, ...stuckQueuesItems(queues)],
       };
-    }).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+    }).pipe(NodeSqliteClient.readOnly, Effect.provideService(SqlClient.SqlClient, sql));
 
   const evaluate: Effect.Effect<MachineHealthReport> = Effect.gen(function* () {
     const now = yield* DateTime.now;
