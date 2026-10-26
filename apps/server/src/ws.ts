@@ -151,6 +151,7 @@ import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManag
 import * as ThreadLaunchService from "./orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts";
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
+import * as LoginRequests from "./secrets/LoginRequests.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as Vault from "./vault/Vault.ts";
 import * as VaultSync from "./vault/VaultSync.ts";
@@ -1114,6 +1115,7 @@ const makeWsRpcHandlers = (
     const retrieval = yield* Retrieval.ContextRetrievalService;
     const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
     const secretRequests = yield* SecretRequests.SecretRequests;
+    const loginRequests = yield* LoginRequests.LoginRequests;
     const vault = yield* Vault.Vault;
     const vaultSync = yield* VaultSync.VaultSync;
     const accounts = yield* Accounts.Accounts;
@@ -1878,6 +1880,10 @@ const makeWsRpcHandlers = (
       [WS_METHODS.secretsAnswerRequest]: (input) =>
         Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
           Effect.andThen(secretRequests.answer(input)),
+        ),
+      [WS_METHODS.secretsAnswerLoginRequest]: (input) =>
+        Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
+          Effect.andThen(loginRequests.answer(input)),
         ),
       [WS_METHODS.scheduledTasksListWebhookDeliveries]: (input) =>
         Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
@@ -2916,6 +2922,7 @@ type WsRequestServices =
   | ReviewService.ReviewService
   | ScheduledTasks.ScheduledTaskService
   | SecretRequests.SecretRequests
+  | LoginRequests.LoginRequests
   | AccountAccess.AccountAccess
   | AccountConnections.AccountConnections
   | Accounts.Accounts

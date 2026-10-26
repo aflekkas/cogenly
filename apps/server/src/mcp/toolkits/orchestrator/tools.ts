@@ -7,6 +7,8 @@ import {
   OrchestratorMcpDelegateTaskResult,
   OrchestratorMcpDeleteScheduledTaskInput,
   OrchestratorMcpDeleteScheduledTaskResult,
+  OrchestratorMcpRequestLoginInput,
+  OrchestratorMcpRequestLoginResult,
   OrchestratorMcpRequestSecretInput,
   OrchestratorMcpRequestSecretResult,
   OrchestratorMcpFailure,
@@ -185,6 +187,18 @@ const RequestSecretTool = Tool.make("request_secret", {
   .annotate(Tool.Title, "Request a secret from the user")
   .annotate(Tool.Destructive, false);
 
+const RequestLoginTool = Tool.make("request_login", {
+  description:
+    "Ask the user to sign in to a site through a login card in this thread, and wait for them to answer. Use it when a page needs a login and vault_list has none for that site: never ask for usernames, passwords or codes in chat. The user's answer goes straight into the vault as a login allowed on that site; you never see it. When saved, sign in with vault_fill using the returned vaultItemId (username, password, and totp when asked for). If a stored login stops working (e.g. the password changed), call again with updateItemId to replace its secrets. declined means the user chose not to; continue without it rather than asking again unprompted. In a scheduled run the user may be away: pass timeoutMs 3600000 so the card waits and notifies them.",
+  parameters: OrchestratorMcpRequestLoginInput,
+  success: OrchestratorMcpRequestLoginResult,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Title, "Ask the user to sign in")
+  .annotate(Tool.Destructive, false);
+
 export const CreateThreadsTool = Tool.make("create_threads", {
   description:
     "Needs an agent running inside a Cogenly thread. Create one or more ORDINARY TOP-LEVEL Cogenly conversations. This is not delegation and does not create child agents/subagents. For delegated work, choose models from orchestrator_capabilities. Prefer native subagents only when they support the chosen model; otherwise call delegate_task, including for same-provider work. Use create_threads for a batch of separate top-level threads sharing this checkout. Prefer thread_launch for a single thread. Both require the user to request separate/new/top-level threads or conversations. Each entry may override provider, model, options, runtime mode, and interaction mode; omitted settings inherit. Project, branch, and worktree always inherit and cannot be overridden here. For independent implementation or a PR stack in its own worktree, use thread_launch with workspaceStrategy instead of asking the agent to create a worktree in its prompt.",
@@ -295,6 +309,7 @@ export const OrchestratorToolkit = Toolkit.make(
   UpdateScheduledTaskTool,
   DeleteScheduledTaskTool,
   RequestSecretTool,
+  RequestLoginTool,
   CreateThreadsTool,
   ThreadListTool,
   ThreadReadTool,

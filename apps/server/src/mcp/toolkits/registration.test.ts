@@ -822,6 +822,7 @@ const smokeCases = [
       "delete_scheduled_task",
       "list_scheduled_tasks",
       "orchestrator_capabilities",
+      "request_login",
       "request_secret",
       "schedule_task",
       "thread_interrupt",

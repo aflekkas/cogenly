@@ -51,7 +51,12 @@ import {
   type MachineOnlyRules,
 } from "./vaultPortability.ts";
 import * as VaultSyncCapture from "./VaultSyncCapture.ts";
-import { evaluateVaultPolicy, hostMatchesAnyDomain, type VaultUseCaller } from "./VaultPolicy.ts";
+import {
+  evaluateVaultPolicy,
+  hostMatchesAnyDomain,
+  normalizeHost,
+  type VaultUseCaller,
+} from "./VaultPolicy.ts";
 import {
   VAULT_WITHHELD,
   processOutputRedactor,
@@ -330,6 +335,26 @@ export class Vault extends Context.Service<
       readonly value: string;
       readonly scopeProjectId?: string | null | undefined;
     }) => Effect.Effect<{ item: VaultItemMetadata }, VaultError>;
+    /**
+     * Stores a login the user entered on an agent's sign-in card. A new item
+     * is environment-wide and usable by any agent on `domain` without asking;
+     * updating an existing login replaces only the entered secrets, adds the
+     * domain if missing, and keeps the owner's policy. Audited as saved from
+     * the asking thread (and agent).
+     */
+    readonly saveLogin: (input: {
+      readonly name: string;
+      readonly domain: string;
+      readonly secretFields: Pick<
+        VaultSecretFields,
+        "username" | "password" | "totpSecret" | "value"
+      >;
+      readonly updateItemId?: VaultItemId | undefined;
+      /** Temporary logins stay on this machine; the caller removes them. */
+      readonly temporary: boolean;
+      readonly threadId: ThreadId;
+      readonly agentId: string | null;
+    }) => Effect.Effect<{ item: VaultItemMetadata; updated: boolean }, VaultError>;
     /** Retained through server lifetime: descendants and retained output may outlive a PTY. */
     readonly registerProcessSecrets: (
       values: ReadonlyArray<string>,
@@ -1229,6 +1254,66 @@ const make = Effect.gen(function* () {
         allowedDomains: [...(input.domains ?? [])] as never,
         secretFields: input.type === "login" ? { password: input.value } : { value: input.value },
       }),
+    saveLogin: (input) =>
+      Effect.gen(function* () {
+        const domain = normalizeHost(input.domain);
+        if (!domain) return yield* new VaultError({ reason: "invalid_input" });
+        const secretFields: VaultSecretFields = Object.fromEntries(
+          Object.entries(input.secretFields).filter(
+            (entry): entry is [string, string] => typeof entry[1] === "string" && entry[1] !== "",
+          ),
+        );
+        if (Object.keys(secretFields).length === 0)
+          return yield* new VaultError({ reason: "invalid_input" });
+        const record = (itemId: string, action: string) =>
+          audit({
+            itemId,
+            threadId: input.threadId,
+            agentId: input.agentId,
+            action,
+            domain,
+            outcome: "saved",
+          });
+        if (input.updateItemId !== undefined) {
+          const row = yield* loadRow(input.updateItemId);
+          if (row.type !== "login") return yield* new VaultError({ reason: "invalid_input" });
+          const domains = parseDomains(row.allowed_domains_json);
+          const { item } = yield* update({
+            id: input.updateItemId,
+            secretFields,
+            ...(hostMatchesAnyDomain(domain, domains)
+              ? {}
+              : { allowedDomains: [...domains, domain] as never }),
+          });
+          yield* record(item.id, "updated_from_request");
+          return { item, updated: true };
+        }
+        // A taken name gets a numbered sibling: the user already typed the
+        // login, so a name clash must not throw it away.
+        const created = yield* Effect.gen(function* () {
+          for (let attempt = 1; ; attempt += 1) {
+            const name = attempt === 1 ? input.name : `${input.name} (${attempt})`;
+            const result = yield* create({
+              name: name as never,
+              type: "login",
+              scopeProjectId: null,
+              allowedDomains: [domain] as never,
+              policy: { mode: "allow", allowedAgentIds: [], allowedDomains: [domain] as never },
+              ...(input.temporary ? { portability: "machine" as const } : {}),
+              secretFields,
+            }).pipe(
+              Effect.asSome,
+              Effect.catchIf(
+                (error) => error.reason === "name_conflict" && attempt < 20,
+                () => Effect.succeedNone,
+              ),
+            );
+            if (Option.isSome(result)) return result.value;
+          }
+        });
+        yield* record(created.item.id, "saved_from_request");
+        return { item: created.item, updated: false };
+      }).pipe(Effect.mapError(wrap)),
     registerProcessSecrets: (values) =>
       registerDelivered(
         values.flatMap((value) => [

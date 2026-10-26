@@ -42,6 +42,7 @@ export type T3McpToolSummaryAction =
   | "question-read"
   | "question-respond"
   | "secret-request"
+  | "login-request"
   | "worktree-handoff"
   | "worktree-list"
   | "worktree-status"
@@ -175,6 +176,10 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     "schedule-delete",
   ),
   request_secret: tool(["Ask for", "Asking for", "Asked for", "a secret"], "secret-request"),
+  request_login: tool(
+    ["Ask to sign in", "Asking to sign in", "Asked to sign in", "to a site"],
+    "login-request",
+  ),
   create_threads: tool(["Create", "Creating", "Created", "Cogenly threads"], "thread-create"),
   thread_start: tool(["Start", "Starting", "Started", "a Cogenly thread"], "thread-create"),
   thread_list: tool(["List", "Listing", "Listed", "Cogenly threads"], "thread-list"),

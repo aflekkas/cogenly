@@ -414,3 +414,144 @@ it.effect("remote delegation retries without clientRequestId reuse their command
     expect(keys[0]).toBe(keys[1]);
   }).pipe(Effect.provide(Orchestrator.layer.pipe(Layer.provideMerge(dependencies))));
 });
+
+const loginFixture = (answer: (login: Record<string, unknown>) => Record<string, unknown>) => {
+  const threadId = ThreadId.make("login-request");
+  const projection = idleThreadProjection(liveThreadShell(threadId));
+  const records = {
+    ...projection,
+    runs: [
+      {
+        id: RunId.make("run"),
+        status: "running",
+        rootNodeId: NodeId.make("node"),
+        providerInstanceId: ProviderInstanceId.make("codex"),
+      } as never,
+    ],
+  };
+  const recorded: Array<{ secretStatus: string; login?: Record<string, unknown> }> = [];
+  const dependencies = Layer.mergeAll(
+    NodeCrypto.layer,
+    Layer.mock(Threads.ThreadManagementService)({
+      getThreadRecords: () => Effect.succeed(records),
+      dispatch: (command) =>
+        Effect.sync(() => {
+          if (command.type === "secret_request.record") {
+            recorded.push(command as never);
+            // The user answers as soon as the card appears.
+            if (command.secretStatus === "pending")
+              records.turnItems = [
+                {
+                  type: "secret_request",
+                  id: command.turnItemId,
+                  ...answer(command.login as never),
+                },
+              ] as never;
+          }
+          return records;
+        }) as never,
+    }),
+    Layer.mock(Launch.ThreadLaunchService)({}),
+    Layer.mock(Adapters.ProviderAdapterRegistryV2)({}),
+    Layer.mock(Providers.ProviderRegistry)({}),
+    Layer.mock(Schedules.ScheduledTaskService)({}),
+    Layer.mock(Projects.ProjectService)({}),
+    Layer.mock(Git.GitVcsDriver)({}),
+    Layer.mock(Settings.ServerSettingsService)({ getSettings: Effect.succeed({} as never) }),
+    Layer.mock(Accounts.AccountConnections)({}),
+    Layer.mock(Secrets.SecretRequests)({}),
+    Layer.mock(Vault.Vault)({
+      list: () =>
+        Effect.succeed({
+          items: [{ id: VaultItemId.make("vault:old"), name: "GitHub", type: "login" } as never],
+        }),
+    }),
+  );
+  const scope = {
+    environmentId: EnvironmentId.make("test"),
+    requestNamespace: "test",
+    issuedAt: 0,
+    capabilities: new Set(["orchestration" as const]),
+    client: undefined,
+    thread: {
+      threadId,
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      providerSessionId: "session",
+    },
+  };
+  return {
+    scope,
+    recorded,
+    provide: <A, E>(effect: Effect.Effect<A, E, Orchestrator.OrchestratorMcpService>) =>
+      effect.pipe(Effect.provide(Orchestrator.layer.pipe(Layer.provide(dependencies)))),
+  };
+};
+
+it.effect("request_login records a sign-in card and returns the saved vault item", () => {
+  const fixture = loginFixture((login) => ({
+    secretStatus: "saved",
+    login: { ...login, savedItemId: "vault:new", savedItemName: "GitHub", kept: true },
+  }));
+  return fixture.provide(
+    Effect.gen(function* () {
+      const service = yield* Orchestrator.OrchestratorMcpService;
+      const result = yield* service.requestLogin(fixture.scope, {
+        site: "https://github.com/login?return_to=/settings",
+        siteName: "GitHub",
+        reason: "Open the repository settings.",
+        usernameHint: " ada ",
+      });
+      expect(result).toEqual({
+        status: "saved",
+        vaultItemId: "vault:new",
+        vaultItemName: "GitHub",
+        domain: "github.com",
+        updated: false,
+        kept: true,
+      });
+      expect(fixture.recorded[0]).toMatchObject({
+        secretStatus: "pending",
+        label: "Sign in to GitHub",
+        login: {
+          origin: "https://github.com",
+          siteName: "GitHub",
+          usernameHint: "ada",
+          fields: ["username", "password"],
+        },
+      });
+    }),
+  );
+});
+
+it.effect("request_login reports a declined card and can update an existing login", () => {
+  const declined = loginFixture(() => ({ secretStatus: "declined" }));
+  const updated = loginFixture((login) => ({
+    secretStatus: "saved",
+    login: { ...login, savedItemId: "vault:old", savedItemName: "GitHub", kept: true },
+  }));
+  return Effect.gen(function* () {
+    const ask = (input: { readonly updateItemId?: string; readonly clientRequestId?: string }) =>
+      Effect.gen(function* () {
+        const service = yield* Orchestrator.OrchestratorMcpService;
+        return yield* service.requestLogin(declined.scope, {
+          site: "github.com",
+          reason: "Sign in again.",
+          ...input,
+        });
+      });
+    expect(yield* declined.provide(ask({}))).toEqual({ status: "declined" });
+    expect(yield* updated.provide(ask({ updateItemId: "vault:old" }))).toMatchObject({
+      status: "saved",
+      vaultItemId: "vault:old",
+      updated: true,
+    });
+    expect(updated.recorded[0]?.login).toMatchObject({
+      updateItemId: "vault:old",
+      updateItemName: "GitHub",
+    });
+    const missing = yield* updated
+      .provide(ask({ updateItemId: "vault:missing", clientRequestId: "other" }))
+      .pipe(Effect.flip);
+    expect(missing).toMatchObject({ code: "invalid_request" });
+  });
+});
