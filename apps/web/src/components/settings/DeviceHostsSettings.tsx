@@ -54,7 +54,6 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
     [props.environmentId, scopeContext.connectedEnvironments],
   );
   const canConfigure = useEnvironmentScope(props.environmentId, AuthSettingsWriteScope);
-  const projectScope = scopeContext.scope.kind === "project";
   const update = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
   const [editing, setEditing] = useState<SshDeviceHostConfig | null>(null);
   const [originalHost, setOriginalHost] = useState<SshDeviceHostConfig | null>(null);
@@ -77,7 +76,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
   );
   const groupedHosts = useMemo(() => groupDeviceHosts(hostEnvironments), [hostEnvironments]);
   const save = async (host: SshDeviceHostConfig, remove = false, original = host) => {
-    if (!props.environmentId || projectScope) return;
+    if (!props.environmentId) return;
     setBusy(true);
     try {
       const results = await Promise.allSettled(
@@ -121,7 +120,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
     }
   };
   const listActions = {
-    busy: !canConfigure || projectScope || busy,
+    busy: !canConfigure || busy,
     checks,
     testConnection: async (host: SshDeviceHostConfig) => {
       const results = await testConnection(host);
@@ -150,14 +149,12 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
       title="Device hosts"
       serverScoped
       settingKeys={["deviceHosts"]}
-      description="Add remote machines with simulator or emulator runtimes installed, and this machine will connect over SSH and set up device tools automatically."
+      description="Other machines with simulators or emulators. This machine connects to them over SSH and sets up the device tools."
       control={
         <Button
           size="sm"
           variant="outline"
-          disabled={
-            !canConfigure || projectScope || busy || !props.environmentId || editing !== null
-          }
+          disabled={!canConfigure || busy || !props.environmentId || editing !== null}
           onClick={() => {
             setOriginalHost(null);
             setEditing({ id: randomUUID(), label: "", target: "" });
@@ -169,8 +166,8 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
     >
       <div className="pt-3 pb-2">
         {!props.environmentId ? (
-          <p className="text-sm text-muted-foreground">
-            Connect a selected machine to manage device hosts.
+          <p className="text-xs text-muted-foreground">
+            Connect this machine to manage its device hosts.
           </p>
         ) : (
           <>
@@ -289,7 +286,7 @@ function DeviceHostList({
   return (
     <>
       {rows.length === 0 ? (
-        <p className="py-2 text-sm text-muted-foreground">No device hosts.</p>
+        <p className="py-2 text-xs text-muted-foreground">No device hosts yet.</p>
       ) : null}
       {rows.map(({ host, members }) => {
         const hostChecks = checks[deviceHostConnectionKey(host)];

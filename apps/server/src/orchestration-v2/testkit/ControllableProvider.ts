@@ -36,13 +36,20 @@ export const makeControllableProvider = (
   // The latest session's queue, for events not tied to a turn input.
   let queue: EventQueue;
   const queues = new Map<ProviderInstanceId, EventQueue>();
+  const threadQueues = new Map<string, EventQueue>();
   const sessionQueues: Array<EventQueue> = [];
   let ordinal = 0;
   const publish = (event: ProviderAdapter.ProviderAdapterV2Event) => Queue.offer(queue, event);
   const publishFor = (
     input: ProviderAdapter.ProviderAdapterV2TurnInput,
     event: ProviderAdapter.ProviderAdapterV2Event,
-  ) => Queue.offer(queues.get(input.providerThread.providerInstanceId) ?? queue, event);
+  ) =>
+    Queue.offer(
+      threadQueues.get(`${input.providerThread.providerInstanceId}:${input.threadId}`) ??
+        queues.get(input.providerThread.providerInstanceId) ??
+        queue,
+      event,
+    );
   const begin = (input: ProviderAdapter.ProviderAdapterV2TurnInput) =>
     Effect.gen(function* () {
       turns.push(input);
@@ -135,6 +142,7 @@ export const makeControllableProvider = (
                 ProviderAdapter.ProviderAdapterV2Event,
                 ProviderAdapter.ProviderAdapterV2Error
               >();
+              const sessionQueue = queue;
               queues.set(instanceId, queue);
               sessionQueues.push(queue);
               const threadKey = (threadId: string) =>
@@ -158,31 +166,40 @@ export const makeControllableProvider = (
                 },
                 events: Stream.fromQueue(queue),
                 ensureThread: (input) =>
-                  Effect.succeed({
-                    id:
-                      input.existingProviderThread?.id ??
-                      ProviderThreadId.make(`provider-thread:${threadKey(input.threadId)}`),
-                    driver,
-                    providerInstanceId: instanceId,
-                    providerSessionId: request.providerSessionId,
-                    appThreadId: input.threadId,
-                    ownerNodeId: null,
-                    nativeThreadRef: {
+                  Effect.sync(() => {
+                    threadQueues.set(`${instanceId}:${input.threadId}`, sessionQueue);
+                    return {
+                      id:
+                        input.existingProviderThread?.id ??
+                        ProviderThreadId.make(`provider-thread:${threadKey(input.threadId)}`),
                       driver,
-                      nativeId: `native:${threadKey(input.threadId)}`,
-                      strength: "strong",
-                    },
-                    nativeConversationHeadRef: null,
-                    status: "idle",
-                    firstRunOrdinal: null,
-                    lastRunOrdinal: null,
-                    handoffIds: [],
-                    forkedFrom: null,
-                    createdAt: now,
-                    updatedAt: now,
+                      providerInstanceId: instanceId,
+                      providerSessionId: request.providerSessionId,
+                      appThreadId: input.threadId,
+                      ownerNodeId: null,
+                      nativeThreadRef: {
+                        driver,
+                        nativeId: `native:${threadKey(input.threadId)}`,
+                        strength: "strong",
+                      },
+                      nativeConversationHeadRef: null,
+                      status: "idle",
+                      firstRunOrdinal: null,
+                      lastRunOrdinal: null,
+                      handoffIds: [],
+                      forkedFrom: null,
+                      createdAt: now,
+                      updatedAt: now,
+                    };
                   }),
                 resumeThread: (input) =>
                   Effect.suspend(() => {
+                    if (input.providerThread.appThreadId !== null) {
+                      threadQueues.set(
+                        `${instanceId}:${input.providerThread.appThreadId}`,
+                        sessionQueue,
+                      );
+                    }
                     resumes.push(input.providerThread.id);
                     return resume(input);
                   }),

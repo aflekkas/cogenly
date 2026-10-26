@@ -27,7 +27,7 @@ import {
 
 /**
  * Pages about one machine's own state, which are mostly machine-local
- * settings: the scope picks one machine and no project.
+ * settings: the scope picks one machine.
  */
 const MACHINE_SETTINGS_PATHS: ReadonlySet<string> = new Set([
   "/settings/providers",
@@ -47,7 +47,7 @@ function SettingsScopeBoundary({ pathname, children }: { pathname: string; child
   if (SETTINGS_SCOPELESS_PATHS.has(pathname) || pathname === "/settings/projects") {
     return children;
   }
-  // Keep the scope sentence on screen so the selection can be changed back.
+  // Keep the scope sentence on screen so the machine can be changed back.
   if (scope.kind === "unavailable")
     return <SettingsPageMessage>{scope.message}</SettingsPageMessage>;
   if (scope.kind === "environment" && connectedEnvironments.length === 0) {
@@ -107,16 +107,10 @@ function SettingsRouteLayout() {
       search={rawSearch}
       machinePage={MACHINE_SETTINGS_PATHS.has(pathname)}
       onChange={(next) => {
-        // Send every key so the retain middleware sees an explicit target
-        // even when the choice is "all", which is the absence of a key.
+        // Send every key so the retain middleware sees an explicit target.
         void navigate({
           to: pathname,
-          search: () => ({
-            project: next.project,
-            machine: next.machine,
-            repository: next.repository,
-            checkout: next.checkout,
-          }),
+          search: () => ({ machine: next.machine, repository: next.repository }),
           hash: "",
           resetScroll: false,
           // A scope change filters the same page; back leaves the page instead.

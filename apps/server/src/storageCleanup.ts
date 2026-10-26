@@ -8,7 +8,6 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type {
   OrchestrationV2ThreadShell,
-  ProjectId,
   ServerSettings,
   ServerSettingsError,
   TerminalSummary,
@@ -90,20 +89,6 @@ const worktreeCleanupEnabled = (rules: WorktreeCleanupRules) =>
   rules.worktreeOnMerge ||
   rules.worktreeOnDelete ||
   rules.worktreeUnchanged;
-
-function sameProjectWorktreePolicies(left: ServerSettings, right: ServerSettings): boolean {
-  return [
-    ...new Set([
-      ...Object.keys(left.projectSettingsOverrides),
-      ...Object.keys(right.projectSettingsOverrides),
-    ]),
-  ].every((projectId) =>
-    Equal.equals(
-      left.projectSettingsOverrides[projectId as ProjectId]?.worktreeCleanup,
-      right.projectSettingsOverrides[projectId as ProjectId]?.worktreeCleanup,
-    ),
-  );
-}
 
 /** Live sessions keep their cwd even when no turn is currently running. */
 export function storageCleanupThreadIdle(thread: OrchestrationV2ThreadShell, now: number): boolean {
@@ -562,7 +547,7 @@ const make = Effect.gen(function* () {
       ...deletedThreads.filter((thread) => !groups.has(path.resolve(thread.worktreePath!))),
     ];
     for (const thread of candidates) {
-      const settings = resolveWorktreeCleanup(serverSettings, thread.projectId);
+      const settings = resolveWorktreeCleanup(serverSettings);
       const worktreePath = path.resolve(thread.worktreePath!);
       const group = groups.get(worktreePath) ?? [];
       const activityAt = Math.max(...group.map(storageCleanupActivityAt));
@@ -741,8 +726,7 @@ const make = Effect.gen(function* () {
           if (deleted) {
             if (
               latest.length > 0 ||
-              !resolveWorktreeCleanup(yield* settingsService.getSettings, thread.projectId)
-                .worktreeOnDelete
+              !resolveWorktreeCleanup(yield* settingsService.getSettings).worktreeOnDelete
             )
               return "thread or cleanup settings changed since check";
             // V2 deletion queues durable cleanup. Do not remove its checkout until
@@ -910,10 +894,7 @@ const make = Effect.gen(function* () {
           settings.worktreeKeepWhen === "any-local-files",
         );
         if (finalChanges !== null) return keep(finalChanges);
-        const current = resolveWorktreeCleanup(
-          yield* settingsService.getSettings,
-          thread.projectId,
-        );
+        const current = resolveWorktreeCleanup(yield* settingsService.getSettings);
         if (
           Object.keys(settings).some(
             (key) =>
@@ -1309,8 +1290,7 @@ const make = Effect.gen(function* () {
         if (
           Equal.equals(settings.automaticBackups, lastSettings.automaticBackups) &&
           Equal.equals(settings.storageCleanup, lastSettings.storageCleanup) &&
-          Equal.equals(settings.worktreeCleanup, lastSettings.worktreeCleanup) &&
-          sameProjectWorktreePolicies(settings, lastSettings)
+          Equal.equals(settings.worktreeCleanup, lastSettings.worktreeCleanup)
         )
           return Effect.void;
         lastSettings = settings;

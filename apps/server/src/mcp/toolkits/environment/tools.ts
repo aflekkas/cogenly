@@ -1,5 +1,4 @@
 import {
-  ChatSandboxSetupResult,
   BackgroundActivityProfile,
   BackgroundActivityProfileSelection,
   DesktopCliCommandLocation,
@@ -16,10 +15,18 @@ import {
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
-import { EnvironmentId, MachineHealthReport, MachineSecurityStatus } from "@cogenly/contracts";
+import {
+  EnvironmentId,
+  MACHINE_HEALTH_FIX_MAX_ITEMS,
+  MachineHealthFixResult,
+  MachineHealthReport,
+  MachineSecurityStatus,
+  TrimmedNonEmptyString,
+} from "@cogenly/contracts";
 import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as MachineHealth from "../../../health/MachineHealth.ts";
+import * as MachineHealthFixes from "../../../health/MachineHealthFixes.ts";
 import * as MachineSecurity from "../../../security/MachineSecurity.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
@@ -152,7 +159,7 @@ const MachineHealthTool = Tool.make("machine_health", {
   ...shared,
   dependencies: [...shared.dependencies, MachineHealth.MachineHealth],
   description:
-    "Health of a Cogenly machine: server, database, disk, provider sign-ins, links to paired machines, sync, integrations, scheduled tasks, stuck runs, boot service, Tailscale Serve and the canary. Each check has a status (ok, warn, fail, unknown when it could not run), a summary and the items worth attention, with a suggested fix where there is one. For setup-sandbox, call machine_health_fix on the affected machine. Omit environmentId for this machine; give a paired machine's (from machines_list) to read its report over the peer link. reachable false means that machine did not answer and the report describes what this one saw.",
+    "Health of a Cogenly machine: server, database, disk, provider sign-ins, links to paired machines, sync, integrations, scheduled tasks, stuck runs, boot service, Tailscale Serve and the canary. Each check has a status (ok, warn, fail, unknown when it could not run), a summary and the items worth attention, with a suggested fix where there is one. Items with a fix (stop-runs, run-now, retry-sync, setup-sandbox) are fixed with machine_health_fix, which runs on the machine that has them. Omit environmentId for this machine; give a paired machine's (from machines_list) to read its report over the peer link. reachable false means that machine did not answer and the report describes what this one saw.",
   parameters: Schema.Struct({
     environmentId: Schema.optionalKey(
       EnvironmentId.annotate({
@@ -166,14 +173,30 @@ const MachineHealthTool = Tool.make("machine_health", {
   .annotate(Tool.Destructive, false);
 const MachineHealthFixTool = Tool.make("machine_health_fix", {
   ...shared,
-  dependencies: [...shared.dependencies, MachineHealth.MachineHealth],
+  dependencies: [
+    ...shared.dependencies,
+    MachineHealth.MachineHealth,
+    MachineHealthFixes.MachineHealthFixes,
+  ],
   description:
-    "Fix this machine's chat-terminal-sandbox health finding. Installs the distro bubblewrap package on Linux using root or passwordless sudo, then re-probes and enables chat commands without restarting. Returns the exact command when sudo needs a password, or when installation fails. Never asks for a sudo password. Run machine_health afterwards to see current health.",
-  parameters: Tool.EmptyParams,
-  success: ChatSandboxSetupResult,
+    "Run the direct fix for machine_health items, on the machine they are on (a paired machine runs it over the peer link). Fixes by item `fix`: stop-runs (and legacy resume) stops the thread's stale turn and subagents and marks dead ones interrupted, even with no live provider session; run-now runs the scheduled task; retry-sync retries sync with the target machine; setup-sandbox installs bubblewrap with root or passwordless sudo, or returns the command to run. Items whose fix is sign-in or null come back `manual`: investigate those yourself with machine_health and the thread, integration or provider tools. Omit itemKeys to fix every item that has a direct fix. Run machine_health afterwards to see current health.",
+  parameters: Schema.Struct({
+    environmentId: Schema.optionalKey(
+      EnvironmentId.annotate({
+        description: "A paired machine's environment ID from machines_list. Omit for this machine.",
+      }),
+    ),
+    itemKeys: Schema.optionalKey(
+      Schema.Array(TrimmedNonEmptyString)
+        .check(Schema.isMinLength(1), Schema.isMaxLength(MACHINE_HEALTH_FIX_MAX_ITEMS))
+        .annotate({ description: "Item `key`s from machine_health for that machine." }),
+    ),
+  }),
+  success: MachineHealthFixResult,
 })
   .annotate(Tool.Readonly, false)
-  .annotate(Tool.Destructive, false);
+  // stop-runs interrupts turns and subagents.
+  .annotate(Tool.Destructive, true);
 const StorageStatusTool = Tool.make("storage_status", {
   ...shared,
   dependencies: [...shared.dependencies, StorageCleanup.StorageCleanup],

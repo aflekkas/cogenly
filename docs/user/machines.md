@@ -5,7 +5,7 @@ machine as the hub; your other computers connect out to it. Each machine can
 join one hub. Paired machines sync project names, instructions, archive state,
 repository remotes and source links, agent profiles, fallback chains and
 scheduled-task configuration, and every conversation. They also sync your
-settings and each project's own settings, including appearance, keybindings,
+settings, including appearance, keybindings,
 notification preferences and composer behavior. Settings that describe one machine
 stay on it: provider setup and sign-ins, folders such as the projects root,
 storage and backups, background activity, and devices. Changes made while a
@@ -170,7 +170,7 @@ across restarts. If you ran `tailscale serve` yourself and it points at
 Cogenly's port, Cogenly uses it. If you set `COGENLY_TAILSCALE_SERVE=1` in a
 systemd drop-in, `cogenly doctor` moves that setting into Cogenly.
 
-Turn private access off or back on any time in Settings → Machines with the Private access switch on this machine.
+Turn private access off or back on any time in Settings → Machines with the **Private access** switch under this machine. It shows the private address while it is on.
 It is the only Tailscale Serve switch in Cogenly; Settings → Connections links to it.
 
 On the computer joining, prepare its key:
@@ -223,9 +223,14 @@ Each machine reports the state of what it depends on: the server and its
 scheduler, the database, free disk space, provider sign-ins and usage limits,
 paired machines and sync, integrations, scheduled tasks, runs stuck far longer
 than any real one, the background service, and Tailscale Serve. Each problem
-names what to fix and, where Cogenly can do it, offers the fix: sign in, run a
-task now, open a stuck thread, or retry sync. A paired machine that can't be
-reached is shown from what this machine last saw of it.
+has a **Fix**. Where Cogenly can fix it directly, Fix does it on the machine
+with the problem, even when you are connected to the other one: it stops a
+thread's stuck runs (they lost their provider session, so they can't be
+resumed; send the thread a message to carry on), runs a failed task again,
+retries sync, or sets up the chat sandbox. A provider or integration that needs
+sign-in opens its sign-in. Anything else opens a new chat with the problem
+filled in, so an agent can investigate and fix it once you send it. A paired
+machine that can't be reached is shown from what this machine last saw of it.
 
 From a terminal on the machine, run `cogenly health` (or `cogenly doctor
 --health`). Add `--machine <environment-id>` to read a paired machine,
@@ -236,8 +241,8 @@ bubblewrap is missing, AppArmor or the host blocks user namespaces, seccomp is
 unavailable, or the architecture is unsupported. Its **Fix** action installs the
 distro package using root or passwordless sudo and checks it again without a
 restart. If it cannot elevate, it shows the exact command instead. You can also
-run `cogenly health --fix` or `cogenly security setup`; agents use
-`machine_health_fix` on the affected machine.
+run `cogenly health --fix` or `cogenly security setup`. Agents run any direct
+fix with `machine_health_fix`, for this machine or a paired one.
 
 A scheduled task that says it succeeded only means its turn started. To prove
 the whole path works, turn on the health canary in your hub's health section
@@ -254,6 +259,9 @@ Cogenly alerts you when something a machine depends on breaks, such as a
 provider that needs sign-in, a failed scheduled task, or a paired machine that
 hasn't been reachable for 10 minutes. A problem has to last about two minutes
 before it alerts, and it alerts once when it starts and once when it clears.
+Problems of one kind on one machine share an alert with a count, such as stuck
+runs in several threads. The alert's **Fix** works as it does in Settings →
+Machines; click its title for the details.
 To also get alerts as a Slack DM or an email, turn the channel on in
 Settings → Machines, choose the connected Slack or Google integration, and send
 a test. Channels are set per machine, so set them on your laptop too if you want

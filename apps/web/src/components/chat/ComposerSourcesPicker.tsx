@@ -34,7 +34,12 @@ import {
   SearchListRowTrailing,
 } from "../ui/search-list";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { ComposerControl, ComposerControlIcon, type ComposerControlSize } from "./ComposerControl";
+import {
+  ComposerControl,
+  ComposerControlChevron,
+  ComposerControlIcon,
+  type ComposerControlSize,
+} from "./ComposerControl";
 import { composerFloatingLayerProps, useComposerMenuProps } from "./composerEventScope";
 
 const EMPTY_SOURCES: ReadonlyArray<IntegrationSource> = [];
@@ -207,8 +212,9 @@ export function ComposerSourcesPicker(props: {
             />
           }
         >
-          <ComposerControlIcon icon={PlugIcon} size={props.size} />
+          <ComposerControlIcon icon={PlugIcon} opticalWidth="narrow" size={props.size} />
           <span data-composer-control-label>Sources</span>
+          <ComposerControlChevron size={props.size} />
         </TooltipTrigger>
         <TooltipPopup side="top">Add a source for the agent to use</TooltipPopup>
       </Tooltip>
@@ -226,7 +232,14 @@ export function ComposerSourcesPicker(props: {
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        {hasMatches ? null : <SearchListEmpty size="popover">{emptyText}</SearchListEmpty>}
+        {hasMatches ? null : (
+          // One row tall and on the rows' column, as the `@` menu says it, so the
+          // popup keeps its height as sources load; the list's padding spaces it
+          // from "Connect sources" below.
+          <SearchListEmpty size="row" className="m-1.5 mb-0">
+            {emptyText}
+          </SearchListEmpty>
+        )}
         <ComboboxList>
           {(option: SourceOption) => (
             <ComboboxItem

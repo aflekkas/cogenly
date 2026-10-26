@@ -18,6 +18,7 @@ import * as ThreadFork from "./threadSync/ThreadFork.ts";
 import * as MachineSecurity from "./security/MachineSecurity.ts";
 import * as ComputerUseService from "./computerUse/ComputerUseService.ts";
 import * as MachineHealth from "./health/MachineHealth.ts";
+import * as MachineHealthFixes from "./health/MachineHealthFixes.ts";
 import * as HealthAlerts from "./health/HealthAlerts.ts";
 import * as MachineSetup from "./tailscale/MachineSetup.ts";
 import * as VisualStates from "./htmlRender/VisualState.ts";
@@ -1107,6 +1108,7 @@ const makeWsRpcHandlers = (
     const computerUse = yield* ComputerUseService.ComputerUse;
     const machineSetup = yield* MachineSetup.MachineSetup;
     const machineHealth = yield* MachineHealth.MachineHealth;
+    const machineHealthFixes = yield* MachineHealthFixes.MachineHealthFixes;
     const healthAlerts = yield* HealthAlerts.HealthAlerts;
     const visualStates = yield* VisualStates.VisualStateService;
     const retrieval = yield* Retrieval.ContextRetrievalService;
@@ -1798,6 +1800,7 @@ const makeWsRpcHandlers = (
       [WS_METHODS.machinesHealthAlertsSubscribe]: () => healthAlerts.subscribe,
       [WS_METHODS.machinesHealthRetrySync]: (input) =>
         machineHealth.retrySync(input).pipe(Effect.as({})),
+      [WS_METHODS.machinesHealthFix]: (input) => machineHealthFixes.fix(input),
       [WS_METHODS.machinesHealthTestAlertChannels]: () => healthAlerts.testChannels,
       [WS_METHODS.factsList]: (input) => facts.list(input),
       [WS_METHODS.factsCreate]: (input) => facts.create(input),
@@ -2870,6 +2873,7 @@ type WsRequestServices =
   | ComputerUseService.ComputerUse
   | MachineSetup.MachineSetup
   | MachineHealth.MachineHealth
+  | MachineHealthFixes.MachineHealthFixes
   | HealthAlerts.HealthAlerts
   | FileSystem.FileSystem
   | GitHubRest.GitHubRest

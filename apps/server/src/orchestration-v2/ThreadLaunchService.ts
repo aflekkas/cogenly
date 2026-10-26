@@ -1,7 +1,6 @@
 import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
 import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
-import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 import {
   isRemoteRepositoryPlaceholder,
   ProjectRepositoryMismatchError,
@@ -448,17 +447,13 @@ const make = Effect.gen(function* () {
       const initialMessage = input.initialMessage;
       const generateBranchNameFor = (cwd: string, message: ThreadLaunchInitialMessage) =>
         Effect.gen(function* () {
-          const settings = resolveProjectSettings(
-            yield* serverSettings.getSettings,
-            input.projectId,
-          ).settings;
+          const settings = yield* serverSettings.getSettings;
           const modelSelection =
             settings.sourceControlWriterModelSelection === null
               ? settings.textGenerationModelSelection
               : ServerSettings.resolveSourceControlWriterModelSelection(
                   settings,
                   yield* providerRegistry.getProviders,
-                  input.projectId,
                 );
           return yield* textGeneration
             .generateBranchName({

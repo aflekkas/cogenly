@@ -39,7 +39,7 @@ export function presentSavedCloudEnvironmentConnection(
     // Not a failure: the machine is fine, this build just cannot talk to it.
     case "unsupported":
       return {
-        buttonLabel: "Client not supported",
+        buttonLabel: "Not compatible",
         statusText: connectionStatusText(connection),
         tone: "idle",
       };

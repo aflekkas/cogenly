@@ -22,6 +22,7 @@ import { shouldShowInstanceBadge, type ProviderInstanceEntry } from "../../provi
 import {
   ComposerControl,
   ComposerControlChevron,
+  composerControlGapClassName,
   type ComposerControlSize,
 } from "./ComposerControl";
 import { useComposerMenuProps } from "./composerEventScope";
@@ -267,7 +268,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               <span
                 className={cn(
                   "flex min-w-0 flex-1 items-center",
-                  size === "xs" ? "gap-1" : "gap-1.5",
+                  composerControlGapClassName(size),
                 )}
               />
             }
@@ -283,7 +284,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 displayName={activeEntry.displayName}
                 accentColor={activeEntry.accentColor}
                 showBadge={showInstanceBadge}
-                className="size-4"
+                // Brand marks fill their box; the margin gives them the side bearing the
+                // lucide icons on the other controls have, so the gaps match.
+                className="mx-px size-4"
                 iconClassName={cn("size-4", props.activeProviderIconClassName)}
                 indicatorBackground={props.instanceIndicatorBackground ?? "var(--contrast-input)"}
               />
@@ -313,13 +316,15 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           </TooltipTrigger>
           <TooltipPopup side="top">{triggerTooltipContent}</TooltipPopup>
         </Tooltip>
+        {/* The chevron's optical margins sit on the frame, outside its clip, so they
+          match the other controls' chevrons without cutting off the glyph. */}
         <span
           aria-hidden="true"
-          className={COLLAPSIBLE_FRAME_CLASS}
+          className={cn(COLLAPSIBLE_FRAME_CLASS, size === "xs" ? "-ms-0.5 -me-1" : "-mx-0.5")}
           data-chat-provider-model-picker-chevron="true"
         >
           <span className="flex min-w-0 items-center overflow-hidden">
-            <ComposerControlChevron size={size} />
+            <ComposerControlChevron size={size} className="m-0!" />
           </span>
         </span>
       </PopoverTrigger>

@@ -43,14 +43,14 @@ See [provider constraints](./providers.md).
 
 ## Settings ownership
 
-Client preferences stay in the current client; server settings and project overrides are stored
-on each server. Universal keys (`isUniversalServerSettingKey` in `packages/contracts`) and project
-overrides replicate between paired machines; every other key is machine-local. The settings client
-writes a universal key to every connected server at once, so they agree before sync runs, and a
-machine-local key only to the machine the page names. Its target is URL state resolved against
-current connections and project folders: a project folder is the same folder id on every machine,
-and its overrides are written to each repository the folder holds there (overrides are stored per
-repository). An unavailable or legacy target must not fall back to a broader one.
+Client preferences stay in the current client; server settings are stored on each server.
+Settings have no project scope: projects are grouping, not a settings layer, and what is truly
+one repository's, such as its actions (`Project.scripts`), lives on the repository record.
+Universal keys (`isUniversalServerSettingKey` in `packages/contracts`) replicate between paired
+machines; every other key is machine-local. The settings client writes a universal key to every
+connected server at once, so they agree before sync runs, and a machine-local key only to the
+machine the page names. That machine is URL state resolved against current connections; an
+unavailable machine must not fall back to another one.
 
 ## Durable intent and side effects
 

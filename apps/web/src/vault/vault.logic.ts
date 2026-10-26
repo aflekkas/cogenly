@@ -43,14 +43,14 @@ export interface VaultFormField {
 export const VAULT_FIELDS_BY_TYPE: Readonly<Record<VaultItemType, ReadonlyArray<VaultFormField>>> =
   {
     login: [
-      { key: "label", title: "Label", placeholder: "Work GitHub" },
+      { key: "label", title: "Description", placeholder: "Work GitHub" },
       { key: "username", title: "Username or email" },
       { key: "password", title: "Password", required: true },
       { key: "totpSecret", title: "One-time code secret", placeholder: "Optional" },
     ],
     api_key: [{ key: "value", title: "Key", required: true }],
     card: [
-      { key: "label", title: "Label", placeholder: "Personal Visa" },
+      { key: "label", title: "Description", placeholder: "Personal Visa" },
       { key: "cardNumber", title: "Card number", required: true },
       { key: "cardExpiryMonth", title: "Expiry month", placeholder: "MM" },
       { key: "cardExpiryYear", title: "Expiry year", placeholder: "YYYY" },
@@ -215,19 +215,19 @@ export function vaultUpdateInput(id: VaultItemId, draft: VaultDraft): VaultUpdat
   };
 }
 
-/** "Agents ask first", or who (and where) may use the item without asking. */
+/** "Asks you first", or who (and where) may use the item without asking. */
 export function vaultPolicySummary(
   policy: VaultPolicy,
   agentName: (id: AgentId) => string | undefined,
 ): string {
-  if (policy.mode === "ask") return "Agents ask first";
+  if (policy.mode === "ask") return "Asks you first";
   const agents =
     policy.allowedAgentIds.length === 0
-      ? "all agents"
+      ? "Any agent"
       : policy.allowedAgentIds.map((id) => agentName(id) ?? "a deleted agent").join(", ");
   const domains =
     policy.allowedDomains.length === 0 ? "" : ` on ${policy.allowedDomains.join(", ")}`;
-  return `Allowed for: ${agents}${domains}`;
+  return `${agents} may use it${domains}`;
 }
 
 /** Items by name, case-insensitively, then type so same-named items in two scopes stay stable. */

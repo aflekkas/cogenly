@@ -11,9 +11,7 @@ import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import {
   ForwardCompatibleNullable,
-  ForwardCompatibleOptional,
   OmittedWhenNull,
-  ProjectId,
   ThreadId,
   TrimmedNonEmptyString,
   TrimmedString,
@@ -33,7 +31,7 @@ import {
   ProviderOptionSelections,
 } from "./model.ts";
 import { ModelSelection } from "./modelSelection.ts";
-import { ProjectScript, type ProjectMutation } from "./project.ts";
+import { type ProjectMutation } from "./project.ts";
 import { DEFAULT_RUNTIME_MODE, RuntimeMode } from "./providerPolicy.ts";
 import { BrowserProfile, BrowserProfileId, DEFAULT_BROWSER_PROFILE_ID } from "./browserProfile.ts";
 import {
@@ -1063,107 +1061,6 @@ export const WorktreeCleanup = Schema.NullOr(
 );
 export type WorktreeCleanup = typeof WorktreeCleanup.Type;
 
-export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
-  "worktreeCleanup",
-  "defaultModelSelection",
-  "defaultRuntimeMode",
-  "defaultThreadEnvMode",
-  "newWorktreesStartFromOrigin",
-  "worktreeSubmodules",
-  "defaultAutoPull",
-  "defaultProjectScripts",
-  "enableAgentBrowserAccess",
-  "enableAgentDeviceAccess",
-  "enableAgentComputerUse",
-  "textGenerationModelSelection",
-  "sourceControlWriterModelSelection",
-  "reviewGuideModelSelection",
-  "reviewGuideInstructions",
-  "sourceControlWritingStyle",
-  "removeAgentCreditsOnMerge",
-  "branchNamingMode",
-  "branchNamePrefix",
-  "branchNameInstructions",
-  "pullRequestMergeMethod",
-  "continueThreadsAfterServerUpdate",
-  "responseStreamingMode",
-] as const;
-export type ProjectScopedServerSettingKey = (typeof PROJECT_SCOPED_SERVER_SETTING_KEYS)[number];
-
-/** Executable definitions require configuration on each destination machine. */
-export function isMachineLocalProjectSettingKey(key: string): boolean {
-  return key === "defaultProjectScripts";
-}
-
-export const ProjectProviderInstanceOverride = Schema.Struct({
-  enabled: Schema.optionalKey(Schema.Boolean),
-});
-export type ProjectProviderInstanceOverride = typeof ProjectProviderInstanceOverride.Type;
-
-/**
- * One project's overrides. An absent key inherits the environment value;
- * `null` is a real value where the environment type is nullable (no default
- * model, no dedicated writer model).
- *
- * `providerInstances` sits outside `PROJECT_SCOPED_SERVER_SETTING_KEYS`:
- * every other key replaces its `ServerSettings` field whole, while this one
- * keeps the settings.json shape but overrides field by field, per
- * `ProviderInstanceId`. Only `enabled` is overridable today. An instance id
- * or field absent here inherits the machine value, and a present `enabled`
- * wins in either direction, so a project can turn on an instance the machine
- * disabled, or turn off one the machine enabled. See
- * `resolveProjectProviderInstanceEnabled` for the combined resolution.
- */
-export const ProjectSettingsOverrides = Schema.Struct({
-  worktreeCleanup: Schema.optionalKey(WorktreeCleanup),
-  defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
-  defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
-  defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
-  newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
-  worktreeSubmodules: ForwardCompatibleOptional(WorktreeSubmodules),
-  defaultAutoPull: Schema.optionalKey(Schema.Boolean),
-  defaultProjectScripts: Schema.optionalKey(Schema.Array(ProjectScript)),
-  enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
-  enableAgentDeviceAccess: Schema.optionalKey(Schema.Boolean),
-  enableAgentComputerUse: Schema.optionalKey(Schema.Boolean),
-  textGenerationModelSelection: Schema.optionalKey(ModelSelection),
-  sourceControlWriterModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
-  reviewGuideModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
-  reviewGuideInstructions: Schema.optionalKey(TrimmedString),
-  sourceControlWritingStyle: Schema.optionalKey(SourceControlWritingStyleSettings),
-  removeAgentCreditsOnMerge: Schema.optionalKey(Schema.Boolean),
-  branchNamingMode: Schema.optionalKey(BranchNamingMode),
-  branchNamePrefix: Schema.optionalKey(TrimmedString),
-  branchNameInstructions: Schema.optionalKey(TrimmedString),
-  pullRequestMergeMethod: Schema.optionalKey(Schema.NullOr(PullRequestMergeMethod)),
-  continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
-  responseStreamingMode: Schema.optionalKey(ResponseStreamingMode),
-  providerInstances: Schema.optionalKey(
-    Schema.Record(ProviderInstanceId, ProjectProviderInstanceOverride),
-  ),
-} satisfies Record<ProjectScopedServerSettingKey | "providerInstances", unknown>);
-export type ProjectSettingsOverrides = typeof ProjectSettingsOverrides.Type;
-
-/**
- * Whether `null` is a stored override value for this key rather than "unset".
- * Clients writing a project override treat null for every other key as a
- * request to remove the override, so a picker's "Inherit" item and the row's
- * reset do the same thing.
- */
-export function isNullableProjectSettingsOverride(key: ProjectScopedServerSettingKey): boolean {
-  return NULLABLE_PROJECT_SETTINGS_OVERRIDES.has(key);
-}
-const NULLABLE_PROJECT_SETTINGS_OVERRIDES: ReadonlySet<ProjectScopedServerSettingKey> = new Set<
-  {
-    [K in ProjectScopedServerSettingKey]: null extends ProjectSettingsOverrides[K] ? K : never;
-  }[ProjectScopedServerSettingKey]
->([
-  "defaultModelSelection",
-  "sourceControlWriterModelSelection",
-  "reviewGuideModelSelection",
-  "pullRequestMergeMethod",
-]);
-
 /** Reclaimable bytes from which the offline `cogenly doctor` repair is worth suggesting. */
 export const DATABASE_COMPACTION_RECOMMENDED_BYTES = 1024 ** 3;
 
@@ -1326,45 +1223,17 @@ export const ServerSettings = Schema.Struct({
    * between a desktop window and a phone attached to the same server.
    */
   enableAgentBrowserAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
-  projectAgentBrowserAccessOverrides: Schema.Record(ProjectId, Schema.Boolean).pipe(
-    Schema.withDecodingDefault(Effect.succeed({})),
-  ),
   /** Off restores CLI-native MCP configuration; otherwise Cogenly owns integrations. */
   useProviderConnectors: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   /** The owner reviewed the one-time native-definition import offer. */
   nativeMcpImportReviewed: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   defaultAutoPull: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  defaultProjectScripts: Schema.Array(ProjectScript).pipe(
-    Schema.withDecodingDefault(Effect.succeed([])),
-  ),
-  projectScriptOverrides: Schema.Record(ProjectId, Schema.NullOr(Schema.Array(ProjectScript))).pipe(
-    Schema.withDecodingDefault(Effect.succeed({})),
-  ),
-  projectAutoPullOverrides: Schema.Record(ProjectId, Schema.Boolean).pipe(
-    Schema.withDecodingDefault(Effect.succeed({})),
-  ),
   defaultModelSelection: Schema.NullOr(ModelSelection).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   defaultRuntimeMode: RuntimeMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE)),
   ),
-  /**
-   * Per-project overrides of the keys in `PROJECT_SCOPED_SERVER_SETTING_KEYS`,
-   * plus `providerInstances`. The source of truth for project
-   * settings; `projectAgentBrowserAccessOverrides`, `projectAutoPullOverrides`
-   * and `projectScriptOverrides` are derived views kept for one release so
-   * older clients keep reading them.
-   */
-  projectSettingsOverrides: Schema.Record(ProjectId, ProjectSettingsOverrides).pipe(
-    Schema.withDecodingDefault(Effect.succeed({})),
-  ),
-  /**
-   * Whether the legacy per-project fields have been folded into
-   * `projectSettingsOverrides`. The fold runs once so a later reset in the
-   * settings UI is not undone by the next server start.
-   */
-  projectSettingsFolded: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   /**
    * Whether agents may drive simulators and emulators. Gates the `device_*`
    * MCP tools and the preconfigured `agent-device` CLI the same way
@@ -1510,8 +1379,8 @@ export const ServerSettings = Schema.Struct({
   reviewGuideInstructions: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   /**
    * The merge method pull requests start with; `null` reuses the method
-   * last chosen on this device. Server-side so a project can override it
-   * like any other project setting.
+   * last chosen on this device. Server-side so it follows the user to
+   * every paired machine.
    */
   pullRequestMergeMethod: Schema.NullOr(PullRequestMergeMethod).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
@@ -1655,21 +1524,13 @@ export const resolveProviderInstanceEnabled = (
 };
 
 /**
- * Effective enablement for a provider instance within a project: the
- * project's `providerInstances[id].enabled` override when set, otherwise the
- * machine-wide `resolveProviderInstanceEnabled` value. `projectId` of `null`
- * (no project in scope) always resolves to the machine-wide value.
+ * Whether this machine has `instanceId` turned on: its configured flag, or the
+ * built-in default for an instance it has not configured.
  */
-export const resolveProjectProviderInstanceEnabled = (
-  settings: Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">,
-  projectId: ProjectId | null,
+export const isProviderInstanceIdEnabled = (
+  settings: Pick<ServerSettings, "providerInstances">,
   instanceId: ProviderInstanceId,
 ): boolean => {
-  const override =
-    projectId === null
-      ? undefined
-      : settings.projectSettingsOverrides[projectId]?.providerInstances?.[instanceId]?.enabled;
-  if (override !== undefined) return override;
   const instanceConfig = Object.hasOwn(settings.providerInstances, instanceId)
     ? settings.providerInstances[instanceId]
     : undefined;
@@ -1684,7 +1545,6 @@ export const ServerSettingsOperation = Schema.Literals([
   "create-provider-instance",
   "read-file",
   "read-provider-history",
-  "read-project-settings",
   "read-secret",
   "remove-secret",
   "remove-stale-secret",
@@ -1811,36 +1671,11 @@ export const ServerSettingsPatch = Schema.Struct({
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
-  projectAgentBrowserAccessOverrides: Schema.optionalKey(
-    Schema.Record(ProjectId, Schema.NullOr(Schema.Boolean)),
-  ),
   useProviderConnectors: Schema.optionalKey(Schema.Boolean),
   nativeMcpImportReviewed: Schema.optionalKey(Schema.Boolean),
   defaultAutoPull: Schema.optionalKey(Schema.Boolean),
-  defaultProjectScripts: Schema.optionalKey(Schema.Array(ProjectScript)),
-  projectScriptOverrides: Schema.optionalKey(
-    Schema.Record(ProjectId, Schema.NullOr(Schema.Array(ProjectScript))),
-  ),
-  projectAutoPullOverrides: Schema.optionalKey(
-    Schema.Record(ProjectId, Schema.NullOr(Schema.Boolean)),
-  ),
   defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
-  /**
-   * Per-project entry replacement: each entry replaces that project's whole
-   * override set and `null` removes it. Clearing one override means resending
-   * the entry without that key. Per-key null cannot express "clear" for the
-   * keys whose value type is itself nullable, and clients always hold the
-   * current entry from the last settings snapshot.
-   *
-   * `providerInstances` is the one exception: an entry that omits the key
-   * keeps the stored value instead of clearing it, so a client built before
-   * that field existed cannot wipe it by editing another key. Clearing every
-   * provider override for a project means sending `providerInstances: {}`.
-   */
-  projectSettingsOverrides: Schema.optionalKey(
-    Schema.Record(ProjectId, Schema.NullOr(ProjectSettingsOverrides)),
-  ),
   enableAgentDeviceAccess: Schema.optionalKey(Schema.Boolean),
   enableAgentComputerUse: Schema.optionalKey(Schema.Boolean),
   enableDeviceSupport: Schema.optionalKey(Schema.Boolean),
@@ -1932,8 +1767,7 @@ export function requiredScopesForServerSettingsPatch(
 
 /**
  * Project scripts run on the host when a worktree is created or a thread
- * settles, so a project mutation that carries them needs the same grant as
- * saving project scripts through settings, on top of `orchestration:operate`.
+ * settles, so changing them needs `settings:write` as well as `orchestration:operate`.
  */
 export function requiredScopesForProjectMutation(
   mutation: ProjectMutation,
@@ -1941,10 +1775,7 @@ export function requiredScopesForProjectMutation(
   if (mutation.type === "project.delete" || mutation.scripts === undefined) {
     return [AuthOrchestrationOperateScope];
   }
-  return [
-    AuthOrchestrationOperateScope,
-    ...requiredScopesForServerSettingsPatch({ defaultProjectScripts: mutation.scripts }),
-  ];
+  return [AuthOrchestrationOperateScope, AuthSettingsWriteScope];
 }
 
 export const ClientSettingsPatch = Schema.Struct({

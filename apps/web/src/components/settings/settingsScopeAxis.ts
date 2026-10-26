@@ -38,26 +38,10 @@ export function settingsScopeEnvironmentLabel(
   return secondary ? `${primary} · ${secondary}` : primary;
 }
 
-export const ALL_PROJECTS_VALUE = "all";
-
-/** Choosing a project keeps the machine; a legacy checkout narrowing is dropped. */
-export function selectProjectScope(
-  search: SettingsScopeSearch,
-  value: string,
-): SettingsScopeSearch {
-  const next: SettingsScopeSearch = { ...search };
-  delete next.checkout;
-  delete next.project;
-  if (value !== ALL_PROJECTS_VALUE) next.project = value;
-  return next;
-}
-
-/** Choosing a machine keeps the project; a legacy checkout narrowing is dropped. */
+/** Choosing a machine keeps the rest of the selection. */
 export function selectMachineScope(
   search: SettingsScopeSearch,
   environmentId: string,
 ): SettingsScopeSearch {
-  const next: SettingsScopeSearch = { ...search, machine: environmentId };
-  delete next.checkout;
-  return next;
+  return { ...search, machine: environmentId };
 }

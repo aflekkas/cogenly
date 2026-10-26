@@ -19,7 +19,6 @@ describe("ExecutionEnvironmentDescriptor", () => {
     const capabilities = {
       settledWorktreeCleanup: true,
       storageCleanupRun: true,
-      projectWorktreeCleanup: true,
       worktreesDirectory: true,
     };
     expect(decodeDescriptor({ ...descriptor, capabilities }).capabilities).toMatchObject(

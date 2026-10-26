@@ -6,9 +6,10 @@ import {
 } from "./SettingsList";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import type { AgentId, ProjectLabelId } from "@cogenly/contracts";
-import { BrainIcon } from "lucide-react";
+import { BrainIcon, PlusIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { Button } from "../ui/button";
 import { useAgents } from "../../agents/agentsClient";
 import { FACT_STATUS_FILTERS, filterFacts, type FactStatusFilter } from "../../memory/facts.logic";
 import { FactEditorDialog, FactList, factInputFromDraft } from "../../memory/FactList";
@@ -22,6 +23,7 @@ import { useSettingsScope } from "./SettingsScopeContext";
 import { SettingsRow, SettingsSection, SettingsSectionAction } from "./settingsLayout";
 
 const ALL = "all";
+const NO_WRITE_TITLE = "This connection cannot change memory.";
 
 /**
  * Settings → Memory. Facts chats and agents can use as context, with where each came
@@ -57,17 +59,35 @@ export function MemorySettings() {
   );
   const agentName = (id: string) => agents.find((agent) => agent.id === id)?.name;
   const filtered = labelId !== ALL || agentId !== ALL || status !== "current" || query !== "";
+  // Search and filters only once there is something to narrow down.
+  const showToolbar = list.isLoaded && (list.facts.length > 0 || filtered);
+  const clearFilters = () => {
+    setLabelId(ALL);
+    setAgentId(ALL);
+    setStatus("current");
+    setQuery("");
+  };
+  const rememberButton = (
+    <Button
+      disabled={!actions.canWrite}
+      title={actions.canWrite ? undefined : NO_WRITE_TITLE}
+      onClick={() => setCreating(true)}
+    >
+      <PlusIcon />
+      Remember something
+    </Button>
+  );
 
   return (
     <>
       <SettingsSection
-        footer="Chats tagged with a confirmed project, and agents allowed to read that project, use its confirmed facts as context. Proposals are never used until you confirm them. Private facts stay with you and the agent they belong to."
+        footer="Chats in a project, and agents that can read it, use its confirmed facts. Facts without a project stay private. Proposals are never used until you confirm them."
         id="memory"
         title="Memory"
         headerAction={
           <SettingsSectionAction
             disabled={!actions.canWrite}
-            title={actions.canWrite ? undefined : "This connection cannot change memory."}
+            title={actions.canWrite ? undefined : NO_WRITE_TITLE}
             onClick={() => setCreating(true)}
           >
             Remember something
@@ -78,52 +98,76 @@ export function MemorySettings() {
           <SettingsRow title="Choose a machine to see what it remembers." />
         ) : (
           <>
-            <SettingsListToolbar>
-              <SettingsListSearch label="Search memory" value={query} onValueChange={setQuery} />
-              <SettingsListFilter
-                label="Project"
-                value={labelId}
-                onValueChange={setLabelId}
-                options={[
-                  { value: ALL, label: "All projects" },
-                  ...sortedLabels.map((label) => ({ value: label.id, label: label.name })),
-                ]}
-              />
-              {agents.length > 0 ? (
+            {showToolbar ? (
+              <SettingsListToolbar>
+                <SettingsListSearch label="Search memory" value={query} onValueChange={setQuery} />
+                {sortedLabels.length > 0 ? (
+                  <SettingsListFilter
+                    label="Project"
+                    value={labelId}
+                    onValueChange={setLabelId}
+                    options={[
+                      { value: ALL, label: "All projects" },
+                      ...sortedLabels.map((label) => ({ value: label.id, label: label.name })),
+                    ]}
+                  />
+                ) : null}
+                {agents.length > 0 ? (
+                  <SettingsListFilter
+                    label="Agent"
+                    value={agentId}
+                    onValueChange={setAgentId}
+                    options={[
+                      { value: ALL, label: "All agents" },
+                      ...agents.map((agent) => ({ value: agent.id, label: agent.name })),
+                    ]}
+                  />
+                ) : null}
                 <SettingsListFilter
-                  label="Agent"
-                  value={agentId}
-                  onValueChange={setAgentId}
-                  options={[
-                    { value: ALL, label: "All agents" },
-                    ...agents.map((agent) => ({ value: agent.id, label: agent.name })),
-                  ]}
+                  label="Status"
+                  value={status}
+                  onValueChange={(value) => {
+                    const option = FACT_STATUS_FILTERS.find((option) => option.value === value);
+                    if (option) setStatus(option.value);
+                  }}
+                  options={FACT_STATUS_FILTERS}
                 />
-              ) : null}
-              <SettingsListFilter
-                label="Status"
-                value={status}
-                onValueChange={(value) => {
-                  const option = FACT_STATUS_FILTERS.find((option) => option.value === value);
-                  if (option) setStatus(option.value);
-                }}
-                options={FACT_STATUS_FILTERS}
-              />
-            </SettingsListToolbar>
+              </SettingsListToolbar>
+            ) : null}
             {list.error !== null ? (
               <SettingsRow title="Could not load memory" description={list.error} />
             ) : !list.isLoaded ? (
               <SettingsRow title="Loading memory…" role="status" />
             ) : facts.length === 0 ? (
-              <SettingsListEmpty
-                icon={<BrainIcon />}
-                title={filtered ? "Nothing matches" : "Nothing remembered yet"}
-                description={
-                  filtered
-                    ? "Try another project, agent or status."
-                    : "Add something here. Agents can propose facts for you to confirm."
-                }
-              />
+              filtered ? (
+                <SettingsListEmpty
+                  icon={<BrainIcon />}
+                  title="Nothing matches"
+                  description="Try another search, project, agent or status."
+                >
+                  <Button variant="outline" onClick={clearFilters}>
+                    Clear filters
+                  </Button>
+                </SettingsListEmpty>
+              ) : list.facts.length > 0 ? (
+                <SettingsListEmpty
+                  icon={<BrainIcon />}
+                  title="Nothing current"
+                  description="Everything here was forgotten or replaced."
+                >
+                  <Button variant="outline" onClick={() => setStatus("all")}>
+                    Show all
+                  </Button>
+                </SettingsListEmpty>
+              ) : (
+                <SettingsListEmpty
+                  icon={<BrainIcon />}
+                  title="Nothing remembered yet"
+                  description="Save what chats and agents should know. Agents also propose facts for you to confirm."
+                >
+                  {rememberButton}
+                </SettingsListEmpty>
+              )
             ) : (
               <FactList
                 environmentId={environmentId}

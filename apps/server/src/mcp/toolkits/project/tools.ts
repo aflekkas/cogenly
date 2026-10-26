@@ -61,7 +61,7 @@ const ProjectListTool = Tool.make("project_list", {
 const ProjectReadTool = Tool.make("project_read", {
   ...shared,
   description:
-    "Read a registered project in this environment, including its workspace and saved scripts.",
+    "Read a registered project in this environment, including its workspace and its actions (scripts).",
   parameters: Schema.Struct({ projectId: ProjectId }),
 })
   .annotate(Tool.Readonly, true)
@@ -80,7 +80,7 @@ const ProjectCreateTool = Tool.make("project_create", {
 const ProjectUpdateTool = Tool.make("project_update", {
   ...shared,
   description:
-    "Update a registered project's settings. Omitted fields are preserved. Uses the same project service as the app.",
+    "Update a registered project's record: title, icon, workspace and its actions (scripts, shown on its page under Settings → Repositories). Omitted fields are preserved. Uses the same project service as the app.",
   parameters: Schema.Struct({ projectId: ProjectId, ...ProjectUpdatePayload.fields }),
 }).annotate(Tool.Destructive, true);
 const ProjectDeleteTool = Tool.make("project_delete", {

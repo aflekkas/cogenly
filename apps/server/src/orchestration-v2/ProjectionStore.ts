@@ -1,3 +1,5 @@
+import { normalizeLegacyProviderThread } from "@cogenly/shared/legacyProviderThreadIdentity";
+import { isMisroutedLegacyRecoveryEvent } from "@cogenly/shared/legacyRecoveryEvent";
 import { withWorkMetadata } from "@cogenly/shared/workMetadata";
 import { applyThreadPullRequestLinkUpdate } from "@cogenly/shared/threadPullRequests";
 import { projectTurnItemForWire } from "./WireProjection.ts";
@@ -1992,8 +1994,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       END
     `;
 
-    const apply: ProjectionStoreV2Shape["apply"] = (event) =>
+    const apply: ProjectionStoreV2Shape["apply"] = (input) =>
       Effect.gen(function* () {
+        const event = normalizeLegacyProviderThread(input);
+        if (isMisroutedLegacyRecoveryEvent(event)) return;
         switch (event.type) {
           case "thread.pull-request-link-updated": {
             const thread = yield* getThread(event.threadId);
@@ -2898,7 +2902,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         Effect.mapError(
           (cause) =>
             new ProjectionStoreApplyEventError({
-              eventType: event.type,
+              eventType: input.type,
               cause,
             }),
         ),
@@ -5091,7 +5095,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               WHERE thread_id = ${threadId} AND status = 'queued')
             AND NOT EXISTS (SELECT 1 FROM orchestration_v2_projection_runs
               WHERE thread_id = ${threadId}
-                AND (status IN ('preparing', 'starting', 'running', 'waiting')
+                AND (status IN ('preparing', 'starting', 'running')
                   OR (status = 'queued' AND json_extract(payload_json, '$.queueHeld') = 1)))`;
             return rows.length > 0;
           }),
@@ -6863,7 +6867,6 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
                 run.status === "preparing" ||
                 run.status === "starting" ||
                 run.status === "running" ||
-                run.status === "waiting" ||
                 (run.status === "queued" && run.queueHeld === true),
             )
           );

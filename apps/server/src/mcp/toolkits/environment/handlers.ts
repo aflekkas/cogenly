@@ -9,6 +9,8 @@ import * as Effect from "effect/Effect";
 import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
 import * as Environment from "../../../environment/ServerEnvironment.ts";
 import * as MachineHealth from "../../../health/MachineHealth.ts";
+import * as MachineHealthFixes from "../../../health/MachineHealthFixes.ts";
+import { directlyFixableItemKeys } from "../../../health/healthChecks.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as Settings from "../../../serverSettings.ts";
 import * as MachineSecurity from "../../../security/MachineSecurity.ts";
@@ -119,8 +121,25 @@ export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
   machine_security_status: McpToolAccess.reads(() =>
     MachineSecurity.MachineSecurity.pipe(Effect.flatMap((security) => security.status)),
   ),
-  machine_health_fix: McpToolAccess.writesEnvironmentAsWork(() =>
-    MachineHealth.MachineHealth.pipe(Effect.flatMap((health) => health.setupSandbox)),
+  machine_health_fix: McpToolAccess.writesEnvironmentAsWork((input) =>
+    Effect.gen(function* () {
+      const fixes = yield* MachineHealthFixes.MachineHealthFixes;
+      if (input.itemKeys !== undefined)
+        return yield* fixes.fix({ ...input, itemKeys: input.itemKeys });
+      const health = yield* MachineHealth.MachineHealth;
+      const report = yield* health.reportFor(input);
+      const itemKeys = directlyFixableItemKeys(report);
+      const [first, ...rest] = itemKeys;
+      return first === undefined
+        ? {
+            environmentId: report.environmentId,
+            machineName: report.machineName,
+            summary:
+              "Nothing on that machine has a direct fix right now. machine_health lists what needs investigating.",
+            outcomes: [],
+          }
+        : yield* fixes.fix({ ...input, itemKeys: [first, ...rest] });
+    }).pipe(Effect.mapError(healthFailure)),
   ),
   machine_health: McpToolAccess.reads((input) =>
     MachineHealth.MachineHealth.pipe(

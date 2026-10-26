@@ -2,20 +2,18 @@ import type { SearchMiddleware } from "@tanstack/react-router";
 
 import { validateSettingsScopeSearch, type SettingsScopeSearch } from "./settingsScope";
 
-/** Accept legacy provider links without replacing an explicit settings scope. */
+/** Accept legacy provider links without replacing an explicit machine. */
 export function validateSettingsRouteSearch(raw: Record<string, unknown>) {
   return validateSettingsScopeSearch(
-    typeof raw.environmentId === "string" && raw.machine === undefined && raw.project === undefined
+    typeof raw.environmentId === "string" && raw.machine === undefined
       ? { ...raw, machine: raw.environmentId }
       : raw,
   );
 }
 
 const SCOPE_KEYS = [
-  "project",
   "machine",
   "repository",
-  "checkout",
 ] as const satisfies readonly (keyof SettingsScopeSearch)[];
 const TARGET_INPUT_KEYS = [...SCOPE_KEYS, "environmentId"];
 

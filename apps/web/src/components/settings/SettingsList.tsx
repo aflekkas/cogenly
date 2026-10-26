@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from "react";
+import { Children, Fragment, type ComponentProps, type ReactNode } from "react";
 
 import { SearchInput } from "../ui/search-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -30,6 +30,10 @@ export function SettingsListSearch({
   );
 }
 
+/**
+ * A filter sized to its value and as tall as the search beside it; full width
+ * once the toolbar wraps on a phone.
+ */
 export function SettingsListFilter({
   label,
   value,
@@ -43,7 +47,7 @@ export function SettingsListFilter({
 }) {
   return (
     <Select value={value} onValueChange={(next) => next !== null && onValueChange(next)}>
-      <SelectTrigger size="sm" aria-label={label}>
+      <SelectTrigger aria-label={label} className="w-full sm:w-auto">
         <SelectValue>
           {options.find((option) => option.value === value)?.label ?? label}
         </SelectValue>
@@ -69,6 +73,27 @@ export function SettingsListItem(props: ComponentProps<typeof SettingsRowContent
     <li className="list-none">
       <SettingsRowContent {...props} />
     </li>
+  );
+}
+
+/**
+ * A list entry's facts as one muted line, "You · 2h ago · Private", for its
+ * `status`. Each child is one fact; null children are skipped, so conditionals
+ * go inline and the dots never double up.
+ */
+export function SettingsListMeta({ children }: { children: ReactNode }) {
+  const shown = Children.toArray(children);
+  if (shown.length === 0) return null;
+  return (
+    <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+      {shown.map((item, index) => (
+        // oxlint-disable-next-line react/no-array-index-key -- positions are the identity here
+        <Fragment key={index}>
+          {index > 0 ? <span aria-hidden>·</span> : null}
+          {item}
+        </Fragment>
+      ))}
+    </span>
   );
 }
 

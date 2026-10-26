@@ -12,10 +12,6 @@ import { connectionAtomRuntime } from "../connection/runtime";
  * after every change.
  */
 export const machinesRpc = {
-  sandboxSetup: createEnvironmentRpcCommand(connectionAtomRuntime, {
-    label: "machines:sandboxSetup",
-    tag: "machines.sandboxSetup",
-  }),
   list: createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
     label: "machines:live",
     tag: "machines.subscribe",
@@ -58,10 +54,23 @@ export const machinesRpc = {
     label: "machines:healthAlerts",
     tag: "machines.healthAlertsSubscribe",
   }),
-  /** Retries sync between the target server and `input.environmentId`. */
+  /**
+   * Runs health items' direct fixes on the machine they are on: the target
+   * server, or `input.environmentId`, which it reaches over the peer link.
+   */
+  healthFix: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "machines:healthFix",
+    tag: "machines.healthFix",
+  }),
+  /** What Fix sends servers without `healthFix`: retries sync with one paired machine. */
   healthRetrySync: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "machines:healthRetrySync",
     tag: "machines.healthRetrySync",
+  }),
+  /** What Fix sends servers without `healthFix`: installs the chat sandbox. */
+  sandboxSetup: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "machines:sandboxSetup",
+    tag: "machines.sandboxSetup",
   }),
   /** Sends a test alert through each enabled external channel of the target server. */
   healthTestAlertChannels: createEnvironmentRpcCommand(connectionAtomRuntime, {

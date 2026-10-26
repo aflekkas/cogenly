@@ -12,11 +12,9 @@ import { useLocation } from "@tanstack/react-router";
 import {
   type KeyboardEvent,
   type ReactNode,
-  type RefObject,
   useCallback,
   useMemo,
   useReducer,
-  useRef,
   useState,
 } from "react";
 import {
@@ -113,19 +111,16 @@ function KeybindingPill({ value }: { value: string }) {
   );
 }
 
-/** Filter box in the page toolbar; Mod+F focuses it from anywhere on the page. */
+/** Filter box in the page toolbar: matches command names, command ids and keys. */
 function KeybindingsSearchInput({
   query,
   onChange,
-  inputRef,
 }: {
   query: string;
   onChange: (next: string) => void;
-  inputRef: RefObject<HTMLInputElement | null>;
 }) {
   return (
     <SearchInput
-      ref={inputRef}
       frameClassName="basis-full sm:basis-0 sm:flex-1"
       value={query}
       onChange={(event) => onChange(event.currentTarget.value)}
@@ -842,7 +837,7 @@ function KeybindingKeyControl({
   );
 }
 
-/** Quiet inline trigger showing the when clause; opens the expression builder. */
+/** Quiet inline trigger beside a binding's title showing its when clause; opens the expression builder. */
 function WhenClauseControl({
   label,
   expression,
@@ -861,16 +856,17 @@ function WhenClauseControl({
   return (
     <Popover>
       <PopoverTrigger
-        render={
-          <Button
-            variant={expression ? "ghost" : "ghost-muted"}
-            size="micro"
-            className="min-w-0 shrink"
-          />
-        }
+        render={<Button variant="ghost-muted" size="micro" className="min-w-0 shrink" />}
         aria-label={`Edit when clause for ${label}`}
       >
-        <span className="truncate font-mono">{expression || "Always"}</span>
+        {expression ? (
+          <>
+            <span className="shrink-0 font-normal text-muted-foreground/70">when</span>
+            <span className="truncate font-mono font-normal">{expression}</span>
+          </>
+        ) : (
+          <span className="font-normal">Always</span>
+        )}
         <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />
       </PopoverTrigger>
       <PopoverContent align="start" sideOffset={6}>
@@ -940,19 +936,8 @@ function KeybindingSourceBadge({ source }: { source: KeybindingRow["source"] }) 
   );
 }
 
-function KeybindingRowTitle({ row }: { row: KeybindingRow }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger render={<span className="flex items-center gap-2" />}>
-        {commandLabel(row.command)}
-        <KeybindingSourceBadge source={row.source} />
-      </TooltipTrigger>
-      <TooltipPopup side="top">{row.command}</TooltipPopup>
-    </Tooltip>
-  );
-}
-
-function KeybindingRowWhen({
+/** The command label, its source badge and its when clause on one line. */
+function KeybindingRowTitle({
   row,
   editor,
   variables,
@@ -962,8 +947,14 @@ function KeybindingRowWhen({
   variables: ReadonlyArray<WhenVariableOption>;
 }) {
   return (
-    <span className="flex h-6 items-center gap-1.5">
-      <span className="text-xs leading-none text-muted-foreground/70">When</span>
+    <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+      <Tooltip>
+        <TooltipTrigger render={<span className="flex shrink-0 items-center gap-2" />}>
+          {commandLabel(row.command)}
+          <KeybindingSourceBadge source={row.source} />
+        </TooltipTrigger>
+        <TooltipPopup side="top">{row.command}</TooltipPopup>
+      </Tooltip>
       <WhenClauseControl
         label={commandLabel(row.command)}
         expression={editor.whenDraftExpression}
@@ -999,8 +990,7 @@ function KeybindingSettingsRow(props: KeybindingRowProps) {
     <SettingsRow
       id={anchorId}
       className="group/row rounded-none"
-      title={<KeybindingRowTitle row={row} />}
-      description={<KeybindingRowWhen row={row} editor={editor} variables={variables} />}
+      title={<KeybindingRowTitle row={row} editor={editor} variables={variables} />}
       control={
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           <KeybindingConflictWarning labels={editor.conflictLabels} />
@@ -1206,10 +1196,9 @@ function NewKeybindingSettingsRow(props: NewKeybindingProps) {
   return (
     <SettingsRow
       className="bg-muted/15"
-      title="New keybinding"
-      description={
-        <span className="flex h-6 items-center gap-1.5">
-          <span className="text-xs leading-none text-muted-foreground/70">When</span>
+      title={
+        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          New keybinding
           <NewKeybindingWhen draft={draft} variables={variables} />
         </span>
       }
@@ -1256,28 +1245,6 @@ function KeybindingsGroups(props: KeybindingsGroupsProps) {
   ));
 }
 
-/** Shown in the browser build only; the desktop app receives every shortcut. */
-function BrowserKeybindingNotice() {
-  // The label carries the whole sentence so assistive tech reads it without
-  // opening the tooltip.
-  const message = "The browser may claim some shortcuts first. The desktop app receives them all.";
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        delay={200}
-        render={
-          <Button size="icon-micro" variant="ghost-muted" aria-label={message}>
-            <TriangleAlertIcon className="size-3.5 text-warning" />
-          </Button>
-        }
-      />
-      <TooltipPopup side="top" className="max-w-72">
-        {message}
-      </TooltipPopup>
-    </Tooltip>
-  );
-}
-
 export function KeybindingsSettingsPanel() {
   // Keybindings are universal even when this page retains a project deep link.
   const { environment: primaryEnvironment } = useSettingsScope();
@@ -1301,7 +1268,6 @@ export function KeybindingsSettingsPanel() {
     reportFailure: false,
   });
   const [query, setQuery] = useState("");
-  const searchInputRef = useRef<HTMLInputElement>(null);
   const [savingCommand, setSavingCommand] = useState<KeybindingCommand | null>(null);
   const [isAddingBinding, setIsAddingBinding] = useState(false);
   const rows = useMemo(() => buildKeybindingRows(keybindings, query), [keybindings, query]);
@@ -1436,7 +1402,6 @@ export function KeybindingsSettingsPanel() {
     <>
       <SettingsSection
         {...searchableSetting("keybindings")}
-        titleAction={!isElectron ? <BrowserKeybindingNotice /> : null}
         headerAction={
           <SettingsSectionAction
             disabled={isAddingBinding || !canWriteSettings}
@@ -1448,13 +1413,16 @@ export function KeybindingsSettingsPanel() {
         footer={
           !canWriteSettings
             ? connectedEnvironments.length === 0
-              ? "Connect an environment to change keybindings."
-              : "This connection can view keybindings but cannot change them."
-            : null
+              ? "Connect a machine to change keybindings."
+              : "This connection can view keybindings but can't change them."
+            : !isElectron
+              ? // The desktop app receives every shortcut.
+                "Your browser may claim some shortcuts first. The desktop app receives them all."
+              : null
         }
       >
         <SettingsToolbar>
-          <KeybindingsSearchInput query={query} onChange={setQuery} inputRef={searchInputRef} />
+          <KeybindingsSearchInput query={query} onChange={setQuery} />
         </SettingsToolbar>
       </SettingsSection>
 
@@ -1484,7 +1452,12 @@ export function KeybindingsSettingsPanel() {
             <SettingsEmpty
               size="sm"
               title="No keybindings match your search"
-              description="Try a command name, a key, or part of a shortcut."
+              description="Try a command name, a key or part of a shortcut."
+              action={
+                <Button size="sm" variant="outline" onClick={() => setQuery("")}>
+                  Clear search
+                </Button>
+              }
             />
           </SettingsGroup>
         )}

@@ -10,7 +10,6 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@cogenly/contracts";
-import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 import * as Cause from "effect/Cause";
 import * as Console from "effect/Console";
 import * as Context from "effect/Context";
@@ -189,16 +188,12 @@ interface AutoBootstrapWelcomeTargets {
 }
 
 export const autoPullProjects = Effect.fn("autoPullProjects")(function* (
-  projects: ReadonlyArray<Pick<Project, "id" | "workspaceRoot" | "autoPull">>,
+  projects: ReadonlyArray<Pick<Project, "workspaceRoot">>,
   settings = DEFAULT_SERVER_SETTINGS,
 ) {
   const git = yield* GitVcsDriver.GitVcsDriver;
   const workspaceRoots = [
-    ...new Set(
-      projects
-        .filter((project) => resolveProjectSettings(settings, project.id).settings.defaultAutoPull)
-        .map((project) => project.workspaceRoot),
-    ),
+    ...new Set((settings.defaultAutoPull ? projects : []).map((project) => project.workspaceRoot)),
   ];
 
   yield* Effect.forEach(
@@ -273,7 +268,7 @@ const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
 
   if (serverConfig.autoBootstrapProjectFromCwd) {
     // Project creation has no user model choice; only the bootstrap thread
-    // gets an automatic selection, and an explicit project default wins.
+    // gets an automatic selection, and a configured default model wins.
     const threadModelSelection = getAutoBootstrapThreadModelSelection();
     const { project } = yield* projects.bootstrap({
       commandId: CommandId.make(yield* randomUUID),
@@ -293,9 +288,7 @@ const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
         commandId: CommandId.make(yield* randomUUID),
         projectId: project.id,
         title: "New thread",
-        modelSelection:
-          resolveProjectSettings(settings, project.id, project).settings.defaultModelSelection ??
-          threadModelSelection,
+        modelSelection: settings.defaultModelSelection ?? threadModelSelection,
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: DEFAULT_RUNTIME_MODE,
         workspaceStrategy: { type: "root" },

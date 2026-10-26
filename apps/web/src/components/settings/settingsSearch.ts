@@ -29,9 +29,8 @@ export type SettingsPath =
   | "/settings/new-threads";
 
 /**
- * A searchable setting. Search and deep links keep the selected scope: every
- * row renders at every scope, and one that can't vary there says where it
- * applies inline (see `SettingsRow`) rather than blocking the page.
+ * A searchable setting. Search and deep links keep the selected machine, and
+ * every row renders whichever machine is selected.
  */
 export interface SettingsSearchItem {
   readonly id: string;
@@ -175,11 +174,12 @@ const MOVED_GENERAL_ANCHORS: Readonly<Record<string, SettingsPath>> = {
   "new-threads": "/settings/new-threads",
   "worktree-submodules": "/settings/new-threads",
   "start-from-origin": "/settings/new-threads",
-  "projects-and-threads": "/settings/new-threads",
-  "add-project-starts-in": "/settings/new-threads",
-  "projects-folder": "/settings/new-threads",
-  "project-actions": "/settings/new-threads",
+  "projects-and-threads": "/settings/project-tags",
+  "add-project-starts-in": "/settings/project-tags",
+  "projects-folder": "/settings/project-tags",
+  "project-actions": "/settings/projects",
   diagnostics: "/settings/diagnostics",
+  "time-format": "/settings/appearance",
 };
 
 /** The new page for an old General anchor, or null when it still lives on General. */
@@ -255,15 +255,14 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "storage-delete-now",
-    title: "Preview cleanup and clean up now",
+    title: "Clean up now",
     to: "/settings/storage",
     searchTerms: [
-      "storage cleanup dry run preview run now results report removed kept failed unsaved agent worktrees",
+      "storage cleanup free up space preview cleanup dry run run now last run results report removed kept failed unsaved agent worktrees",
     ],
   },
   {
-    id: "storage-backups",
-    targetId: "storage-backups",
+    id: "storage-backup-retention",
     title: "Backups to keep",
     to: "/settings/storage",
     searchTerms: ["nightly backup snapshots retention database disk space cleanup"],
@@ -280,7 +279,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Worktree cleanup",
     to: "/settings/storage",
     searchTerms: [
-      "disk storage delete deleted archived threads old inactive merged unchanged worktrees retention days project inherit off custom",
+      "disk storage delete deleted archived threads old inactive merged unchanged worktrees retention days off custom",
     ],
   },
   {
@@ -291,16 +290,18 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "storage-artifacts",
-    title: "Artifacts and logs",
+    title: "Build files, captures and logs",
     to: "/settings/storage",
-    searchTerms: ["disk storage browser screenshots captures rotated logs cleanup retention"],
+    searchTerms: [
+      "artifacts and logs disk storage browser artifacts screenshots captures rotated logs cleanup retention",
+    ],
   },
   {
     id: "project-defaults",
-    title: "New threads",
+    title: "Workspace",
     to: "/settings/new-threads",
     searchTerms: [
-      "project defaults overrides workspace worktree submodules start from origin machines projects repositories inheritance all projects",
+      "new threads defaults workspace worktree submodules start from origin repositories cogenly.json",
     ],
   },
   {
@@ -308,7 +309,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Memory",
     to: "/settings/memory",
     searchTerms: [
-      "facts remember forget correct context proposed confirm agents knowledge",
+      "facts remember something forget correct context proposed proposals confirm reject private agents knowledge",
       "sync synced syncing other machines offline",
     ],
   },
@@ -317,15 +318,26 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Vault",
     to: "/settings/vault",
     searchTerms: [
-      "secrets passwords logins credentials api keys cards notes one-time codes totp approvals usage log",
+      "secrets passwords logins credentials api keys cards notes one-time codes totp approvals access ask first usage log recent activity",
       "share vault sharing sync synced other machines this machine only keep on this machine",
+    ],
+  },
+  {
+    id: "scheduled-tasks",
+    title: "Scheduled tasks",
+    to: "/settings/scheduled-tasks",
+    searchTerms: [
+      "schedule cron recurring timer interval daily weekdays automation automate run prompt automatically paused active",
+      "webhook url trigger event github signature deliveries",
     ],
   },
   {
     id: "data-export",
     title: "Export",
     to: "/settings/data",
-    searchTerms: ["export backup download portable data jsonl validate bundle"],
+    searchTerms: [
+      "export backup download portable data jsonl validate check bundle recent exports",
+    ],
   },
   {
     id: "t3-import",
@@ -365,16 +377,30 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["appearance theme brand primary color orange blue violet green pink"],
   },
   {
+    id: "diff-colors",
+    title: "Diff colors",
+    to: "/settings/appearance",
+    searchTerms: [
+      "appearance theme added removed lines red green blue orange color blind colorblind accessibility",
+    ],
+  },
+  {
     id: "font-size",
     title: "Font size",
     to: "/settings/appearance",
     searchTerms: ["appearance text size zoom small large scale"],
   },
   {
+    id: "chat-width",
+    title: "Chat width",
+    to: "/settings/appearance",
+    searchTerms: ["appearance layout thread timeline composer wide full comfortable column"],
+  },
+  {
     id: "sidebar-layout",
     title: "Sidebar layout",
     to: "/settings/appearance",
-    searchTerms: ["appearance sidebar search dock top bottom anchored list order"],
+    searchTerms: ["appearance layout sidebar search dock top bottom anchored list order"],
   },
   {
     id: "usage-meters",
@@ -386,7 +412,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "reduce-motion",
     title: "Reduce motion",
     to: "/settings/appearance",
-    searchTerms: ["appearance animation motion accessibility"],
+    searchTerms: ["appearance layout animation motion accessibility"],
   },
   {
     id: "project-grouping",
@@ -402,15 +428,17 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "snooze-limited-threads",
-    title: "Snooze limited threads",
+    title: "Snooze at usage limits",
     to: "/settings/general",
-    searchTerms: ["usage quota rate limit reset wake recover continue"],
+    searchTerms: ["snooze limited threads usage quota rate limit reset wake recover continue"],
   },
   {
     id: "auto-resume-limited-threads",
-    title: "Auto-resume limited threads",
+    title: "Resume after usage limits",
     to: "/settings/general",
-    searchTerms: ["usage quota rate limit reset recover continue"],
+    searchTerms: [
+      "auto-resume limited threads automatically usage quota rate limit reset recover continue",
+    ],
   },
   {
     id: "working-shelf",
@@ -433,8 +461,8 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "time-format",
     title: "Time format",
-    to: "/settings/general",
-    searchTerms: ["timestamp clock locale system browser os 12 hour 24 hour"],
+    to: "/settings/appearance",
+    searchTerms: ["appearance display timestamp clock locale system browser os 12 hour 24 hour"],
   },
   {
     id: "response-streaming",
@@ -444,9 +472,9 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "skills-in-slash-menu",
-    title: "Show skills in slash menu",
+    title: "Skills in the slash menu",
     to: "/settings/general",
-    searchTerms: ["command menu dollar $ slash /"],
+    searchTerms: ["show skills command menu dollar $ slash /"],
   },
   {
     id: "composer-rich-text",
@@ -472,7 +500,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "follow-up-behavior",
     title: "Follow-up behavior",
     to: "/settings/general",
-    searchTerms: ["queue steer running turn send default behavior composer"],
+    searchTerms: ["queue steer running turn send default behavior composer while agent works"],
   },
   {
     id: "provider-update-checks",
@@ -498,32 +526,32 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "new-threads",
-    title: "Workspace",
+    title: "Start new threads in",
     to: "/settings/new-threads",
-    searchTerms: ["new threads default workspace mode draft local worktree"],
+    searchTerms: ["new threads default workspace mode draft local current checkout worktree"],
   },
   {
     id: "worktree-submodules",
-    title: "Submodules",
+    title: "Worktree submodules",
     to: "/settings/new-threads",
     searchTerms: ["git submodule init recursive top-level none worktree cogenly.json"],
   },
   {
     id: "start-from-origin",
-    title: "Start from origin",
+    title: "Start worktrees from origin",
     to: "/settings/new-threads",
-    searchTerms: ["new worktrees latest matching remote branch local"],
+    searchTerms: ["new worktrees latest matching remote branch local fetch"],
   },
   {
     id: "add-project-starts-in",
-    title: "Add repository starts in",
-    to: "/settings/new-threads",
-    searchTerms: ["add project base directory folder browser path home"],
+    title: "Folder browser starts in",
+    to: "/settings/project-tags",
+    searchTerms: ["add repository project base directory folder browser path home"],
   },
   {
     id: "projects-folder",
     title: "Projects folder",
-    to: "/settings/new-threads",
+    to: "/settings/project-tags",
     searchTerms: ["projects root cogenly clone new repository location directory path"],
   },
   {
@@ -542,7 +570,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "quit-confirmation",
     title: "Quit shortcut",
     to: "/settings/general",
-    searchTerms: ["confirmation desktop app exit direct hold double click press twice"],
+    searchTerms: ["confirmation desktop app exit quit right away hold double click press twice"],
     desktopOnly: true,
   },
   {
@@ -588,12 +616,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "diagnostics",
     title: "Diagnostics",
     to: "/settings/diagnostics",
-    searchTerms: ["logs traces live processes resource history failures spans cpu memory"],
+    searchTerms: [
+      "logs traces trace diagnostics live processes resource monitor resource history failures repeated failures slowest spans span logs warnings errors top span names most frequent cpu memory",
+    ],
   },
   {
     id: "open-source-licenses",
-    title: "Open source licenses",
+    title: "Open-source licenses",
     to: "/settings/general",
+    searchTerms: ["about third-party notices open source oss dependencies"],
   },
   {
     id: "legacy-plan-mode",
@@ -645,10 +676,12 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "integration-add",
-    title: "Connect with an agent",
+    // Its row waits for the account list; the section is always there.
+    targetId: "integration-services",
+    title: "Connect a service",
     to: "/settings/integrations",
     searchTerms: [
-      "connect new service account custom mcp server setup oauth client id secret api key personal access token slack app manifest google cloud install uv",
+      "connect with an agent new service account custom mcp server setup oauth client id secret api key personal access token slack app manifest google cloud install uv",
     ],
   },
   {
@@ -664,7 +697,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Agent browser access",
     to: "/settings/integrations",
     searchTerms: [
-      "agent access allow disable enable open drive shared browser preview tools sessions project override",
+      "agent access allow disable enable open drive shared browser preview tools sessions",
     ],
   },
   {
@@ -672,7 +705,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Computer use",
     to: "/settings/integrations",
     searchTerms: [
-      "agent access allow disable enable control mac apps click type screenshot accessibility screen recording macos permission system settings privacy project override",
+      "agent access allow disable enable control mac apps click type screenshot accessibility screen recording macos permission system settings privacy",
     ],
   },
   {
@@ -685,14 +718,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "agent-device-access",
     title: "Agent device access",
     to: "/settings/integrations",
-    targetId: "devices",
     searchTerms: ["allow simulator emulator ios android drive tools sessions"],
   },
   {
     id: "device-hub",
     title: "Device hub",
     to: "/settings/integrations",
-    targetId: "devices",
     searchTerms: ["simulator emulator ios android install start"],
   },
   {
@@ -713,7 +744,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "browser-profiles",
     title: "Browser profiles",
     to: "/settings/integrations",
-    targetId: "browser",
   },
   {
     id: "browser-default-profile",
@@ -723,38 +753,41 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "browser-default-viewport",
-    title: "Default browser viewport",
+    title: "Default tab size",
     to: "/settings/integrations",
-    searchTerms: ["preview size width height device desktop mobile rotate"],
+    searchTerms: ["browser viewport preview size width height device desktop mobile rotate"],
   },
   {
     id: "browser-default-zoom",
-    title: "Default browser zoom",
+    title: "Default tab zoom",
     to: "/settings/integrations",
-    searchTerms: ["preview page scale tabs percent"],
+    searchTerms: ["browser preview page scale tabs percent"],
   },
   {
     id: "browser-default-appearance",
-    title: "Default browser appearance",
+    title: "Tab color scheme",
     to: "/settings/integrations",
-    searchTerms: ["preview color scheme light dark system os"],
+    searchTerms: [
+      "default browser appearance preview color scheme light dark system os match cogenly theme",
+    ],
   },
   {
     id: "browser-recording-frame-rate",
-    title: "Browser recording frame rate",
+    title: "Recording frame rate",
     to: "/settings/integrations",
+    searchTerms: ["browser recordings fps video capture smooth"],
   },
   {
     id: "browser-recording-key-presses",
-    title: "Show key presses in recordings",
+    title: "Show key presses",
     to: "/settings/integrations",
-    searchTerms: ["browser preview keyboard shortcuts keystrokes overlay capture"],
+    searchTerms: ["browser recordings preview keyboard shortcuts keystrokes overlay capture"],
   },
   {
     id: "browser-recording-mouse-presses",
-    title: "Show mouse presses in recordings",
+    title: "Show clicks",
     to: "/settings/integrations",
-    searchTerms: ["browser preview clicks buttons drag overlay capture"],
+    searchTerms: ["browser recordings preview mouse presses buttons drag overlay capture"],
   },
   {
     id: "browser-link-target",
@@ -766,7 +799,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "automatic-pull",
     title: "Automatically pull",
     to: "/settings/source-control",
-    searchTerms: ["auto pull default branch current checkout fast forward upstream"],
+    searchTerms: ["auto pull default branch current checkout fast forward upstream git"],
   },
   {
     id: "remove-agent-credits-on-merge",
@@ -778,14 +811,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "pull-request-merge-method",
     title: "Default merge method",
     to: "/settings/source-control",
-    searchTerms: ["pull request merge squash rebase last selected"],
+    searchTerms: ["pull request merge squash rebase last used selected button"],
   },
   {
     id: "source-control",
     title: "Source control",
     to: "/settings/source-control",
     searchTerms: [
-      "version control git github hosting integrations credentials scan server environment",
+      "version control git github hosting integrations credentials scan rescan machine sign in",
     ],
   },
   {
@@ -793,15 +826,17 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Git fetch interval",
     to: "/settings/source-control",
     searchTerms: [
-      "automatic remote branch refresh background credentials security keys seconds off",
+      "background fetch automatic remote branch refresh credentials security keys seconds off",
     ],
     environmentOnly: true,
   },
   {
     id: "worktree-branch-naming",
-    title: "Worktree branch naming",
+    title: "Branch names",
     to: "/settings/source-control",
-    searchTerms: ["static semantic prefix custom prompt instructions feat fix refactor chore"],
+    searchTerms: [
+      "worktree branch naming static semantic prefix custom prompt instructions feat fix refactor chore",
+    ],
     environmentOnly: true,
   },
   {
@@ -816,34 +851,36 @@ export const SETTINGS_SEARCH_ITEMS = [
   ...SOURCE_CONTROL_HOST_SEARCH_ITEMS,
   {
     id: "source-control-writing-style",
-    title: "Source control writing style",
+    title: "Writing style",
     to: "/settings/source-control",
     searchTerms: [
-      "repository conventions conventional commits custom instructions change descriptions request titles",
+      "source control commit messages pull request titles descriptions repository conventions conventional commits custom instructions",
     ],
     environmentOnly: true,
   },
   {
     id: "follow-change-request-templates",
-    title: "Follow change request templates",
+    title: "Use pull request templates",
     to: "/settings/source-control",
-    searchTerms: ["repository pr pull request description structure"],
+    searchTerms: ["follow change request template repository pr description structure"],
     environmentOnly: true,
   },
   {
     id: "source-control-writer-model",
-    title: "Source control writer model",
+    title: "Writing model",
     to: "/settings/source-control",
     searchTerms: [
-      "override generated commit change request pr titles descriptions branch bookmark",
+      "source control writer model override generated commit messages pull request pr titles descriptions branch names",
     ],
     environmentOnly: true,
   },
   {
     id: "project-actions",
-    title: "Actions",
-    to: "/settings/new-threads",
-    searchTerms: ["commands scripts setup run dev server checkout worktree cogenly.json import"],
+    title: "Repository actions",
+    to: "/settings/projects",
+    searchTerms: [
+      "actions commands scripts setup run dev server checkout worktree cogenly.json import repository",
+    ],
   },
   {
     id: "environment-icon",
@@ -864,7 +901,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "network-access",
     title: "Network access",
     to: "/settings/connections",
-    targetId: "connections-environment",
+    targetId: "connections-remote-access",
     searchTerms: ["expose backend remote pairing local machine interfaces host restart"],
     localBackendManagementOnly: true,
   },
@@ -885,7 +922,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     localEnvironmentOnly: true,
     title: "Cogenly Connect",
     to: "/settings/connections",
-    targetId: "connections-environment",
+    targetId: "connections-remote-access",
     searchTerms: ["managed tunnel cloud other devices remote"],
     desktopOnly: true,
     cloudOnly: true,
@@ -895,7 +932,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     localEnvironmentOnly: true,
     title: "Hold webhooks while offline",
     to: "/settings/connections",
-    targetId: "connections-environment",
+    targetId: "connections-remote-access",
     searchTerms: ["webhook automations offline queue mailbox cogenly connect"],
     cloudOnly: true,
     managedTunnelOnly: true,
@@ -905,7 +942,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     localEnvironmentOnly: true,
     title: "Publish agent activity",
     to: "/settings/connections",
-    targetId: "connections-environment",
+    targetId: "connections-remote-access",
     searchTerms: ["mobile push notifications live activities cloud tunnel"],
     cloudOnly: true,
   },
@@ -914,7 +951,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "This machine",
     to: "/settings/connections",
     searchTerms: [
-      "connections server backend local remote access administrative permissions scope pairing links qr code authorized clients sessions revoke endpoint",
+      "connections server backend local remote access administrative permissions scope pairing links pair a device qr code authorized clients devices with access sessions revoke endpoint",
     ],
   },
   {
@@ -986,7 +1023,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "archive",
     title: "Archived threads",
     to: "/settings/archived",
-    searchTerms: ["restore reopen deleted history projects"],
+    searchTerms: ["archive unarchive restore reopen delete deleted history projects"],
   },
   {
     id: "project-folders",
@@ -994,7 +1031,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/project-tags",
     searchTerms: [
       "folders new project archive github org sources files agents repositories",
-      "orphan folders outside any project adopt as project remove empty projects root",
+      "orphan folders without a project outside adopt make project remove empty projects root",
     ],
   },
 ] as const satisfies ReadonlyArray<SettingsSearchItem>;

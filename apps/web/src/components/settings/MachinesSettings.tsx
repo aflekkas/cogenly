@@ -18,7 +18,6 @@ import {
   CircleIcon,
   ClockIcon,
   ExternalLinkIcon,
-  PlusIcon,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -49,10 +48,14 @@ import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { CopyableValue } from "./CopyableValue";
 import { useStatusFade } from "./integrationStatusMotion";
-import { createIntegrationStatusFade } from "./integrationStatusMotion";
 import { MachineHealthSections } from "./MachineHealthSection";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SettingsNote,
+  SettingsRow,
+  SettingsSection,
+  SettingsSectionAction,
+} from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 
 const TAILSCALE_SENTENCE =
@@ -60,7 +63,7 @@ const TAILSCALE_SENTENCE =
 const TERMINAL_STEPS_URL =
   "https://github.com/aflekkas/cogenly/blob/main/docs/user/machines.md#pair-from-the-terminal";
 const READ_ONLY_MESSAGE =
-  "This connection can see machines but can't add or unpair them. Reconnect with full access to change pairing.";
+  "This connection can see your machines but can't add or unpair them. Reconnect with full access to change pairing.";
 
 /** Opens a link: the system browser on desktop, a new tab on the web. */
 function openInBrowser(url: string) {
@@ -98,7 +101,7 @@ function roleText(list: MachineListResult): string {
   const { link } = list;
   switch (link._tag) {
     case "standalone":
-      return "Not paired with another machine yet.";
+      return "Not paired yet. Add a machine to share projects and threads with it.";
     case "hub":
       return link.spokes === 1
         ? "The always-on machine for 1 other machine."
@@ -184,12 +187,10 @@ function MachinesSection({
   return (
     <SettingsSection
       {...searchableSetting("machines")}
+      title="Your machines"
       headerAction={
         canPair ? (
-          <Button size="xs" variant="outline" onClick={onAdd}>
-            <PlusIcon />
-            Add a machine
-          </Button>
+          <SettingsSectionAction onClick={onAdd}>Add a machine</SettingsSectionAction>
         ) : null
       }
     >
@@ -219,9 +220,7 @@ function MachinesSection({
             />
           ))
       )}
-      {environment !== null && !canPair ? (
-        <SettingsRow title="Pairing" description={READ_ONLY_MESSAGE} />
-      ) : null}
+      {environment !== null && !canPair ? <SettingsNote>{READ_ONLY_MESSAGE}</SettingsNote> : null}
     </SettingsSection>
   );
 }
@@ -321,53 +320,70 @@ function MachineRow({
     }
   };
 
+  if (isThis) {
+    const joinUrl = setup?.status?.joinUrl ?? null;
+    return (
+      <>
+        <SettingsRow title={`${machine.name} (this machine)`} description={description} />
+        <SettingsRow
+          title="Private access"
+          description={
+            !canPrivateAccess || setup?.canWrite === false
+              ? "This connection can't change private access."
+              : setup?.reachable === false
+                ? `Can't reach ${machine.name} to check private access.`
+                : setup?.status === null
+                  ? "Checking Tailscale…"
+                  : served === true && joinUrl
+                    ? `On. Your machines reach ${machine.name} at ${joinUrl}.`
+                    : `Let your other machines reach ${machine.name} privately through Tailscale. Adding a machine turns it on.`
+          }
+          control={
+            <div className="flex items-center gap-2">
+              {privateBusy ? <Spinner /> : null}
+              <Switch
+                checked={served === true}
+                disabled={!canPrivateAccess || setup?.status === null || privateBusy}
+                aria-label={`Private access for ${machine.name}`}
+                onCheckedChange={(checked) => void setPrivateAccess(checked)}
+              />
+            </div>
+          }
+        />
+      </>
+    );
+  }
+
   return (
     <SettingsRow
-      title={isThis ? `${machine.name} (this machine)` : machine.name}
+      title={machine.name}
       description={description}
       control={
-        isThis ? (
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">Private access</span>
-            <Switch
-              checked={served === true}
-              disabled={!canPrivateAccess || setup?.status === null || privateBusy}
-              aria-label={`Private access for ${machine.name}`}
-              onCheckedChange={(checked) => void setPrivateAccess(checked)}
-            />
-            {privateBusy ? <Spinner /> : null}
-          </div>
-        ) : (
-          <>
-            <div ref={statusNode} className="flex">
-              {presence === null ? null : (
-                <Badge
-                  size="sm"
-                  variant={
-                    presence === "Online"
-                      ? "success"
-                      : presence === "Offline"
-                        ? "outline"
-                        : "warning"
-                  }
-                >
-                  {presence}
-                </Badge>
-              )}
-            </div>
-            {unpairable && canUnpair ? (
-              <Button
+        <>
+          <div ref={statusNode} className="flex">
+            {presence === null ? null : (
+              <Badge
                 size="sm"
-                variant="destructive-outline"
-                disabled={busy}
-                onClick={() => void unpairNow()}
+                variant={
+                  presence === "Online" ? "success" : presence === "Offline" ? "outline" : "warning"
+                }
               >
-                {busy ? <Spinner /> : null}
-                Unpair
-              </Button>
-            ) : null}
-          </>
-        )
+                {presence}
+              </Badge>
+            )}
+          </div>
+          {unpairable && canUnpair ? (
+            <Button
+              size="sm"
+              variant="destructive-outline"
+              disabled={busy}
+              onClick={() => void unpairNow()}
+            >
+              {busy ? <Spinner /> : null}
+              Unpair
+            </Button>
+          ) : null}
+        </>
       }
     />
   );

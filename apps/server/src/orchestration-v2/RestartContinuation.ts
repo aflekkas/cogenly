@@ -1,5 +1,4 @@
 import { runRanAfter } from "@cogenly/shared/orchestrationV2ThreadError";
-import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 import {
   CommandId,
   latestProviderTurnForAttempt,
@@ -286,7 +285,7 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
   function* (input: { readonly threadId: ThreadId; readonly sourceRunId: RunId }) {
     const settings = yield* ServerSettings.ServerSettingsService;
     const enabled = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
-    if (!enabled) return;
+    if (!enabled?.continueThreadsAfterServerUpdate) return;
     const threads = yield* ThreadManagementService.ThreadManagementService;
     const messageId = MessageId.make(`message:restart-continuation:${input.sourceRunId}`);
     const projection = yield* threads.getThreadRecords(
@@ -294,11 +293,6 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
       ["messages", "runs", "providerTurns", "attempts", "runtimeRequests", "turnItems"],
       { messageIds: [messageId], turnItemTypes: ["secret_request"] },
     );
-    if (
-      !resolveProjectSettings(enabled, projection.thread.projectId).settings
-        .continueThreadsAfterServerUpdate
-    )
-      return;
     if (projection.messages.some((message) => message.id === messageId)) return;
     const source = projection.runs.find((run) => run.id === input.sourceRunId);
     // Reconciliation cancels a waiting run it cannot checkpoint, so a settled
@@ -402,7 +396,7 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
         restartContinuationOfRunId: input.sourceRunId,
       })
       .pipe(
-        // The project turned this instance off since the restart. No turn
+        // The machine turned this instance off since the restart. No turn
         // resumes, and the success path below still runs so a delegated
         // child waiting on this run is recovered immediately instead of
         // after EffectWorker exhausts its retries on a refusal that will

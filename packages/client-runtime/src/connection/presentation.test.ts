@@ -70,7 +70,7 @@ describe("connection presentation", () => {
     );
     expect(connection.phase).toBe("unsupported");
     expect(connection.error).toBe("Update your app.");
-    expect(connectionStatusText(connection)).toBe("Client not supported");
+    expect(connectionStatusText(connection)).toBe("Not compatible with this app");
   });
 
   it("preserves profile display information without exposing credentials", () => {

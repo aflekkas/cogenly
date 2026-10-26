@@ -935,7 +935,9 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
    popup animates), because Base UI waits for that element's own transitions
    before unmounting. The popup fades in from 97% scale about its anchor
    (origin --transform-origin); nothing slides. Exits are quicker.
-   Compositor-only properties, a single transition per open or close. */
+   Compositor-only properties, a single transition per open or close.
+   A surface outside Base UI (the docked thread details card) wears it too:
+   data-popup-enter fades it in on mount, data-ending-style fades it out. */
 @utility popup-motion {
   --tw-duration: 200ms;
   --tw-ease: --theme(--ease-drawer);
@@ -944,17 +946,26 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
     opacity: 0;
     scale: 0.97;
   }
+  &[data-popup-enter] {
+    @starting-style {
+      opacity: 0;
+      scale: 0.97;
+    }
+  }
   &[data-ending-style] {
     --tw-duration: 140ms;
     --tw-ease: --theme(--ease-popup-exit);
   }
 
-  /* Reduced motion opens and closes instantly; a zero-length transition never
-     starts, so Base UI unmounts at once too. */
-  @media (prefers-reduced-motion: reduce) {
-    &&,
-    &&[data-ending-style] {
-      --tw-duration: 0s;
+  /* Reduced motion keeps the fade and drops the scale. */
+  @variant motion-reduce {
+    &:is([data-starting-style], [data-ending-style]) {
+      scale: 1;
+    }
+    &[data-popup-enter] {
+      @starting-style {
+        scale: 1;
+      }
     }
   }
 }

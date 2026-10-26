@@ -37,7 +37,6 @@ import {
   type ThreadPullRequestKey,
 } from "@cogenly/contracts";
 import type { ReviewGuideStackLayer } from "@cogenly/provider-core/server/textGeneration";
-import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 import { sourceControlRepositorySelector } from "@cogenly/shared/sourceControl";
 
 import * as ServerConfig from "../config.ts";
@@ -383,12 +382,7 @@ const make = Effect.gen(function* () {
       ],
       { concurrency: "unbounded" },
     );
-    const projectSettings = resolveProjectSettings(settings, input.projectId).settings;
-    const modelSelection = ServerSettings.resolveReviewGuideModelSelection(
-      projectSettings,
-      providers,
-      input.projectId,
-    );
+    const modelSelection = ServerSettings.resolveReviewGuideModelSelection(settings, providers);
     // The checkout lives only as long as the model is reading it. The change's hunks are read
     // from it too, so the guide can be held to the lines the change actually touched.
     const { generated, change } = yield* checkoutHead(
@@ -405,7 +399,7 @@ const make = Effect.gen(function* () {
               ...reviewGuideInputFromPullRequest(detail, activity, checkout.baseCommit),
               cwd: checkout.path,
               modelSelection,
-              instructions: projectSettings.reviewGuideInstructions,
+              instructions: settings.reviewGuideInstructions,
               stack: checkout.stack,
             }),
             change: readChange(checkout.path, checkout.baseCommit),

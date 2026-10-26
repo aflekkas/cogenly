@@ -83,7 +83,7 @@ import {
   ProviderInteractionMode,
   ProviderDriverKind,
   resolveEnvironmentMachineKind,
-  resolveProjectProviderInstanceEnabled,
+  isProviderInstanceIdEnabled,
   RuntimeMode,
   type WorktreeSetupSnapshot,
 } from "@cogenly/contracts";
@@ -138,13 +138,12 @@ import {
   resolvePromptInjectedEffort,
   resolveSelectableModel,
 } from "@cogenly/shared/model";
-import { projectScriptCwd, resolveProjectScripts } from "@cogenly/shared/projectScripts";
+import { projectScriptCwd } from "@cogenly/shared/projectScripts";
 import { derivePendingBackgroundWork } from "@cogenly/shared/orchestrationV2PendingBackgroundWork";
 import {
   latestUnheldRun,
   usageLimitRunPresentedAsLatest,
 } from "@cogenly/shared/orchestrationV2ThreadError";
-import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 import { sourceControlRepositorySelector } from "@cogenly/shared/sourceControl";
 import { truncate } from "@cogenly/shared/String";
 import { resolveThreadReferenceCopyTarget } from "@cogenly/shared/threadReference";
@@ -1592,10 +1591,6 @@ export default function ChatView(props: ChatViewProps) {
   const environmentUnavailableSendToastSlotRef = useRef(0);
   const feedbackUploadsInFlightRef = useRef(new Set<string>());
 
-  const fallbackDraftProjectRef = draftThread
-    ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
-    : null;
-  const fallbackDraftProject = useProject(fallbackDraftProjectRef);
   const localDraftError = serverThread
     ? null
     : ((draftId ? localDraftErrorsByDraftId[draftId]?.message : null) ?? null);
@@ -1637,17 +1632,9 @@ export default function ChatView(props: ChatViewProps) {
   }, [draftId, localDraftErrorsByDraftId, routeThreadKey, serverThread]);
   const localDraftThread = useMemo(() => {
     if (!draftThread) return undefined;
-    // Statements, not one nested expression: the React Compiler cannot lower
-    // a `??` inside this call inside a ternary.
-    const projectSettings = resolveProjectSettings(
-      settings,
-      fallbackDraftProject?.id ?? null,
-      fallbackDraftProject ?? undefined,
-    ).settings;
-    const defaultModelSelection =
-      projectSettings.defaultModelSelection ?? NO_PROVIDER_MODEL_SELECTION;
+    const defaultModelSelection = settings.defaultModelSelection ?? NO_PROVIDER_MODEL_SELECTION;
     return buildLocalDraftThread(threadId, draftThread, defaultModelSelection);
-  }, [draftThread, fallbackDraftProject, settings, threadId]);
+  }, [draftThread, settings, threadId]);
   const newThreadPending = useNewThreadPending((state) => state.count > 0);
   const isServerThread = serverThread !== null;
   const activeThread = isServerThread ? serverThread : localDraftThread;
@@ -1917,20 +1904,13 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeActivityRun, activePlan, activeRuntime]);
   const activeComposerTaskSteps =
     activeComposerTasksProgress && activePlan ? activePlan.steps : null;
-  // Environment settings with the active project's overrides applied.
-  const activeProjectSettings = useMemo(
-    () => resolveProjectSettings(settings, activeProject?.id ?? null, activeProject ?? undefined),
-    [activeProject, settings],
-  );
   // The composer's pick, else the thread's stored mode, else the new-thread
   // default. Sending applies a pick to the thread (persistThreadSettingsForNextTurn).
   const runtimeMode =
-    composerRuntimeMode ??
-    activeThread?.runtimeMode ??
-    activeProjectSettings.settings.defaultRuntimeMode;
+    composerRuntimeMode ?? activeThread?.runtimeMode ?? settings.defaultRuntimeMode;
   const activeProjectScripts = useMemo(
-    () => (activeProject ? resolveProjectScripts(settings, activeProject) : []),
-    [activeProject, settings],
+    () => (activeProject ? activeProject.scripts : []),
+    [activeProject],
   );
   // A project added by cloning exists before its files do. The draft stays
   // editable throughout; only sending waits for the clone, and a failed
@@ -2038,7 +2018,7 @@ export default function ChatView(props: ChatViewProps) {
     retryProjectClone,
     runProjectCloneActionStable,
   ]);
-  const activeProjectDefaultModelSelection = activeProjectSettings.settings.defaultModelSelection;
+  const activeProjectDefaultModelSelection = settings.defaultModelSelection;
   const handleNewThreadInActiveProject = () => {
     startNewThreadForProject(activeProjectRef, handleNewThread);
   };
@@ -2320,7 +2300,7 @@ export default function ChatView(props: ChatViewProps) {
     setLogicalProjectDraftThreadId(logicalProjectKey, activeProjectRef, nextDraftId, {
       threadId: nextThreadId,
       createdAt: new Date().toISOString(),
-      runtimeMode: activeProjectSettings.settings.defaultRuntimeMode,
+      runtimeMode: settings.defaultRuntimeMode,
       interactionMode: DEFAULT_INTERACTION_MODE,
       ...input,
     });
@@ -2605,11 +2585,7 @@ export default function ChatView(props: ChatViewProps) {
   const providerInstanceEntries = useMemo(
     () =>
       sortProviderInstanceEntries(
-        applyProviderInstanceSettings(
-          deriveProviderInstanceEntries(providerStatuses),
-          settings,
-          activeProject?.id ?? null,
-        ),
+        applyProviderInstanceSettings(deriveProviderInstanceEntries(providerStatuses), settings),
       ),
     [providerStatuses, settings, activeProject?.id],
   );
@@ -3754,11 +3730,9 @@ export default function ChatView(props: ChatViewProps) {
                     (activeProviderInstanceId === null ||
                       provider.instanceId === activeProviderInstanceId) &&
                     provider.driver === selectedProvider &&
-                    // The destination project may override the machine switch.
                     (environment.serverConfig?.settings
-                      ? resolveProjectProviderInstanceEnabled(
+                      ? isProviderInstanceIdEnabled(
                           environment.serverConfig.settings,
-                          candidate.projectId,
                           provider.instanceId,
                         )
                       : provider.enabled) &&
@@ -5125,7 +5099,7 @@ export default function ChatView(props: ChatViewProps) {
     ? (draftThread?.startFromOrigin ?? false)
     : canOverrideServerThreadEnvMode
       ? (pendingServerThreadStartFromOriginByThreadId[activeThread?.id ?? ""] ??
-        activeProjectSettings.settings.newWorktreesStartFromOrigin)
+        settings.newWorktreesStartFromOrigin)
       : false;
   const sendEnvMode = resolveSendEnvMode({
     requestedEnvMode: envMode,
@@ -9044,7 +9018,7 @@ export default function ChatView(props: ChatViewProps) {
         envMode: mode,
         startFromOrigin: resolveNewDraftStartFromOrigin({
           envMode: mode,
-          newWorktreesStartFromOrigin: activeProjectSettings.settings.newWorktreesStartFromOrigin,
+          newWorktreesStartFromOrigin: settings.newWorktreesStartFromOrigin,
         }),
         ...(mode === "worktree" && draftThread?.worktreePath ? { worktreePath: null } : {}),
       });

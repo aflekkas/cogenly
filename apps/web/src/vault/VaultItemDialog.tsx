@@ -155,8 +155,12 @@ export function VaultItemDialog(props: {
                     value={draft.name}
                     maxLength={200}
                     placeholder="github"
+                    aria-describedby={`${idPrefix}-name-hint`}
                     onChange={(event) => update({ name: event.currentTarget.value })}
                   />
+                  <p id={`${idPrefix}-name-hint`} className="text-xs text-muted-foreground">
+                    Agents ask for the item by this name.
+                  </p>
                 </div>
               </div>
               {VAULT_FIELDS_BY_TYPE[draft.type].map((field) => {
@@ -314,9 +318,9 @@ function VaultPolicyFields(props: {
     });
   return (
     <div className="space-y-2">
-      <div id={labelId} className="text-xs font-medium text-muted-foreground">
-        When an agent wants it
-      </div>
+      <Label id={labelId} render={<div />}>
+        Access
+      </Label>
       <RadioGroup
         aria-labelledby={labelId}
         value={draft.policyMode}
@@ -324,11 +328,11 @@ function VaultPolicyFields(props: {
       >
         <label className="flex items-center gap-2 text-sm">
           <Radio value="ask" />
-          Ask me each time an agent wants it
+          Ask me before an agent uses it
         </label>
         <label className="flex items-center gap-2 text-sm">
           <Radio value="allow" />
-          Allow these agents
+          Let agents use it without asking
         </label>
       </RadioGroup>
       {draft.policyMode === "allow" ? (

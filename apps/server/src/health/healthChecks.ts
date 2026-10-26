@@ -6,6 +6,7 @@
  * the peer link and feed external alerts.
  */
 import {
+  MACHINE_HEALTH_FIX_MAX_ITEMS,
   isProviderAvailable,
   type ComputerUseStatus,
   type EnvironmentId,
@@ -150,6 +151,17 @@ export function buildReport(input: {
     checks: input.checks,
   };
 }
+
+/**
+ * What a Fix without named items fixes (MCP without `itemKeys`, `cogenly health
+ * --fix`): every bad item with a fix the server runs without the owner.
+ */
+export const directlyFixableItemKeys = (report: MachineHealthReport) =>
+  report.checks
+    .flatMap((entry) => entry.items)
+    .filter((entry) => entry.status !== "ok" && entry.fix !== null && entry.fix !== "sign-in")
+    .map((entry) => entry.key)
+    .slice(0, MACHINE_HEALTH_FIX_MAX_ITEMS);
 
 /** Equal when only the observation time or uptime moved, so subscribers aren't woken for noise. */
 export const sameReportContent = (left: MachineHealthReport, right: MachineHealthReport) =>
@@ -622,7 +634,22 @@ export interface ActiveRun {
   readonly startedAt: DateTime.Utc;
 }
 
-/** Turns and delegated subagents on this machine still active far longer than any real one runs. */
+export const stuckRunsItemKey = (threadId: ThreadId) => `stuck-runs:thread:${threadId}`;
+
+/** The title for one thread's stuck turn and subagents, aged by the oldest. */
+function stuckThreadTitle(threadTitle: string, runs: number, subagents: number, age: string) {
+  const thread = quoted(threadTitle);
+  if (subagents === 0) return `${thread} has been running for ${age}`;
+  if (runs > 0) return `${thread} and ${plural(subagents, "subagent")} stuck for ${age}`;
+  return subagents === 1
+    ? `A subagent in ${thread} has been running for ${age}`
+    : `${subagents} subagents stuck in ${thread} for ${age}`;
+}
+
+/**
+ * Turns and delegated subagents on this machine still active far longer than
+ * any real one runs, one item per thread: its Fix stops them all at once.
+ */
 export function stuckRunsCheck(input: {
   readonly active: ReadonlyArray<ActiveRun>;
   readonly now: DateTime.Utc;
@@ -634,22 +661,38 @@ export function stuckRunsCheck(input: {
         DateTime.toEpochMillis(left.startedAt) - DateTime.toEpochMillis(right.startedAt),
     );
   if (stuck.length === 0) return check("stuck-runs", "No stuck runs", []);
-  const items = stuck.slice(0, STUCK_RUN_ITEM_LIMIT).map((run) => {
-    const age = formatAgo(millisBetween(run.startedAt, input.now));
+  // Oldest first, so each thread's first run is its oldest.
+  const byThread = new Map<ThreadId, Array<ActiveRun>>();
+  for (const run of stuck) byThread.set(run.threadId, [...(byThread.get(run.threadId) ?? []), run]);
+  const items = [...byThread.values()].slice(0, STUCK_RUN_ITEM_LIMIT).flatMap((runs) => {
+    const oldest = runs[0];
+    if (oldest === undefined) return [];
+    const subagents = runs.filter((run) => run.kind === "subagent").length;
     return item({
-      key: `stuck-runs:${run.kind}:${run.id}`,
+      key: stuckRunsItemKey(oldest.threadId),
       status: "fail",
-      title:
-        run.kind === "run"
-          ? `${quoted(run.threadTitle)} has been running for ${age}`
-          : `A subagent in ${quoted(run.threadTitle)} has been running for ${age}`,
-      detail: "It may have lost its provider session. Open the thread to stop or resume it.",
-      since: run.startedAt,
-      target: { _tag: "thread", threadId: run.threadId },
+      title: stuckThreadTitle(
+        oldest.threadTitle,
+        runs.length - subagents,
+        subagents,
+        formatAgo(millisBetween(oldest.startedAt, input.now)),
+      ),
+      detail:
+        runs.length === 1
+          ? "It has likely lost its provider session. Fix stops it so the thread can continue."
+          : "They have likely lost their provider sessions. Fix stops them so the thread can continue.",
+      since: oldest.startedAt,
+      target: { _tag: "thread", threadId: oldest.threadId },
       fix: "resume",
     });
   });
-  return check("stuck-runs", `${plural(stuck.length, "stuck run")}`, items);
+  return check(
+    "stuck-runs",
+    byThread.size === 1
+      ? plural(stuck.length, "stuck run")
+      : `${plural(stuck.length, "stuck run")} in ${byThread.size} threads`,
+    items,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -722,6 +765,14 @@ export function tailscaleServeCheck(input: {
     return check("tailscale-serve", "Tailscale Serve off", []);
   }
   const { tailscale, problem, joinUrl } = input.setup;
+  // Cogenly is pointing Serve at this run (at startup, or after a port change):
+  // the mapping is missing on purpose for those seconds.
+  const exposing = input.setup.steps.some(
+    (entry) => entry.id === "expose" && entry.state === "working",
+  );
+  if (tailscale.running && tailscale.signedIn && !tailscale.served && exposing) {
+    return check("tailscale-serve", "Pointing Tailscale Serve at this server", []);
+  }
   const failure = !tailscale.installed
     ? "Tailscale isn't installed"
     : !tailscale.running

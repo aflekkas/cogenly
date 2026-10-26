@@ -14,9 +14,6 @@ import {
   DEFAULT_SERVER_SETTINGS,
   DEFAULT_TEXT_GENERATION_MODEL,
   ModelSelection,
-  ProjectId,
-  ProjectScript,
-  ProjectSettingsOverrides,
   type ProviderInstanceConfig,
   type ProviderInstanceMutation,
   defaultInstanceIdForDriver,
@@ -56,7 +53,6 @@ import { type DeepPartial, deepMerge } from "@cogenly/shared/Struct";
 import { fromJsonStringPretty, fromLenientJson } from "@cogenly/shared/schemaJson";
 import {
   applyServerSettingsPatch,
-  deriveLegacyProjectOverrides,
   fallbackTextGenerationModelSelection,
   isModelSelectionProviderEnabled,
 } from "@cogenly/shared/serverSettings";
@@ -74,6 +70,12 @@ import {
 } from "./sourceControl/sourceControlHostSecrets.ts";
 
 import { mapSettingsSecrets, SECRET_REDACTED, type SettingsSecret } from "./settingsSecrets.ts";
+import {
+  LEGACY_PROJECT_ACTIONS_FILE_NAME,
+  LegacyProjectActionsJson,
+  type LegacyProjectActions,
+  readLegacyProjectActions,
+} from "./project/legacyProjectActions.ts";
 
 export {
   resolveReviewGuideModelSelection,
@@ -141,7 +143,6 @@ const normalizeServerSettings = (
   encodeServerSettings(settings).pipe(
     Effect.flatMap(decodeServerSettings),
     Effect.map(foldProviderInstanceEnabledFlags),
-    Effect.map((next) => ({ ...next, ...deriveLegacyProjectOverrides(next) })),
     Effect.mapError(
       (cause) =>
         new ServerSettingsError({
@@ -340,16 +341,10 @@ const ServerSettingsJson = fromLenientJson(
     responseStreamingMode: PersistedResponseStreamingMode.pipe(
       Schema.withDecodingDefault(Effect.succeed("paragraph" as const)),
     ),
-    projectSettingsOverrides: Schema.Record(
-      ProjectId,
-      Schema.Struct({
-        ...ProjectSettingsOverrides.fields,
-        responseStreamingMode: Schema.optionalKey(PersistedResponseStreamingMode),
-      }),
-    ).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   }),
 );
 const decodeServerSettingsJsonExit = Schema.decodeUnknownExit(ServerSettingsJson);
+const encodeLegacyProjectActions = Schema.encodeEffect(LegacyProjectActionsJson);
 const decodeStoredSettingsExit = Schema.decodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
 /**
  * The retired `providers.<kind>` map, read without its old schemas. Before
@@ -560,93 +555,6 @@ function stripDefaultServerSettings(current: unknown, defaults: unknown): unknow
   return Object.is(current, defaults) ? undefined : current;
 }
 
-const decodeProjectScriptsJson = Schema.decodeUnknownOption(
-  Schema.fromJsonString(Schema.Array(ProjectScript)),
-);
-const decodeModelSelectionJson = Schema.decodeUnknownOption(
-  Schema.fromJsonString(Schema.NullOr(ModelSelection)),
-);
-
-interface LegacyProjectSettingsRow {
-  readonly projectId: string;
-  readonly defaultModelSelection: string | null;
-  readonly defaultThreadEnvMode: string | null;
-  readonly autoPull: number;
-  readonly scripts: string;
-}
-
-/**
- * One-time fold of the legacy per-project fields into `projectSettingsOverrides`:
- * the three `project*Overrides` maps and the settings columns on the project
- * aggregate. Keys already present in the generic record win. Marked with
- * `projectSettingsFolded` so a later reset in the UI survives restarts.
- */
-function foldLegacyProjectSettings(
-  settings: ServerSettings,
-  rows: ReadonlyArray<LegacyProjectSettingsRow>,
-): ServerSettings {
-  if (settings.projectSettingsFolded) return settings;
-  // Nothing to fold yet (fresh install): leave the marker off so the file
-  // stays sparse, and check again on the next load.
-  if (
-    rows.length === 0 &&
-    Object.keys(settings.projectAgentBrowserAccessOverrides).length === 0 &&
-    Object.keys(settings.projectAutoPullOverrides).length === 0 &&
-    Object.keys(settings.projectScriptOverrides).length === 0
-  ) {
-    return settings;
-  }
-  const entries: Record<string, ProjectSettingsOverrides> = {
-    ...settings.projectSettingsOverrides,
-  };
-  const set = <K extends keyof ProjectSettingsOverrides>(
-    projectId: string,
-    key: K,
-    value: ProjectSettingsOverrides[K] | undefined,
-  ) => {
-    if (value === undefined) return;
-    const entry = entries[projectId] ?? {};
-    if (Object.hasOwn(entry, key)) return;
-    entries[projectId] = { ...entry, [key]: value };
-  };
-  for (const [projectId, value] of Object.entries(settings.projectAgentBrowserAccessOverrides)) {
-    set(projectId, "enableAgentBrowserAccess", value);
-  }
-  for (const [projectId, value] of Object.entries(settings.projectAutoPullOverrides)) {
-    set(projectId, "defaultAutoPull", value);
-  }
-  // A stored null meant "reset to machine defaults", which is now plain
-  // inheritance; the project's own aggregate scripts must not resurface.
-  const resetScripts = new Set<string>();
-  for (const [projectId, value] of Object.entries(settings.projectScriptOverrides)) {
-    if (value === null) resetScripts.add(projectId);
-    else set(projectId, "defaultProjectScripts", value);
-  }
-  for (const row of rows) {
-    const model = decodeModelSelectionJson(row.defaultModelSelection ?? "null");
-    if (Option.isSome(model) && model.value !== null) {
-      set(row.projectId, "defaultModelSelection", model.value);
-    }
-    if (row.defaultThreadEnvMode === "local" || row.defaultThreadEnvMode === "worktree") {
-      set(row.projectId, "defaultThreadEnvMode", row.defaultThreadEnvMode);
-    }
-    if (row.autoPull === 1) set(row.projectId, "defaultAutoPull", true);
-    const scripts = decodeProjectScriptsJson(row.scripts);
-    if (Option.isSome(scripts) && scripts.value.length > 0 && !resetScripts.has(row.projectId)) {
-      set(row.projectId, "defaultProjectScripts", scripts.value);
-    }
-  }
-  const projectSettingsOverrides = Object.fromEntries(
-    Object.entries(entries).filter(([, entry]) => Object.keys(entry).length > 0),
-  );
-  return {
-    ...settings,
-    projectSettingsOverrides,
-    projectSettingsFolded: true,
-    ...deriveLegacyProjectOverrides({ projectSettingsOverrides }),
-  };
-}
-
 /**
  * Device support and agent device access used to default to off behind a setup
  * wizard, and an off value equal to the default was never written to the file.
@@ -713,12 +621,32 @@ const make = Effect.gen(function* () {
     ),
   );
 
+  // Keep legacy actions on every settings rewrite until their sidecar is durable.
+  let pendingLegacyProjectActions: LegacyProjectActions | null = null;
+  // Keep every retired per-project value until legacy-project-settings.json is durable.
+  let pendingLegacyProjectSettings: Record<string, unknown> = {};
   const writeSettingsAtomically = Effect.fnUntraced(
     function* (settings: ServerSettings) {
-      const sparseSettingsJson = yield* encodeServerSettingsJson(
-        stripDefaultServerSettings(settings, DEFAULT_SERVER_SETTINGS) ?? {},
-      );
-
+      const sparse = stripDefaultServerSettings(settings, DEFAULT_SERVER_SETTINGS) ?? {};
+      const sparseSettingsJson =
+        pendingLegacyProjectActions === null &&
+        Object.keys(pendingLegacyProjectSettings).length === 0
+          ? yield* encodeServerSettingsJson(sparse)
+          : yield* Schema.encodeUnknownEffect(
+              fromJsonStringPretty(Schema.Record(Schema.String, Schema.Unknown)),
+            )({
+              ...sparse,
+              ...(pendingLegacyProjectActions === null
+                ? {}
+                : {
+                    projectSettingsFolded: pendingLegacyProjectActions.folded,
+                    projectScriptOverrides: pendingLegacyProjectActions.scripts,
+                    ...(pendingLegacyProjectActions.defaultScripts !== undefined
+                      ? { defaultProjectScripts: pendingLegacyProjectActions.defaultScripts }
+                      : {}),
+                  }),
+              ...pendingLegacyProjectSettings,
+            });
       return yield* writeFileStringAtomically({
         filePath: settingsPath,
         contents: `${sparseSettingsJson}\n`,
@@ -767,6 +695,60 @@ const make = Effect.gen(function* () {
       if (moved.size === 0) return settings;
       return mapSettingsSecrets(settings, (secret) =>
         moved.has(secret.secretName) ? { value: "", redacted: true } : secret,
+      );
+    });
+
+  const legacyProjectActionsPath = pathService.join(
+    pathService.dirname(settingsPath),
+    LEGACY_PROJECT_ACTIONS_FILE_NAME,
+  );
+  /** Keeps a sidecar that is still waiting for the migration: it holds the older copy. */
+  const saveLegacyProjectActions = (actions: LegacyProjectActions) =>
+    Effect.gen(function* () {
+      if (yield* fs.exists(legacyProjectActionsPath)) {
+        const previous = yield* fs
+          .readFileString(legacyProjectActionsPath)
+          .pipe(Effect.flatMap(Schema.decodeUnknownEffect(LegacyProjectActionsJson)));
+        // An unfinished older migration owns its lists; only add the retired machine fallback.
+        actions = {
+          ...actions,
+          ...previous,
+          ...(previous.defaultScripts === undefined && actions.defaultScripts !== undefined
+            ? { defaultScripts: actions.defaultScripts }
+            : {}),
+        };
+      }
+      yield* writeFileStringAtomically({
+        filePath: legacyProjectActionsPath,
+        contents: `${yield* encodeLegacyProjectActions(actions)}\n`,
+      }).pipe(
+        Effect.provideService(FileSystem.FileSystem, fs),
+        Effect.provideService(Path.Path, pathService),
+      );
+    });
+
+  const legacyProjectSettingsPath = pathService.join(
+    pathService.dirname(settingsPath),
+    "legacy-project-settings.json",
+  );
+  const legacyProjectSettingsSchema = Schema.Record(Schema.String, Schema.Unknown);
+  const legacyProjectSettingsJson = fromJsonStringPretty(legacyProjectSettingsSchema);
+  const saveLegacyProjectSettings = (values: Record<string, unknown>) =>
+    Effect.gen(function* () {
+      const previous = (yield* fs.exists(legacyProjectSettingsPath))
+        ? yield* fs
+            .readFileString(legacyProjectSettingsPath)
+            .pipe(Effect.flatMap(Schema.decodeUnknownEffect(legacyProjectSettingsJson)))
+        : {};
+      yield* writeFileStringAtomically({
+        filePath: legacyProjectSettingsPath,
+        contents: `${yield* Schema.encodeUnknownEffect(legacyProjectSettingsJson)({
+          ...values,
+          ...previous,
+        })}\n`,
+      }).pipe(
+        Effect.provideService(FileSystem.FileSystem, fs),
+        Effect.provideService(Path.Path, pathService),
       );
     });
 
@@ -836,29 +818,6 @@ const make = Effect.gen(function* () {
       ),
     );
 
-    const legacyProjectRows =
-      settings.projectSettingsFolded || !settingsFileTrusted
-        ? []
-        : yield* sql<LegacyProjectSettingsRow>`
-          SELECT
-            project_id AS "projectId",
-            default_model_selection_json AS "defaultModelSelection",
-            default_thread_env_mode AS "defaultThreadEnvMode",
-            auto_pull AS "autoPull",
-            scripts_json AS "scripts"
-          FROM projection_projects
-          WHERE deleted_at IS NULL
-        `.pipe(
-            Effect.mapError(
-              (cause) =>
-                new ServerSettingsError({
-                  settingsPath,
-                  operation: "read-project-settings",
-                  cause,
-                }),
-            ),
-          );
-
     const loaded = foldProviderInstanceEnabledFlags(
       legacyProviders === undefined
         ? settings
@@ -867,9 +826,47 @@ const make = Effect.gen(function* () {
     const deviceFolded = settingsFileTrusted
       ? foldLegacyDeviceOnboarding(loaded, storedSettings)
       : loaded;
-    const folded = settingsFileTrusted
-      ? foldLegacyProjectSettings(deviceFolded, legacyProjectRows)
-      : loaded;
+    const folded = settingsFileTrusted ? deviceFolded : loaded;
+    // Repository actions saved as pre-0.3.2 project settings go to a sidecar
+    // for LegacyProjectActionsMigration before the rewrite below drops them.
+    const storedRecord = Schema.decodeUnknownOption(legacyProjectSettingsSchema)(storedSettings);
+    pendingLegacyProjectSettings =
+      settingsFileTrusted && Option.isSome(storedRecord)
+        ? Object.fromEntries(
+            Object.entries(storedRecord.value).filter(
+              ([key]) =>
+                key === "projectSettingsFolded" ||
+                key === "projectSettingsOverrides" ||
+                key === "projectScriptOverrides" ||
+                key === "projectAutoPullOverrides" ||
+                key === "projectAgentBrowserAccessOverrides",
+            ),
+          )
+        : {};
+    const legacyProjectSettingsSaved =
+      Object.keys(pendingLegacyProjectSettings).length > 0 &&
+      (yield* saveLegacyProjectSettings(pendingLegacyProjectSettings).pipe(
+        Effect.as(true),
+        Effect.catch((cause) =>
+          Effect.logWarning("failed to preserve retired per-project settings", { cause }).pipe(
+            Effect.as(false),
+          ),
+        ),
+      ));
+    if (legacyProjectSettingsSaved) pendingLegacyProjectSettings = {};
+    const legacyActions = settingsFileTrusted ? readLegacyProjectActions(storedSettings) : null;
+    pendingLegacyProjectActions = legacyActions;
+    const legacyActionsSaved =
+      legacyActions !== null &&
+      (yield* saveLegacyProjectActions(legacyActions).pipe(
+        Effect.as(true),
+        Effect.catch((cause) =>
+          Effect.logWarning("failed to save repository actions from project settings", {
+            cause,
+          }).pipe(Effect.as(false)),
+        ),
+      ));
+    if (legacyActionsSaved) pendingLegacyProjectActions = null;
     // Copied, not moved: the old entry is removed only after the new file is written. A token
     // that cannot be read or copied leaves the retired keys in place, so the migration runs again
     // on the next load instead of dropping it.
@@ -904,7 +901,9 @@ const make = Effect.gen(function* () {
     if (
       migrated !== loaded ||
       (settingsFileTrusted && legacyProviders !== undefined) ||
-      hasLegacySourceControl
+      hasLegacySourceControl ||
+      legacyActionsSaved ||
+      legacyProjectSettingsSaved
     ) {
       yield* writeSettingsAtomically(migrated);
       for (const move of sourceControlMigration.secretMoves) {

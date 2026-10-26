@@ -21,6 +21,11 @@ export function SettingsGroup({
         variant === "grouped" &&
           divided &&
           "[&>*+*]:border-t [&>*+*]:border-border/50 [&>[data-slot=settings-row]]:rounded-none",
+        // A collapsed `AnimatedHeight` row draws no separator of its own, and as
+        // the first row it leaves none on the row below it either.
+        variant === "grouped" &&
+          divided &&
+          "[&>[data-slot=animated-height]:has(>:empty)]:border-t-transparent [&>[data-slot=animated-height]:first-child:has(>:empty)+*]:border-t-transparent",
         className,
       )}
     />

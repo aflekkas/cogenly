@@ -222,6 +222,9 @@ viewing. Discarding an unsent draft from the sidebar works the same way: Undo br
 back its text and attachments. `mod+z` triggers the most recent Undo when no text field is focused; see
 [Keybindings](./keybindings.md#commands-with-special-behavior).
 
+Archived threads stay in **Settings → Archive**. Search them, then choose **Unarchive** to
+bring one back to the sidebar or the trash button to delete it for good.
+
 On web and desktop, you can also drag files from your computer onto any thread row:
 the thread opens and the files are attached in its composer, ready for
 your next message. The same per-message file limits apply as when attaching
@@ -449,14 +452,14 @@ the continuation finishes. If the queue was held by a restart, resume it then.
 When the provider reports a reset time, the thread continues on its own at the
 reset. Choose **Don't resume** in the thread's banner, its sidebar menu, or the
 command palette to opt this stop out, and **Resume at reset** to schedule it
-again. Turn off **Auto-resume limited threads** in **Settings → General** to
-make opting in the default instead. A stop whose reset already passed waits for
+again. Turn off **Settings → General → Threads → Resume after usage limits**
+to make opting in the default instead. A stop whose reset already passed waits for
 you to resume it. The environment must be running when the reset arrives; it
 resumes overdue continuations after a restart. Sending a new message, archiving,
 or settling the thread prevents a pending continuation from starting.
 
 To hide a limited thread until its allowance returns, snooze it like any other
-thread, or enable **Snooze limited threads** in thread behavior settings to
+thread, or turn on **Settings → General → Threads → Snooze at usage limits** to
 snooze limit stops until their reset by default. Snoozing does not change
 whether the thread resumes; a snooze that outlasts the reset delays the
 continuation until the thread wakes. Providers without a reset time offer manual

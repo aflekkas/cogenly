@@ -13,7 +13,7 @@ import { FoldedSettingsSection } from "./FoldedSettingsSection";
 import { settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
 import { useScopedSettingsWriteAllowed } from "./useScopedSettings";
 import { NotificationSettings } from "./NotificationSettings";
-import { ArchiveIcon, ArchiveX, CheckIcon, RotateCcwIcon, SettingsIcon } from "lucide-react";
+import { ArchiveIcon, ArchiveX, RotateCcwIcon, SettingsIcon } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
@@ -30,11 +30,12 @@ import {
 } from "@cogenly/client-runtime/state/runtime";
 import {
   DEFAULT_UNIFIED_SETTINGS,
-  type ChatWidth,
-  type EnvironmentIdentificationMode,
+  ChatWidth,
+  DiffColorScheme,
   type ResponseStreamingMode,
   type QuitConfirmationMode,
   SidebarProjectSortOrder,
+  type TimestampFormat,
 } from "@cogenly/contracts/settings";
 import { resolveServerBackgroundActivitySettings } from "@cogenly/shared/backgroundActivitySettings";
 import * as Duration from "effect/Duration";
@@ -52,7 +53,6 @@ import {
 import { isElectron } from "../../env";
 import { buildHostedChannelSelectionUrl, type HostedAppChannel } from "../../hostedPairing";
 import { useTheme } from "../../hooks/useTheme";
-import { BrowserAppearanceSettingRow } from "./IntegrationsSettings";
 import { DEFAULT_APPEARANCE_MODE, type AppearanceMode } from "../../theme";
 import { AccentColorSettingRow } from "./AccentColorSettingRow";
 import {
@@ -64,13 +64,10 @@ import {
 } from "../../appearancePreferences";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { UsageMeterModeToggle } from "../usage/UsageMeter";
-import {
-  useScopedSettings,
-  useScopedSettingsMixed,
-  useUpdateScopedSettings,
-} from "./useScopedSettings";
+import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { useThreadActions } from "../../hooks/useThreadActions";
+import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
 import { isMacPlatform } from "../../lib/utils";
@@ -88,7 +85,6 @@ import {
 } from "../ui/dialog";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
-import { ScopedSwitch } from "./ScopedSwitch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
@@ -113,44 +109,53 @@ import {
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
+import { Trash2Icon } from "lucide-react";
 import { searchableSetting } from "./settingsSearch";
 import { RESPONSE_STREAMING_MODE_LABELS } from "./settingValueLabels";
 import { ProjectFavicon } from "../ProjectFavicon";
 
-const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
-  artwork: "Artwork",
-  pill: "Version pill",
-  none: "None",
-};
-
 const RESPONSE_STREAMING_MODE_DESCRIPTIONS: Record<ResponseStreamingMode, string> = {
   turn: "Text appears once the agent finishes its turn.",
-  paragraph: "Each paragraph or code block appears as soon as it is complete.",
+  paragraph: "Each paragraph or code block appears as soon as it's complete.",
 };
 
+const FOLLOW_UP_BEHAVIOR_LABELS = {
+  steer: "Steer the current turn",
+  queue: "Queue until it finishes",
+} as const;
+
 const SIDEBAR_PROJECT_SORT_ORDER_LABELS: Record<SidebarProjectSortOrder, string> = {
-  updated_at: "Last user message",
-  created_at: "Created at",
+  updated_at: "Latest message",
+  created_at: "Date added",
   manual: "Manual",
 };
 const isSidebarProjectSortOrder = Schema.is(SidebarProjectSortOrder);
 
-const TIMESTAMP_FORMAT_LABELS = {
-  locale: "System default",
+const TIMESTAMP_FORMATS: readonly TimestampFormat[] = ["locale", "12-hour", "24-hour"];
+const TIMESTAMP_FORMAT_LABELS: Record<TimestampFormat, string> = {
+  locale: "System",
   "12-hour": "12-hour",
   "24-hour": "24-hour",
-} as const;
+};
 
+const CHAT_WIDTHS: readonly ChatWidth[] = ChatWidth.literals;
 const CHAT_WIDTH_LABELS: Record<ChatWidth, string> = {
   comfortable: "Comfortable",
   wide: "Wide",
   full: "Full",
 };
 
+type DiffColorSchemeValue = typeof DiffColorScheme.Type;
+const DIFF_COLOR_SCHEMES: readonly DiffColorSchemeValue[] = DiffColorScheme.literals;
+const DIFF_COLOR_SCHEME_LABELS: Record<DiffColorSchemeValue, string> = {
+  "red-green": "Red and green",
+  "blue-orange": "Blue and orange",
+};
+
 const QUIT_CONFIRMATION_MODE_LABELS: Record<QuitConfirmationMode, string> = {
-  direct: "Direct",
-  hold: "Hold",
-  "double-click": "Double press",
+  direct: "Quit right away",
+  hold: "Hold to quit",
+  "double-click": "Press twice",
 };
 
 const BACKGROUND_ACTIVITY_PROFILE_LABELS: Record<BackgroundActivityProfile, string> = {
@@ -316,16 +321,16 @@ function AboutVersionSection() {
   const statusLabel: Record<string, string> = {
     checking: "Checking…",
     downloading: "Downloading…",
-    "up-to-date": "Up to Date",
+    "up-to-date": "Up to date",
   };
   const buttonLabel =
-    actionLabel[action] ?? statusLabel[updateState?.status ?? ""] ?? "Check for Updates";
+    actionLabel[action] ?? statusLabel[updateState?.status ?? ""] ?? "Check for updates";
   const description =
     action === "download" || action === "install"
       ? updateState?.manualDownloadUrl
-        ? "Update available — download and install the DMG."
-        : "Update available."
-      : "Current version of the application.";
+        ? "An update is available. Download and install the DMG."
+        : "An update is available."
+      : "The version of Cogenly you're running.";
 
   return (
     <>
@@ -353,9 +358,8 @@ function AboutVersionSection() {
       />
       {selectedHostedAppChannel ? (
         <SettingsRow
-          clientSetting
           {...searchableSetting("update-track")}
-          description="Switches the hosted app release channel."
+          description="The release channel this hosted app follows."
           control={
             <Select
               value={selectedHostedAppChannel}
@@ -442,10 +446,10 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Working section"]
         : []),
       ...(settings.autoResumeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads
-        ? ["Auto-resume limited threads"]
+        ? ["Resume after usage limits"]
         : []),
       ...(settings.snoozeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads
-        ? ["Snooze limited threads"]
+        ? ["Snooze at usage limits"]
         : []),
       ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
       ...(settings.persistComposerContextStrip !==
@@ -454,7 +458,7 @@ export function useSettingsRestore(onRestored?: () => void) {
         : []),
       ...getChangedTypographySettingLabels(settings),
       ...(settings.showSkillsInSlashMenu !== DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu
-        ? ["Show skills in slash menu"]
+        ? ["Skills in the slash menu"]
         : []),
       ...(settings.composerRichTextEnabled !== DEFAULT_UNIFIED_SETTINGS.composerRichTextEnabled
         ? ["Rich text composer"]
@@ -894,15 +898,105 @@ function SettingsSegmented<T extends string>(props: {
   );
 }
 
+function ChatWidthSettingRow() {
+  const value = useClientSettings((settings) => settings.chatWidth);
+  const updateClientSettings = useUpdateClientSettings();
+  const setValue = (chatWidth: typeof value) => updateClientSettings({ chatWidth });
+  const isDefault = value === DEFAULT_UNIFIED_SETTINGS.chatWidth;
+  return (
+    <SettingsRow
+      {...searchableSetting("chat-width")}
+      description="How wide threads and the composer grow on large screens."
+      resetAction={
+        isDefault ? null : (
+          <SettingResetButton
+            label="chat width"
+            onClick={() => setValue(DEFAULT_UNIFIED_SETTINGS.chatWidth)}
+          />
+        )
+      }
+      control={
+        <SettingsSegmented
+          label="Chat width"
+          value={value}
+          options={CHAT_WIDTHS}
+          labels={CHAT_WIDTH_LABELS}
+          onChange={setValue}
+        />
+      }
+    />
+  );
+}
+
+function DiffColorsSettingRow() {
+  const value = useClientSettings((settings) => settings.diffColorScheme);
+  const updateClientSettings = useUpdateClientSettings();
+  const setValue = (diffColorScheme: typeof value) => updateClientSettings({ diffColorScheme });
+  const isDefault = value === DEFAULT_UNIFIED_SETTINGS.diffColorScheme;
+  return (
+    <SettingsRow
+      {...searchableSetting("diff-colors")}
+      description="Colors for added and removed lines. Blue and orange is easier to tell apart for color blindness."
+      resetAction={
+        isDefault ? null : (
+          <SettingResetButton
+            label="diff colors"
+            onClick={() => setValue(DEFAULT_UNIFIED_SETTINGS.diffColorScheme)}
+          />
+        )
+      }
+      control={
+        <SettingsSegmented
+          label="Diff colors"
+          value={value}
+          options={DIFF_COLOR_SCHEMES}
+          labels={DIFF_COLOR_SCHEME_LABELS}
+          onChange={setValue}
+        />
+      }
+    />
+  );
+}
+
+function TimeFormatSettingRow() {
+  const value = useClientSettings((settings) => settings.timestampFormat);
+  const updateClientSettings = useUpdateClientSettings();
+  const setValue = (timestampFormat: typeof value) => updateClientSettings({ timestampFormat });
+  const isDefault = value === DEFAULT_UNIFIED_SETTINGS.timestampFormat;
+  return (
+    <SettingsRow
+      {...searchableSetting("time-format")}
+      description="How times are shown in threads and lists. System follows your device's clock."
+      resetAction={
+        isDefault ? null : (
+          <SettingResetButton
+            label="time format"
+            onClick={() => setValue(DEFAULT_UNIFIED_SETTINGS.timestampFormat)}
+          />
+        )
+      }
+      control={
+        <SettingsSegmented
+          label="Time format"
+          value={value}
+          options={TIMESTAMP_FORMATS}
+          labels={TIMESTAMP_FORMAT_LABELS}
+          onChange={setValue}
+        />
+      }
+    />
+  );
+}
+
 export function AppearanceSettingsPanel() {
   const { appearanceMode, setAppearanceMode } = useTheme();
   const { preferences, update } = useAppearancePreferences();
   return (
     <>
-      <SettingsSection id="appearance" title="Appearance">
+      <SettingsSection id="appearance" title="Theme">
         <SettingsRow
           {...searchableSetting("color-scheme")}
-          description="Light, dark, or follow your system."
+          description="Light, dark, or match your system."
           resetAction={
             appearanceMode !== DEFAULT_APPEARANCE_MODE ? (
               <SettingResetButton
@@ -922,6 +1016,10 @@ export function AppearanceSettingsPanel() {
           }
         />
         <AccentColorSettingRow />
+        <DiffColorsSettingRow />
+      </SettingsSection>
+
+      <SettingsSection id="layout" title="Layout">
         <SettingsRow
           {...searchableSetting("font-size")}
           description="Scales text and spacing across the app."
@@ -943,9 +1041,10 @@ export function AppearanceSettingsPanel() {
             />
           }
         />
+        <ChatWidthSettingRow />
         <SettingsRow
           {...searchableSetting("sidebar-layout")}
-          description="Anchored to the bottom near search, or top-down."
+          description="Bottom docks search at the foot of the sidebar, Top puts it under the titlebar. Only on this device."
           resetAction={
             preferences.sidebarLayout !== DEFAULT_APPEARANCE_PREFERENCES.sidebarLayout ? (
               <SettingResetButton
@@ -967,21 +1066,8 @@ export function AppearanceSettingsPanel() {
           }
         />
         <SettingsRow
-          {...searchableSetting("usage-meters")}
-          description="Whether usage limit bars show quota remaining (draining) or quota used (filling up)."
-          resetAction={
-            preferences.usageMeter !== DEFAULT_APPEARANCE_PREFERENCES.usageMeter ? (
-              <SettingResetButton
-                label="usage meters"
-                onClick={() => update({ usageMeter: DEFAULT_APPEARANCE_PREFERENCES.usageMeter })}
-              />
-            ) : null
-          }
-          control={<UsageMeterModeToggle />}
-        />
-        <SettingsRow
           {...searchableSetting("reduce-motion")}
-          description="Turn animations down to simple fades. Off follows your system setting."
+          description="Use simple fades instead of animations. Off follows your system setting."
           resetAction={
             preferences.motion !== DEFAULT_APPEARANCE_PREFERENCES.motion ? (
               <SettingResetButton
@@ -999,8 +1085,22 @@ export function AppearanceSettingsPanel() {
           }
         />
       </SettingsSection>
-      <SettingsSection id="browser-appearance" title="Browser on this device">
-        <BrowserAppearanceSettingRow disabled={false} />
+
+      <SettingsSection id="display" title="Display">
+        <TimeFormatSettingRow />
+        <SettingsRow
+          {...searchableSetting("usage-meters")}
+          description="Show usage limits as how much is left or how much is used."
+          resetAction={
+            preferences.usageMeter !== DEFAULT_APPEARANCE_PREFERENCES.usageMeter ? (
+              <SettingResetButton
+                label="usage meters"
+                onClick={() => update({ usageMeter: DEFAULT_APPEARANCE_PREFERENCES.usageMeter })}
+              />
+            ) : null
+          }
+          control={<UsageMeterModeToggle />}
+        />
       </SettingsSection>
     </>
   );
@@ -1031,9 +1131,8 @@ function LegacyFeaturesSection() {
       headerPlacement="outside"
     >
       <SettingsRow
-        clientSetting
         {...searchableSetting("legacy-plan-mode")}
-        description="Restore Build/Plan, /plan, /default, and Shift+Tab. Off uses build mode."
+        description="Bring back the Build and Plan modes, /plan, /default and Shift+Tab. Off always builds."
         control={
           <Switch
             checked={settings.planModeEnabled}
@@ -1045,9 +1144,8 @@ function LegacyFeaturesSection() {
         }
       />
       <SettingsRow
-        clientSetting
         {...searchableSetting("legacy-context-window-indicator")}
-        description="Shows context window usage as a circular indicator in the composer."
+        description="Show context window usage as a ring in the composer."
         control={
           <Switch
             checked={settings.contextWindowMeterEnabled}
@@ -1059,9 +1157,8 @@ function LegacyFeaturesSection() {
         }
       />
       <SettingsRow
-        clientSetting
         {...searchableSetting("legacy-sidebar")}
-        description="Restore per-repository thread trees instead of the default flat sidebar."
+        description="Group threads under each repository instead of the flat sidebar."
         control={
           <Switch
             checked={settings.legacySidebarEnabled}
@@ -1081,8 +1178,8 @@ function RestoreDefaultsSection({ onRestored }: { onRestored: () => void }) {
   return (
     <SettingsSection id="reset" title="Reset">
       <SettingsRow
-        title="Restore device defaults"
-        description="Reset the settings on this page to their defaults. You confirm before anything changes."
+        title="Restore default settings"
+        description="Reset preferences across Settings. Keybindings, providers and connections stay as they are. You see the list before anything changes."
         control={
           <Button
             size="sm"
@@ -1104,18 +1201,23 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
   const modifierLabel = isMacPlatform(navigator.platform) ? "⌘" : "Ctrl";
   const sendShortcutOptions = [
     { value: "enter", label: "Enter" },
-    { value: "mod-enter-multiline", label: `${modifierLabel} + Enter for multiline prompts` },
-    { value: "mod-enter", label: `${modifierLabel} + Enter always` },
+    { value: "mod-enter-multiline", label: `${modifierLabel} + Enter when multiline` },
+    { value: "mod-enter", label: `${modifierLabel} + Enter` },
   ] as const;
   const settings = useScopedSettings();
+  const oppositeFollowUpShortcut =
+    settings.sendShortcut === "mod-enter-multiline"
+      ? `${modifierLabel} + Enter (${modifierLabel} + Shift + Enter when multiline)`
+      : settings.sendShortcut === "mod-enter"
+        ? `${modifierLabel} + Shift + Enter`
+        : `${modifierLabel} + Enter`;
   const updateSettings = useUpdateScopedSettings();
-  const { scope, environment, connectedEnvironments } = useSettingsScope();
+  const { environment, connectedEnvironments } = useSettingsScope();
   // The representative environment is the machine machine-local rows such as
   // background activity apply to, so per-machine tuning edits that machine.
   const environmentId = environment?.environmentId ?? null;
-  const isEnvironmentScope = scope.kind !== "project" && environmentId !== null;
+  const hasMachine = environmentId !== null;
   const [backgroundActivityDialogOpen, setBackgroundActivityDialogOpen] = useState(false);
-  const mixedResponseStreamingMode = useScopedSettingsMixed(["responseStreamingMode"]);
   const lastEnabledProjectGroupingMode = useRef<SidebarProjectGroupingMode>(
     readLastEnabledProjectGroupingMode(),
   );
@@ -1128,7 +1230,6 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
   const resolvedBackgroundActivity = resolveServerBackgroundActivitySettings(settings);
   const activeBackgroundActivityProfile = resolvedBackgroundActivity.profile;
   const backgroundActivityProfileOption = resolveBackgroundActivityProfileOption(settings);
-  const mixedBackgroundActivity = useScopedSettingsMixed(["backgroundActivity"]);
   const backgroundActivityDescription =
     backgroundActivityProfileOption === "advanced"
       ? `${ADVANCED_BACKGROUND_ACTIVITY_DESCRIPTION} Shared policy: ${
@@ -1142,11 +1243,322 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
 
   return (
     <>
-      <SettingsSection id="organization" title="Organization">
+      <SettingsSection id="notifications" title="Notifications">
+        <NotificationSettings />
         <SettingsRow
-          clientSetting
+          {...searchableSetting("in-app-notifications")}
+          description="Show a toast when another thread finishes, fails or needs you while Cogenly is focused."
+          control={
+            <Switch
+              checked={settings.inAppNotificationsEnabled}
+              onCheckedChange={(checked) => updateSettings({ inAppNotificationsEnabled: checked })}
+              aria-label="In-app notifications"
+            />
+          }
+        />
+      </SettingsSection>
+
+      <SettingsSection id="composer" title="Composer">
+        <SettingsRow
+          {...searchableSetting("send-shortcut")}
+          description="Choose whether Enter sends your prompt or starts a new line."
+          resetAction={
+            settings.sendShortcut !== DEFAULT_UNIFIED_SETTINGS.sendShortcut ? (
+              <SettingResetButton
+                label="send shortcut"
+                onClick={() =>
+                  updateSettings({ sendShortcut: DEFAULT_UNIFIED_SETTINGS.sendShortcut })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.sendShortcut}
+              onValueChange={(value) => {
+                const option = sendShortcutOptions.find((option) => option.value === value);
+                if (option) updateSettings({ sendShortcut: option.value });
+              }}
+            >
+              <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Send shortcut">
+                <SelectValue>
+                  {
+                    sendShortcutOptions.find((option) => option.value === settings.sendShortcut)
+                      ?.label
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {sendShortcutOptions.map((option) => (
+                  <SelectItem hideIndicator key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("follow-up-behavior")}
+          description={`Send follow-ups into the running turn, or hold them until it ends. ${oppositeFollowUpShortcut} does the other once.`}
+          resetAction={
+            settings.followUpBehavior !== DEFAULT_UNIFIED_SETTINGS.followUpBehavior ? (
+              <SettingResetButton
+                label="follow-up behavior"
+                onClick={() =>
+                  updateSettings({
+                    followUpBehavior: DEFAULT_UNIFIED_SETTINGS.followUpBehavior,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.followUpBehavior}
+              onValueChange={(value) => {
+                if (value === "queue" || value === "steer") {
+                  updateSettings({ followUpBehavior: value });
+                }
+              }}
+            >
+              <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Follow-up behavior">
+                <SelectValue>{FOLLOW_UP_BEHAVIOR_LABELS[settings.followUpBehavior]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="steer">
+                  {FOLLOW_UP_BEHAVIOR_LABELS.steer}
+                </SelectItem>
+                <SelectItem hideIndicator value="queue">
+                  {FOLLOW_UP_BEHAVIOR_LABELS.queue}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("composer-rich-text")}
+          description="Show Markdown such as bold, lists and code as formatted text while you type."
+          resetAction={
+            settings.composerRichTextEnabled !==
+            DEFAULT_UNIFIED_SETTINGS.composerRichTextEnabled ? (
+              <SettingResetButton
+                label="rich text composer"
+                onClick={() =>
+                  updateSettings({
+                    composerRichTextEnabled: DEFAULT_UNIFIED_SETTINGS.composerRichTextEnabled,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.composerRichTextEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ composerRichTextEnabled: Boolean(checked) })
+              }
+              aria-label="Rich text composer"
+            />
+          }
+        />
+
+        {dictationSupported ? (
+          <SettingsRow
+            {...searchableSetting("composer-dictation")}
+            description="Show the mic button and its shortcut. Speech is transcribed on this Mac."
+            resetAction={
+              settings.dictationEnabled !== DEFAULT_UNIFIED_SETTINGS.dictationEnabled ? (
+                <SettingResetButton
+                  label="dictation"
+                  onClick={() =>
+                    updateSettings({ dictationEnabled: DEFAULT_UNIFIED_SETTINGS.dictationEnabled })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.dictationEnabled}
+                onCheckedChange={(checked) =>
+                  updateSettings({ dictationEnabled: Boolean(checked) })
+                }
+                aria-label="Dictation"
+              />
+            }
+          />
+        ) : null}
+
+        <SettingsRow
+          {...searchableSetting("skills-in-slash-menu")}
+          description="List skills in the / menu too. Typing $ always shows them."
+          resetAction={
+            settings.showSkillsInSlashMenu !== DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu ? (
+              <SettingResetButton
+                label="skills in the slash menu"
+                onClick={() =>
+                  updateSettings({
+                    showSkillsInSlashMenu: DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.showSkillsInSlashMenu}
+              onCheckedChange={(checked) =>
+                updateSettings({ showSkillsInSlashMenu: Boolean(checked) })
+              }
+              aria-label="Skills in the slash menu"
+            />
+          }
+        />
+      </SettingsSection>
+
+      <SettingsSection id="threads" title="Threads">
+        <SettingsRow
+          serverScoped
+          settingKeys={["responseStreamingMode"]}
+          {...searchableSetting("response-streaming")}
+          description={RESPONSE_STREAMING_MODE_DESCRIPTIONS[settings.responseStreamingMode]}
+          resetAction={
+            settings.responseStreamingMode !== DEFAULT_UNIFIED_SETTINGS.responseStreamingMode ? (
+              <SettingResetButton
+                label="response streaming"
+                onClick={() =>
+                  updateSettings({
+                    responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.responseStreamingMode}
+              onValueChange={(value) => {
+                if (value === "turn" || value === "paragraph") {
+                  updateSettings({ responseStreamingMode: value });
+                }
+              }}
+            >
+              <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Response streaming">
+                <SelectValue>
+                  {(value: ResponseStreamingMode) => RESPONSE_STREAMING_MODE_LABELS[value]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="paragraph">
+                  {RESPONSE_STREAMING_MODE_LABELS.paragraph}
+                </SelectItem>
+                <SelectItem hideIndicator value="turn">
+                  {RESPONSE_STREAMING_MODE_LABELS.turn}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          serverScoped
+          settingKeys={["aiGreetings"]}
+          {...searchableSetting("ai-greetings")}
+          description="Greet new chats with a line about your recent work, written by the text generation model."
+          resetAction={
+            settings.aiGreetings !== DEFAULT_UNIFIED_SETTINGS.aiGreetings ? (
+              <SettingResetButton
+                label="AI greetings"
+                onClick={() =>
+                  updateSettings({ aiGreetings: DEFAULT_UNIFIED_SETTINGS.aiGreetings })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.aiGreetings}
+              onCheckedChange={(checked) => updateSettings({ aiGreetings: Boolean(checked) })}
+              aria-label="AI greetings"
+            />
+          }
+        />
+
+        <SettingsRow
+          serverScoped
+          {...searchableSetting("snooze-limited-threads")}
+          description="Snooze a thread that hits a usage limit until the limit resets."
+          settingKeys={["snoozeLimitedThreads"]}
+          control={
+            <Switch
+              checked={settings.snoozeLimitedThreads}
+              onCheckedChange={(checked) =>
+                updateSettings({ snoozeLimitedThreads: Boolean(checked) })
+              }
+              aria-label="Snooze at usage limits"
+            />
+          }
+        />
+        <SettingsRow
+          serverScoped
+          {...searchableSetting("auto-resume-limited-threads")}
+          description="Continue a thread stopped by a usage limit when the limit resets. Opt a thread out from its banner."
+          settingKeys={["autoResumeLimitedThreads"]}
+          control={
+            <Switch
+              checked={settings.autoResumeLimitedThreads}
+              onCheckedChange={(checked) =>
+                updateSettings({ autoResumeLimitedThreads: Boolean(checked) })
+              }
+              aria-label="Resume after usage limits"
+            />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("continue-threads-after-server-update")}
+          serverScoped
+          settingKeys={["continueThreadsAfterServerUpdate"]}
+          description="Resume threads interrupted by an update, crash or restart on any of your machines."
+          status={
+            !supportsRestartContinuation
+              ? "Needs every connected machine on a version that supports it."
+              : undefined
+          }
+          resetAction={
+            supportsRestartContinuation &&
+            settings.continueThreadsAfterServerUpdate !==
+              DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate ? (
+              <SettingResetButton
+                label="continue threads after restarts"
+                onClick={() =>
+                  updateSettings({
+                    continueThreadsAfterServerUpdate:
+                      DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.continueThreadsAfterServerUpdate}
+              disabled={!supportsRestartContinuation}
+              onCheckedChange={(checked) =>
+                updateSettings({ continueThreadsAfterServerUpdate: Boolean(checked) })
+              }
+              aria-label="Continue threads after restarts"
+            />
+          }
+        />
+      </SettingsSection>
+
+      <SettingsSection id="sidebar" title="Sidebar">
+        <SettingsRow
           {...searchableSetting("project-grouping")}
-          description="Combine matching repositories across machines."
+          description="Show the same repository on different machines as one entry."
           resetAction={
             settings.sidebarProjectGroupingMode !==
             DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode ? (
@@ -1180,9 +1592,8 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
           }
         />
         <SettingsRow
-          clientSetting
           {...searchableSetting("project-order")}
-          description="Order of repositories in the sidebar repository picker and command palette."
+          description="How repositories are sorted in the sidebar picker and the command palette."
           resetAction={
             settings.sidebarProjectSortOrder !==
             DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder ? (
@@ -1205,7 +1616,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
                 }
               }}
             >
-              <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Repository order">
+              <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Repository order">
                 <SelectValue>
                   {SIDEBAR_PROJECT_SORT_ORDER_LABELS[settings.sidebarProjectSortOrder]}
                 </SelectValue>
@@ -1220,44 +1631,9 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
             </Select>
           }
         />
-
         <SettingsRow
-          serverScoped
-          {...searchableSetting("auto-resume-limited-threads")}
-          description="Continue usage-limit stops at the reported reset time. Each thread can opt out from its banner or menu."
-          settingKeys={["autoResumeLimitedThreads"]}
-          control={
-            <ScopedSwitch
-              settingKeys={["autoResumeLimitedThreads"]}
-              checked={settings.autoResumeLimitedThreads}
-              onCheckedChange={(checked) =>
-                updateSettings({ autoResumeLimitedThreads: Boolean(checked) })
-              }
-              aria-label="Auto-resume limited threads"
-            />
-          }
-        />
-        <SettingsRow
-          serverScoped
-          {...searchableSetting("snooze-limited-threads")}
-          description="Snooze usage-limit stops until the reported reset time. Combine with auto-resume to continue when they wake."
-          settingKeys={["snoozeLimitedThreads"]}
-          control={
-            <ScopedSwitch
-              settingKeys={["snoozeLimitedThreads"]}
-              checked={settings.snoozeLimitedThreads}
-              onCheckedChange={(checked) =>
-                updateSettings({ snoozeLimitedThreads: Boolean(checked) })
-              }
-              aria-label="Snooze limited threads"
-            />
-          }
-        />
-
-        <SettingsRow
-          clientSetting
           {...searchableSetting("working-shelf")}
-          description="Fold working and monitoring threads into a Working section. They return to the top of the inbox when they need you."
+          description="Collect running and monitoring threads in a Working section. They return to the inbox when they need you."
           resetAction={
             settings.sidebarWorkingShelfEnabled !==
             DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled ? (
@@ -1283,121 +1659,17 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
         />
       </SettingsSection>
 
-      <SettingsSection id="behavior" title="Behavior">
-        <NotificationSettings />
+      <SettingsSection id="confirmations" title="Confirmations">
         <SettingsRow
-          clientSetting
-          {...searchableSetting("in-app-notifications")}
-          description="Show a toast when another thread finishes, fails, or needs input or approval while this app has focus."
-          control={
-            <Switch
-              checked={settings.inAppNotificationsEnabled}
-              onCheckedChange={(checked) => updateSettings({ inAppNotificationsEnabled: checked })}
-              aria-label="In-app notifications"
-            />
-          }
-        />
-        <SettingsRow
-          clientSetting
-          {...searchableSetting("time-format")}
-          description="System default follows your browser or OS clock preference."
+          {...searchableSetting("archive-confirmation")}
+          description="Ask for a second click before the inline archive button archives a thread."
           resetAction={
-            settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat ? (
+            settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive ? (
               <SettingResetButton
-                label="time format"
+                label="archive confirmation"
                 onClick={() =>
                   updateSettings({
-                    timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Select
-              value={settings.timestampFormat}
-              onValueChange={(value) => {
-                if (value === "locale" || value === "12-hour" || value === "24-hour") {
-                  updateSettings({ timestampFormat: value });
-                }
-              }}
-            >
-              <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Timestamp format">
-                <SelectValue>{TIMESTAMP_FORMAT_LABELS[settings.timestampFormat]}</SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="locale">
-                  {TIMESTAMP_FORMAT_LABELS.locale}
-                </SelectItem>
-                <SelectItem hideIndicator value="12-hour">
-                  {TIMESTAMP_FORMAT_LABELS["12-hour"]}
-                </SelectItem>
-                <SelectItem hideIndicator value="24-hour">
-                  {TIMESTAMP_FORMAT_LABELS["24-hour"]}
-                </SelectItem>
-              </SelectPopup>
-            </Select>
-          }
-        />
-        <SettingsRow
-          serverScoped
-          settingKeys={["responseStreamingMode"]}
-          {...searchableSetting("response-streaming")}
-          description={
-            mixedResponseStreamingMode
-              ? "The selected targets use different streaming modes."
-              : RESPONSE_STREAMING_MODE_DESCRIPTIONS[settings.responseStreamingMode]
-          }
-          resetAction={
-            settings.responseStreamingMode !== DEFAULT_UNIFIED_SETTINGS.responseStreamingMode ? (
-              <SettingResetButton
-                label="response streaming"
-                onClick={() =>
-                  updateSettings({
-                    responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Select
-              value={mixedResponseStreamingMode ? null : settings.responseStreamingMode}
-              onValueChange={(value) => {
-                if (value === "turn" || value === "paragraph") {
-                  updateSettings({ responseStreamingMode: value });
-                }
-              }}
-            >
-              <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Response streaming">
-                <SelectValue>
-                  {(value: ResponseStreamingMode | null) =>
-                    value === null ? "Mixed" : RESPONSE_STREAMING_MODE_LABELS[value]
-                  }
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="turn">
-                  {RESPONSE_STREAMING_MODE_LABELS.turn}
-                </SelectItem>
-                <SelectItem hideIndicator value="paragraph">
-                  {RESPONSE_STREAMING_MODE_LABELS.paragraph}
-                </SelectItem>
-              </SelectPopup>
-            </Select>
-          }
-        />
-        <SettingsRow
-          clientSetting
-          {...searchableSetting("skills-in-slash-menu")}
-          description="Also include skills in the / command menu. Skills always appear when you type $."
-          resetAction={
-            settings.showSkillsInSlashMenu !== DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu ? (
-              <SettingResetButton
-                label="skills in slash menu"
-                onClick={() =>
-                  updateSettings({
-                    showSkillsInSlashMenu: DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu,
+                    confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
                   })
                 }
               />
@@ -1405,27 +1677,25 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
           }
           control={
             <Switch
-              checked={settings.showSkillsInSlashMenu}
+              checked={settings.confirmThreadArchive}
               onCheckedChange={(checked) =>
-                updateSettings({ showSkillsInSlashMenu: Boolean(checked) })
+                updateSettings({ confirmThreadArchive: Boolean(checked) })
               }
-              aria-label="Show skills in slash menu"
+              aria-label="Confirm thread archiving"
             />
           }
         />
 
         <SettingsRow
-          clientSetting
-          {...searchableSetting("composer-rich-text")}
-          description="Show formatted Markdown as you type."
+          {...searchableSetting("delete-confirmation")}
+          description="Ask before deleting a thread and its history."
           resetAction={
-            settings.composerRichTextEnabled !==
-            DEFAULT_UNIFIED_SETTINGS.composerRichTextEnabled ? (
+            settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete ? (
               <SettingResetButton
-                label="rich text composer"
+                label="delete confirmation"
                 onClick={() =>
                   updateSettings({
-                    composerRichTextEnabled: DEFAULT_UNIFIED_SETTINGS.composerRichTextEnabled,
+                    confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
                   })
                 }
               />
@@ -1433,138 +1703,64 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
           }
           control={
             <Switch
-              checked={settings.composerRichTextEnabled}
+              checked={settings.confirmThreadDelete}
               onCheckedChange={(checked) =>
-                updateSettings({ composerRichTextEnabled: Boolean(checked) })
+                updateSettings({ confirmThreadDelete: Boolean(checked) })
               }
-              aria-label="Rich text composer"
+              aria-label="Confirm thread deletion"
             />
           }
         />
 
-        {dictationSupported ? (
+        {isElectron ? (
           <SettingsRow
-            clientSetting
-            {...searchableSetting("composer-dictation")}
-            description="Show the composer's mic button and its shortcut. Speech is transcribed on this Mac."
+            {...searchableSetting("quit-confirmation")}
+            description={`How ${modifierLabel}Q closes the app. Hold to quit also accepts two quick presses.`}
             resetAction={
-              settings.dictationEnabled !== DEFAULT_UNIFIED_SETTINGS.dictationEnabled ? (
+              settings.confirmQuit !== DEFAULT_UNIFIED_SETTINGS.confirmQuit ? (
                 <SettingResetButton
-                  label="dictation"
+                  label="quit shortcut behavior"
                   onClick={() =>
-                    updateSettings({ dictationEnabled: DEFAULT_UNIFIED_SETTINGS.dictationEnabled })
+                    updateSettings({ confirmQuit: DEFAULT_UNIFIED_SETTINGS.confirmQuit })
                   }
                 />
               ) : null
             }
             control={
-              <Switch
-                checked={settings.dictationEnabled}
-                onCheckedChange={(checked) =>
-                  updateSettings({ dictationEnabled: Boolean(checked) })
-                }
-                aria-label="Dictation"
-              />
+              <Select
+                value={settings.confirmQuit}
+                onValueChange={(value) => {
+                  if (value === "direct" || value === "hold" || value === "double-click") {
+                    updateSettings({ confirmQuit: value });
+                  }
+                }}
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="w-full sm:w-56"
+                  aria-label="Quit shortcut behavior"
+                >
+                  <SelectValue>{QUIT_CONFIRMATION_MODE_LABELS[settings.confirmQuit]}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  {Object.entries(QUIT_CONFIRMATION_MODE_LABELS).map(([value, label]) => (
+                    <SelectItem hideIndicator key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
             }
           />
         ) : null}
+      </SettingsSection>
 
-        <SettingsRow
-          clientSetting
-          {...searchableSetting("send-shortcut")}
-          description="Choose when Enter sends a prompt or inserts a new line"
-          resetAction={
-            settings.sendShortcut !== DEFAULT_UNIFIED_SETTINGS.sendShortcut ? (
-              <SettingResetButton
-                label="send shortcut"
-                onClick={() =>
-                  updateSettings({ sendShortcut: DEFAULT_UNIFIED_SETTINGS.sendShortcut })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Select
-              value={settings.sendShortcut}
-              onValueChange={(value) => {
-                const option = sendShortcutOptions.find((option) => option.value === value);
-                if (option) updateSettings({ sendShortcut: option.value });
-              }}
-            >
-              <SelectTrigger
-                size="sm"
-                className="w-auto min-w-0 max-w-full"
-                aria-label="Send shortcut"
-              >
-                <SelectValue>
-                  {
-                    sendShortcutOptions.find((option) => option.value === settings.sendShortcut)
-                      ?.label
-                  }
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                {sendShortcutOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    <span className="flex items-center justify-between gap-4">
-                      {option.label}
-                      {settings.sendShortcut === option.value && <CheckIcon aria-hidden="true" />}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          }
-        />
-
-        <SettingsRow
-          clientSetting
-          {...searchableSetting("follow-up-behavior")}
-          description={
-            "Steer the current run with follow-ups or queue them until the agent finishes. " +
-            (settings.sendShortcut === "mod-enter-multiline"
-              ? `Press ${modifierLabel} + Enter for single-line prompts or ${modifierLabel} + Shift + Enter for multiline prompts to do the opposite for one message.`
-              : `Press ${modifierLabel}${settings.sendShortcut === "mod-enter" ? " + Shift" : ""} + Enter to do the opposite for one message.`)
-          }
-          resetAction={
-            settings.followUpBehavior !== DEFAULT_UNIFIED_SETTINGS.followUpBehavior ? (
-              <SettingResetButton
-                label="follow-up behavior"
-                onClick={() =>
-                  updateSettings({
-                    followUpBehavior: DEFAULT_UNIFIED_SETTINGS.followUpBehavior,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Select
-              value={settings.followUpBehavior}
-              onValueChange={(value) => {
-                if (value === "queue" || value === "steer") {
-                  updateSettings({ followUpBehavior: value });
-                }
-              }}
-            >
-              <SelectTrigger size="sm" className="w-auto min-w-0" aria-label="Follow-up behavior">
-                <SelectValue>
-                  {settings.followUpBehavior === "queue" ? "Queue" : "Steer"}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem value="queue">Queue</SelectItem>
-                <SelectItem value="steer">Steer</SelectItem>
-              </SelectPopup>
-            </Select>
-          }
-        />
-
+      <SettingsSection id="system" title="System">
         <SettingsRow
           serverScoped
           settingKeys={["enableProviderUpdateChecks"]}
           {...searchableSetting("provider-update-checks")}
-          description="Check installed provider CLIs for newer available versions and fetch model catalog updates. When off, new models may not appear."
+          description="Check provider CLIs for new versions and fetch new models. When off, new models may not appear."
           resetAction={
             settings.enableProviderUpdateChecks !==
             DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks ? (
@@ -1579,51 +1775,12 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
             ) : null
           }
           control={
-            <ScopedSwitch
-              settingKeys={["enableProviderUpdateChecks"]}
+            <Switch
               checked={settings.enableProviderUpdateChecks}
               onCheckedChange={(checked) =>
                 updateSettings({ enableProviderUpdateChecks: Boolean(checked) })
               }
-              aria-label="Check provider versions"
-            />
-          }
-        />
-
-        <SettingsRow
-          {...searchableSetting("continue-threads-after-server-update")}
-          serverScoped
-          settingKeys={["continueThreadsAfterServerUpdate"]}
-          description="Automatically resume interrupted threads after an update, crash, or machine restart across your machines."
-          status={
-            !supportsRestartContinuation
-              ? "Every connected machine must support restart continuation."
-              : undefined
-          }
-          resetAction={
-            supportsRestartContinuation &&
-            settings.continueThreadsAfterServerUpdate !==
-              DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate ? (
-              <SettingResetButton
-                label="continue threads after restarts"
-                onClick={() =>
-                  updateSettings({
-                    continueThreadsAfterServerUpdate:
-                      DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <ScopedSwitch
-              settingKeys={["continueThreadsAfterServerUpdate"]}
-              checked={settings.continueThreadsAfterServerUpdate}
-              disabled={!supportsRestartContinuation}
-              onCheckedChange={(checked) =>
-                updateSettings({ continueThreadsAfterServerUpdate: Boolean(checked) })
-              }
-              aria-label="Continue threads after restarts"
+              aria-label="Provider update checks"
             />
           }
         />
@@ -1653,10 +1810,10 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
           control={
             <>
               <Select
-                value={mixedBackgroundActivity ? null : backgroundActivityProfileOption}
+                value={backgroundActivityProfileOption}
                 onValueChange={(value) => {
                   if (value === "advanced") {
-                    if (isEnvironmentScope) setBackgroundActivityDialogOpen(true);
+                    if (hasMachine) setBackgroundActivityDialogOpen(true);
                     return;
                   }
                   if (
@@ -1670,12 +1827,12 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
               >
                 <SelectTrigger
                   size="sm"
-                  className="w-full sm:w-40"
+                  className="w-full sm:w-56"
                   aria-label="Background activity profile"
                 >
                   <SelectValue>
-                    {(value: BackgroundActivityProfileOption | null) =>
-                      value === null ? "Mixed" : BACKGROUND_ACTIVITY_PROFILE_OPTION_LABELS[value]
+                    {(value: BackgroundActivityProfileOption) =>
+                      BACKGROUND_ACTIVITY_PROFILE_OPTION_LABELS[value]
                     }
                   </SelectValue>
                 </SelectTrigger>
@@ -1689,14 +1846,14 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
                   <SelectItem hideIndicator value="battery-saver">
                     {BACKGROUND_ACTIVITY_PROFILE_LABELS["battery-saver"]}
                   </SelectItem>
-                  <SelectItem hideIndicator value="advanced" disabled={!isEnvironmentScope}>
-                    {isEnvironmentScope
+                  <SelectItem hideIndicator value="advanced" disabled={!hasMachine}>
+                    {hasMachine
                       ? BACKGROUND_ACTIVITY_PROFILE_OPTION_LABELS.advanced
                       : `${BACKGROUND_ACTIVITY_PROFILE_OPTION_LABELS.advanced} (one machine)`}
                   </SelectItem>
                 </SelectPopup>
               </Select>
-              {backgroundActivityProfileOption === "advanced" && isEnvironmentScope ? (
+              {backgroundActivityProfileOption === "advanced" && hasMachine ? (
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -1714,136 +1871,10 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
                 </Tooltip>
               ) : null}
               <BackgroundActivityAdvancedDialog
-                open={backgroundActivityDialogOpen && isEnvironmentScope}
+                open={backgroundActivityDialogOpen && hasMachine}
                 onOpenChange={setBackgroundActivityDialogOpen}
               />
             </>
-          }
-        />
-      </SettingsSection>
-
-      <SettingsSection id="confirmations" title="Confirmations">
-        <SettingsRow
-          clientSetting
-          {...searchableSetting("archive-confirmation")}
-          description="Require a second click on the inline archive action before a thread is archived."
-          resetAction={
-            settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive ? (
-              <SettingResetButton
-                label="archive confirmation"
-                onClick={() =>
-                  updateSettings({
-                    confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.confirmThreadArchive}
-              onCheckedChange={(checked) =>
-                updateSettings({ confirmThreadArchive: Boolean(checked) })
-              }
-              aria-label="Confirm thread archiving"
-            />
-          }
-        />
-
-        <SettingsRow
-          clientSetting
-          {...searchableSetting("delete-confirmation")}
-          description="Ask before deleting a thread and its chat history."
-          resetAction={
-            settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete ? (
-              <SettingResetButton
-                label="delete confirmation"
-                onClick={() =>
-                  updateSettings({
-                    confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.confirmThreadDelete}
-              onCheckedChange={(checked) =>
-                updateSettings({ confirmThreadDelete: Boolean(checked) })
-              }
-              aria-label="Confirm thread deletion"
-            />
-          }
-        />
-
-        {isElectron ? (
-          <SettingsRow
-            clientSetting
-            {...searchableSetting("quit-confirmation")}
-            description="Hold mode also quits on two quick presses."
-            resetAction={
-              settings.confirmQuit !== DEFAULT_UNIFIED_SETTINGS.confirmQuit ? (
-                <SettingResetButton
-                  label="quit shortcut behavior"
-                  onClick={() =>
-                    updateSettings({ confirmQuit: DEFAULT_UNIFIED_SETTINGS.confirmQuit })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <Select
-                value={settings.confirmQuit}
-                onValueChange={(value) => {
-                  if (value === "direct" || value === "hold" || value === "double-click") {
-                    updateSettings({ confirmQuit: value });
-                  }
-                }}
-              >
-                <SelectTrigger
-                  size="sm"
-                  className="w-full sm:w-40"
-                  aria-label="Quit shortcut behavior"
-                >
-                  <SelectValue>{QUIT_CONFIRMATION_MODE_LABELS[settings.confirmQuit]}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {Object.entries(QUIT_CONFIRMATION_MODE_LABELS).map(([value, label]) => (
-                    <SelectItem hideIndicator key={value} value={value}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-            }
-          />
-        ) : null}
-      </SettingsSection>
-
-      <SettingsSection id="greetings" title="Greetings">
-        <SettingsRow
-          serverScoped
-          settingKeys={["aiGreetings"]}
-          {...searchableSetting("ai-greetings")}
-          description="Write the new chat greeting from what you've been working on, a few times a day with the text generation model."
-          resetAction={
-            settings.aiGreetings !== DEFAULT_UNIFIED_SETTINGS.aiGreetings ? (
-              <SettingResetButton
-                label="AI greetings"
-                onClick={() =>
-                  updateSettings({ aiGreetings: DEFAULT_UNIFIED_SETTINGS.aiGreetings })
-                }
-              />
-            ) : null
-          }
-          control={
-            <ScopedSwitch
-              settingKeys={["aiGreetings"]}
-              checked={settings.aiGreetings}
-              onCheckedChange={(checked) => updateSettings({ aiGreetings: Boolean(checked) })}
-              aria-label="AI greetings"
-            />
           }
         />
       </SettingsSection>
@@ -1852,17 +1883,15 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
         {isElectron || HOSTED_APP_CHANNEL ? (
           <AboutVersionSection />
         ) : (
-          <>
-            <SettingsRow
-              id={searchableSetting("app-version").id}
-              title={<AboutVersionTitle />}
-              description="Current version of the application."
-            />
-          </>
+          <SettingsRow
+            id={searchableSetting("app-version").id}
+            title={<AboutVersionTitle />}
+            description="The version of Cogenly you're running."
+          />
         )}
         <SettingsRow
           {...searchableSetting("open-source-licenses")}
-          description="Notices for dependencies, assets, and optional tools used by Cogenly."
+          description="Notices for the open-source software Cogenly is built with."
           control={
             <Button
               render={<Link to="/settings/open-source-licenses" />}
@@ -1894,21 +1923,11 @@ export function ArchivedThreadsPanel() {
   } = useArchivedThreadSnapshots(scope.environmentIds);
 
   const { groups: archivedGroups, hasMultipleEnvironments } = useMemo(() => {
-    const selectedProjectKeys =
-      scope.kind === "project"
-        ? new Set(scope.members.map((member) => `${member.environmentId}:${member.id}`))
-        : null;
     const projectsByEnvironmentAndId = new Map(
       archivedSnapshots.flatMap(({ environmentId, snapshot }) =>
-        snapshot.projects
-          .filter(
-            (project) =>
-              selectedProjectKeys === null ||
-              selectedProjectKeys.has(`${environmentId}:${project.id}`),
-          )
-          .map(
-            (project) => [`${environmentId}:${project.id}`, { ...project, environmentId }] as const,
-          ),
+        snapshot.projects.map(
+          (project) => [`${environmentId}:${project.id}`, { ...project, environmentId }] as const,
+        ),
       ),
     );
     const environmentLabels = new Map(
@@ -1983,98 +2002,106 @@ export function ArchivedThreadsPanel() {
       }),
     }));
     return { groups: sortedGroups, hasMultipleEnvironments };
-  }, [archivedSnapshots, environments, projectGroups, scope]);
+  }, [archivedSnapshots, environments, projectGroups]);
 
-  const handleArchivedThreadContextMenu = useCallback(
-    async (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {
-      const api = readLocalApi();
-      if (!api) return;
-      const clicked = await api.contextMenu.show(
-        [
-          { id: "unarchive", label: "Unarchive" },
-          { id: "delete", label: "Delete", destructive: true },
-        ],
-        position,
+  const unarchive = async (threadRef: ScopedThreadRef, title: string) => {
+    const result = await unarchiveThread(threadRef);
+    if (result._tag === "Success") {
+      refreshArchivedThreads();
+      toastManager.add(stackedThreadToast({ type: "success", title: `Unarchived ${title}` }));
+      return;
+    }
+    if (!isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Couldn't unarchive thread",
+          description: error instanceof Error ? error.message : "Try again in a moment.",
+        }),
       );
+    }
+  };
 
-      if (clicked === "unarchive") {
-        const result = await unarchiveThread(threadRef);
-        if (result._tag === "Success") {
-          refreshArchivedThreads();
-        } else if (!isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Failed to unarchive thread",
-              description: error instanceof Error ? error.message : "An error occurred.",
-            }),
-          );
-        }
-        return;
-      }
+  const deleteForGood = async (threadRef: ScopedThreadRef) => {
+    const result = await confirmAndDeleteThread(threadRef);
+    if (result._tag === "Success") {
+      refreshArchivedThreads();
+    } else if (!isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Couldn't delete thread",
+          description: error instanceof Error ? error.message : "Try again in a moment.",
+        }),
+      );
+    }
+  };
 
-      if (clicked === "delete") {
-        const result = await confirmAndDeleteThread(threadRef);
-        if (result._tag === "Success") {
-          refreshArchivedThreads();
-        } else if (!isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Failed to delete thread",
-              description: error instanceof Error ? error.message : "An error occurred.",
-            }),
-          );
-        }
-      }
-    },
-    [confirmAndDeleteThread, refreshArchivedThreads, unarchiveThread],
-  );
-
+  // A filter left on a project that has since emptied falls back to every project.
+  const activeProjectFilter = archivedGroups.some((group) => group.key === projectFilter)
+    ? projectFilter
+    : "all";
   const shownGroups = archivedGroups
-    .filter((group) => projectFilter === "all" || group.key === projectFilter)
+    .filter((group) => activeProjectFilter === "all" || group.key === activeProjectFilter)
     .map((group) => ({
       ...group,
       threads: group.threads.filter((thread) => matchesSettingsListQuery(query, [thread.title])),
     }))
     .filter((group) => group.threads.length > 0);
+  const filtered = query !== "" || activeProjectFilter !== "all";
 
   return (
     <>
-      <SettingsSection id={searchableSetting("archive").id} title="Archive">
-        <SettingsListToolbar>
-          <SettingsListSearch label="Search archive" value={query} onValueChange={setQuery} />
-          <SettingsListFilter
-            label="Project"
-            value={projectFilter}
-            onValueChange={setProjectFilter}
-            options={[
-              { value: "all", label: "All projects" },
-              ...archivedGroups.map((group) => ({ value: group.key, label: group.title })),
-            ]}
-          />
-        </SettingsListToolbar>
+      <SettingsSection id={searchableSetting("archive").id} title="Archived threads">
+        {/* Search and filter only help once there is something to look through. */}
+        {archivedGroups.length > 0 ? (
+          <SettingsListToolbar>
+            <SettingsListSearch label="Search archive" value={query} onValueChange={setQuery} />
+            {archivedGroups.length > 1 ? (
+              <SettingsListFilter
+                label="Project"
+                value={activeProjectFilter}
+                onValueChange={setProjectFilter}
+                options={[
+                  { value: "all", label: "All projects" },
+                  ...archivedGroups.map((group) => ({ value: group.key, label: group.title })),
+                ]}
+              />
+            ) : null}
+          </SettingsListToolbar>
+        ) : null}
         {shownGroups.length === 0 ? (
           isLoadingArchive || archiveError ? (
             <SettingsRow
-              title={
-                isLoadingArchive ? "Loading archived threads" : "Could not load archived threads"
-              }
+              title={isLoadingArchive ? "Loading archived threads…" : "Couldn't load the archive"}
               description={archiveError ?? "Checking connected machines."}
               role={isLoadingArchive ? "status" : undefined}
             />
           ) : (
             <SettingsListEmpty
               icon={<ArchiveIcon />}
-              title={query || projectFilter !== "all" ? "Nothing matches" : "No archived threads"}
+              title={filtered ? "Nothing matches" : "No archived threads"}
               description={
-                query || projectFilter !== "all"
+                filtered
                   ? "Try another search or project."
-                  : "Archived threads will appear here."
+                  : "Archive a thread from its menu to put it away without deleting it. Unarchive it here any time."
               }
-            />
+            >
+              {filtered ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setQuery("");
+                    setProjectFilter("all");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              ) : null}
+            </SettingsListEmpty>
           )
         ) : (
           shownGroups.map(({ key, project, title, threads: projectThreads }) => (
@@ -2092,29 +2119,32 @@ export function ArchivedThreadsPanel() {
                   <SettingsListItem
                     key={`${thread.environmentId}:${thread.id}`}
                     onContextMenu={(event) => {
+                      const api = readLocalApi();
+                      if (!api) return;
                       event.preventDefault();
-                      void (async () => {
-                        const result = await settlePromise(() =>
-                          handleArchivedThreadContextMenu(
-                            scopeThreadRef(thread.environmentId, thread.id),
-                            {
-                              x: event.clientX,
-                              y: event.clientY,
-                            },
-                          ),
+                      const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+                      void settlePromise(async () => {
+                        const clicked = await api.contextMenu.show(
+                          [
+                            { id: "unarchive", label: "Unarchive" },
+                            { id: "delete", label: "Delete…", destructive: true },
+                          ],
+                          { x: event.clientX, y: event.clientY },
                         );
-                        if (result._tag === "Failure") {
-                          const error = squashAtomCommandFailure(result);
-                          toastManager.add(
-                            stackedThreadToast({
-                              type: "error",
-                              title: "Archived thread action failed",
-                              description:
-                                error instanceof Error ? error.message : "An error occurred.",
-                            }),
-                          );
-                        }
-                      })();
+                        if (clicked === "unarchive") await unarchive(threadRef, thread.title);
+                        if (clicked === "delete") await deleteForGood(threadRef);
+                      }).then((result) => {
+                        if (result._tag === "Success") return;
+                        const error = squashAtomCommandFailure(result);
+                        toastManager.add(
+                          stackedThreadToast({
+                            type: "error",
+                            title: "Couldn't open the thread menu",
+                            description:
+                              error instanceof Error ? error.message : "Try again in a moment.",
+                          }),
+                        );
+                      });
                     }}
                     title={thread.title}
                     description={
@@ -2126,37 +2156,34 @@ export function ArchivedThreadsPanel() {
                       </span>
                     }
                     control={
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="xs"
-                        className="shrink-0"
-                        onClick={() => {
-                          void (async () => {
-                            const result = await unarchiveThread(
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="xs"
+                          onClick={() =>
+                            void unarchive(
                               scopeThreadRef(thread.environmentId, thread.id),
-                            );
-                            if (result._tag === "Success") {
-                              refreshArchivedThreads();
-                              return;
-                            }
-                            if (!isAtomCommandInterrupted(result)) {
-                              const error = squashAtomCommandFailure(result);
-                              toastManager.add(
-                                stackedThreadToast({
-                                  type: "error",
-                                  title: "Failed to unarchive thread",
-                                  description:
-                                    error instanceof Error ? error.message : "An error occurred.",
-                                }),
-                              );
-                            }
-                          })();
-                        }}
-                      >
-                        <ArchiveX className="size-3.5" />
-                        <span>Unarchive</span>
-                      </Button>
+                              thread.title,
+                            )
+                          }
+                        >
+                          <ArchiveX />
+                          Unarchive
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost-destructive"
+                          size="icon-xs"
+                          aria-label={`Delete ${thread.title}`}
+                          title="Delete"
+                          onClick={() =>
+                            void deleteForGood(scopeThreadRef(thread.environmentId, thread.id))
+                          }
+                        >
+                          <Trash2Icon />
+                        </Button>
+                      </div>
                     }
                   />
                 ))}

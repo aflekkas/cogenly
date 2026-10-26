@@ -1,3 +1,5 @@
+import { normalizeLegacyProviderThread } from "@cogenly/shared/legacyProviderThreadIdentity";
+import { isMisroutedLegacyRecoveryEvent } from "@cogenly/shared/legacyRecoveryEvent";
 import { withWorkMetadata } from "@cogenly/shared/workMetadata";
 import { applyThreadPullRequestLinkUpdate } from "@cogenly/shared/threadPullRequests";
 import type {
@@ -194,10 +196,16 @@ function upsertVisibleTurnItem(
 /** Applies one committed event to a matching thread projection. */
 export function applyOrchestrationV2ProjectionEvent(
   projection: OrchestrationV2ThreadProjection | null,
-  event: OrchestrationV2DomainEvent,
+  input: OrchestrationV2DomainEvent,
   options?: ApplyOrchestrationV2ProjectionEventOptions,
 ): OrchestrationV2ThreadProjection | null {
-  if (projection === null || event.threadId !== projection.thread.id) return projection;
+  const event = normalizeLegacyProviderThread(input);
+  if (
+    projection === null ||
+    event.threadId !== projection.thread.id ||
+    isMisroutedLegacyRecoveryEvent(event)
+  )
+    return projection;
 
   const partialTimeline = options?.partialTimeline === true;
   const latestLocalTurnOrdinal = options?.latestLocalTurnOrdinal;

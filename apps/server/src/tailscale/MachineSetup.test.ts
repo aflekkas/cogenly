@@ -398,4 +398,49 @@ describe("MachineSetup", () => {
       }).pipe(Effect.provide(harness.layer));
     }),
   );
+
+  it.effect("reads Serve as being set up, not broken, until start puts the mapping back", () =>
+    Effect.gen(function* () {
+      // `--tailscale-serve` removed the mapping when the previous run shut down.
+      const harness = yield* makeHarness({
+        mode: { enabled: true, servePort: 443, localPort: 3773 },
+        runs: {
+          serve: [
+            (input, probe) =>
+              Ref.update(probe, (current) => ({
+                ...current,
+                serveMappings: [ours(input.localPort)],
+              })).pipe(Effect.andThen(finished())),
+          ],
+        },
+      });
+      yield* Effect.gen(function* () {
+        const setup = yield* MachineSetup.MachineSetup;
+        const before = yield* setup.status;
+        assert.isFalse(before.tailscale.served);
+        assert.equal(stepOf(before, "expose").state, "working");
+        yield* setup.start(3773);
+        const ready = yield* awaitStatus((status) => status.ready);
+        assert.isTrue(ready.tailscale.served);
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
+
+  it.effect("reports a missing mapping as missing once start has run", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        status: { ...signedIn },
+        mode: { enabled: true, servePort: 443, localPort: 3773 },
+        // The tailnet refuses: the mapping stays missing.
+        runs: { serve: [() => finished({ _tag: "failed", reason: "other" })] },
+      });
+      yield* Effect.gen(function* () {
+        const setup = yield* MachineSetup.MachineSetup;
+        yield* setup.start(3773);
+        const after = yield* awaitStatus((status) => stepOf(status, "expose").state !== "working");
+        assert.isFalse(after.tailscale.served);
+        assert.equal(stepOf(after, "expose").state, "todo");
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
 });

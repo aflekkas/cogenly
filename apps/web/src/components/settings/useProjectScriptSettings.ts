@@ -1,20 +1,16 @@
-import { AuthSettingsWriteScope, EnvironmentAuthorizationError } from "@cogenly/contracts";
-import { readEnvironmentScope } from "../../state/session";
+import {
+  AuthOrchestrationOperateScope,
+  AuthSettingsWriteScope,
+  EnvironmentAuthorizationError,
+  type EnvironmentId,
+  type ProjectScript,
+} from "@cogenly/contracts";
 import {
   isAtomCommandInterrupted,
   mapAtomCommandResult,
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@cogenly/client-runtime/state/runtime";
-import {
-  type EnvironmentId,
-  type ProjectId,
-  type ProjectScript,
-  type ResolvedKeybindingsConfig,
-  type ServerSettings,
-} from "@cogenly/contracts";
-import { resolveProjectScripts } from "@cogenly/shared/projectScripts";
-import { clearProjectSettingsOverrides } from "@cogenly/shared/projectSettings";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import { useRef, useState } from "react";
@@ -29,9 +25,14 @@ import {
   nextProjectScriptId,
   releaseClaimedRoles,
 } from "../../projectScripts";
+import type { SidebarProjectGroupMember } from "../../sidebarProjectGrouping";
 import { useProjects } from "../../state/entities";
+import { useEnvironments } from "../../state/environments";
+import { projectEnvironment } from "../../state/projects";
 import { serverEnvironment } from "../../state/server";
+import { readEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import type { NewProjectScriptInput } from "../projectScriptEditor";
 import { toastManager } from "../ui/toast";
 
@@ -47,22 +48,29 @@ function reportScriptFailure(result: AtomCommandResult<unknown, unknown>) {
   return mapAtomCommandResult(result, () => undefined);
 }
 
+function deniedResult(message: string): AtomCommandResult<void, unknown> {
+  return reportScriptFailure(
+    AsyncResult.failure(
+      Cause.fail(
+        new EnvironmentAuthorizationError({ requiredScope: AuthSettingsWriteScope, message }),
+      ),
+    ),
+  );
+}
+
 /**
- * Edits the action list on every target: the environment default when there is
- * no project, else that project's override entry, then saves changed shortcuts.
+ * Edits a repository's actions, stored on each of its checkouts
+ * (`Project.scripts`), then saves changed shortcuts once per machine. A
+ * checkout without its own list starts from the machine's actions.
  */
-export function useProjectScriptSettings(
-  targets: readonly {
-    environmentId: EnvironmentId;
-    settings: ServerSettings;
-    keybindings: ResolvedKeybindingsConfig;
-    project?: { id: ProjectId; scripts: readonly ProjectScript[] };
-  }[],
-) {
+export function useProjectScriptSettings(members: readonly SidebarProjectGroupMember[]) {
   const projects = useProjects();
+  const { environments } = useEnvironments();
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
-  const updateSettings = useAtomCommand(serverEnvironment.updateSettings, "project actions update");
+  const updateProject = useOrchestrationCommand(projectEnvironment.update, {
+    reportFailure: false,
+  });
   const upsertKeybinding = useAtomCommand(
     serverEnvironment.upsertKeybinding,
     "action shortcut update",
@@ -71,99 +79,79 @@ export function useProjectScriptSettings(
     serverEnvironment.removeKeybinding,
     "action shortcut removal",
   );
+  const configOf = (environmentId: EnvironmentId) =>
+    environments.find((environment) => environment.environmentId === environmentId)?.serverConfig ??
+    null;
 
   async function persist(
-    transform: (current: readonly ProjectScript[]) => readonly ProjectScript[] | null,
+    transform: (current: readonly ProjectScript[]) => readonly ProjectScript[],
     scriptId?: string,
     keybinding?: string | null,
   ): Promise<AtomCommandResult<void, unknown>> {
-    if (savingRef.current || targets.length === 0) {
-      const message = "No available machine, or another action change is saving.";
+    const targets = members.flatMap((member) => {
+      const config = configOf(member.environmentId);
+      return config ? [{ member, config }] : [];
+    });
+    if (savingRef.current || targets.length === 0 || targets.length < members.length) {
+      const message =
+        "Connect every machine with this repository, or wait for the last change to save.";
       toastManager.add({ type: "error", title: "Actions not saved", description: message });
       return AsyncResult.failure(Cause.fail(new Error(message)));
     }
-    if (
-      targets.some(
-        ({ environmentId }) => !readEnvironmentScope(environmentId, AuthSettingsWriteScope),
-      )
-    ) {
-      return reportScriptFailure(
-        AsyncResult.failure(
-          Cause.fail(
-            new EnvironmentAuthorizationError({
-              requiredScope: AuthSettingsWriteScope,
-              message: "This connection cannot change this machine's settings.",
-            }),
-          ),
-        ),
+    // A project update carrying scripts also needs settings permission.
+    const denied = targets.find(
+      ({ member }) =>
+        !readEnvironmentScope(member.environmentId, AuthSettingsWriteScope) ||
+        !readEnvironmentScope(member.environmentId, AuthOrchestrationOperateScope),
+    );
+    if (denied) {
+      return deniedResult(
+        `This connection cannot change actions on ${denied.member.environmentLabel ?? "this machine"}.`,
       );
     }
     savingRef.current = true;
     setSaving(true);
     try {
-      for (const { environmentId, settings, keybindings, project } of targets) {
-        const current = project
-          ? resolveProjectScripts(settings, project)
-          : settings.defaultProjectScripts;
+      const handledEnvironments = new Set<EnvironmentId>();
+      for (const { member, config } of targets) {
+        const current = member.scripts;
         const nextScripts = transform(current);
-        const effectiveScripts = nextScripts ?? settings.defaultProjectScripts;
-        const result = await updateSettings({
-          environmentId,
-          input: {
-            patch: project
-              ? {
-                  projectSettingsOverrides: {
-                    [project.id]:
-                      nextScripts === null
-                        ? clearProjectSettingsOverrides(settings, project.id, [
-                            "defaultProjectScripts",
-                          ])
-                        : {
-                            ...settings.projectSettingsOverrides[project.id],
-                            defaultProjectScripts: nextScripts,
-                          },
-                  },
-                }
-              : { defaultProjectScripts: nextScripts ?? [] },
-          },
+        const result = await updateProject({
+          environmentId: member.environmentId,
+          input: { projectId: member.id, scripts: [...nextScripts] },
         });
         if (result._tag === "Failure") return reportScriptFailure(result);
+        // Shortcuts are per machine, so each machine's bindings change once.
+        if (handledEnvironments.has(member.environmentId)) continue;
+        handledEnvironments.add(member.environmentId);
         const changedIds = scriptId
           ? [scriptId]
           : current
-              .filter((script) => !effectiveScripts.some((next) => next.id === script.id))
+              .filter((script) => !nextScripts.some((next) => next.id === script.id))
               .map((script) => script.id);
         for (const id of changedIds) {
           const command = commandForProjectScript(id);
-          const previousValue = keybindingValueForCommand(keybindings, command);
+          const previousValue = keybindingValueForCommand(config.keybindings, command);
           const previous = previousValue
             ? decodeProjectScriptKeybindingRule({ keybinding: previousValue, command })
             : null;
           const next = decodeProjectScriptKeybindingRule({ keybinding, command });
           const retainedElsewhere =
-            !nextScripts?.some((script) => script.id === id) &&
-            ((project && settings.defaultProjectScripts.some((script) => script.id === id)) ||
-              Object.entries(settings.projectSettingsOverrides).some(
-                ([projectId, entry]) =>
-                  projectId !== project?.id &&
-                  entry.defaultProjectScripts?.some((script) => script.id === id),
-              ) ||
-              projects.some(
-                (other) =>
-                  other.environmentId === environmentId &&
-                  other.id !== project?.id &&
-                  (project ? resolveProjectScripts(settings, other) : other.scripts).some(
-                    (script) => script.id === id,
-                  ),
-              ));
+            !nextScripts.some((script) => script.id === id) &&
+            projects.some(
+              (other) =>
+                other.environmentId === member.environmentId &&
+                !members.some((candidate) => candidate.id === other.id) &&
+                other.scripts.some((script) => script.id === id),
+            );
           const bindingResult = next
             ? await upsertKeybinding({
-                environmentId,
+                environmentId: member.environmentId,
                 input:
                   previous && previous.key !== next.key ? { ...next, replace: previous } : next,
               })
             : previous && !retainedElsewhere
-              ? await removeKeybinding({ environmentId, input: previous })
+              ? await removeKeybinding({ environmentId: member.environmentId, input: previous })
               : null;
           if (bindingResult?._tag === "Failure") return reportScriptFailure(bindingResult);
         }
@@ -176,18 +164,9 @@ export function useProjectScriptSettings(
   }
 
   function submit(scriptId: string | null, input: NewProjectScriptInput) {
-    const existingIds = [
-      ...projects.flatMap((project) => project.scripts.map((script) => script.id)),
-      ...targets.flatMap(({ settings, project }) =>
-        [
-          ...settings.defaultProjectScripts,
-          ...Object.values(settings.projectSettingsOverrides).flatMap(
-            (entry) => entry.defaultProjectScripts ?? [],
-          ),
-          ...(project?.scripts ?? []),
-        ].map((script) => script.id),
-      ),
-    ];
+    const existingIds = projects.flatMap((project) => {
+      return project.scripts.map((script) => script.id);
+    });
     const id = scriptId ?? nextProjectScriptId(input.name, existingIds);
     const next = buildProjectScript(id, input);
     return persist(

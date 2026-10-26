@@ -19,11 +19,10 @@ export function NotificationSettings() {
 
   return (
     <SettingsRow
-      clientSetting
       {...searchableSetting("thread-notifications")}
       description={
         permissionMessage ??
-        "Alerts when a thread finishes, fails, or needs input or approval. Your preference is shared; each device needs notification permission."
+        "Alert you when a thread finishes, fails or needs you. Each device asks for permission."
       }
       control={
         <Select

@@ -40,8 +40,9 @@ disconnect an otherwise healthy conversation.
 
 Use direct pairing when the other device can reach the host's network address.
 
-On a desktop host, open **Settings → Connections**, enable **Network access**,
-then create a pairing link using an address the other device can reach. Changing
+On a desktop host, open **Settings → Connections**, enable **Network access**
+under **Remote access**, then choose **Pair a device** under **Devices with access**,
+using an address the other device can reach. Changing
 network access restarts the desktop app. You can turn it off in the same place.
 
 For a command-line host, replace `<private-ip>` with the host's LAN or tailnet
@@ -295,8 +296,8 @@ threads on an environment through its MCP server. See
 
 ## Manage or revoke access
 
-On the host, **Settings → Connections** lets authorized administrators create
-pairing links and revoke client sessions. Revoking an unused link prevents new
+On the host, **Devices with access** in **Settings → Connections** lets
+administrators create pairing links and revoke device sessions. Revoking an unused link prevents new
 pairings; revoke a device's session to remove its existing access. Command-line
 management is available through `cogenly auth --help`.
 

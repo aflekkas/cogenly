@@ -2045,11 +2045,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const providerInstanceEntries = useMemo<ReadonlyArray<ProviderInstanceEntry>>(
     () =>
       sortProviderInstanceEntries(
-        applyProviderInstanceSettings(
-          deriveProviderInstanceEntries(providerStatuses),
-          settings,
-          activeProjectId,
-        ),
+        applyProviderInstanceSettings(deriveProviderInstanceEntries(providerStatuses), settings),
       ),
     [providerStatuses, settings, activeProjectId],
   );
@@ -4865,13 +4861,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           composerControlsCollapsed
             ? cn(
                 "min-w-13 shrink text-xs!",
+                // Icon-only: the frame's negative margin cancels the gap the empty label
+                // would leave, and the floor drops to icon plus chevron so the row doesn't
+                // stretch them apart, keeping the icon → chevron gap the other controls have.
                 !showInlineRestingControls &&
-                  "@max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:w-0 @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:flex-none",
+                  "@max-[640px]/composer-surface:min-w-10 @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label-frame]]:-ms-1 @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:w-0 @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:flex-none",
               )
             : // A narrow composer shows the provider icon alone rather than a clipped
               // name (the tooltip and aria-label keep the full name); the chevron
               // stays until even that does not fit.
-              "min-w-13 @max-xs/composer-surface:[&_[data-chat-provider-model-picker-label-frame]]:-ms-1.5 @max-xs/composer-surface:[&_[data-chat-provider-model-picker-label-frame]]:grid-cols-[0fr] @max-xs/composer-surface:[&_[data-chat-provider-model-picker-label-frame]]:opacity-0 @max-[12rem]/composer-surface:min-w-0 @max-[12rem]/composer-surface:[&_[data-chat-provider-model-picker-chevron]]:-ms-1.5 @max-[12rem]/composer-surface:[&_[data-chat-provider-model-picker-chevron]]:grid-cols-[0fr] @max-[12rem]/composer-surface:[&_[data-chat-provider-model-picker-chevron]]:opacity-0"
+              "min-w-13 @max-xs/composer-surface:[&_[data-chat-provider-model-picker-label-frame]]:-ms-1.5 @max-xs/composer-surface:[&_[data-chat-provider-model-picker-label-frame]]:grid-cols-[0fr] @max-xs/composer-surface:[&_[data-chat-provider-model-picker-label-frame]]:opacity-0 @max-[12rem]/composer-surface:min-w-0 @max-[12rem]/composer-surface:[&_[data-chat-provider-model-picker-chevron]]:-ms-1.5 @max-[12rem]/composer-surface:[&_[data-chat-provider-model-picker-chevron]]:me-0 @max-[12rem]/composer-surface:[&_[data-chat-provider-model-picker-chevron]]:grid-cols-[0fr] @max-[12rem]/composer-surface:[&_[data-chat-provider-model-picker-chevron]]:opacity-0"
         }
         open={isComposerModelPickerOpen}
         instanceIndicatorBackground={
@@ -6666,58 +6665,64 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   data-chat-composer-primary-actions-compact={
                     isComposerPrimaryActionsCompact ? "true" : "false"
                   }
-                  // Even breathing room between dictation, attach and the primary button.
-                  className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
+                  // Dictation and attach sit as one tight pair; the larger send/stop button
+                  // gets more room so the pair reads as evenly spaced next to it.
+                  className="flex shrink-0 flex-nowrap items-center justify-end gap-2.5"
                 >
-                  {settings.dictationEnabled && !isChoiceOnlyPendingQuestion ? (
-                    <ComposerDictationControl
-                      ownerKey={composerDraftTargetKey}
-                      disabled={composerEditorLocked}
-                      keybindings={keybindings}
-                      handleRef={dictationRef}
-                      onPartial={onDictationPartial}
-                      onFinal={onDictationFinal}
-                      onActiveChange={onDictationActiveChange}
-                      onRecordingChange={setDictationRecording}
-                      waveform={expandedControlsLayout.dictationWaveform}
-                    />
-                  ) : null}
-                  {showComposerAttachAction ? (
-                    <>
-                      <input
-                        ref={attachmentInputRef}
-                        type="file"
-                        multiple
-                        className="hidden"
-                        onChange={(event) => {
-                          const files = Array.from(event.currentTarget.files ?? []);
-                          event.currentTarget.value = "";
-                          // Inserting a chip refocuses the editor after the draft renders;
-                          // focusing synchronously here would report the editor's stale text
-                          // over the prompt that was just written.
-                          void addComposerAttachments(files).then((inserted) => {
-                            if (!inserted) focusComposer();
-                          });
-                        }}
-                      />
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              onPointerDown={(event) => event.preventDefault()}
-                              onClick={() => attachmentInputRef.current?.click()}
-                              aria-label="Attach files"
-                            />
-                          }
-                        >
-                          <PaperclipIcon />
-                        </TooltipTrigger>
-                        <TooltipPopup>Attach files</TooltipPopup>
-                      </Tooltip>
-                    </>
+                  {(settings.dictationEnabled && !isChoiceOnlyPendingQuestion) ||
+                  showComposerAttachAction ? (
+                    <div className="flex shrink-0 items-center gap-0.5">
+                      {settings.dictationEnabled && !isChoiceOnlyPendingQuestion ? (
+                        <ComposerDictationControl
+                          ownerKey={composerDraftTargetKey}
+                          disabled={composerEditorLocked}
+                          keybindings={keybindings}
+                          handleRef={dictationRef}
+                          onPartial={onDictationPartial}
+                          onFinal={onDictationFinal}
+                          onActiveChange={onDictationActiveChange}
+                          onRecordingChange={setDictationRecording}
+                          waveform={expandedControlsLayout.dictationWaveform}
+                        />
+                      ) : null}
+                      {showComposerAttachAction ? (
+                        <>
+                          <input
+                            ref={attachmentInputRef}
+                            type="file"
+                            multiple
+                            className="hidden"
+                            onChange={(event) => {
+                              const files = Array.from(event.currentTarget.files ?? []);
+                              event.currentTarget.value = "";
+                              // Inserting a chip refocuses the editor after the draft renders;
+                              // focusing synchronously here would report the editor's stale text
+                              // over the prompt that was just written.
+                              void addComposerAttachments(files).then((inserted) => {
+                                if (!inserted) focusComposer();
+                              });
+                            }}
+                          />
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  onPointerDown={(event) => event.preventDefault()}
+                                  onClick={() => attachmentInputRef.current?.click()}
+                                  aria-label="Attach files"
+                                />
+                              }
+                            >
+                              <PaperclipIcon />
+                            </TooltipTrigger>
+                            <TooltipPopup>Attach files</TooltipPopup>
+                          </Tooltip>
+                        </>
+                      ) : null}
+                    </div>
                   ) : null}
                   <ComposerFooterPrimaryActions
                     compact={isComposerPrimaryActionsCompact}

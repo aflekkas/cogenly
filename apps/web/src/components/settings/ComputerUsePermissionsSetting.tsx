@@ -68,9 +68,14 @@ function ComputerUsePermissionsRow({
   readonly onRequested: () => void;
 }) {
   const { canRequest, pending, request } = useRequestComputerUsePermission(environmentId);
+  // Which app to grant only matters while a grant is missing.
+  const missingGrant = status.permissions.some((entry) => entry.grant !== "granted");
   const description =
     computerUseUnsupportedLine(status) ??
-    ([machineNote, computerUseHostAppNote(status)].filter(Boolean).join(" ") || undefined);
+    ([machineNote, missingGrant ? computerUseHostAppNote(status) : null]
+      .filter(Boolean)
+      .join(" ") ||
+      undefined);
 
   return (
     <SettingsRow

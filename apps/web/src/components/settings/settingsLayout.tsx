@@ -6,7 +6,6 @@ import { InfoIcon, PlusIcon, Undo2Icon } from "lucide-react";
 import {
   DEFAULT_SERVER_SETTINGS,
   isUniversalServerSettingKey,
-  isMachineLocalProjectSettingKey,
   type ServerSettings,
 } from "@cogenly/contracts";
 import * as Equal from "effect/Equal";
@@ -32,7 +31,7 @@ import {
 import { cn } from "../../lib/utils";
 import { getRelativeTimeState } from "../../timestampFormat";
 import { PageContent } from "../PageContent";
-import { Button, InlineButton } from "../ui/button";
+import { Button } from "../ui/button";
 import { RefreshIcon } from "../ui/refresh-icon";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { DisclosureChevron } from "../ui/disclosure";
@@ -54,27 +53,8 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useOptionalSettingsScope } from "./SettingsScopeContext";
 import { MachineScopeMenu, SettingsScopeSentence } from "./SettingsScopeSentence";
-import { ALL_PROJECTS_VALUE, selectProjectScope } from "./settingsScopeAxis";
-import {
-  groupProjectOverridesByFolder,
-  isProjectScopedSettingKey,
-  settingAppliesToAllProjects,
-  listProjectOverrides,
-  type ProjectOverrideEntry,
-  scopedSettingsAreMixed,
-  scopedSettingsSource,
-  selectMachineLocalSettingsTargets,
-} from "./scopedSettings";
-import {
-  overridingProjectsFrom,
-  useClearProjectOverrides,
-  useClearScopedSettings,
-} from "./useScopedSettings";
-import {
-  SettingInheritance,
-  type SettingInheritanceState,
-  type SettingOverridingProject,
-} from "./SettingInheritance";
+import { selectMachineLocalSettingsTargets } from "./scopedSettings";
+import { SettingInheritance } from "./SettingInheritance";
 
 const EMPTY_SETTING_KEYS: readonly (keyof ServerSettings)[] = [];
 
@@ -602,13 +582,10 @@ export function SettingsRow({
   description,
   status,
   resetAction,
-  onResetOverride,
   control,
   serverScoped = false,
   settingKeys = EMPTY_SETTING_KEYS,
-  clientSetting = false,
   interactive = false,
-  mixed: mixedOverride,
   children,
   className,
   ...rowProps
@@ -617,33 +594,19 @@ export function SettingsRow({
   description?: ReactNode;
   status?: ReactNode;
   resetAction?: ReactNode;
-  /** Replaces the default override clear for rows with side effects beyond the settings key. */
-  onResetOverride?: () => void;
   control?: ReactNode;
   serverScoped?: boolean;
   settingKeys?: readonly (keyof ServerSettings)[];
-  /**
-   * The row edits a client setting, which has no per-project value. At a
-   * project scope it reads as applying to all projects, like a server row
-   * whose keys take no override.
-   */
-  clientSetting?: boolean;
   interactive?: boolean;
-  mixed?: boolean;
   children?: ReactNode;
 }) {
   const targetRef = useSettingsSearchTarget<HTMLDivElement>(rowProps.id);
   const primarySettingsAvailable = usePrimarySettingsAvailable();
   const context = useOptionalSettingsScope();
-  const machineLocalProjectSetting =
-    settingKeys.length > 0 && settingKeys.every(isMachineLocalProjectSettingKey);
-  const rowTargets = context
-    ? machineLocalProjectSetting
-      ? selectMachineLocalSettingsTargets(context.scope, context.targets)
-      : context.targets
-    : [];
+  const machineLocal =
+    settingKeys.length > 0 && !settingKeys.some((key) => isUniversalServerSettingKey(key));
   const rowEnvironments = context
-    ? machineLocalProjectSetting
+    ? machineLocal
       ? selectMachineLocalSettingsTargets(context.scope, context.connectedEnvironments)
       : context.connectedEnvironments
     : [];
@@ -655,24 +618,6 @@ export function SettingsRow({
     ? rowEnvironments.length > 0 &&
       rowEnvironments.every((target) => writableIds.has(target.environmentId))
     : primaryCanWrite;
-  const clearOverrides = useClearScopedSettings();
-  const clearProjectOverrides = useClearProjectOverrides();
-  const isProjectScope = context !== null && context.scope.kind === "project";
-  const scopedKeys = settingKeys.filter(isProjectScopedSettingKey);
-  const machineLocal =
-    settingKeys.length > 0 && !settingKeys.some((key) => isUniversalServerSettingKey(key));
-  // A project scope can only edit keys that support overrides; the rest stay
-  // visible, marked as applying to all projects with a way there, but cannot
-  // change here.
-  const environmentWide = settingAppliesToAllProjects({
-    scopeKind: context?.scope.kind ?? null,
-    serverScoped,
-    clientSetting,
-    settingKeys,
-  });
-  const mixed =
-    mixedOverride ?? (context !== null && scopedSettingsAreMixed(rowTargets, settingKeys));
-  const source = context && isProjectScope ? scopedSettingsSource(rowTargets, scopedKeys) : null;
   const unavailable =
     serverScoped &&
     (!canWriteSettings || !(context ? rowEnvironments.length > 0 : primarySettingsAvailable));
@@ -682,51 +627,13 @@ export function SettingsRow({
     serverScoped &&
     machineLocal &&
     !context.machinePage &&
-    (!isProjectScope || machineLocalProjectSetting) &&
     context.environments.length > 1 ? (
       <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
         on <MachineScopeMenu />
       </span>
     ) : null;
   const machineName = context?.environment?.label ?? "this machine";
-  const environmentSettingsById = useMemo(
-    () =>
-      new Map(
-        (context?.connectedEnvironments ?? []).flatMap((environment) =>
-          environment.serverConfig
-            ? [[environment.environmentId, environment.serverConfig.settings] as const]
-            : [],
-        ),
-      ),
-    [context?.connectedEnvironments],
-  );
-  // At All projects, projects with their own value keep it when the value for
-  // all projects changes; the chain names them and can reset them.
-  const overridingProjects = useMemo((): SettingOverridingProject[] => {
-    if (context === null || isProjectScope || scopedKeys.length === 0) return [];
-    return overridingProjectsFrom(
-      groupProjectOverridesByFolder(
-        listProjectOverrides(context.connectedEnvironments, scopedKeys),
-        context.folders,
-      ),
-      // A machine page has no project picker to open one with.
-      context.machinePage
-        ? undefined
-        : (folderId) => context.selectScope(selectProjectScope(context.search, folderId)),
-    );
-  }, [context, isProjectScope, scopedKeys]);
-  const renderedReset =
-    unavailable || environmentWide ? null : isProjectScope && scopedKeys.length > 0 ? (
-      source === "project" || source === "mixed" ? (
-        <SettingResetButton
-          label={typeof title === "string" ? title : "override"}
-          tooltip="Reset to All projects"
-          onClick={() => (onResetOverride ? onResetOverride() : clearOverrides(scopedKeys))}
-        />
-      ) : null
-    ) : (
-      resetAction
-    );
+  const renderedReset = unavailable ? null : resetAction;
   const inertControl = (message: string) => (
     <Tooltip>
       <TooltipTrigger
@@ -748,9 +655,6 @@ export function SettingsRow({
       <TooltipPopup side="top">{message}</TooltipPopup>
     </Tooltip>
   );
-  // A mixed selection keeps the real control with "Mixed" as its placeholder
-  // (the multi-selection inspector convention): the popover shows who has
-  // what, and picking a value applies it to every target.
   const renderedControl =
     unavailable && control
       ? inertControl(
@@ -767,76 +671,35 @@ export function SettingsRow({
               ? `Reconnect ${machineName} to change this setting.`
               : PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE,
         )
-      : environmentWide && control
-        ? inertControl(
-            serverScoped && machineLocal
-              ? `Applies to every project on ${machineName}. Change it under All projects.`
-              : "Applies to all projects. Change it under All projects.",
-          )
-        : control;
-  const allProjectsLink =
-    environmentWide && context ? (
-      <span className="text-xs">
-        <InlineButton
-          tone="muted"
-          onClick={() =>
-            context.selectScope(selectProjectScope(context.search, ALL_PROJECTS_VALUE))
-          }
-        >
-          Applies to all projects
-        </InlineButton>
-      </span>
-    ) : null;
+      : control;
   // Server rows get an indicator beside the title that opens the resolution
-  // chain per target at every scope; client rows keep a plain status only.
+  // chain; client rows keep a plain status only.
+  const key = settingKeys[0];
+  const target = context?.target ?? null;
   const customized =
-    context !== null &&
-    settingKeys.some((key) =>
-      rowTargets.some((candidate) => {
-        const environmentSettings = environmentSettingsById.get(candidate.environmentId);
-        return (
-          environmentSettings !== undefined &&
-          !Equal.equals(environmentSettings[key], DEFAULT_SERVER_SETTINGS[key])
-        );
-      }),
+    target !== null &&
+    settingKeys.some(
+      (settingKey) =>
+        !Equal.equals(target.settings[settingKey], DEFAULT_SERVER_SETTINGS[settingKey]),
     );
-  const inheritance: { state: SettingInheritanceState; summary: string } = mixed
-    ? {
-        state: "mixed",
-        summary: isProjectScope
-          ? "Differs between this project's repositories"
-          : "Differs between machines",
-      }
-    : source === "project"
-      ? { state: "overridden", summary: "Overrides All projects" }
-      : source === "cogenly.json"
-        ? { state: "inherited", summary: "From the repository's cogenly.json" }
-        : source === "environment" && scopedKeys.length > 0
-          ? { state: "inherited", summary: "Follows All projects" }
-          : customized
-            ? {
-                state: "environment",
-                summary: machineLocal ? `Set on ${machineName}` : "Set for all projects",
-              }
-            : { state: "default", summary: "Built-in default" };
   const renderedInheritance =
-    context && serverScoped && settingKeys.length > 0 ? (
+    context && serverScoped && key !== undefined && target !== null ? (
       <SettingInheritance
-        state={inheritance.state}
-        summary={inheritance.summary}
-        targets={rowTargets}
-        environments={rowEnvironments}
-        keys={settingKeys}
-        overridingProjects={overridingProjects}
-        {...(canWriteSettings
-          ? {
-              onClearOverrides: (entries: readonly ProjectOverrideEntry[]) =>
-                clearProjectOverrides(entries, scopedKeys),
-            }
-          : {})}
+        state={customized ? "environment" : "default"}
+        summary={
+          customized
+            ? machineLocal
+              ? `Set on ${machineName}`
+              : "Set for all machines"
+            : "Built-in default"
+        }
+        target={target}
+        environment={context.connectedEnvironments.find(
+          (environment) => environment.environmentId === target.environmentId,
+        )}
+        settingKey={key}
       />
     ) : null;
-  const renderedStatus = status;
 
   return (
     <SettingsRowContent
@@ -845,7 +708,7 @@ export function SettingsRow({
       tabIndex={rowProps.id ? -1 : rowProps.tabIndex}
       title={title}
       description={description}
-      status={renderedStatus}
+      status={status}
       control={renderedControl}
       interactive={interactive}
       className={className}
@@ -860,11 +723,10 @@ export function SettingsRow({
             {renderedReset}
           </span>
           {machineLabel}
-          {allProjectsLink}
         </>
       }
     >
-      {(unavailable || environmentWide) && children ? (
+      {unavailable && children ? (
         <div inert className="opacity-50">
           {children}
         </div>

@@ -21,6 +21,7 @@ import {
   type OrchestratorMcpDelegateTaskInput,
   type OrchestratorMcpDelegateTaskResult,
   type OrchestratorMcpInteractionMode,
+  type OrchestratorMcpMachineProvider,
   type OrchestratorMcpDeleteScheduledTaskInput,
   type OrchestratorMcpRequestSecretInput,
   type OrchestratorMcpRequestSecretResult,
@@ -310,6 +311,17 @@ function providerConstraints(
     constraints.push("Provider is not authenticated.");
   }
   return constraints;
+}
+
+/** Another machine's provider as orchestrator_capabilities lists it. */
+function machineProvider(provider: ServerProvider): OrchestratorMcpMachineProvider {
+  return {
+    providerInstanceId: provider.instanceId,
+    driverKind: provider.driver,
+    displayName: provider.displayName ?? null,
+    models: provider.models.map((model) => model.slug),
+    canRunChildTask: providerConstraints(provider, true).length === 0,
+  };
 }
 
 /**
@@ -1139,9 +1151,77 @@ const make = Effect.gen(function* () {
         const catalog = yield* remote.value
           .catalog(machine)
           .pipe(Effect.mapError((error) => failure("provider_unavailable", error.message)));
-        if (Option.isSome(catalog)) return { providers: catalog.value, remote: true };
+        if (Option.isSome(catalog)) {
+          const machines = yield* Effect.serviceOption(Machines.Machines);
+          const machineName = Option.isNone(machines)
+            ? undefined
+            : yield* machines.value.list.pipe(
+                Effect.map(
+                  (view) =>
+                    view.machines.find((candidate) => candidate.environmentId === machine)?.name,
+                ),
+                Effect.orElseSucceed(() => undefined),
+              );
+          return { providers: catalog.value, remote: true, machineName };
+        }
       }
-      return { providers: yield* loadProviders, remote: false };
+      return { providers: yield* loadProviders, remote: false, machineName: undefined };
+    });
+
+  /**
+   * Provider instance ids are machine-local: another machine may name its
+   * instances differently. A requested or inherited instance it lacks resolves
+   * to one of the same driver there, preferring one that advertises the model;
+   * with none, the refusal lists the instances that machine has.
+   */
+  const remoteTarget = (input: {
+    readonly parent: Pick<OrchestrationV2ThreadProjection, "thread">;
+    readonly target: OrchestratorMcpTarget | undefined;
+    readonly providers: ReadonlyArray<ServerProvider>;
+    readonly machineName?: string | undefined;
+  }) =>
+    Effect.gen(function* () {
+      const inherited = input.parent.thread.modelSelection;
+      const requested =
+        input.target?.providerInstanceId ??
+        (input.target?.driverKind === undefined ? inherited.instanceId : undefined);
+      if (
+        requested === undefined ||
+        input.providers.some((provider) => provider.instanceId === requested)
+      )
+        return input.target;
+      const driver =
+        input.target?.driverKind ??
+        (yield* loadProviders).find((provider) => provider.instanceId === requested)?.driver;
+      const model =
+        input.target?.model ??
+        (input.target?.providerInstanceId === undefined ? inherited.model : undefined);
+      const candidates = input.providers.filter(
+        (provider) =>
+          provider.driver === driver && providerConstraints(provider, true).length === 0,
+      );
+      const match =
+        candidates.find((provider) => provider.models.some((entry) => entry.slug === model)) ??
+        candidates[0];
+      if (match === undefined) {
+        const available = input.providers
+          .map((provider) => `${provider.instanceId} (${provider.driver})`)
+          .join(", ");
+        return yield* failure(
+          "provider_unavailable",
+          `${input.machineName ?? "That machine"} has no provider instance ${requested}${driver === undefined ? "" : ` or other ${driver} instance that can run a child task`}. Available there: ${available || "none"}. See orchestrator_capabilities.`,
+        );
+      }
+      // An explicit model stays, so an unadvertised one is refused by name.
+      const kept =
+        input.target?.model ??
+        (match.models.some((entry) => entry.slug === model) ? model : undefined);
+      const { providerInstanceId: _requested, model: _model, ...rest } = input.target ?? {};
+      return {
+        ...rest,
+        providerInstanceId: match.instanceId,
+        ...(kept === undefined ? {} : { model: kept }),
+      } satisfies OrchestratorMcpTarget;
     });
 
   /**
@@ -1205,10 +1285,13 @@ const make = Effect.gen(function* () {
      */
     readonly skipProjectEnablementFilter?: boolean;
     readonly remote?: boolean;
+    /** The remote machine's name, for refusals. */
+    readonly machineName?: string | undefined;
   }): Effect.Effect<ResolvedTarget, OrchestratorMcpFailure> =>
     Effect.gen(function* () {
-      const requestedInstanceId = input.target?.providerInstanceId;
-      const requestedDriver = input.target?.driverKind;
+      const target = input.remote === true ? yield* remoteTarget(input) : input.target;
+      const requestedInstanceId = target?.providerInstanceId;
+      const requestedDriver = target?.driverKind;
       const orchestrationCapableInstanceIds =
         input.remote === true
           ? new Set(input.providers.map((provider) => provider.instanceId))
@@ -1230,7 +1313,7 @@ const make = Effect.gen(function* () {
         // Inherit the parent's instance only when it can actually serve the
         // child; an unavailable parent yields to a healthy instance of the
         // requested driver rather than failing the delegation. An instance
-        // the project turned off cannot serve either, so selection skips it
+        // the machine turned off cannot serve either, so selection skips it
         // for the next candidate instead of failing the enablement check.
         const healthyCandidates = candidates.filter(
           (candidate) => providerConstraints(candidate, true).length === 0,
@@ -1243,14 +1326,13 @@ const make = Effect.gen(function* () {
           ...healthyCandidates.filter((candidate) => candidate !== inheritedCandidate),
         ];
         for (const candidate of orderedCandidates) {
-          const enabledForProject =
+          const enabled =
             input.remote === true ||
             input.skipProjectEnablementFilter === true ||
-            (yield* threadManagement.isProviderInstanceEnabledForProject({
-              projectId: input.parent.thread.projectId,
+            (yield* threadManagement.isProviderInstanceEnabled({
               instanceId: candidate.instanceId,
             }));
-          if (enabledForProject) {
+          if (enabled) {
             instanceId = candidate.instanceId;
             break;
           }
@@ -1260,7 +1342,7 @@ const make = Effect.gen(function* () {
             "provider_unavailable",
             healthyCandidates.length === 0
               ? `No available V2 provider instance for driver ${requestedDriver}.`
-              : `No instance of driver ${requestedDriver} is enabled for this project.`,
+              : `No instance of driver ${requestedDriver} is turned on on this machine.`,
           );
         }
       }
@@ -1291,7 +1373,7 @@ const make = Effect.gen(function* () {
       }
 
       const inheritedSelection = input.parent.thread.modelSelection;
-      const requestedModel = input.target?.model;
+      const requestedModel = target?.model;
       const model =
         requestedModel ??
         (instanceId === inheritedSelection.instanceId
@@ -1315,7 +1397,7 @@ const make = Effect.gen(function* () {
         );
       }
 
-      const requestedOptions = input.target?.options;
+      const requestedOptions = target?.options;
       if (requestedOptions !== undefined) {
         const descriptors = provider.models.find((candidate) => candidate.slug === model)
           ?.capabilities?.optionDescriptors;
@@ -2108,17 +2190,31 @@ const make = Effect.gen(function* () {
           ? undefined
           : yield* machinesService.value.list.pipe(
               Effect.flatMap((view) =>
-                Effect.forEach(view.machines, (machine) =>
-                  Effect.gen(function* () {
-                    if (!machine.online || machine.pairing === "revoked") return machine;
-                    const catalog = yield* targetProviders(machine.environmentId).pipe(
-                      Effect.option,
-                    );
-                    return {
-                      ...machine,
-                      ...(Option.isNone(catalog) ? {} : { catalog: catalog.value.providers }),
-                    };
-                  }),
+                // Read over the peer link at once and briefly; one slow machine
+                // must not hold up the rest. Compact, since agents read it whole.
+                Effect.forEach(
+                  view.machines,
+                  (machine) =>
+                    machine.relation === "this" || !machine.online || machine.pairing === "revoked"
+                      ? Effect.succeed(machine)
+                      : targetProviders(machine.environmentId).pipe(
+                          Effect.timeout("10 seconds"),
+                          Effect.map(({ providers, remote }) =>
+                            remote
+                              ? { ...machine, catalog: providers.map(machineProvider) }
+                              : machine,
+                          ),
+                          Effect.catch((error) =>
+                            Effect.succeed({
+                              ...machine,
+                              catalogError:
+                                error._tag === "TimeoutError"
+                                  ? `${machine.name} did not answer in time.`
+                                  : error.message,
+                            }),
+                          ),
+                        ),
+                  { concurrency: "unbounded" },
                 ),
               ),
               Effect.orElseSucceed(() => undefined),
@@ -2235,12 +2331,13 @@ const make = Effect.gen(function* () {
         const isRetryOfAcceptedDelegation = yield* threadManagement.hasReceipt(commandId);
         if (isRetryOfAcceptedDelegation)
           return yield* readTask(scope, derive.delegatedTaskNode({ commandId }), false, true);
-        const { providers, remote } = yield* targetProviders(machine);
+        const { providers, remote, machineName } = yield* targetProviders(machine);
         const target = yield* resolveTargetRechecking({
           parent,
           target: input.target,
           providers,
           remote,
+          machineName,
           skipProjectEnablementFilter: isRetryOfAcceptedDelegation,
         });
         const runtimeMode = yield* resolveRuntimeMode(
@@ -2569,12 +2666,13 @@ const make = Effect.gen(function* () {
               const machine = yield* resolveMachine(request.machine ?? input.machine).pipe(
                 Effect.mapError((error) => failure("invalid_request", error.message)),
               );
-              const { providers, remote } = yield* targetProviders(machine);
+              const { providers, remote, machineName } = yield* targetProviders(machine);
               const target = yield* resolveTargetRechecking({
                 parent,
                 target: request.target,
                 providers,
                 remote,
+                machineName,
               });
               const runtimeMode = yield* resolveRuntimeMode(
                 parent.thread.runtimeMode,

@@ -1,13 +1,9 @@
-import { EnvironmentId, ProjectId, ProjectLabelId } from "@cogenly/contracts";
+import { EnvironmentId } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import type { Project } from "../../types";
-import {
-  buildSettingsProjectFolders,
-  resolveSettingsScope,
-  validateSettingsScopeSearch,
-} from "./settingsScope";
-import { selectMachineScope, selectProjectScope } from "./settingsScopeAxis";
+import { resolveSettingsScope, validateSettingsScopeSearch } from "./settingsScope";
+import { selectMachineScope } from "./settingsScopeAxis";
+import { validateSettingsRouteSearch } from "./settingsScopeNavigation";
 
 const laptopId = EnvironmentId.make("laptop");
 const serverId = EnvironmentId.make("server");
@@ -16,84 +12,34 @@ const environments = [
   { environmentId: serverId, label: "VPS", connection: { phase: "connected" as const } },
 ];
 
-function project(id: string, environmentId: EnvironmentId): Project {
-  return {
-    id: ProjectId.make(id),
-    environmentId,
-    title: id,
-    workspaceRoot: `/repos/${id}`,
-    defaultModelSelection: null,
-    scripts: [],
-    createdAt: "2026-09-07T00:00:00.000Z",
-    updatedAt: "2026-09-07T00:00:00.000Z",
-  };
-}
-
-const cogenlyMac = project("cogenly-mac", laptopId);
-const docsMac = project("docs-mac", laptopId);
-const cogenlyVps = project("cogenly-vps", serverId);
-const scratch = project("scratch", laptopId);
-const projects = [cogenlyMac, docsMac, cogenlyVps, scratch];
-
-function label(id: string, name: string, repositoryIds: readonly ProjectId[]) {
-  return { id: ProjectLabelId.make(id), name, color: undefined, repositoryIds };
-}
-
-// The same folder id on both machines, as paired machines sync it.
-const cogenlyOnLaptop = {
-  environmentId: laptopId,
-  label: label("label:cogenly", "Cogenly", [cogenlyMac.id, docsMac.id]),
-};
-const folders = buildSettingsProjectFolders(
-  [
-    cogenlyOnLaptop,
-    { environmentId: serverId, label: label("label:cogenly", "Cogenly", [cogenlyVps.id]) },
-    { environmentId: laptopId, label: label("label:empty", "Empty", []) },
-    // A repository id the environment no longer has is not a member.
-    { environmentId: serverId, label: label("label:gone", "Gone", [ProjectId.make("removed")]) },
-  ],
-  projects,
-);
-
-describe("settings project folders", () => {
-  it("dedupes a folder across machines and collects every repository it holds", () => {
-    expect(folders.find((folder) => folder.id === "label:cogenly")).toEqual({
-      id: "label:cogenly",
-      name: "Cogenly",
-      color: undefined,
-      icon: cogenlyOnLaptop,
-      members: [cogenlyMac, docsMac, cogenlyVps],
-    });
-  });
-
-  it("lists folders without a repository, as the composer's project picker does", () => {
-    expect(folders.map((folder) => [folder.id, folder.members.length])).toEqual([
-      ["label:cogenly", 3],
-      ["label:empty", 0],
-      ["label:gone", 0],
-    ]);
-  });
-});
-
 describe("settings scope search", () => {
-  it("ignores the retired scope key from older links", () => {
-    expect(validateSettingsScopeSearch({ scope: "device", project: "label:cogenly" })).toEqual({
-      project: "label:cogenly",
-    });
-    expect(validateSettingsScopeSearch({ scope: "all" })).toEqual({});
+  it("drops the project and checkout keys of links from before settings were global", () => {
+    expect(
+      validateSettingsScopeSearch({
+        project: "label:cogenly",
+        checkout: `${laptopId}:/repos/cogenly`,
+        machine: serverId,
+      }),
+    ).toEqual({ machine: serverId });
+    expect(validateSettingsRouteSearch({ project: "label:cogenly" })).toEqual({});
+    expect(validateSettingsScopeSearch({ scope: "device" })).toEqual({});
   });
 
-  it("keeps the repository page key apart from the scope", () => {
+  it("keeps the repository page key", () => {
     expect(validateSettingsScopeSearch({ repository: "group", unused: true })).toEqual({
       repository: "group",
     });
   });
 
-  it("choosing a project or machine drops a legacy checkout", () => {
-    const legacy = { project: "label:cogenly", machine: laptopId, checkout: "old" };
-    expect(selectProjectScope(legacy, "all")).toEqual({ machine: laptopId });
-    expect(selectMachineScope(legacy, serverId)).toEqual({
-      project: "label:cogenly",
+  it("maps a legacy provider link's environment to the machine", () => {
+    expect(validateSettingsRouteSearch({ environmentId: serverId })).toEqual({
+      machine: serverId,
+    });
+  });
+
+  it("choosing a machine keeps the repository", () => {
+    expect(selectMachineScope({ repository: "group", machine: laptopId }, serverId)).toEqual({
+      repository: "group",
       machine: serverId,
     });
   });
@@ -102,30 +48,19 @@ describe("settings scope search", () => {
 describe("settings scope resolution", () => {
   const options = { primaryEnvironmentId: laptopId };
 
-  it("defaults to All projects on every machine, read from the primary", () => {
-    expect(resolveSettingsScope({}, folders, environments, options)).toMatchObject({
+  it("writes to every machine, reading from the primary", () => {
+    expect(resolveSettingsScope({}, environments, options)).toMatchObject({
       kind: "all",
-      label: "All projects",
-      members: [],
       environmentIds: [laptopId, serverId],
       machineId: laptopId,
     });
   });
 
-  it("keeps every machine at All projects when a machine is picked for machine-local rows", () => {
-    expect(
-      resolveSettingsScope({ machine: serverId }, folders, environments, options),
-    ).toMatchObject({ kind: "all", environmentIds: [laptopId, serverId], machineId: serverId });
-  });
-
-  it("scopes a project to its repositories on every machine", () => {
-    expect(
-      resolveSettingsScope({ project: "label:cogenly" }, folders, environments, options),
-    ).toMatchObject({
-      kind: "project",
-      label: "Cogenly",
-      members: [cogenlyMac, docsMac, cogenlyVps],
+  it("keeps every machine when one is picked for machine-local rows", () => {
+    expect(resolveSettingsScope({ machine: serverId }, environments, options)).toMatchObject({
+      kind: "all",
       environmentIds: [laptopId, serverId],
+      machineId: serverId,
     });
   });
 
@@ -134,51 +69,23 @@ describe("settings scope resolution", () => {
       { ...environments[0]!, connection: { phase: "offline" as const } },
       environments[1]!,
     ];
-    expect(resolveSettingsScope({}, folders, offlinePrimary, options)).toMatchObject({
+    expect(resolveSettingsScope({}, offlinePrimary, options)).toMatchObject({
       machineId: serverId,
     });
   });
 
-  it("resolves a machine page to one machine and ignores the project", () => {
+  it("resolves a machine page to one machine", () => {
     expect(
-      resolveSettingsScope({ project: "label:cogenly", machine: serverId }, folders, environments, {
-        ...options,
-        machinePage: true,
-      }),
-    ).toMatchObject({
-      kind: "environment",
-      environmentId: serverId,
-      environmentIds: [serverId],
-      members: [],
-    });
-    expect(
-      resolveSettingsScope({}, folders, environments, { ...options, machinePage: true }),
-    ).toMatchObject({ kind: "environment", environmentId: laptopId });
+      resolveSettingsScope({ machine: serverId }, environments, { ...options, machinePage: true }),
+    ).toMatchObject({ kind: "environment", environmentId: serverId, environmentIds: [serverId] });
+    expect(resolveSettingsScope({}, environments, { ...options, machinePage: true })).toMatchObject(
+      { kind: "environment", environmentId: laptopId },
+    );
   });
 
-  it("names a project without repositories instead of editing nothing", () => {
-    expect(
-      resolveSettingsScope({ project: "label:empty" }, folders, environments, options),
-    ).toMatchObject({
+  it("never widens a removed machine to every machine", () => {
+    expect(resolveSettingsScope({ machine: "removed" }, environments, options)).toMatchObject({
       kind: "unavailable",
-      reason: "project-empty",
-      message: expect.stringContaining("Empty has no repositories yet"),
-    });
-  });
-
-  it.each([
-    // A repository group key from an older link is not a project folder.
-    { project: "t3code" },
-    { project: "label:empty" },
-    { machine: "removed" },
-    { project: "label:cogenly", machine: "removed" },
-    // Older checkout links never widen to the whole project or All projects.
-    { checkout: `${laptopId}:/repos/cogenly-mac` },
-    { project: "label:cogenly", checkout: `${laptopId}:/repos/cogenly-mac` },
-  ])("never widens an invalid or legacy target: %j", (search) => {
-    expect(resolveSettingsScope(search, folders, environments, options)).toMatchObject({
-      kind: "unavailable",
-      members: [],
       environmentIds: [],
       machineId: null,
     });

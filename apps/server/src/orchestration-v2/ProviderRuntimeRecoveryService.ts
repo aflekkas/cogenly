@@ -1,5 +1,4 @@
 import { runRanAfter } from "@cogenly/shared/orchestrationV2ThreadError";
-import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 import {
   CommandId,
   type OrchestrationV2DomainEvent,
@@ -728,6 +727,12 @@ export const make = Effect.gen(function* () {
       // persisted Waiting roster (including idle threads from settled roots)
       // and idle active threads without resurrecting active status.
       for (const providerThread of projection.providerThreads ?? []) {
+        // Delegated children can appear through the parent's subagent roster.
+        if (
+          providerThread.appThreadId !== null &&
+          providerThread.appThreadId !== projection.thread.id
+        )
+          continue;
         const needsIdle = providerThread.status === "active";
         const needsRosterClear = providerThreadHasPendingBackgroundTasks(providerThread);
         if (!needsIdle && !needsRosterClear) {
@@ -927,10 +932,7 @@ export const make = Effect.gen(function* () {
               }),
           ),
         );
-        const enabled =
-          continueAfterRestart !== null &&
-          resolveProjectSettings(continueAfterRestart, projection.thread.projectId).settings
-            .continueThreadsAfterServerUpdate;
+        const enabled = continueAfterRestart?.continueThreadsAfterServerUpdate === true;
         const result = yield* reconcileProjection(projection, trigger, enabled);
         terminalizedRuns += result.terminalizedRuns;
         stoppedSessions += result.stoppedSessions;
@@ -951,16 +953,11 @@ export const make = Effect.gen(function* () {
   // rejects any source run that actually completed.
   const prepareForShutdown = Effect.gen(function* () {
     const enabled = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
-    if (!enabled) return;
+    if (!enabled?.continueThreadsAfterServerUpdate) return;
     const threadIds = yield* projections.getRecoveryThreadIds("runtime");
     for (const threadId of threadIds) {
       yield* Effect.gen(function* () {
         const projection = yield* projections.getRuntimeRecoveryProjection(threadId);
-        if (
-          !resolveProjectSettings(enabled, projection.thread.projectId).settings
-            .continueThreadsAfterServerUpdate
-        )
-          return;
         const run = yield* resumableRun(projection, yield* DateTime.now);
         if (!run) return;
         const commandId = CommandId.make(`command:restart-prepare:${run.id}`);

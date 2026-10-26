@@ -273,6 +273,15 @@ export function readEnvironmentSupportsSettlement(environmentId: EnvironmentId):
   );
 }
 
+/** Whether the environment's server answers machines.healthFix (0.3.2 and later).
+    Older servers get Fix as their per-item commands instead. */
+export function readEnvironmentSupportsHealthFix(environmentId: EnvironmentId): boolean {
+  return (
+    appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities
+      .machineHealthFix === true
+  );
+}
+
 /** Whether the environment's server understands thread.snooze/unsnooze.
     Same version-skew contract as settlement. */
 export function readEnvironmentSupportsSnooze(environmentId: EnvironmentId): boolean {

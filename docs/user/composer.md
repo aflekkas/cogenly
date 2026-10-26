@@ -219,7 +219,7 @@ Type `/` for commands or `$` to add a skill from the selected environment and
 provider.
 
 The slash menu also includes skills unless you turn off **Settings → General →
-Show skills in slash menu**. Only skills enabled for the provider are listed.
+Skills in the slash menu**. Only skills enabled for the provider are listed.
 
 After you add or change skills, plugins, or MCP servers, use **Restart agent
 session** in the command palette on web and desktop. The conversation continues,

@@ -16,16 +16,19 @@ import {
   resolveServerBackgroundActivitySettings,
 } from "@cogenly/shared/backgroundActivitySettings";
 
+import { DEFAULT_UNIFIED_SETTINGS } from "@cogenly/contracts/settings";
+
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { cn } from "../../lib/utils";
+import { PULL_REQUEST_MERGE_METHOD_LABELS } from "~/lib/pullRequestContext";
 import { useEnvironmentQuery } from "../../state/query";
 import { sourceControlEnvironment } from "../../state/sourceControl";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { DisclosureChevron } from "../ui/disclosure";
 import { Collapsible, CollapsibleContent } from "../ui/collapsible";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Skeleton } from "../ui/skeleton";
 import { Switch } from "../ui/switch";
 
@@ -36,7 +39,6 @@ import { GitHubTokenSettings } from "./GitHubTokenSettings";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SourceControlWritingSettingsSection } from "./SourceControlWritingSettings";
 import {
-  PolicyTooltip,
   SettingResetButton,
   SettingsEmpty,
   SettingsNumberField,
@@ -108,10 +110,10 @@ function authPresentation(auth: SourceControlProviderAuth): {
   readonly badge: "warning" | null;
 } {
   if (auth.status === "authenticated") {
-    return { label: "Authenticated", badge: null };
+    return { label: "Signed in", badge: null };
   }
   if (auth.status === "unauthenticated") {
-    return { label: "Not authenticated", badge: "warning" };
+    return { label: "Not signed in", badge: "warning" };
   }
   return { label: "Status unknown", badge: null };
 }
@@ -172,7 +174,7 @@ function itemSummary({
   readonly authAccount: string | null;
 }) {
   if (item.status !== "available") {
-    return <span>Not available on this server: {item.installHint}</span>;
+    return <span>Not installed on this machine. {item.installHint}</span>;
   }
 
   if (auth) {
@@ -182,7 +184,7 @@ function itemSummary({
       const authDetail = optionLabel(auth.detail);
       return (
         <>
-          <span>Authenticated</span>
+          <span>Signed in</span>
           {authAccount ? (
             <>
               <span aria-hidden>as</span>
@@ -208,9 +210,9 @@ function itemSummary({
     if (auth.status === "unauthenticated") {
       return (
         <span>
-          {item.label} is not authenticated on this server. Sign in or configure credentials using
-          the <code className="rounded bg-muted px-1 py-px text-2xs">{item.executable}</code> tool
-          on the server host to enable change request features.
+          Save a token below, or sign in with{" "}
+          <code className="rounded bg-muted px-1 py-px text-2xs">{item.executable}</code> on this
+          machine, to work with pull requests.
         </span>
       );
     }
@@ -233,19 +235,16 @@ function DiscoveryItemRow({
   readonly children?: ReactNode;
 }) {
   const version = optionLabel(item.version);
-  const enabled = isProviderDiscoveryItem(item)
-    ? item.status === "available" && item.auth.status === "authenticated"
-    : item.status === "available";
   const auth = isProviderDiscoveryItem(item) ? item.auth : null;
   const authStatus = auth ? authPresentation(auth) : null;
   const authAccount = auth ? optionLabel(auth.account) : null;
   const [isExpanded, setIsExpanded] = useState(false);
   const hasDetails = children !== undefined;
+  const detailsLabel = item.kind === "github" ? "Accounts and token" : "Credentials";
   const searchTargetId = useSettingsSearchTargetId();
 
   useEffect(() => {
     if (
-      (item.kind === "git" && searchTargetId === searchableSetting("git-fetch-interval").id) ||
       searchTargetId === sourceControlHostSettingsSearchId(item.kind) ||
       (item.kind === "github" && searchTargetId === searchableSetting("github-accounts").id)
     ) {
@@ -254,7 +253,7 @@ function DiscoveryItemRow({
   }, [item.kind, searchTargetId]);
 
   return (
-    <div className="first:rounded-t-xl last:rounded-b-xl transition-colors hover:bg-muted/20">
+    <div className="first:rounded-t-xl last:rounded-b-xl">
       <div className="px-3 py-3 sm:px-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0 flex-1 space-y-1">
@@ -272,20 +271,20 @@ function DiscoveryItemRow({
               {itemSummary({ item, auth, authAccount })}
             </p>
           </div>
-          <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
-            {hasDetails ? (
+          {hasDetails ? (
+            <div className="flex shrink-0 items-center sm:justify-end">
               <Button
-                size="icon-xs"
+                size="xs"
                 variant="ghost-muted"
                 onClick={() => setIsExpanded((open) => !open)}
                 aria-expanded={isExpanded}
-                aria-label={`Toggle ${item.label} details`}
+                aria-label={`${isExpanded ? "Hide" : "Show"} ${item.label} ${detailsLabel.toLowerCase()}`}
               >
+                {detailsLabel}
                 <DisclosureChevron open={isExpanded} />
               </Button>
-            ) : null}
-            <Switch checked={enabled} disabled aria-label={`${item.label} availability`} />
-          </div>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -300,7 +299,7 @@ function DiscoveryItemRow({
   );
 }
 
-function GitFetchIntervalSettings() {
+function GitFetchIntervalRow() {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
   const resolvedBackgroundActivity = resolveServerBackgroundActivitySettings(settings);
@@ -312,46 +311,28 @@ function GitFetchIntervalSettings() {
       getBackgroundActivityBaseProfile(settings.backgroundActivity),
     ).automaticGitFetchInterval,
   );
-  const canResetFetchInterval =
-    automaticGitFetchIntervalSeconds !== defaultAutomaticGitFetchIntervalSeconds;
-  const setting = searchableSetting("git-fetch-interval");
 
   return (
-    <SettingsSearchTarget id={setting.id} className="grid gap-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0 space-y-1">
-          <div className="flex min-w-0 items-center gap-1">
-            <span className="text-xs font-medium text-foreground">{setting.title}</span>
-            <PolicyTooltip>
-              This interval is configured for Git only. The shared Background activity policy still
-              decides whether Git refreshes may run when the timer fires. Custom intervals appear as
-              Advanced in General settings.
-            </PolicyTooltip>
-            <span
-              className={cn(
-                "inline-flex size-5 shrink-0 items-center justify-center transition-opacity",
-                canResetFetchInterval ? "opacity-100" : "pointer-events-none opacity-0",
-              )}
-              aria-hidden={!canResetFetchInterval}
-            >
-              {canResetFetchInterval ? (
-                <SettingResetButton
-                  label="fetch interval"
-                  onClick={() =>
-                    updateSettings(
-                      backgroundActivityOverrideSettings(settings.backgroundActivity, {
-                        automaticGitFetchInterval: undefined,
-                      }),
-                    )
-                  }
-                />
-              ) : null}
-            </span>
-          </div>
-          <p className="max-w-xl text-xs leading-normal text-muted-foreground/80">
-            Refresh remote branches in the background. Set to 0 to avoid automatic Git prompts.
-          </p>
-        </div>
+    <SettingsRow
+      serverScoped
+      settingKeys={["backgroundActivity"]}
+      {...searchableSetting("git-fetch-interval")}
+      description="How often Git fetches remote branches. 0 turns it off and avoids credential prompts. Background activity in General can still pause it."
+      resetAction={
+        automaticGitFetchIntervalSeconds !== defaultAutomaticGitFetchIntervalSeconds ? (
+          <SettingResetButton
+            label="fetch interval"
+            onClick={() =>
+              updateSettings(
+                backgroundActivityOverrideSettings(settings.backgroundActivity, {
+                  automaticGitFetchInterval: undefined,
+                }),
+              )
+            }
+          />
+        ) : null
+      }
+      control={
         <SettingsNumberField
           label="automatic Git fetch interval"
           unit="seconds"
@@ -366,94 +347,179 @@ function GitFetchIntervalSettings() {
             )
           }
         />
-      </div>
-    </SettingsSearchTarget>
+      }
+    />
   );
 }
 
-function SourceControlSectionSkeleton({
-  title,
-  headerAction,
-  footer,
-}: {
-  readonly title: string;
-  readonly headerAction?: ReactNode;
-  readonly footer?: ReactNode;
-}) {
+function AutomaticPullRow() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
   return (
-    <SettingsSection title={title} headerAction={headerAction} footer={footer}>
-      {SOURCE_CONTROL_SKELETON_ROWS.map((row) => (
-        <div key={row} className="first:rounded-t-xl last:rounded-b-xl px-3 py-3 sm:px-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0 flex-1 space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="relative inline-flex size-5 shrink-0 items-center justify-center">
-                  <Skeleton className="size-4.5" />
-                  <Skeleton
-                    shape="pill"
-                    className="pointer-events-none absolute -left-0.5 -top-0.5 size-2"
-                    aria-hidden
-                  />
-                </span>
-                <Skeleton shape="pill" className="h-4 w-28" />
-                <Skeleton shape="pill" className="h-5 w-14" />
-              </div>
-              <Skeleton shape="pill" className="h-3 w-full max-w-xs" />
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <Skeleton className="size-7" />
-              <Skeleton shape="pill" className="h-5 w-9" />
-            </div>
-          </div>
-        </div>
-      ))}
-    </SettingsSection>
+    <SettingsRow
+      serverScoped
+      settingKeys={["defaultAutoPull"]}
+      {...searchableSetting("automatic-pull")}
+      description="Fast-forwards the default branch from its upstream while the checkout has no local changes or commits."
+      resetAction={
+        settings.defaultAutoPull ? (
+          <SettingResetButton
+            label="automatic pull"
+            tooltip="Reset automatic pull to off"
+            onClick={() => updateSettings({ defaultAutoPull: false })}
+          />
+        ) : null
+      }
+      control={
+        <Switch
+          aria-label="Automatically pull"
+          checked={settings.defaultAutoPull}
+          onCheckedChange={(enabled) => updateSettings({ defaultAutoPull: enabled })}
+        />
+      }
+    />
   );
 }
 
-function EmptySourceControlDiscovery({
-  error,
-  isPending,
-  onScan,
-}: {
-  readonly error: string | null;
-  readonly isPending: boolean;
-  readonly onScan: () => void;
-}) {
-  const hasError = error !== null;
-
+/** How pull requests open and merge. */
+function PullRequestSettingsSection() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const style = settings.sourceControlWritingStyle;
+  const defaultTemplates =
+    DEFAULT_UNIFIED_SETTINGS.sourceControlWritingStyle.followChangeRequestTemplates;
   return (
-    <SettingsSection id={searchableSetting("source-control").id} title="Version control">
-      <SettingsEmpty
-        icon={<PullRequestGlyph.pullRequest />}
-        title={hasError ? "Could not scan the server environment" : "Nothing detected yet"}
-        description={
-          hasError
-            ? error
-            : "Install Git on the server, add optional hosting integrations or credentials your workspace needs, then rescan."
+    <SettingsSection id="pull-requests" title="Pull requests">
+      <SettingsRow
+        serverScoped
+        settingKeys={["pullRequestMergeMethod"]}
+        {...searchableSetting("pull-request-merge-method")}
+        description="The method the merge button starts on. Last used keeps your most recent choice on this device."
+        resetAction={
+          settings.pullRequestMergeMethod !== null ? (
+            <SettingResetButton
+              label="default merge method"
+              tooltip="Reset to last used"
+              onClick={() => updateSettings({ pullRequestMergeMethod: null })}
+            />
+          ) : null
         }
-        action={
-          <Button size="sm" variant="outline" onClick={onScan} disabled={isPending}>
-            <RefreshIcon size="sm" refreshing={isPending} />
-            Scan
-          </Button>
+        control={
+          <Select
+            value={settings.pullRequestMergeMethod ?? "last"}
+            onValueChange={(value) => {
+              if (value === "last") updateSettings({ pullRequestMergeMethod: null });
+              else if (value === "merge" || value === "squash" || value === "rebase")
+                updateSettings({ pullRequestMergeMethod: value });
+            }}
+          >
+            <SelectTrigger size="sm" aria-label="Default merge method">
+              <SelectValue>
+                {(value: string | null) =>
+                  value === "merge" || value === "squash" || value === "rebase"
+                    ? PULL_REQUEST_MERGE_METHOD_LABELS[value]
+                    : "Last used"
+                }
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              <SelectItem value="last">Last used</SelectItem>
+              <SelectItem value="merge">{PULL_REQUEST_MERGE_METHOD_LABELS.merge}</SelectItem>
+              <SelectItem value="squash">{PULL_REQUEST_MERGE_METHOD_LABELS.squash}</SelectItem>
+              <SelectItem value="rebase">{PULL_REQUEST_MERGE_METHOD_LABELS.rebase}</SelectItem>
+            </SelectPopup>
+          </Select>
+        }
+      />
+      <SettingsRow
+        serverScoped
+        settingKeys={["sourceControlWritingStyle"]}
+        {...searchableSetting("follow-change-request-templates")}
+        description="Generated pull request descriptions follow the repository's template when it has one."
+        resetAction={
+          style.followChangeRequestTemplates !== defaultTemplates ? (
+            <SettingResetButton
+              label="pull request templates"
+              onClick={() =>
+                updateSettings({
+                  sourceControlWritingStyle: { followChangeRequestTemplates: defaultTemplates },
+                })
+              }
+            />
+          ) : null
+        }
+        control={
+          <Switch
+            checked={style.followChangeRequestTemplates}
+            onCheckedChange={(checked) =>
+              updateSettings({
+                sourceControlWritingStyle: { followChangeRequestTemplates: Boolean(checked) },
+              })
+            }
+            aria-label="Use pull request templates"
+          />
+        }
+      />
+      <SettingsRow
+        serverScoped
+        settingKeys={["removeAgentCreditsOnMerge"]}
+        {...searchableSetting("remove-agent-credits-on-merge")}
+        description="Strips agent Co-authored-by lines when Cogenly merges or squashes, auto-merge included. Human co-authors stay."
+        resetAction={
+          settings.removeAgentCreditsOnMerge ? (
+            <SettingResetButton
+              label="agent credit removal"
+              tooltip="Keep agent credits"
+              onClick={() => updateSettings({ removeAgentCreditsOnMerge: false })}
+            />
+          ) : null
+        }
+        control={
+          <Switch
+            aria-label="Remove agent credits when merging"
+            checked={settings.removeAgentCreditsOnMerge}
+            onCheckedChange={(enabled) => updateSettings({ removeAgentCreditsOnMerge: enabled })}
+          />
         }
       />
     </SettingsSection>
   );
 }
 
+/** Placeholder discovery rows while the first scan runs. */
+function DiscoverySkeletonRows({ count }: { readonly count: number }) {
+  return SOURCE_CONTROL_SKELETON_ROWS.slice(0, count).map((row) => (
+    <div key={row} className="first:rounded-t-xl last:rounded-b-xl px-3 py-3 sm:px-4">
+      <div className="min-w-0 flex-1 space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="relative inline-flex size-5 shrink-0 items-center justify-center">
+            <Skeleton className="size-4.5" />
+            <Skeleton
+              shape="pill"
+              className="pointer-events-none absolute -left-0.5 -top-0.5 size-2"
+              aria-hidden
+            />
+          </span>
+          <Skeleton shape="pill" className="h-4 w-28" />
+          <Skeleton shape="pill" className="h-5 w-14" />
+        </div>
+        <Skeleton shape="pill" className="h-3 w-full max-w-xs" />
+      </div>
+    </div>
+  ));
+}
+
 export function SourceControlSettingsPanel() {
   const { scope, environment, connectedEnvironments } = useSettingsScope();
   // Discovery scans one machine's tools, so it shows the representative
   // environment (named under the first card when several are selected);
-  // the settings rows above it fan out like everywhere else.
+  // the settings rows fan out like everywhere else.
   const environmentId =
     environment?.connection.phase === "connected" ? environment.environmentId : null;
   const aggregate = scope.environmentIds.length !== 1 && connectedEnvironments.length > 1;
   const scanScopeNote =
     aggregate && environment
-      ? `Detected on ${environment.label}. Select one environment to inspect another.`
+      ? `Detected on ${environment.label}. Select one machine to inspect another.`
       : null;
   const discovery = useEnvironmentQuery(
     environmentId === null
@@ -464,8 +530,6 @@ export function SourceControlSettingsPanel() {
         }),
   );
   const result = discovery.data ?? EMPTY_DISCOVERY_RESULT;
-  const hasVersionControlSystems = result.versionControlSystems.length > 0;
-  const hasDiscoveryItems = hasVersionControlSystems || result.sourceControlProviders.length > 0;
   const isInitialScanPending = discovery.isPending && discovery.data === null;
   const handleScan = () => {
     discovery.refresh();
@@ -486,96 +550,104 @@ export function SourceControlSettingsPanel() {
       </SettingsSearchTarget>
     );
   };
-  const scanButton = (
-    <SettingsRefreshAction
-      label="Rescan Git and hosting integrations"
-      refreshing={discovery.isPending}
-      idleLabel="Rescan"
-      onRefresh={handleScan}
-    />
-  );
+  const scanButton =
+    environmentId === null ? null : (
+      <SettingsRefreshAction
+        label="Rescan Git and GitHub on this machine"
+        refreshing={discovery.isPending}
+        idleLabel="Rescan"
+        onRefresh={handleScan}
+      />
+    );
+
+  const hostingRows =
+    environmentId === null ? (
+      <SettingsRow title="Connect a machine to see its Git and GitHub setup." role="status" />
+    ) : isInitialScanPending ? (
+      <DiscoverySkeletonRows count={1} />
+    ) : result.sourceControlProviders.length > 0 ? (
+      result.sourceControlProviders.map((item) => (
+        <DiscoveryItemRow key={`provider:${item.kind}`} item={item}>
+          {item.kind === "github" ? (
+            <SettingsSearchTarget id={searchableSetting("github-accounts").id}>
+              <div className="grid gap-6">
+                {/* Shown even without gh: a saved token is how GitHub works without the CLI. */}
+                <GitHubTokenSettings
+                  key={`token-${environmentId}`}
+                  environmentId={environmentId}
+                  onSaved={handleScan}
+                />
+                {item.status === "available" ? (
+                  <GitHubAccountSettings
+                    key={environmentId}
+                    environmentId={environmentId}
+                    auth={item.auth}
+                    onSaved={handleScan}
+                  />
+                ) : null}
+              </div>
+            </SettingsSearchTarget>
+          ) : (
+            hostSettingsPanel(item.kind)
+          )}
+        </DiscoveryItemRow>
+      ))
+    ) : (
+      <SettingsEmpty
+        icon={<PullRequestGlyph.pullRequest />}
+        title={discovery.error !== null ? "Could not scan this machine" : "No hosting found"}
+        description={
+          discovery.error ?? "Save a GitHub token or sign in with gh on this machine, then rescan."
+        }
+        action={
+          <Button size="sm" variant="outline" onClick={handleScan} disabled={discovery.isPending}>
+            <RefreshIcon size="sm" refreshing={discovery.isPending} />
+            Rescan
+          </Button>
+        }
+      />
+    );
 
   return (
     <>
-      <ProjectDefaultsSettings category="source-control" />
-      {environmentId === null ? (
-        <SettingsSection id={searchableSetting("source-control").id} title="Version control">
-          <SettingsRow
-            title="Connect an environment to inspect its version control tools and hosting integrations."
-            role="status"
-          />
-        </SettingsSection>
-      ) : isInitialScanPending ? (
-        <>
-          <SourceControlSectionSkeleton
-            title="Version control"
-            headerAction={scanButton}
-            footer={scanScopeNote}
-          />
-          <SourceControlSectionSkeleton title="Source control providers" />
-        </>
-      ) : hasDiscoveryItems ? (
-        <>
-          {hasVersionControlSystems ? (
-            <SettingsSection
-              id={searchableSetting("source-control").id}
-              title="Version control"
-              headerAction={scanButton}
-              footer={scanScopeNote}
-            >
-              {result.versionControlSystems.map((item) => (
-                <DiscoveryItemRow key={`vcs:${item.kind}`} item={item}>
-                  {item.kind === "git" ? <GitFetchIntervalSettings /> : undefined}
-                </DiscoveryItemRow>
-              ))}
-            </SettingsSection>
-          ) : null}
-
-          {result.sourceControlProviders.length > 0 ? (
-            <SettingsSection
-              id={hasVersionControlSystems ? undefined : searchableSetting("source-control").id}
-              title="Source control providers"
-              headerAction={hasVersionControlSystems ? null : scanButton}
-              footer={hasVersionControlSystems ? null : scanScopeNote}
-            >
-              {result.sourceControlProviders.map((item) => (
-                <DiscoveryItemRow key={`provider:${item.kind}`} item={item}>
-                  {item.kind === "github" ? (
-                    <SettingsSearchTarget id={searchableSetting("github-accounts").id}>
-                      <div className="grid gap-6">
-                        {/* Shown even without gh: a saved token is how GitHub works without the CLI. */}
-                        <GitHubTokenSettings
-                          key={`token-${environmentId}`}
-                          environmentId={environmentId}
-                          onSaved={handleScan}
-                        />
-                        {item.status === "available" ? (
-                          <GitHubAccountSettings
-                            key={environmentId}
-                            environmentId={environmentId}
-                            auth={item.auth}
-                            onSaved={handleScan}
-                          />
-                        ) : null}
-                      </div>
-                    </SettingsSearchTarget>
-                  ) : (
-                    hostSettingsPanel(item.kind)
-                  )}
-                </DiscoveryItemRow>
-              ))}
-            </SettingsSection>
-          ) : null}
-        </>
-      ) : (
-        <EmptySourceControlDiscovery
-          error={discovery.error}
-          isPending={discovery.isPending}
-          onScan={handleScan}
-        />
-      )}
-
+      <SettingsSection
+        id={searchableSetting("source-control").id}
+        title="Hosting"
+        headerAction={scanButton}
+        footer={scanScopeNote}
+      >
+        {isInitialScanPending ||
+        result.sourceControlProviders.some((item) => item.kind === "github") ? (
+          hostingRows
+        ) : (
+          // GitHub accounts live in the GitHub row; until a scan lists it, their search lands here.
+          <SettingsSearchTarget id={searchableSetting("github-accounts").id}>
+            {hostingRows}
+          </SettingsSearchTarget>
+        )}
+      </SettingsSection>
+      <PullRequestSettingsSection />
       <SourceControlWritingSettingsSection />
+      <SettingsSection id="git" title="Git">
+        {environmentId !== null && isInitialScanPending ? (
+          <DiscoverySkeletonRows count={1} />
+        ) : null}
+        {environmentId !== null && !isInitialScanPending && discovery.error === null ? (
+          result.versionControlSystems.length > 0 ? (
+            result.versionControlSystems.map((item) => (
+              <DiscoveryItemRow key={`vcs:${item.kind}`} item={item} />
+            ))
+          ) : (
+            <SettingsRow
+              title="Git not found"
+              description="Install Git on this machine, then rescan."
+              role="status"
+            />
+          )
+        ) : null}
+        <AutomaticPullRow />
+        <GitFetchIntervalRow />
+      </SettingsSection>
     </>
   );
 }

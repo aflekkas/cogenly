@@ -33,6 +33,7 @@ import {
 import {
   SettingResetButton,
   SettingsNote,
+  SettingsRefreshAction,
   SettingsRow,
   SettingsSection,
   useRelativeTimeTick,
@@ -43,20 +44,13 @@ import { FoldedSettingsSection } from "./FoldedSettingsSection";
 import { SettingsGroup } from "./SettingsGroup";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { searchableSetting } from "./settingsSearch";
-import {
-  useScopedSettings,
-  useScopedSettingsMixed,
-  useUpdateScopedSettings,
-  useWorktreeCleanupOverrides,
-} from "./useScopedSettings";
-import { ProjectOverridesPopover } from "./SettingInheritance";
+import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 import { settingsScopeEnvironmentLabel } from "./settingsScopeAxis";
 
 function WorktreesDirectoryRow() {
   const { connectedEnvironments, targets } = useSettingsScope();
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
-  const mixed = useScopedSettingsMixed(["worktreesDirectory"]);
   const edited = useRef(false);
   if (
     connectedEnvironments.some(
@@ -76,7 +70,7 @@ function WorktreesDirectoryRow() {
       serverScoped
       settingKeys={["worktreesDirectory"]}
       resetAction={
-        mixed || settings.worktreesDirectory !== "" ? (
+        settings.worktreesDirectory !== "" ? (
           <SettingResetButton
             label="worktree location"
             onClick={() => updateSettings({ worktreesDirectory: "" })}
@@ -85,18 +79,18 @@ function WorktreesDirectoryRow() {
       }
       control={
         <Input
-          key={`${scopeKey}:${mixed}:${settings.worktreesDirectory}`}
+          key={`${scopeKey}:${settings.worktreesDirectory}`}
           aria-label="Worktree location"
           autoCapitalize="none"
           spellCheck={false}
-          placeholder={mixed ? "Mixed" : "Default"}
-          defaultValue={mixed ? "" : settings.worktreesDirectory}
+          placeholder="Default"
+          defaultValue={settings.worktreesDirectory}
           onChange={() => {
             edited.current = true;
           }}
           onBlur={(event) => {
             const value = event.target.value.trim();
-            if (edited.current && (mixed || value !== settings.worktreesDirectory))
+            if (edited.current && value !== settings.worktreesDirectory)
               updateSettings({ worktreesDirectory: value });
             edited.current = false;
           }}
@@ -157,9 +151,7 @@ function RetentionControl({
             <NumberFieldIncrement aria-label={`Increase ${label}`} />
           </NumberFieldGroup>
         </NumberField>
-      ) : (
-        <span className="text-xs text-muted-foreground">Off</span>
-      )}
+      ) : null}
       <Switch
         aria-label={label}
         checked={value !== null}
@@ -199,12 +191,12 @@ function CleanupResults({
                 ? entry.path
                 : entry.path?.split(/[\\/]/).findLast(Boolean)) ?? "Worktrees")
             : entry.kind === "backups"
-              ? "Expired backup"
+              ? "Old backup"
               : entry.kind === "dependencies"
-                ? "Rebuildable dependencies"
+                ? "Build files"
                 : entry.kind === "logs"
-                  ? "Rotated logs"
-                  : "Browser artifacts";
+                  ? "Old logs"
+                  : "Browser captures";
         return (
           <SettingsRow
             key={`${entry.path ?? entry.kind}:${entry.threadId ?? index}`}
@@ -238,12 +230,12 @@ function CleanupResults({
       {report.omittedCount > 0 && (
         <SettingsNote>
           {environmentLabel ? `${environmentLabel}: ` : ""}
-          {report.omittedCount.toLocaleString()} more results.
+          {report.omittedCount.toLocaleString()} more.
         </SettingsNote>
       )}
       {report.entries.length === 0 && report.omittedCount === 0 && (
         <SettingsNote>
-          {environmentLabel ? `${environmentLabel}: ` : ""}Nothing needed cleanup.
+          {environmentLabel ? `${environmentLabel}: ` : ""}Nothing to clean up.
         </SettingsNote>
       )}
     </>
@@ -310,11 +302,7 @@ function CleanupSection() {
       settings.storageCleanup.browserArtifactsAfterDays !== null ||
       settings.storageCleanup.logsAfterDays !== null ||
       settings.storageCleanup.dependenciesAfterDays !== null ||
-      enabled(resolveWorktreeCleanup(settings, null)) ||
-      Object.values(settings.projectSettingsOverrides).some(
-        (override) =>
-          override.worktreeCleanup?.mode === "custom" && enabled(override.worktreeCleanup.rules),
-      )
+      enabled(resolveWorktreeCleanup(settings))
     );
   });
   if (supported.length === 0) return null;
@@ -329,11 +317,11 @@ function CleanupSection() {
         ? `${report.counts.removed} removed, ${report.counts.kept} kept${report.counts.failed > 0 ? `, ${report.counts.failed} failed` : ""}`
         : "",
       description: report
-        ? `Last run ${formatRelativeTimeLabel(report.finishedAt)}. ${report.spaceMeasurement === "volume-change" ? `${formatBytes(report.bytesFreed)} more volume space available.` : "Recovered space could not be measured."}${report.counts.failed > 0 ? ` ${report.counts.failed} ${report.counts.failed === 1 ? "item" : "items"} couldn't be removed.` : ""}`
+        ? `Last ran ${formatRelativeTimeLabel(report.finishedAt)}${report.spaceMeasurement === "volume-change" && report.bytesFreed > 0 ? ` and freed ${formatBytes(report.bytesFreed)}.` : "."}${report.counts.failed > 0 ? ` ${report.counts.failed} ${report.counts.failed === 1 ? "item" : "items"} couldn't be removed.` : ""}`
         : query?.failed
-          ? "Could not load the last run."
+          ? "Couldn't load the last run."
           : query?.loading
-            ? "Loading last run…"
+            ? "Loading the last run…"
             : "Cleanup hasn't run yet.",
     };
   });
@@ -389,7 +377,7 @@ function CleanupSection() {
           description={
             <span>
               {!hasRules
-                ? "Completed delegated tasks clean up automatically when safe."
+                ? "Remove what the rules below allow. Finished delegated tasks already clean up on their own."
                 : summaries.map(({ environment, label, description }) => (
                     <span key={environment.environmentId} className="block">
                       {supported.length > 1 ? `${label}: ` : ""}
@@ -416,7 +404,13 @@ function CleanupSection() {
                 disabled={pending || !state.some((entry) => entry.allowed)}
                 onClick={() => void deleteNow(!previewOpen)}
               >
-                {pending ? "Checking…" : !previewOpen ? "Preview cleanup" : "Clean up now"}
+                {pending
+                  ? previewOpen
+                    ? "Cleaning up…"
+                    : "Checking…"
+                  : !previewOpen
+                    ? "Preview cleanup"
+                    : "Clean up now"}
               </Button>
             </div>
           }
@@ -427,13 +421,8 @@ function CleanupSection() {
           {previews !== null && (
             <>
               <SettingsNote>
-                Preview only. Safety is checked again when cleanup runs. Branches and checkpoints
-                are kept.
-              </SettingsNote>
-              <SettingsNote>
-                Shared blocks prevent reliable size estimates on APFS. Cleanup measures available
-                volume space before and after it runs; other disk activity can affect that
-                measurement.
+                Nothing is removed yet. Cleanup checks each item again before removing it and always
+                keeps branches and checkpoints. Sizes are estimates.
               </SettingsNote>
               {previews.some(({ report }) => (report.unsavedAgentWorktrees ?? 0) > 0) && (
                 <SettingsNote>
@@ -441,7 +430,7 @@ function CleanupSection() {
                     (total, { report }) => total + (report.unsavedAgentWorktrees ?? 0),
                     0,
                   )}{" "}
-                  agent worktrees have unsaved changes and will be kept.
+                  agent worktrees have unsaved changes, so they stay.
                 </SettingsNote>
               )}
               {previews.map(({ environmentId, report }) => (
@@ -462,7 +451,7 @@ function CleanupSection() {
       {summaries.some(({ report }) => (report?.unsavedAgentWorktrees ?? 0) > 0) && (
         <SettingsNote>
           {summaries.reduce((total, { report }) => total + (report?.unsavedAgentWorktrees ?? 0), 0)}{" "}
-          agent worktrees have unsaved changes and were kept.
+          agent worktrees had unsaved changes, so they stayed.
         </SettingsNote>
       )}
       {summaries.some(({ report }) => report !== null) && (
@@ -493,10 +482,10 @@ function CleanupSection() {
 
 const STORAGE_LABELS: Record<string, string> = {
   "agent-worktrees": "Agent worktrees",
-  "user-worktrees": "User worktrees",
+  "user-worktrees": "Your worktrees",
   dependencies: "Dependencies and build output",
   "dev-data": "Dev data copies",
-  "browser-artifacts": "Browser artifacts",
+  "browser-artifacts": "Browser captures",
   logs: "Logs",
   backups: "Backups",
 };
@@ -504,12 +493,16 @@ const STORAGE_LABELS: Record<string, string> = {
 function StorageUsage({ environmentId, label }: { environmentId: EnvironmentId; label: string }) {
   const measure = useAtomCommand(serverEnvironment.storageStatus);
   const [status, setStatus] = useState<StorageStatus | null>(null);
+  const [checkedAt, setCheckedAt] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const refresh = async () => {
     setPending(true);
     try {
       const result = await measure({ environmentId, input: {} });
-      if (result._tag === "Success") setStatus(result.value);
+      if (result._tag === "Success") {
+        setStatus(result.value);
+        setCheckedAt(new Date().toISOString());
+      }
     } finally {
       setPending(false);
     }
@@ -517,49 +510,55 @@ function StorageUsage({ environmentId, label }: { environmentId: EnvironmentId; 
   useEffect(() => {
     let cancelled = false;
     void measure({ environmentId, input: {} }).then((result) => {
-      if (!cancelled && result._tag === "Success") setStatus(result.value);
+      if (!cancelled && result._tag === "Success") {
+        setStatus(result.value);
+        setCheckedAt(new Date().toISOString());
+      }
     });
     return () => {
       cancelled = true;
     };
   }, [environmentId, measure]);
   return (
-    <SettingsSection id={`storage-usage-${environmentId}`} title={`Disk usage · ${label}`}>
-      <SettingsRow
-        title="Disk space"
-        description="Volume usage counts shared blocks once. APFS clones and reflinks prevent exact per-category sizes, so those sizes are left unknown. Cleanup measures actual volume space before and after it runs."
-        control={
-          <Button variant="outline" size="sm" disabled={pending} onClick={() => void refresh()}>
-            {pending ? "Measuring…" : "Refresh"}
-          </Button>
-        }
-      />
+    <SettingsSection
+      id={`storage-usage-${environmentId}`}
+      title={`Disk usage on ${label}`}
+      headerAction={
+        <SettingsRefreshAction
+          label="Measure disk usage again"
+          refreshing={pending}
+          checkedAt={checkedAt}
+          idleLabel="Measuring"
+          onRefresh={() => void refresh()}
+        />
+      }
+      footer="Files that share disk space with copies, such as worktrees on APFS, show as Unknown."
+    >
       {status === null ? (
-        <SettingsNote>Measuring disk usage…</SettingsNote>
+        <SettingsRow title="Measuring disk usage…" role="status" />
       ) : (
         <>
           {!status.complete && (
-            <SettingsNote>Measurement could not finish. Refresh to try again.</SettingsNote>
+            <SettingsNote>Measuring didn't finish. Refresh to try again.</SettingsNote>
           )}
           {status.volumes.map((volume) => (
             <SettingsRow
               key={volume.id}
-              title="Volume usage"
+              title="Disk"
               description={volume.path}
               control={
                 <span className="text-sm tabular-nums">
-                  {formatBytes(volume.usedBytes)} used · {formatBytes(volume.availableBytes)}{" "}
-                  available
+                  {formatBytes(volume.usedBytes)} used · {formatBytes(volume.availableBytes)} free
                 </span>
               }
             />
           ))}
           <SettingsRow
-            title="Database file"
-            description="Conversation history and indexes. Storage cleanup keeps this history and does not compact the database."
+            title="Conversation history"
+            description="Cogenly's database. Cleanup never removes history."
             control={
               <span className="text-sm tabular-nums">
-                {status.databaseBytes === null ? "Unavailable" : formatBytes(status.databaseBytes)}
+                {status.databaseBytes === null ? "Unknown" : formatBytes(status.databaseBytes)}
               </span>
             }
           />
@@ -571,7 +570,7 @@ function StorageUsage({ environmentId, label }: { environmentId: EnvironmentId; 
                 title={title}
                 description={
                   usage
-                    ? `${usage.files.toLocaleString()} files${usage.bytes === null ? " · Shares filesystem blocks" : ""}`
+                    ? `${usage.files.toLocaleString()} ${usage.files === 1 ? "file" : "files"}${usage.bytes === null ? " · Shares disk space" : ""}`
                     : undefined
                 }
                 control={
@@ -596,10 +595,9 @@ export function StorageSettingsPanel() {
   const scopedSettings = useScopedSettings();
   const settings = {
     ...scopedSettings.storageCleanup,
-    ...resolveWorktreeCleanup(scopedSettings, null),
+    ...resolveWorktreeCleanup(scopedSettings),
   };
   const updateSettings = useUpdateScopedSettings();
-  const worktreeCleanupOverrides = useWorktreeCleanupOverrides();
   const update = (patch: Partial<StorageCleanupSettings>) =>
     updateSettings({ storageCleanup: patch });
 
@@ -637,6 +635,10 @@ export function StorageSettingsPanel() {
             label={environment.label}
           />
         ))}
+      {/* Right under usage: people come here to free space. The rules below say what it removes. */}
+      <CleanupSection
+        key={connectedEnvironments.map((environment) => environment.environmentId).join(":")}
+      />
       {connectedEnvironments
         .filter(
           (environment) =>
@@ -649,16 +651,11 @@ export function StorageSettingsPanel() {
             label={environment.label}
           />
         ))}
-      <SettingsSection
-        id="storage-worktrees"
-        title="Worktrees"
-        // Projects with their own cleanup ignore these rules on every machine.
-        titleAction={<ProjectOverridesPopover {...worktreeCleanupOverrides} />}
-      >
+      <SettingsSection id="storage-worktrees" title="Worktrees">
         <WorktreesDirectoryRow />
         <SettingsRow
           title="Delete worktrees with deleted threads"
-          description="Remove unused worktrees when active or archived threads are deleted. Worktrees with local changes are kept."
+          description="When you delete a thread, remove its worktree too. Worktrees with local changes stay."
           serverScoped
           control={
             <Switch
@@ -670,7 +667,7 @@ export function StorageSettingsPanel() {
         />
         <SettingsRow
           title="Delete inactive worktrees"
-          description="Remove worktrees after their threads have been inactive for this many days. Branches and thread history are kept."
+          description="Remove a worktree once its thread has been idle this long. Branches and history stay."
           serverScoped
           control={
             <RetentionControl
@@ -687,7 +684,7 @@ export function StorageSettingsPanel() {
           ) && (
             <SettingsRow
               title="Delete settled or archived worktrees"
-              description="Remove safe worktrees this many days after their thread settles or is archived. Reopening recreates them from the retained branch. Completed delegated tasks clean up as soon as safe."
+              description="Remove a worktree this long after its thread settles or is archived. Reopening the thread brings it back from its branch."
               serverScoped
               control={
                 <RetentionControl
@@ -701,7 +698,7 @@ export function StorageSettingsPanel() {
           )}
         <SettingsRow
           title="Delete merged worktrees"
-          description="Remove worktrees whose pull request is merged and whose commits are included in the default branch."
+          description="Remove a worktree once its pull request is merged into the default branch."
           serverScoped
           control={
             <Switch
@@ -713,7 +710,7 @@ export function StorageSettingsPanel() {
         />
         <SettingsRow
           title="Delete unchanged worktrees"
-          description="Remove worktrees with no commits beyond the default branch."
+          description="Remove worktrees that have no commits of their own."
           serverScoped
           control={
             <Switch
@@ -725,7 +722,7 @@ export function StorageSettingsPanel() {
         />
         <SettingsRow
           title="Keep ignored local files too"
-          description="Edits, untracked files and stashes always block removal. Unknown ignored files such as .env are protected too. This also keeps ignored build output and dev data copies; node_modules can still be removed."
+          description="Also keep worktrees that hold ignored files such as build output. Edits, untracked files, stashes and files like .env always keep a worktree. node_modules can still go."
           serverScoped
           control={
             <Switch
@@ -742,7 +739,7 @@ export function StorageSettingsPanel() {
       <SettingsSection id="storage-backups" title="Backups">
         <SettingsRow
           title="Nightly backups"
-          description="Keep consistent snapshots of the database, settings and secrets. Cleanup removes backups beyond the retention count and keeps the newest complete copies."
+          description="Save a copy of the database, settings and secrets every night."
           serverScoped
           control={
             <Switch
@@ -753,9 +750,9 @@ export function StorageSettingsPanel() {
           }
         />
         <SettingsRow
-          {...searchableSetting("storage-backups")}
+          {...searchableSetting("storage-backup-retention")}
           title="Backups to keep"
-          description="Defaults to two complete copies. The same retention applies to Clean up now."
+          description="The newest copies stay. Older ones are removed when cleanup runs."
           serverScoped
           control={
             <NumberField
@@ -781,10 +778,10 @@ export function StorageSettingsPanel() {
           }
         />
       </SettingsSection>
-      <SettingsSection id="storage-artifacts" title="Artifacts and logs">
+      <SettingsSection id="storage-artifacts" title="Build files, captures and logs">
         <SettingsRow
           title="Prune idle dependencies"
-          description="Optionally remove ignored node_modules, .turbo and dist folders in idle worktrees after this many days. Setup runs before the next turn. Shared package files may free little space. Off by default."
+          description="Remove node_modules, .turbo and dist from worktrees idle this long. They're rebuilt before the next turn."
           serverScoped
           control={
             <RetentionControl
@@ -795,33 +792,30 @@ export function StorageSettingsPanel() {
           }
         />
         <SettingsRow
-          title="Delete old browser artifacts"
-          description="Delete saved browser captures after this many days. Older capture links will no longer open."
+          title="Delete old browser captures"
+          description="Remove saved browser screenshots and recordings after this long. Links to them stop opening."
           serverScoped
           control={
             <RetentionControl
-              label="Delete old browser artifacts"
+              label="Delete old browser captures"
               value={settings.browserArtifactsAfterDays}
               onChange={(browserArtifactsAfterDays) => update({ browserArtifactsAfterDays })}
             />
           }
         />
         <SettingsRow
-          title="Delete old rotated logs"
-          description="Delete inactive rotated log files after this many days. Current logs are kept."
+          title="Delete old logs"
+          description="Remove old log files after this long. The current log stays."
           serverScoped
           control={
             <RetentionControl
-              label="Delete old rotated logs"
+              label="Delete old logs"
               value={settings.logsAfterDays}
               onChange={(logsAfterDays) => update({ logsAfterDays })}
             />
           }
         />
       </SettingsSection>
-      <CleanupSection
-        key={connectedEnvironments.map((environment) => environment.environmentId).join(":")}
-      />
     </>
   );
 }

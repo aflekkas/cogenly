@@ -1,5 +1,4 @@
 import { makeAssistantStreamingFilter } from "./assistantStreaming.ts";
-import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 import { fillModelSelectionEffortDefault } from "@cogenly/shared/model";
 import {
   isOrchestrationV2WorkActive,
@@ -914,11 +913,7 @@ export const layer: Layer.Layer<
           });
           const responseStreamingMode = yield* Effect.gen(function* () {
             const responseStreamingMode = yield* serverSettings.getSettings.pipe(
-              Effect.map(
-                (settings) =>
-                  resolveProjectSettings(settings, input.appThread.projectId).settings
-                    .responseStreamingMode,
-              ),
+              Effect.map((settings) => settings.responseStreamingMode),
             );
             yield* checkpointService
               .captureBaseline({

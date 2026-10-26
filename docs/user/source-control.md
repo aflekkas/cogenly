@@ -58,8 +58,12 @@ its own folder name.
 A repository you cloned elsewhere before keeps working where it is. Move it into
 its project folder from its menu in the project's repository list. Its worktrees
 come along, and its threads follow. Folders under `~/.cogenly/projects` that no
-project claims, such as those left by a deleted project, are listed in
-**Settings → Projects**. Adopt one as a project, or remove it if it is empty.
+project claims, such as those left by a deleted project, are listed under
+**Folders without a project** in **Settings → Projects**. Choose **Make project** to turn
+one into a project, or remove it if it is empty.
+
+To create projects and clone repositories somewhere else, set **Projects folder** in
+**Settings → Projects**. Repositories already on disk stay where they are.
 
 ## Pull requests with agents
 

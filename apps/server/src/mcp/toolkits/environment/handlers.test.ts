@@ -4,6 +4,7 @@ import {
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   MachineHealthError,
+  type MachineHealthItem,
   type MachineHealthReport,
   ProviderInstanceId,
   ThreadId,
@@ -18,6 +19,7 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as MachineHealth from "../../../health/MachineHealth.ts";
+import * as MachineHealthFixes from "../../../health/MachineHealthFixes.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Settings from "../../../serverSettings.ts";
@@ -79,9 +81,8 @@ const makeServer = (
     Effect.die("machine_health is not exercised here"),
   cliCommand: DesktopAppControl.DesktopAppControl["Service"]["cliCommand"] = () =>
     Effect.die("cli_command is not exercised here"),
-  setupSandbox: MachineHealth.MachineHealth["Service"]["setupSandbox"] = Effect.die(
-    "sandbox setup is not exercised here",
-  ),
+  fix: MachineHealthFixes.MachineHealthFixes["Service"]["fix"] = () =>
+    Effect.die("machine_health_fix is not exercised here"),
 ) =>
   McpHttpServer.toolkitRegistration(EnvironmentToolkit, EnvironmentHandlers.layer).pipe(
     Layer.provideMerge(McpServer.McpServer.layer),
@@ -102,7 +103,8 @@ const makeServer = (
           status: Effect.die("machine_security_status is not exercised here"),
         }),
         Layer.mock(StorageCleanup.StorageCleanup)({}),
-        Layer.mock(MachineHealth.MachineHealth)({ reportFor, setupSandbox }),
+        Layer.mock(MachineHealth.MachineHealth)({ reportFor }),
+        Layer.succeed(MachineHealthFixes.MachineHealthFixes, { fix }),
         Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({}),
       ),
     ),
@@ -266,6 +268,7 @@ it.effect("environment_preferences_update saves local and shared settings", () =
           Layer.succeed(MachineSecurity.MachineSecurity, { status: Effect.die("unused") }),
           Layer.mock(StorageCleanup.StorageCleanup)({}),
           Layer.mock(MachineHealth.MachineHealth)({}),
+          Layer.mock(MachineHealthFixes.MachineHealthFixes)({}),
           Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({}),
         ),
       ),
@@ -418,9 +421,40 @@ it.effect.each([
   ["a read-only client", readOnlyClient, false],
 ] as const)("machine_health_fix from %s", ([, scope, allowed]) =>
   Effect.gen(function* () {
-    let calls = 0;
+    const fixed: Array<unknown> = [];
+    const item = (key: string, fix: MachineHealthItem["fix"]): MachineHealthItem => ({
+      key,
+      status: "fail",
+      title: key,
+      detail: "",
+      since: null,
+      target: null,
+      fix,
+    });
+    const report: MachineHealthReport = {
+      ...vpsReport,
+      checks: [
+        {
+          id: "stuck-runs",
+          status: "fail",
+          summary: "18 stuck runs",
+          items: [item("stuck-runs:thread:a", "stop-runs")],
+        },
+        {
+          id: "providers",
+          status: "fail",
+          summary: "",
+          items: [item("providers:claude:auth", "sign-in"), item("providers:codex:status", null)],
+        },
+      ],
+    };
     const outcome = yield* McpServer.McpServer.pipe(
-      Effect.flatMap((server) => server.callTool({ name: "machine_health_fix", arguments: {} })),
+      Effect.flatMap((server) =>
+        server.callTool({
+          name: "machine_health_fix",
+          arguments: { environmentId: "environment-vps" },
+        }),
+      ),
       Effect.map(({ content }) =>
         JSON.parse(content.map((part) => (part.type === "text" ? part.text : "")).join("")),
       ),
@@ -429,24 +463,27 @@ it.effect.each([
       Effect.provide(
         makeServer(
           () => Effect.die("unused"),
+          () => Effect.succeed(report),
           undefined,
-          undefined,
-          Effect.sync(() => {
-            calls++;
-            return {
-              available: false,
-              message: "Run: sudo apt-get install -y bubblewrap",
-              command: "sudo apt-get install -y bubblewrap",
-            };
-          }),
+          (input) =>
+            Effect.sync(() => {
+              fixed.push(input);
+              return {
+                environmentId: report.environmentId,
+                machineName: report.machineName,
+                summary: "Stopped 18 stuck subagents.",
+                outcomes: [],
+              };
+            }),
         ),
       ),
     );
-    expect(calls).toBe(allowed ? 1 : 0);
+    // Omitted itemKeys fix what has a direct fix; sign-in and investigations stay manual.
+    expect(fixed).toEqual(
+      allowed ? [{ environmentId: "environment-vps", itemKeys: ["stuck-runs:thread:a"] }] : [],
+    );
     expect(outcome).toMatchObject(
-      allowed
-        ? { available: false, command: "sudo apt-get install -y bubblewrap" }
-        : { code: "capability_denied" },
+      allowed ? { summary: "Stopped 18 stuck subagents." } : { code: "capability_denied" },
     );
   }),
 );

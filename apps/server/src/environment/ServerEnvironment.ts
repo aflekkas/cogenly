@@ -232,12 +232,9 @@ export const make = Effect.gen(function* () {
       storageStatus: true,
       databaseStorage: true,
       otlpEndpointCheck: true,
-      projectWorktreeCleanup: true,
       settledWorktreeCleanup: true,
       worktreesDirectory: true,
       threadRestartContinuation: true,
-      projectSettingsOverrides: true,
-      projectProviderInstanceOverrides: true,
       threadSnooze: true,
       usageModelAliases: true,
       threadPinning: true,
@@ -262,6 +259,7 @@ export const make = Effect.gen(function* () {
         : {}),
       ...(desktopAppUpdate ? { desktopAppUpdate: true } : {}),
       serverBrowser: true,
+      machineHealthFix: true,
     },
   };
 

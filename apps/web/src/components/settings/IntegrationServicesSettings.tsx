@@ -1,4 +1,3 @@
-import { scopeProjectRef } from "@cogenly/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -11,10 +10,9 @@ import {
   type IntegrationNativeImportPreview,
   type IntegrationSummary,
 } from "@cogenly/contracts";
+import { MoreVertical } from "lucide-react";
 import { useState } from "react";
-import { useComposerDraftStore } from "~/composerDraftStore";
-import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
-import { useScratchProject } from "~/hooks/useScratchProject";
+import { useOpenAgentChat } from "~/hooks/useOpenAgentChat";
 import { AnimatedHeight } from "~/components/AnimatedHeight";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
@@ -25,6 +23,7 @@ import { IntegrationSourceIcon } from "../chat/ComposerSourcesPicker";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { toastManager } from "../ui/toast";
 import {
   integrationErrorText,
@@ -40,7 +39,7 @@ import {
 import { openSignInPage } from "./openIntegrationSignIn";
 import { useStatusFade } from "./integrationStatusMotion";
 import { useEnvironmentMachineList } from "../../machines/useMachines";
-import { ScopedSwitch } from "./ScopedSwitch";
+import { Switch } from "../ui/switch";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
@@ -48,8 +47,7 @@ import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings"
 
 /** Opens a new chat on the selected environment, preserving existing drafts. */
 function useConnectWithAgent(environmentId: EnvironmentId | null) {
-  const { openScratchProject } = useScratchProject();
-  const newThread = useNewThreadHandler();
+  const openAgentChat = useOpenAgentChat();
   const [pending, setPending] = useState(false);
   return {
     pending,
@@ -58,12 +56,7 @@ function useConnectWithAgent(environmentId: EnvironmentId | null) {
       if (environmentId === null || pending) return;
       setPending(true);
       try {
-        const project = await openScratchProject(environmentId);
-        if (!project) return;
-        const opened = await newThread(scopeProjectRef(environmentId, project.id), {
-          surface: "chat",
-        });
-        if (opened) useComposerDraftStore.getState().setPrompt(opened.draftId, request);
+        await openAgentChat(environmentId, request);
       } finally {
         setPending(false);
       }
@@ -81,44 +74,73 @@ export function IntegrationServicesSettings() {
   const canWrite = useAtomValue(integrationsRpc.update.permissionAtom(environmentId));
   const agent = useConnectWithAgent(environmentId);
   const connectDisabled = !canWrite || environmentId === null || agent.pending;
-  const connectButton = (
-    <Button
-      size="sm"
-      variant="outline"
-      disabled={connectDisabled}
-      onClick={() => void agent.connect()}
-    >
-      Connect with an agent
-    </Button>
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const integrations = query.data?.integrations ?? null;
+  // Quick starts skip services that are already connected.
+  const connectedCatalogIds = new Set(
+    (integrations ?? []).flatMap(
+      (summary) => integrationCatalogEntryFor(summary.integration)?.id ?? [],
+    ),
   );
+  const suggestions = INTEGRATION_CATALOG.filter((entry) => !connectedCatalogIds.has(entry.id));
+  const empty = integrations !== null && integrations.length === 0;
   return (
-    <>
-      <SettingsSection {...searchableSetting("integration-services")}>
-        {environmentId === null ? (
-          <SettingsRow title="Choose a machine to see its integrations." />
-        ) : query.error !== null && query.data === null ? (
-          <SettingsRow title="Couldn't load integrations" description={query.error} />
-        ) : query.data === null ? (
-          <SettingsRow title="Loading integrations…" role="status" />
-        ) : (
-          query.data.integrations.map((summary) => (
-            <AccountRow
-              key={summary.integration.id}
-              environmentId={environmentId}
-              summary={summary}
-              onAgent={agent.connect}
-            />
-          ))
-        )}
-        {query.data !== null && query.data.integrations.length === 0 ? (
-          <SettingsRow
-            id={searchableSetting("integration-add").id}
-            title="Connect your services"
-            description="Integrations let agents read and act in services like Gmail, Slack and Linear. An agent sets each one up with you and asks for sign-in or secrets when needed."
-            control={connectButton}
-          >
-            <div role="group" aria-label="Suggested services" className="flex flex-wrap gap-2 pb-3">
-              {INTEGRATION_CATALOG.map((entry) => (
+    <SettingsSection {...searchableSetting("integration-services")}>
+      {/* The one-time import leads the card so it is seen before the account list. */}
+      <AnimatedHeight>
+        {!settings.nativeMcpImportReviewed && !settings.useProviderConnectors ? (
+          <NativeImportOffer
+            key={environmentId ?? "none"}
+            environmentId={environmentId}
+            onAgent={agent.connect}
+            onDone={() => updateSettings({ nativeMcpImportReviewed: true })}
+          />
+        ) : null}
+      </AnimatedHeight>
+      {environmentId === null ? (
+        <SettingsRow title="Choose a machine to see its integrations." />
+      ) : query.error !== null && integrations === null ? (
+        <SettingsRow title="Couldn't load integrations" description={query.error} />
+      ) : integrations === null ? (
+        <SettingsRow title="Loading integrations…" role="status" />
+      ) : (
+        integrations.map((summary) => (
+          <AccountRow
+            key={summary.integration.id}
+            environmentId={environmentId}
+            summary={summary}
+            onAgent={agent.connect}
+          />
+        ))
+      )}
+      {integrations !== null ? (
+        <SettingsRow
+          {...searchableSetting("integration-add")}
+          {...(empty ? { title: "Connect your first service" } : {})}
+          description={
+            empty
+              ? "Let agents read and act in services like Gmail, Slack and Linear. An agent sets each one up with you and asks before it uses a sign-in or secret."
+              : "Ask an agent to connect another service or any MCP server. It walks you through setup."
+          }
+          control={
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={connectDisabled}
+              onClick={() => void agent.connect()}
+            >
+              Connect with an agent
+            </Button>
+          }
+        >
+          {suggestions.length > 0 ? (
+            <div
+              role="group"
+              aria-label="Suggested services"
+              className="flex flex-wrap gap-2 pt-2 pb-3"
+            >
+              {suggestions.map((entry) => (
                 <Button
                   key={entry.id}
                   size="sm"
@@ -131,65 +153,34 @@ export function IntegrationServicesSettings() {
                 </Button>
               ))}
             </div>
-          </SettingsRow>
-        ) : (
-          <SettingsRow
-            {...searchableSetting("integration-add")}
-            description="Ask an agent to connect Gmail, Wispr Flow, or any MCP server. It handles setup and asks you for consent or secrets when needed."
-            control={connectButton}
-          />
-        )}
-      </SettingsSection>
-      <SettingsSection title="Provider connectors" hideTitle>
-        <ProviderConnectorsSettingRow
-          key={environmentId ?? "none"}
-          environmentId={environmentId}
-          onAgent={agent.connect}
-        />
-      </SettingsSection>
-    </>
+          ) : null}
+        </SettingsRow>
+      ) : null}
+    </SettingsSection>
   );
 }
 
 const REVIEW_WITH_AGENT_REQUEST =
   "Help me finish importing my Claude and Codex integrations into Cogenly. Tell me what couldn't be reviewed, then set up the ones I choose.";
 
-function ProviderConnectorsSettingRow({
-  environmentId,
-  onAgent,
-}: {
-  readonly environmentId: EnvironmentId | null;
-  readonly onAgent: (request: string) => Promise<void>;
-}) {
+/** Whether agents also load the MCP servers, connectors and plugins set up in Claude or Codex. */
+export function UseOnlyCogenlyIntegrationsRow() {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
   return (
-    <>
-      <AnimatedHeight>
-        {!settings.nativeMcpImportReviewed && !settings.useProviderConnectors ? (
-          <NativeImportOffer
-            environmentId={environmentId}
-            onAgent={onAgent}
-            onDone={() => updateSettings({ nativeMcpImportReviewed: true })}
-          />
-        ) : null}
-      </AnimatedHeight>
-
-      <SettingsRow
-        serverScoped
-        {...searchableSetting("provider-connectors")}
-        description="Agents use the integrations connected here, not the MCP servers, connectors and plugins set up in Claude or Codex. MCP servers checked into a repo, such as its .mcp.json, still load. Servers your organization manages for Claude stay on. Turn off to let agents use both. Applies to new agent sessions."
-        settingKeys={["useProviderConnectors"]}
-        control={
-          <ScopedSwitch
-            settingKeys={["useProviderConnectors"]}
-            checked={!settings.useProviderConnectors}
-            onCheckedChange={(checked) => updateSettings({ useProviderConnectors: !checked })}
-            aria-label="Use only Cogenly integrations"
-          />
-        }
-      />
-    </>
+    <SettingsRow
+      serverScoped
+      {...searchableSetting("provider-connectors")}
+      description="Agents skip the MCP servers, connectors and plugins set up in Claude or Codex. Servers checked into a repo, like its .mcp.json, and ones your organization manages still load. Applies to new agent sessions."
+      settingKeys={["useProviderConnectors"]}
+      control={
+        <Switch
+          checked={!settings.useProviderConnectors}
+          onCheckedChange={(checked) => updateSettings({ useProviderConnectors: !checked })}
+          aria-label="Use only Cogenly integrations"
+        />
+      }
+    />
   );
 }
 
@@ -254,10 +245,10 @@ function NativeImportOffer({
       title="Import from Claude and Codex"
       description={
         review === null
-          ? "Agents keep using the MCP servers set up in Claude and Codex until you import or skip them. Imported servers stay off until an agent finishes setting them up with you."
+          ? "Bring the MCP servers you set up in Claude and Codex into Cogenly. Agents keep using them until you import or skip."
           : found === 0
             ? "No servers found in your Claude or Codex settings."
-            : `Found ${found === 1 ? "1 server" : `${found} servers`} in your Claude and Codex settings. Imported servers stay off until an agent finishes setting them up with you.`
+            : `Found ${found === 1 ? "1 server" : `${found} servers`} in Claude and Codex. Each stays off until an agent finishes setting it up with you.`
       }
       control={
         <div className="flex gap-2">
@@ -427,6 +418,22 @@ function AccountRow({
       return null;
     });
   };
+  const runTest = async () => {
+    const result = await test({ environmentId, input: { id: integration.id } });
+    if (result._tag === "Success")
+      toastManager.add({
+        type: result.value.status === "connected" ? "success" : "error",
+        title: result.value.message,
+      });
+    else if (!isAtomCommandInterrupted(result))
+      setError(integrationErrorText(squashAtomCommandFailure(result)));
+  };
+  // A row that needs the user offers Reconnect; a healthy one offers Test.
+  // The other action, Turn off and Remove sit in the row's menu.
+  const needsReconnect =
+    status.tone === "warning" || status.tone === "error" || !integration.enabled;
+  const reconnectDisabled = pending || !canWrite || !canSignIn;
+  const testDisabled = pending || !canTest || !integration.enabled;
   return (
     <SettingsRow
       title={
@@ -438,74 +445,94 @@ function AccountRow({
       description={
         <>
           <span ref={statusRef}>{status.label}</span>
+          {/* The title already names the account. */}
           {` · ${scopeLabel(integration.scope, labels)}`}
-          {integration.accountLabel ? ` · ${integration.accountLabel}` : ""}
           {paired && summary.notSyncedReason ? ` · ${summary.notSyncedReason}` : ""}
         </>
       }
       control={
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={pending || !canTest || !integration.enabled}
-            onClick={() =>
-              void run(async () => {
-                const result = await test({ environmentId, input: { id: integration.id } });
-                if (result._tag === "Success")
-                  toastManager.add({
-                    type: result.value.status === "connected" ? "success" : "error",
-                    title: result.value.message,
-                  });
-                else if (!isAtomCommandInterrupted(result))
-                  setError(integrationErrorText(squashAtomCommandFailure(result)));
-              })
-            }
-          >
-            Test
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={pending || !canWrite || !canSignIn}
-            onClick={() => void run(reconnect)}
-          >
-            Reconnect
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={pending || !canWrite || !integration.enabled}
-            onClick={() =>
-              void run(async () => {
-                report(
-                  await update({ environmentId, input: { id: integration.id, enabled: false } }),
-                );
-              })
-            }
-          >
-            Disconnect
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={pending || !canRemove}
-            onClick={() =>
-              void run(async () => {
-                if (
-                  !(await requestConfirmDialog(
-                    `Remove ${integrationTitle(integration)}? Agents will no longer have access through this integration.`,
-                  ))
-                )
-                  return;
-                const result = await remove({ environmentId, input: { id: integration.id } });
-                if (result._tag !== "Success" && !isAtomCommandInterrupted(result))
-                  setError(integrationErrorText(squashAtomCommandFailure(result)));
-              })
-            }
-          >
-            Remove
-          </Button>
+        <div className="flex items-center justify-end gap-1">
+          {needsReconnect ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={reconnectDisabled}
+              onClick={() => void run(reconnect)}
+            >
+              Reconnect
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={testDisabled}
+              onClick={() => void run(runTest)}
+            >
+              Test
+            </Button>
+          )}
+          <Menu>
+            <MenuTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="ghost-muted"
+                  disabled={pending}
+                  aria-label={`${integrationTitle(integration)} options`}
+                />
+              }
+            >
+              <MoreVertical />
+            </MenuTrigger>
+            <MenuPopup align="end">
+              {needsReconnect ? (
+                <MenuItem disabled={testDisabled} onClick={() => void run(runTest)}>
+                  Test connection
+                </MenuItem>
+              ) : (
+                <MenuItem disabled={reconnectDisabled} onClick={() => void run(reconnect)}>
+                  Reconnect
+                </MenuItem>
+              )}
+              {integration.enabled ? (
+                <MenuItem
+                  disabled={!canWrite}
+                  onClick={() =>
+                    void run(async () => {
+                      report(
+                        await update({
+                          environmentId,
+                          input: { id: integration.id, enabled: false },
+                        }),
+                      );
+                    })
+                  }
+                >
+                  Turn off
+                </MenuItem>
+              ) : null}
+              <MenuSeparator />
+              <MenuItem
+                variant="destructive"
+                disabled={!canRemove}
+                onClick={() =>
+                  void run(async () => {
+                    if (
+                      !(await requestConfirmDialog(
+                        `Remove ${integrationTitle(integration)}? Agents will no longer have access through this integration.`,
+                      ))
+                    )
+                      return;
+                    const result = await remove({ environmentId, input: { id: integration.id } });
+                    if (result._tag !== "Success" && !isAtomCommandInterrupted(result))
+                      setError(integrationErrorText(squashAtomCommandFailure(result)));
+                  })
+                }
+              >
+                Remove
+              </MenuItem>
+            </MenuPopup>
+          </Menu>
         </div>
       }
     >

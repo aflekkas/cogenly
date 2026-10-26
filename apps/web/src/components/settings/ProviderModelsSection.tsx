@@ -498,10 +498,11 @@ export function ProviderModelsSection({
           isHidden && "opacity-50",
         )}
       >
+        {/* The name keeps its width; the slug truncates first. */}
         <span className="flex min-w-0 items-baseline gap-2">
-          <span className={cn(nameClassName, "truncate")}>{model.name}</span>
+          <span className={cn(nameClassName, "max-w-full shrink-0 truncate")}>{model.name}</span>
           {model.name !== model.slug ? (
-            <code className="truncate font-mono text-2xs text-muted-foreground/70">
+            <code className="min-w-0 truncate font-mono text-2xs text-muted-foreground/70">
               {model.slug}
             </code>
           ) : null}
@@ -511,11 +512,11 @@ export function ProviderModelsSection({
         </span>
         {/*
           Always a grid item so the columns line up across rows; the text
-          itself drops out on phone widths where it would starve the name.
+          itself drops out in a narrow list, where it would starve the name.
         */}
         <span className="flex items-center gap-1.5 text-2xs text-muted-foreground/70">
           {capLabels.length > 0 ? (
-            <span className="hidden sm:inline">{capLabels.join(" · ")}</span>
+            <span className="hidden @min-[40rem]/model-list:inline">{capLabels.join(" · ")}</span>
           ) : null}
           {onEffortDefaultChange ? (
             <ModelEffortDefaultSelect
@@ -566,7 +567,7 @@ export function ProviderModelsSection({
                 )
               }
             >
-              {allBuiltInModelsHidden ? "Enable all" : "Disable all"}
+              {allBuiltInModelsHidden ? "Show all" : "Hide all"}
             </Button>
           ) : null}
           <span className="text-xs text-muted-foreground">
@@ -589,7 +590,7 @@ export function ProviderModelsSection({
       </div>
       <div
         ref={listRef}
-        className="scroll-fade-y mt-2 -mx-2 max-h-64 overflow-y-auto lg:max-h-none lg:min-h-0 lg:flex-1"
+        className="@container/model-list scroll-fade-y mt-2 -mx-2 max-h-64 overflow-y-auto lg:max-h-none lg:min-h-0 lg:flex-1"
       >
         {visibleModels.length === 0 ? (
           <p className="px-2 py-2 text-xs text-muted-foreground">

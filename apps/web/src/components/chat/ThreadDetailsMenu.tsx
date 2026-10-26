@@ -24,8 +24,7 @@ import {
 import { Children, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { observeResize } from "~/lib/observeResize";
-import { playPanelFlip, readPanelFlipShift } from "~/lib/panelFlip";
-import { PANEL_ANIMATION_DURATION, readPanelAnimationsActive } from "~/panelAnimations";
+import { readPanelFlipShift } from "~/lib/panelFlip";
 import { cn } from "~/lib/utils";
 import {
   useProjects,
@@ -294,26 +293,6 @@ function ThreadDetailsDockCard(props: {
   const { ref, shell, summary, canDetach } = useThreadDetailsModel(props);
   const cardRef = useRef<HTMLElement | null>(null);
   const { open, reportDetailsCard } = props;
-  const enteredRef = useRef(false);
-  useLayoutEffect(() => {
-    if (!open) {
-      enteredRef.current = false;
-      return;
-    }
-    if (enteredRef.current) return;
-    enteredRef.current = true;
-    const card = cardRef.current;
-    const trigger = document.querySelector<HTMLElement>("[data-thread-details-trigger]");
-    if (!card || !trigger || !props.fadeIn || !readPanelAnimationsActive()) return;
-    // Dock from the header button's alignment to the canvas's right edge.
-    // Restored cards have no entrance; their persisted position is history.
-    const right = trigger.getBoundingClientRect().right;
-    const width = card.getBoundingClientRect().width;
-    playPanelFlip(
-      { root: card, entries: [{ element: card, bounds: { left: right - width, right } }] },
-      PANEL_ANIMATION_DURATION,
-    );
-  }, [open, props.fadeIn]);
   // Reported only while open, so the chat glides back as the card fades out.
   useLayoutEffect(() => {
     const card = cardRef.current;
@@ -347,6 +326,11 @@ function ThreadDetailsDockCard(props: {
       aria-label="Thread details"
       inert={!open}
       data-panel-flip="end"
+      // Opens and closes like the popover it replaces: a fade from 97% scale
+      // about the corner under the header button. It never slides, so the
+      // chat lane's glide (ChatCanvas) is the only thing that moves.
+      data-popup-enter={props.fadeIn ? "" : undefined}
+      data-ending-style={open ? undefined : ""}
       onKeyDown={(event) => {
         if (event.key !== "Escape") return;
         event.stopPropagation();
@@ -358,10 +342,9 @@ function ThreadDetailsDockCard(props: {
       }}
       className={cn(
         "dropdown-glass surface-raised surface-raised-floating absolute right-3 z-30 flex max-h-[min(36rem,calc(100%-12rem))] w-(--thread-details-panel-width) flex-col overflow-hidden rounded-lg text-popover-foreground",
-        "transition-[opacity,top] duration-(--motion-duration-panel) ease-(--ease-panel) motion-reduce:transition-opacity",
-        props.fadeIn && "starting:opacity-0",
+        "origin-top-right popup-motion transition-[opacity,scale,top]",
         props.findOpen ? "top-14" : "top-3",
-        open ? "opacity-100" : "pointer-events-none opacity-0",
+        !open && "pointer-events-none",
       )}
     >
       <div className="scroll-fade-y min-h-0 overflow-y-auto overscroll-contain">

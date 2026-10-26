@@ -2,7 +2,6 @@ import { ProjectId, type ProjectScript } from "@cogenly/contracts";
 import * as HostProcess from "@cogenly/shared/HostProcess";
 import {
   projectScriptRuntimeEnv,
-  resolveProjectScripts,
   settleProjectScript,
   setupProjectScript,
 } from "@cogenly/shared/projectScripts";
@@ -16,7 +15,6 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as ProjectService from "./ProjectService.ts";
 
@@ -203,7 +201,6 @@ function wrapCommandForCompletion(
 export const make = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
   const terminalManager = yield* TerminalManager.TerminalManager;
-  const serverSettings = yield* ServerSettings.ServerSettingsService;
   const crypto = yield* Crypto.Crypto;
   const completionShell = resolveCompletionShell(
     yield* HostProcess.Platform,
@@ -355,18 +352,8 @@ export const make = Effect.gen(function* () {
       return yield* new ProjectSetupScriptProjectNotFoundError(errorContext);
     }
 
-    const settings = yield* serverSettings.getSettings.pipe(
-      Effect.mapError(
-        (cause) =>
-          new ProjectSetupScriptOperationError({
-            ...errorContext,
-            operation: "readSettings",
-            cause,
-          }),
-      ),
-    );
     const trigger = input.trigger ?? "setup";
-    const scripts = resolveProjectScripts(settings, project);
+    const scripts = project.scripts;
     const script =
       trigger === "settle" ? settleProjectScript(scripts) : setupProjectScript(scripts);
     if (!script) {

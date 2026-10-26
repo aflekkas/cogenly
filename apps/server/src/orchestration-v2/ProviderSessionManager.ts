@@ -3,7 +3,6 @@ import * as AgentStore from "../agents/AgentStore.ts";
 import { terminalToolsAuthorized } from "@cogenly/provider-core/server/mcpSession";
 import { AgentScope } from "@cogenly/shared/AgentScope";
 import * as KeyedLock from "@cogenly/shared/KeyedLock";
-import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 import {
   isOrchestrationV2WorkActive,
   ModelSelection,
@@ -44,7 +43,6 @@ import {
   withMetrics,
 } from "../observability/Metrics.ts";
 import { ProviderWorkspaceMissingError } from "../provider/Errors.ts";
-import * as ProjectService from "../project/ProjectService.ts";
 import * as McpProviderSessions from "@cogenly/provider-core/server/McpProviderSessions";
 import * as ServerSettings from "../serverSettings.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
@@ -364,7 +362,6 @@ export const layerWithOptions = (
       const agents = yield* Effect.serviceOption(AgentStore.AgentStore);
       const sandbox = yield* Effect.serviceOption(ReadOnlySandbox.ReadOnlySandbox);
       const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
-      const projectService = yield* Effect.serviceOption(ProjectService.ProjectService);
       const eventSink = yield* EventSink.EventSinkV2;
       const commandOutput = yield* CommandOutputHub.CommandOutputHub;
       const idAllocator = yield* IdAllocator.IdAllocatorV2;
@@ -377,33 +374,10 @@ export const layerWithOptions = (
             return { browser: true, device: false, computer: false };
           return yield* Effect.gen(function* () {
             const settings = yield* serverSettings.value.getSettings;
-            const thread = yield* projectionStore.getThread(threadId);
-            const entries = Object.values(settings.projectSettingsOverrides);
-            const browserOverridden = entries.some(
-              (entry) => entry.enableAgentBrowserAccess !== undefined,
-            );
-            const deviceOverridden = entries.some(
-              (entry) => entry.enableAgentDeviceAccess !== undefined,
-            );
-            const computerOverridden = entries.some(
-              (entry) => entry.enableAgentComputerUse !== undefined,
-            );
-            if (browserOverridden || deviceOverridden || computerOverridden) {
-              const project = Option.isSome(projectService)
-                ? yield* projectService.value.getById(thread.projectId)
-                : Option.none();
-              if (Option.isNone(project))
-                return {
-                  browser: browserOverridden ? false : settings.enableAgentBrowserAccess,
-                  device: deviceOverridden ? false : settings.enableAgentDeviceAccess,
-                  computer: computerOverridden ? false : settings.enableAgentComputerUse,
-                };
-            }
-            const effective = resolveProjectSettings(settings, thread.projectId).settings;
             return {
-              browser: effective.enableAgentBrowserAccess,
-              device: effective.enableAgentDeviceAccess,
-              computer: effective.enableAgentComputerUse,
+              browser: settings.enableAgentBrowserAccess,
+              device: settings.enableAgentDeviceAccess,
+              computer: settings.enableAgentComputerUse,
             };
           }).pipe(
             Effect.catch((cause) =>

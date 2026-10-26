@@ -369,7 +369,7 @@ export function CloudEnvironmentConnectRows({
       : "Not added";
     const statusText =
       unsupported && !savedEnvironment
-        ? `Cogenly Connect · ${notAdded} · Client not supported`
+        ? `Cogenly Connect · ${notAdded} · Not compatible with this app`
         : offlineReason !== null
           ? offlineReason
           : savedConnection
@@ -486,7 +486,7 @@ export function CloudEnvironmentConnectRows({
                   Add
                 </Button>
               </TooltipTrigger>
-              <TooltipPopup>{unsupportedDetail ?? "Client not supported"}</TooltipPopup>
+              <TooltipPopup>{unsupportedDetail ?? "Not compatible with this app"}</TooltipPopup>
             </Tooltip>
           ) : savedConnection ? (
             <Button size="sm" variant="outline" disabled>

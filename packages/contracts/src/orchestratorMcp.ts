@@ -1,6 +1,5 @@
 import { ProjectLabelId } from "./projectLabel.ts";
 import { MachineInfo } from "./machine.ts";
-import { ServerProvider } from "./server.ts";
 import { AgentId } from "./agent.ts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -178,7 +177,7 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
   machine: Schema.optional(
     TrimmedNonEmptyString.annotate({
       description:
-        "A paired machine name or environment ID, this, vps, or auto (the hub). Omit to run on this machine. Offline launches fail without queuing.",
+        "A paired machine name or environment ID, this, vps, or auto (the hub). Omit to run on this machine. Offline launches fail without queuing. Pick the target from that machine's catalog in orchestrator_capabilities; an instance it lacks resolves to its instance of the same driver.",
     }),
   ),
   task: OrchestratorMcpPrompt.annotate({
@@ -568,12 +567,26 @@ export const OrchestratorMcpProviderCapability = Schema.Struct({
 });
 export type OrchestratorMcpProviderCapability = typeof OrchestratorMcpProviderCapability.Type;
 
+/** A provider instance on another paired machine, for delegate_task and create_threads with machine. */
+export const OrchestratorMcpMachineProvider = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  driverKind: ProviderDriverKind,
+  displayName: Schema.NullOr(Schema.String),
+  /** Model ids that machine advertises for the instance. */
+  models: Schema.Array(Schema.String),
+  canRunChildTask: Schema.Boolean,
+});
+export type OrchestratorMcpMachineProvider = typeof OrchestratorMcpMachineProvider.Type;
+
 export const OrchestratorMcpCapabilitiesResult = Schema.Struct({
   machines: Schema.optional(
     Schema.Array(
       Schema.Struct({
         ...MachineInfo.fields,
-        catalog: Schema.optional(Schema.Array(ServerProvider)),
+        /** Another online machine's providers; this machine's are `providers` below. */
+        catalog: Schema.optional(Schema.Array(OrchestratorMcpMachineProvider)),
+        /** Why that machine's providers could not be read. */
+        catalogError: Schema.optional(Schema.String),
       }),
     ),
   ),

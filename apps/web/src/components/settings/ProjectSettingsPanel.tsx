@@ -45,6 +45,7 @@ import {
   ProjectFaviconPickerDialog,
 } from "./ProjectFaviconPickerDialog";
 import { projectGroupTitleNeedsUpdate } from "./ProjectSettingsPanel.logic";
+import { RepositoryActionsSettings } from "./RepositoryActionsSettings";
 import { useSettingsProjectGroups } from "./useSettingsProjectGroups";
 import { settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
 
@@ -59,62 +60,33 @@ function memberKey(member: { environmentId: string; id: string }): string {
 }
 
 /**
- * One repository group's identity and checkouts. Its settings live on the
- * other pages, scoped to the project folder that holds it.
+ * One repository group's identity, actions and checkouts. Settings are global
+ * and live on the other pages.
  */
-export function ProjectSettingsPanel({
-  projectKey,
-  environmentId = null,
-  checkoutKey = null,
-}: {
-  projectKey: string;
-  environmentId?: EnvironmentId | null;
-  checkoutKey?: string | null;
-}) {
+export function ProjectSettingsPanel({ projectKey }: { projectKey: string }) {
   const groups = useSettingsProjectGroups();
   const navigate = useNavigate({ from: "/settings" });
   const pathname = useLocation({ select: (location) => location.pathname });
 
   const selected = groups.find((group) => group.projectKey === projectKey) ?? null;
-  const members = useMemo(
-    () =>
-      selected?.memberProjects.filter(
-        (member) =>
-          (environmentId === null || member.environmentId === environmentId) &&
-          (checkoutKey === null || member.physicalProjectKey === checkoutKey),
-      ) ?? [],
-    [selected, environmentId, checkoutKey],
-  );
 
-  // Remember the members of the last rendered group so a grouping-rule change
+  // Remember the checkouts of the last rendered group so a grouping-rule change
   // (which changes the group key) can follow the project to its new group.
-  const lastSelectionRef = useRef<{
-    key: string;
-    environmentId: EnvironmentId | null;
-    checkoutKey: string | null;
-    memberKeys: string[];
-  } | null>(null);
+  const lastSelectionRef = useRef<{ key: string; memberKeys: string[] } | null>(null);
   useEffect(() => {
-    if (!selected || members.length === 0) return;
+    if (!selected) return;
     lastSelectionRef.current = {
       key: selected.projectKey,
-      environmentId,
-      checkoutKey,
-      memberKeys: members.map((member) => member.physicalProjectKey),
+      memberKeys: selected.memberProjects.map((member) => member.physicalProjectKey),
     };
-  }, [selected, members, environmentId, checkoutKey]);
+  }, [selected]);
 
   // A grouping-rule change replaces the group key mid-visit; follow the
   // project to its new key instead of parking on the not-found state.
   useEffect(() => {
-    if (members.length > 0) return;
+    if (selected) return;
     const last = lastSelectionRef.current;
-    if (
-      last?.key !== projectKey ||
-      last.environmentId !== environmentId ||
-      last.checkoutKey !== checkoutKey
-    )
-      return;
+    if (last?.key !== projectKey) return;
     const successor = groups.find((group) =>
       group.memberProjects.some((member) => last.memberKeys.includes(member.physicalProjectKey)),
     );
@@ -126,7 +98,7 @@ export function ProjectSettingsPanel({
         hashScrollIntoView: false,
       });
     }
-  }, [groups, navigate, pathname, projectKey, members.length, environmentId, checkoutKey]);
+  }, [groups, navigate, pathname, projectKey, selected]);
 
   if (!selected) {
     return (
@@ -137,34 +109,11 @@ export function ProjectSettingsPanel({
       </SettingsPageMessage>
     );
   }
-  if (members.length === 0)
-    return (
-      <SettingsPageMessage>
-        This checkout is no longer available in the selected repository and environment.
-      </SettingsPageMessage>
-    );
-  const scopedGroup = {
-    ...selected,
-    memberProjects: members,
-    environmentId: members[0]!.environmentId,
-    id: members[0]!.id,
-  };
-  return (
-    <ProjectDetail
-      key={`${selected.projectKey}:${environmentId ?? "all"}:${checkoutKey ?? "all"}`}
-      group={scopedGroup}
-      hasOtherMembers={members.length < selected.memberProjects.length}
-    />
-  );
+  // Each checkout's own Remove sits in the Checkouts section.
+  return <ProjectDetail key={selected.projectKey} group={selected} />;
 }
 
-function ProjectDetail({
-  group,
-  hasOtherMembers,
-}: {
-  group: SidebarProjectSnapshot;
-  hasOtherMembers: boolean;
-}) {
+function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
   const navigate = useNavigate({ from: "/settings" });
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const { environments } = useEnvironments();
@@ -338,7 +287,7 @@ function ProjectDetail({
         memberKeys.has(`${thread.environmentId}:${thread.projectId}`),
       );
       const isWholeGroup = members.length === group.memberProjects.length;
-      const targetKind = hasOtherMembers || !isWholeGroup ? "checkout" : "project";
+      const targetKind = !isWholeGroup ? "checkout" : "project";
       const singleMember = members.length === 1 ? members[0]! : null;
       const targetLabel = singleMember?.title ?? group.displayName;
       const confirmed = await settlePromise(() =>
@@ -360,7 +309,7 @@ function ProjectDetail({
                   "This permanently clears conversation history for those threads and any archived threads.",
                 ]
               : ["This permanently clears any archived conversation history."]),
-            isWholeGroup && !hasOtherMembers
+            isWholeGroup
               ? "This removes only the repository entries, not the files on disk."
               : "Other entries in this grouped repository are unaffected.",
             "This action cannot be undone.",
@@ -405,7 +354,7 @@ function ProjectDetail({
         draftStore.clearProjectDraftThreadId(projectRef);
       }
 
-      if (isWholeGroup && !hasOtherMembers) {
+      if (isWholeGroup) {
         void navigate({ to: "/", replace: true });
       }
     },
@@ -414,7 +363,6 @@ function ProjectDetail({
       deleteProject,
       group.displayName,
       group.memberProjects.length,
-      hasOtherMembers,
       navigate,
       reportFailure,
       threads,
@@ -427,19 +375,21 @@ function ProjectDetail({
     if (members) members.push(member);
     else checkoutsByEnvironment.set(member.environmentId, [member]);
   }
-  const checkoutRemoveButton = (member: SidebarProjectGroupMember) => (
-    <Button
-      size="sm"
-      variant="destructive-outline"
-      disabled={!editableIds.has(member.environmentId)}
-      onClick={() => void removeMembers([member])}
-      aria-label={`Remove checkout ${member.workspaceRoot}`}
-    >
-      Remove
-    </Button>
-  );
+  // A lone checkout is the repository itself; removing it is the row below.
+  const checkoutRemoveButton = (member: SidebarProjectGroupMember) =>
+    hasMultipleCheckouts ? (
+      <Button
+        size="sm"
+        variant="destructive-outline"
+        disabled={!editableIds.has(member.environmentId)}
+        onClick={() => void removeMembers([member])}
+        aria-label={`Remove checkout ${member.workspaceRoot}`}
+      >
+        Remove
+      </Button>
+    ) : undefined;
   const checkoutChoices = (
-    <SettingsSection title="Checkouts">
+    <SettingsSection title={hasMultipleCheckouts ? "Checkouts" : "Checkout"}>
       {Array.from(checkoutsByEnvironment, ([environmentId, members]) => {
         if (checkoutsByEnvironment.size === 1) {
           return members.map((member) => (
@@ -519,7 +469,7 @@ function ProjectDetail({
           ) : null}
           <SettingsRow
             title="Name"
-            description="The shared name for this repository group in the sidebar and thread lists."
+            description="Shown in the sidebar and thread lists on every machine."
             control={
               <Input
                 key={`${group.projectKey}:${group.displayName}`}
@@ -543,7 +493,7 @@ function ProjectDetail({
             }
           />
           <SettingsRow
-            title="Repository icon"
+            title="Icon"
             description={
               projectIcon?.kind === "lucide"
                 ? `${projectIcon.name} · ${projectIcon.color}`
@@ -551,7 +501,7 @@ function ProjectDetail({
                   ? `Folder · ${projectIcon.color}`
                   : projectIcon?.kind === "emoji"
                     ? "Folder"
-                    : (faviconPath ?? "Automatic: the repository's favicon, else a folder icon")
+                    : (faviconPath ?? "Automatic: the repository's favicon when it has one")
             }
             resetAction={
               group.memberProjects.some(
@@ -585,28 +535,25 @@ function ProjectDetail({
                   disabled={isSavingFavicon || !canEditGroup}
                   onClick={() => setFaviconPickerOpen(true)}
                 >
-                  Choose file
+                  Choose image
                 </Button>
               </div>
             }
           />
         </SettingsSection>
-        {hasMultipleCheckouts ? checkoutChoices : null}
-        <SettingsSection title="Danger">
+        <RepositoryActionsSettings members={group.memberProjects} canEdit={canEditGroup} />
+        {checkoutChoices}
+        <SettingsSection title="Remove" hideTitle>
           <SettingsRow
             title={
-              hasOtherMembers
-                ? "Remove checkout"
-                : group.memberProjects.length > 1
-                  ? "Remove this repository everywhere"
-                  : "Remove repository"
+              group.memberProjects.length > 1
+                ? "Remove this repository everywhere"
+                : "Remove repository"
             }
             description={
-              hasOtherMembers
-                ? "Deletes the selected machine's checkout entries and their threads. Other machines and files on disk are not touched."
-                : group.memberProjects.length > 1
-                  ? `Deletes all ${group.memberProjects.length} checkout entries and their threads on every machine. Files on disk are not touched.`
-                  : "Deletes the repository entry and its threads. Files on disk are not touched."
+              group.memberProjects.length > 1
+                ? `Removes all ${group.memberProjects.length} checkouts from Cogenly and deletes their threads on every machine. The files on disk stay.`
+                : "Removes it from Cogenly and deletes its threads. The files on disk stay."
             }
             control={
               <Button
@@ -616,11 +563,7 @@ function ProjectDetail({
                 onClick={() => void removeMembers(group.memberProjects)}
               >
                 <Trash2Icon />
-                {hasOtherMembers
-                  ? "Remove checkout"
-                  : group.memberProjects.length > 1
-                    ? "Remove all entries"
-                    : "Remove repository"}
+                {group.memberProjects.length > 1 ? "Remove everywhere" : "Remove"}
               </Button>
             }
           />

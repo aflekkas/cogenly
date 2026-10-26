@@ -1,17 +1,13 @@
 /**
  * Keeps this machine's settings.json in step with the shared `settings`
- * documents, so universal settings and project overrides follow the user to
- * every paired machine. SharedSync moves the documents; this service only
- * reconciles them with the local file, after every local settings change and
- * every shared change. Machine-local keys never enter a document.
- *
- * A project override is stored per local repository (the key every
- * resolver reads), and the project document keeps all of the project's
- * repositories, on every machine, carrying the same entry.
+ * document, so universal settings follow the user to every paired machine.
+ * SharedSync moves the documents; this service only reconciles them with the
+ * local file, after every local settings change and every shared change.
+ * Machine-local keys never enter a document.
  *
  * @module SettingsSync
  */
-import { type ProjectId, type ServerSettingsError, SharedStateError } from "@cogenly/contracts";
+import { type ServerSettingsError, SharedStateError } from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -21,13 +17,8 @@ import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 import { ServerSettingsService } from "../serverSettings.ts";
-import { resolveProjectLabelId } from "./ProjectMergeProjection.ts";
 import { SharedState } from "./SharedState.ts";
-import {
-  projectSettingsDocumentId,
-  settingsDocumentAddress,
-  UNIVERSAL_SETTINGS_DOCUMENT_ID,
-} from "./settingsDocument.ts";
+import { UNIVERSAL_SETTINGS_DOCUMENT_ID } from "./settingsDocument.ts";
 import {
   canonicalJson,
   planSettingsReconcile,
@@ -60,52 +51,17 @@ const make = Effect.gen(function* () {
       scope: string;
       key: string;
       value_json: string;
-    }>`SELECT document_id,scope,key,value_json FROM settings_sync_base`;
-    const memberships = yield* sql<{
-      label_id: string;
-      repository_id: string;
-    }>`SELECT r.label_id,r.repository_id FROM label_repositories r JOIN projection_projects p ON p.project_id=r.repository_id WHERE p.deleted_at IS NULL ORDER BY r.label_id,r.repository_id`;
-    const projects = new Map<string, ProjectId[]>();
-    for (const row of memberships) {
-      const repositories = projects.get(row.label_id) ?? [];
-      repositories.push(row.repository_id as ProjectId);
-      projects.set(row.label_id, repositories);
-    }
+    }>`SELECT document_id,scope,key,value_json FROM settings_sync_base WHERE document_id=${UNIVERSAL_SETTINGS_DOCUMENT_ID}`;
     const documents = new Map<string, Readonly<Record<string, Schema.Json>>>();
-    for (const id of [
-      UNIVERSAL_SETTINGS_DOCUMENT_ID,
-      ...[...projects.keys()].map(projectSettingsDocumentId),
-    ]) {
-      const address = settingsDocumentAddress(id);
-      const document = yield* shared.get(address.kind, address.id);
-      if (document) documents.set(id, document.fields);
-    }
-    // Source settings can arrive after the merge tombstone on a different sync
-    // channel. Inherit unset keys without rewriting the peer's authored document.
-    const mergedProjects = yield* sql<{
-      id: string;
-      target: string;
-    }>`SELECT id,json_extract(fields_json,'$.mergedInto') AS target FROM shared_documents WHERE kind='project' AND tombstone_json IS NOT NULL AND json_type(fields_json,'$.mergedInto')='text' ORDER BY id`;
-    for (const source of mergedProjects) {
-      const target = yield* resolveProjectLabelId(source.target).pipe(
-        Effect.provideService(SqlClient.SqlClient, sql),
-      );
-      if (target === null || !projects.has(target)) continue;
-      const sourceSettings = yield* shared.get("project-settings", source.id);
-      if (!sourceSettings || sourceSettings.tombstone) continue;
-      const documentId = projectSettingsDocumentId(target);
-      const fields = { ...documents.get(documentId) };
-      for (const [key, value] of Object.entries(sourceSettings.fields))
-        if (fields[key] === undefined) fields[key] = value;
-      documents.set(documentId, fields);
-    }
+    const universal = yield* shared.get("settings", UNIVERSAL_SETTINGS_DOCUMENT_ID);
+    if (universal) documents.set(UNIVERSAL_SETTINGS_DOCUMENT_ID, universal.fields);
     const base = new Map(
       baseRows.map((row) => [
         settingsBaseKey(row.document_id, row.scope, row.key),
         decodeJson(row.value_json),
       ]),
     );
-    return { base, documents, projects };
+    return { base, documents };
   }).pipe(Effect.mapError(storage));
 
   const recordBase = (entries: SettingsReconcilePlan["base"]) =>
@@ -134,8 +90,7 @@ const make = Effect.gen(function* () {
       // Publish before recording, and record applied values only after the
       // file write: an interrupted pass then repeats rather than reverting.
       for (const [documentId, fields] of plan.publish) {
-        const address = settingsDocumentAddress(documentId);
-        yield* shared.write(address.kind, address.id, fields);
+        yield* shared.write("settings", documentId, fields);
       }
       if (plan.base.length > 0) yield* recordBase(plan.base);
     }),

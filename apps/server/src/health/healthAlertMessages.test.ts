@@ -3,8 +3,10 @@ import { EnvironmentId, type MachineHealthAlert } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 
 import {
+  alertGroupMessage,
   alertMessage,
   emailSendCall,
+  groupAlertsByCheck,
   sanitizeAlertText,
   slackSendCall,
 } from "./healthAlertMessages.ts";
@@ -71,6 +73,32 @@ describe("alertMessage", () => {
       ].join("\n"),
     );
     expect(message.text).not.toContain("abc123secret");
+  });
+});
+
+describe("grouped alert messages", () => {
+  const stuck = (thread: string): MachineHealthAlert => ({
+    ...alert,
+    id: `hub:stuck-runs:thread:${thread}:0`,
+    itemKey: `stuck-runs:thread:${thread}`,
+    checkId: "stuck-runs",
+    title: `"${thread}" has been running for 2 days`,
+  });
+
+  it("sends one message per machine and check for a burst of alerts", () => {
+    const burst = [...Array.from({ length: 10 }, (_, index) => stuck(`Thread ${index}`)), alert];
+    const groups = groupAlertsByCheck(burst);
+    expect(groups.map((group) => group.length)).toEqual([10, 1]);
+    const message = alertGroupMessage(groups[0]!, "opened")!;
+    expect(message.subject).toBe("Cogenly health alert on Contabo VPS: 10 problems");
+    expect(message.text.split("\n")).toEqual([
+      "Cogenly health alert on Contabo VPS: 10 problems",
+      ...Array.from({ length: 8 }, (_, index) => `- "Thread ${index}" has been running for 2 days`),
+      "…and 2 more.",
+      "Open Cogenly → Settings → Machines for details.",
+    ]);
+    // A group of one reads like a single alert.
+    expect(alertGroupMessage(groups[1]!, "opened")).toEqual(alertMessage(alert, "opened"));
   });
 });
 

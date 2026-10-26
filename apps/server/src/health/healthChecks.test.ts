@@ -3,7 +3,10 @@ import {
   EnvironmentId,
   IntegrationId,
   type IntegrationSummary,
-  type MachineHealthCheck,
+  MachineHealthCheck,
+  MachineHealthItem,
+  MachineHealthReport,
+  MachineHealthAlert,
   type MachineInfo,
   ProjectId,
   ProviderDriverKind,
@@ -15,6 +18,7 @@ import {
 } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
+import * as Schema from "effect/Schema";
 
 import {
   DISK_FAIL_FREE_BYTES,
@@ -36,6 +40,7 @@ import {
   serverCheck,
   stuckRunsCheck,
   syncCheck,
+  tailscaleServeCheck,
   trackSyncProgress,
   worstStatus,
 } from "./healthChecks.ts";
@@ -45,12 +50,18 @@ import {
   peerReachabilityItem,
   unreachableReport,
 } from "./peerReachability.ts";
+import {
+  buildMachineSetupStatus,
+  emptyProgress,
+  type MachineSetupObservation,
+} from "../tailscale/machineSetupSteps.ts";
 
 const NOW_MS = Date.parse("2026-10-24T12:00:00.000Z");
 const now = DateTime.makeUnsafe(NOW_MS);
 const ago = (ms: number) => DateTime.makeUnsafe(NOW_MS - ms);
 const iso = (ms: number) => DateTime.formatIso(ago(ms));
 const minutes = (count: number) => count * 60_000;
+const days = (count: number) => count * 24 * 60 * 60_000;
 const seconds = (count: number) => count * 1000;
 const GB = 1024 ** 3;
 
@@ -572,32 +583,173 @@ describe("scheduledTasksCheck", () => {
 });
 
 describe("stuckRunsCheck", () => {
-  it("fails runs and subagents active past the limit, targeting the thread", () => {
-    const threadId = ThreadId.make("thread-1");
-    const active = (kind: "run" | "subagent", id: string, threadTitle: string, age: number) => ({
-      kind,
-      id,
-      threadId,
-      threadTitle,
-      startedAt: ago(age),
-    });
+  const active = (
+    kind: "run" | "subagent",
+    id: string,
+    thread: string,
+    threadTitle: string,
+    age: number,
+  ) => ({ kind, id, threadId: ThreadId.make(thread), threadTitle, startedAt: ago(age) });
+
+  // 0.3.1 has the same report/alert structure, but only these Fix literals.
+  const legacyFix = Schema.NullOr(
+    Schema.Literals(["sign-in", "run-now", "resume", "retry-sync", "setup-sandbox"]),
+  );
+  const legacyItem = Schema.Struct({ ...MachineHealthItem.fields, fix: legacyFix });
+  const legacyReport = Schema.Struct({
+    ...MachineHealthReport.fields,
+    checks: Schema.Array(
+      Schema.Struct({ ...MachineHealthCheck.fields, items: Schema.Array(legacyItem) }),
+    ),
+  });
+  const legacyAlert = Schema.Struct({ ...MachineHealthAlert.fields, fix: legacyFix });
+
+  const encodeReport = Schema.encodeSync(Schema.toCodecJson(MachineHealthReport));
+  const encodeAlert = Schema.encodeSync(Schema.toCodecJson(MachineHealthAlert));
+  const decoders = {
+    "0.3.2 to 0.3.1": {
+      report: Schema.decodeUnknownSync(Schema.toCodecJson(legacyReport)),
+      alert: Schema.decodeUnknownSync(Schema.toCodecJson(legacyAlert)),
+    },
+    "0.3.1 to 0.3.2": {
+      report: Schema.decodeUnknownSync(Schema.toCodecJson(MachineHealthReport)),
+      alert: Schema.decodeUnknownSync(Schema.toCodecJson(MachineHealthAlert)),
+    },
+  };
+  it.each(["0.3.2 to 0.3.1", "0.3.1 to 0.3.2"] as const)(
+    "decodes stuck-run reports and alerts from %s",
+    (direction) => {
+      const check = stuckRunsCheck({
+        active: [active("run", "old", "thread", "Old", STUCK_RUN_AFTER_MS + 1)],
+        now,
+      });
+      const report = {
+        environmentId: self,
+        machineName: "MacBook",
+        status: check.status,
+        observedAt: now,
+        serverVersion: direction.startsWith("0.3.2") ? "0.3.2" : "0.3.1",
+        uptimeSeconds: 1,
+        reachable: true,
+        checks: [check],
+      };
+      const alert = {
+        id: "alert:old",
+        originEnvironmentId: self,
+        originMachineName: "MacBook",
+        itemKey: check.items[0]!.key,
+        checkId: "stuck-runs" as const,
+        state: "open" as const,
+        status: check.status,
+        title: "Stuck",
+        detail: "",
+        openedAt: now,
+        resolvedAt: null,
+        target: check.items[0]!.target,
+        fix: check.items[0]!.fix,
+      };
+      const reportJson = encodeReport(report);
+      const alertJson = encodeAlert(alert);
+      expect(decoders[direction].report(reportJson).checks[0]!.items[0]!.fix).toBe("resume");
+      expect(decoders[direction].alert(alertJson).fix).toBe("resume");
+    },
+  );
+
+  it("one item per thread, past the limit, with a Fix that stops them", () => {
     const result = stuckRunsCheck({
       active: [
-        active("run", "run-1", "Fix login", STUCK_RUN_AFTER_MS),
-        active("subagent", "sub-1", "Fix login", STUCK_RUN_AFTER_MS + 1),
-        active("run", "run-2", "Recent", minutes(5)),
+        active("run", "run-1", "thread-1", "Fix login", STUCK_RUN_AFTER_MS),
+        active("subagent", "sub-1", "thread-1", "Fix login", STUCK_RUN_AFTER_MS + 1),
+        active("run", "run-2", "thread-2", "Recent", minutes(5)),
       ],
       now,
     });
     assert.strictEqual(result.status, "fail");
+    assert.strictEqual(result.summary, "2 stuck runs");
     assert.deepStrictEqual(
-      result.items.map((entry) => [entry.key, entry.fix, entry.target]),
+      result.items.map((entry) => [entry.key, entry.fix, entry.target, entry.title]),
       [
-        ["stuck-runs:subagent:sub-1", "resume", { _tag: "thread", threadId }],
-        ["stuck-runs:run:run-1", "resume", { _tag: "thread", threadId }],
+        [
+          "stuck-runs:thread:thread-1",
+          "resume",
+          { _tag: "thread", threadId: ThreadId.make("thread-1") },
+          `"Fix login" and 1 subagent stuck for 6 hours`,
+        ],
       ],
     );
-    assert.strictEqual(result.items[1]?.title, `"Fix login" has been running for 6 hours`);
+  });
+
+  it("collapses many stuck subagents in one thread into one counted item", () => {
+    const title = "Athens Racing — Master: Fixes, Kifissia & Riviera";
+    const result = stuckRunsCheck({
+      active: [
+        ...Array.from({ length: 18 }, (_, index) =>
+          active("subagent", `sub-${index}`, "athens", title, days(2) + index),
+        ),
+        active("subagent", "other", "thread-3", "Other", STUCK_RUN_AFTER_MS),
+      ],
+      now,
+    });
+    assert.strictEqual(result.summary, "19 stuck runs in 2 threads");
+    assert.deepStrictEqual(
+      result.items.map((entry) => entry.title),
+      [
+        `18 subagents stuck in "Athens Racing — Master: Fixes, Kifissia & Riviera" for 2 days`,
+        `A subagent in "Other" has been running for 6 hours`,
+      ],
+    );
+  });
+});
+
+describe("tailscaleServeCheck", () => {
+  const setup = (overrides: Partial<MachineSetupObservation>) =>
+    buildMachineSetupStatus(
+      {
+        machineName: "Contabo VPS",
+        host: { platform: "linux", root: false, passwordlessSudo: false, homebrew: false },
+        installed: true,
+        version: "1.104.2",
+        status: {
+          backendState: "Running",
+          authUrl: null,
+          magicDnsName: "contabo-vps.tail300b9e.ts.net",
+          tailnetName: "alex@example.com",
+          httpsEnabled: true,
+        },
+        serveMappings: [],
+        localPort: 4773,
+        serveMode: { enabled: true, servePort: 443 },
+        progress: emptyProgress,
+        ...overrides,
+      },
+      now,
+    );
+
+  it("serves when the mapping points at this server's port", () => {
+    const result = tailscaleServeCheck({
+      serveEnabled: true,
+      setup: setup({
+        serveMappings: [{ port: 443, target: "http://127.0.0.1:4773", funnel: false }],
+      }),
+    });
+    expect(result).toMatchObject({
+      status: "ok",
+      summary: "Serving at https://contabo-vps.tail300b9e.ts.net/",
+    });
+  });
+
+  it("doesn't call a restart broken while Cogenly points Serve back at this run", () => {
+    // `--tailscale-serve` removes the mapping at shutdown; the new run adds it back.
+    const restarting = tailscaleServeCheck({
+      serveEnabled: true,
+      setup: setup({ progress: { ...emptyProgress, working: new Set(["expose"]) } }),
+    });
+    expect(restarting).toMatchObject({ status: "ok", items: [] });
+    const broken = tailscaleServeCheck({ serveEnabled: true, setup: setup({}) });
+    expect(broken).toMatchObject({
+      status: "fail",
+      summary: "Tailscale Serve isn't forwarding to this server",
+    });
   });
 });
 

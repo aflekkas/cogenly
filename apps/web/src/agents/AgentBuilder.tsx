@@ -134,7 +134,7 @@ export function AgentBuilder({
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<AgentContact | null>(null);
   const [seed] = useState(() => randomUUID());
-  const defaultModel = useDefaultAgentModel(environmentId, thread?.projectId ?? null);
+  const defaultModel = useDefaultAgentModel(environmentId);
   const [chosenModel, setChosenModel] = useState<ModelSelection | null>(null);
   const modelSelection = chosenModel ?? defaultModel;
   const cardRef = useRef<HTMLDivElement>(null);
@@ -396,7 +396,6 @@ export function AgentBuilder({
             ) : (
               <BuilderComposer
                 environmentId={environmentId}
-                projectId={thread?.projectId ?? null}
                 modelSelection={modelSelection}
                 onModelChange={setChosenModel}
                 // Filing is picked before the conversation starts; the card takes over after.
@@ -597,7 +596,6 @@ const noop = () => {};
 /** The agent composer's card around a plain prompt, with the builder's model picker. */
 function BuilderComposer({
   environmentId,
-  projectId,
   modelSelection,
   onModelChange,
   project,
@@ -607,7 +605,6 @@ function BuilderComposer({
   onSend,
 }: {
   environmentId: EnvironmentId;
-  projectId: ProjectId | null;
   modelSelection: ModelSelection | null;
   onModelChange: (selection: ModelSelection) => void;
   /** The project the builder starts filed in, until its first message. */
@@ -679,7 +676,6 @@ function BuilderComposer({
                   {modelSelection && (
                     <LiveModelControls
                       environmentId={environmentId}
-                      projectId={projectId}
                       selection={modelSelection}
                       disabled={disabled}
                       unavailable={false}

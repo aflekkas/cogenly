@@ -178,15 +178,17 @@ describe("searchSettings", () => {
       "network-access",
       "publish-agent-activity",
       "provider-health-check-interval",
-      "cursor-keychain-usage",
       "source-control-writer-model",
-      "review-guide-model",
-      "review-guide-instructions",
       "source-control-writing-style",
+      "worktree-branch-naming",
+      "github-accounts",
       "t3-connect",
       "hold-webhooks-while-offline",
       "wsl-backend",
     ]);
+    // A renamed or removed id would make the check below pass vacuously.
+    const catalogIds = new Set<string>(SETTINGS_SEARCH_ITEMS.map((item) => item.id));
+    expect([...gatedIds].filter((id) => !catalogIds.has(id))).toEqual([]);
     expect(available.map((item) => item.id).filter((id) => gatedIds.has(id))).toEqual([]);
   });
 
@@ -303,19 +305,31 @@ describe("searchSettings", () => {
   it.each([
     ["default model", "default-model", "/settings/models"],
     ["text generation model", "text-generation-model", "/settings/models"],
-    ["new threads", "project-defaults", "/settings/new-threads"],
-    ["workspace", "new-threads", "/settings/new-threads"],
-    ["projects folder", "projects-folder", "/settings/new-threads"],
+    ["new threads", "new-threads", "/settings/new-threads"],
+    ["workspace", "project-defaults", "/settings/new-threads"],
+    ["projects folder", "projects-folder", "/settings/project-tags"],
+    ["folder browser", "add-project-starts-in", "/settings/project-tags"],
     ["live processes", "diagnostics", "/settings/diagnostics"],
     ["agent browser access", "agent-browser-access", "/settings/integrations"],
     ["computer use", "agent-computer-use", "/settings/integrations"],
+    ["connect a service", "integration-add", "/settings/integrations"],
+    ["tab size", "browser-default-viewport", "/settings/integrations"],
+    ["browser viewport", "browser-default-viewport", "/settings/integrations"],
+    ["show clicks", "browser-recording-mouse-presses", "/settings/integrations"],
     ["screen recording", "agent-computer-use", "/settings/integrations"],
     ["connect a machine", "remote-environments", "/settings/connections"],
     ["private access", "machines", "/settings/machines"],
     ["orphan folders", "project-folders", "/settings/project-tags"],
     ["automatically pull", "automatic-pull", "/settings/source-control"],
-    ["actions", "project-actions", "/settings/new-threads"],
+    ["background fetch", "git-fetch-interval", "/settings/source-control"],
+    ["pull request templates", "follow-change-request-templates", "/settings/source-control"],
+    ["branch naming", "worktree-branch-naming", "/settings/source-control"],
+    ["actions", "project-actions", "/settings/projects"],
     ["project overview", "project-overview", "/settings/projects"],
+    ["time format", "time-format", "/settings/appearance"],
+    ["chat width", "chat-width", "/settings/appearance"],
+    ["color blind", "diff-colors", "/settings/appearance"],
+    ["auto-resume limited threads", "auto-resume-limited-threads", "/settings/general"],
   ])("routes %s to its owning category", (query, id, to) => {
     expect(searchSettings(query)[0]).toMatchObject({ id, to });
   });
@@ -337,6 +351,14 @@ describe("searchSettings", () => {
       "machines",
       "add-machine",
     ]);
+  });
+
+  it("finds Scheduled tasks by the words people use for automations", () => {
+    expect(searchSettings("cron")[0]).toMatchObject({
+      id: "scheduled-tasks",
+      to: "/settings/scheduled-tasks",
+    });
+    expect(searchSettings("webhook deliveries")[0]?.id).toBe("scheduled-tasks");
   });
 
   it("keeps environment settings discoverable without a primary environment", () => {
@@ -377,9 +399,10 @@ describe("settings navigation", () => {
     ["#default-model", "/settings/models"],
     ["text-generation-model", "/settings/models"],
     ["project-defaults", "/settings/new-threads"],
-    ["projects-folder", "/settings/new-threads"],
-    ["project-actions", "/settings/new-threads"],
+    ["projects-folder", "/settings/project-tags"],
+    ["project-actions", "/settings/projects"],
     ["diagnostics", "/settings/diagnostics"],
+    ["#time-format", "/settings/appearance"],
     ["send-shortcut", null],
     ["", null],
   ])("sends the old General anchor %s to %s", (hash, expected) => {
