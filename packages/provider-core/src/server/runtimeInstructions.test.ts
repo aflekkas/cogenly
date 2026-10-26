@@ -32,7 +32,10 @@ describe("buildRuntimeInstructions", () => {
       expect(instructions).toContain("<vault>");
       expect(instructions).toContain("vault_save");
       expect(instructions).toContain("vault_fill");
-      expect(instructions).toContain("Never ask for secrets in chat");
+      expect(instructions).toContain(
+        "Never ask for usernames, passwords, codes or other secrets in chat",
+      );
+      expect(instructions).toContain("request_login");
       expect(instructions).toContain("saveToVault");
     }
   });
