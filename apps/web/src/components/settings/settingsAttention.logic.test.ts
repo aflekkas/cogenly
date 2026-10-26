@@ -83,6 +83,15 @@ describe("settingsPagesForAlert", () => {
         target: { _tag: "provider", instanceId: ProviderInstanceId.make("codex") },
       }),
     ).toEqual(["/settings/machines", "/settings/providers"]);
+    // An account rate-limited over and over is spread across accounts from Providers.
+    expect(
+      pages({
+        checkId: "providers",
+        itemKey: "providers:codex:rate-limited",
+        status: "warn",
+        target: { _tag: "provider", instanceId: ProviderInstanceId.make("codex") },
+      }),
+    ).toEqual(["/settings/machines", "/settings/providers"]);
   });
 
   it("keeps machine-wide checks on Machines alone", () => {
@@ -118,6 +127,19 @@ describe("settingsAttentionByPage", () => {
       "/settings/machines": "destructive",
       "/settings/providers": "warning",
       "/settings/storage": "destructive",
+    });
+  });
+
+  it("shows a repeated rate limit as an amber Providers dot", () => {
+    const rateLimited = alert({
+      checkId: "providers",
+      itemKey: "providers:codex:rate-limited",
+      status: "warn",
+      target: { _tag: "provider", instanceId: ProviderInstanceId.make("codex") },
+    });
+    expect(Object.fromEntries(settingsAttentionByPage([rateLimited]))).toEqual({
+      "/settings/machines": "warning",
+      "/settings/providers": "warning",
     });
   });
 
