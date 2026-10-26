@@ -26,6 +26,8 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 
+import { compareExactServiceVersions, isExactServiceVersion } from "../cloud/serviceProtocol.ts";
+
 import type { SandboxStatus } from "../terminal/ReadOnlySandbox.ts";
 
 import { formatAgo, peerReachabilityItem, peerReachabilityKey } from "./peerReachability.ts";
@@ -350,6 +352,17 @@ export function providersCheck(input: {
 export const directPeers = (machines: ReadonlyArray<MachineInfo>) =>
   machines.filter((machine) => machine.relation === "hub" || machine.relation === "spoke");
 
+/** The newest exact version known on this paired group; never recommend a downgrade. */
+export const newestMachineVersion = (machines: ReadonlyArray<MachineInfo>) =>
+  machines
+    .filter((machine) => machine.pairing !== "revoked")
+    .flatMap((machine) =>
+      machine.serverVersion !== undefined && isExactServiceVersion(machine.serverVersion)
+        ? [machine.serverVersion]
+        : [],
+    )
+    .toSorted((left, right) => compareExactServiceVersions(right, left))[0];
+
 export function machineLinksCheck(input: {
   readonly machines: ReadonlyArray<MachineInfo>;
   readonly link: MachineLinkState;
@@ -358,6 +371,34 @@ export function machineLinksCheck(input: {
   const peers = directPeers(input.machines);
   if (peers.length === 0) return check("machine-links", "Not paired with other machines", []);
   const items: MachineHealthItem[] = [];
+  const targetVersion = newestMachineVersion(input.machines);
+  if (targetVersion !== undefined) {
+    for (const machine of input.machines) {
+      if (
+        machine.pairing === "revoked" ||
+        machine.serverVersion === undefined ||
+        machine.serverVersion === targetVersion
+      )
+        continue;
+      items.push(
+        item({
+          key: `machine-version:${machine.environmentId}`,
+          status: "warn",
+          title: `Update ${machine.name} to match`,
+          detail: `${machine.name} runs ${machine.serverVersion}; paired machines run ${targetVersion}.`,
+          target: { _tag: "machine", environmentId: machine.environmentId },
+          fix:
+            machine.online &&
+            machine.relation !== "peer" &&
+            isExactServiceVersion(machine.serverVersion) &&
+            (machine.relation === "this" ||
+              compareExactServiceVersions(machine.serverVersion, "0.3.3") >= 0)
+              ? "update-machine"
+              : null,
+        }),
+      );
+    }
+  }
   for (const peer of peers) {
     if (
       peer.relation === "hub" &&

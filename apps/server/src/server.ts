@@ -291,6 +291,8 @@ const layerDesktopAppUpdate = DesktopAppUpdate.layer.pipe(
   Layer.provide(layerDesktopTelemetryReceiver),
 );
 
+const layerServerSelfUpdate = ServerSelfUpdate.layer.pipe(Layer.provide(layerDesktopAppUpdate));
+
 const layerBackground = BackgroundPolicy.layer.pipe(
   Layer.provide(layerHostPowerMonitor),
   Layer.provideMerge(layerServerSettings),
@@ -786,6 +788,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
 );
 
 const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
+  Layer.provide(layerServerSelfUpdate),
   Layer.provideMerge(layerPtyAdapter),
   // Provider event loggers are shared by every driver instance and the
   // orchestration runtime, so they are provided once here.
@@ -901,7 +904,7 @@ const layerMakeRoutes = Layer.mergeAll(
   // Server browser tabs and HTML render previews install and run the same headless browser.
   Layer.provide(PreviewBrowser.layer),
   Layer.provide(PreviewAutomationBroker.layer),
-  Layer.provide(ServerSelfUpdate.layer.pipe(Layer.provide(layerDesktopAppUpdate))),
+  Layer.provide(layerServerSelfUpdate),
   Layer.provide(layerCommandReadiness),
   Layer.provide(ServerHttp.layerBrowserApiCors),
   Layer.provide(ServerHttp.layerHttpCompression),

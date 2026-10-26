@@ -739,12 +739,21 @@ describe("tailscaleServeCheck", () => {
   });
 
   it("doesn't call a restart broken while Cogenly points Serve back at this run", () => {
-    // `--tailscale-serve` removes the mapping at shutdown; the new run adds it back.
+    // Reconciliation also allows tailscaled to come up after the server.
     const restarting = tailscaleServeCheck({
       serveEnabled: true,
       setup: setup({ progress: { ...emptyProgress, working: new Set(["expose"]) } }),
     });
     expect(restarting).toMatchObject({ status: "ok", items: [] });
+    expect(
+      tailscaleServeCheck({
+        serveEnabled: true,
+        setup: setup({
+          status: null,
+          progress: { ...emptyProgress, working: new Set(["expose"]) },
+        }),
+      }),
+    ).toMatchObject({ status: "ok", items: [] });
     const broken = tailscaleServeCheck({ serveEnabled: true, setup: setup({}) });
     expect(broken).toMatchObject({
       status: "fail",
@@ -774,5 +783,51 @@ it("chat sandbox health offers provisioning only for repairable failures", () =>
   expect(chatSandboxCheck({ available: true, backend: "bwrap" })).toMatchObject({
     status: "ok",
     items: [],
+  });
+});
+
+describe("machine version skew", () => {
+  const self = machine({
+    environmentId: EnvironmentId.make("self"),
+    name: "MacBook",
+    relation: "this",
+    pairing: "self",
+    serverVersion: "0.3.3",
+  });
+  const inspect = (peers: ReadonlyArray<MachineInfo>) =>
+    machineLinksCheck({
+      machines: [self, ...peers],
+      link: { _tag: "hub", spokes: peers.length },
+      now,
+    });
+  it("warns on older peers, with a direct fix for peers that support it", () => {
+    const result = inspect([machine({ serverVersion: "0.3.3-staging.1", relation: "spoke" })]);
+    expect(result.status).toBe("warn");
+    expect(result.items[0]).toMatchObject({ title: "Update Contabo VPS to match", fix: null });
+    const newer = inspect([machine({ serverVersion: "0.3.4" })]);
+    expect(newer.items[0]).toMatchObject({
+      title: "Update MacBook to match",
+      fix: "update-machine",
+      target: { _tag: "machine", environmentId: self.environmentId },
+    });
+  });
+  it("offers a peer update, and leaves offline machines manual", () => {
+    const source = machine({ serverVersion: "0.3.4", environmentId: EnvironmentId.make("newer") });
+    const old = machine({ serverVersion: "0.3.3", relation: "spoke" });
+    expect(
+      inspect([source, old]).items.find(
+        (item) =>
+          item.target?._tag === "machine" && item.target.environmentId === old.environmentId,
+      )?.fix,
+    ).toBe("update-machine");
+    expect(
+      inspect([source, { ...old, online: false }]).items.find(
+        (item) => item.key === `machine-version:${old.environmentId}`,
+      )?.fix,
+    ).toBeNull();
+  });
+  it("clears after versions match and tolerates 0.3.2 lists without versions", () => {
+    expect(inspect([machine({ serverVersion: "0.3.3" })]).items).toEqual([]);
+    expect(inspect([machine({})]).items).toEqual([]);
   });
 });

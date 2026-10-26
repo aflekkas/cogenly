@@ -14,6 +14,7 @@ import {
   type MachineHealthFixOutcome,
   type MachineHealthFixResult,
   MachineHealthFixRun,
+  MachineVersionUpdate,
   type MachineHealthItem,
   type ThreadId,
   isOrchestrationV2WorkActive,
@@ -27,13 +28,15 @@ import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import * as ServerSelfUpdate from "../cloud/selfUpdate.ts";
+import { compareExactServiceVersions, isExactServiceVersion } from "../cloud/serviceProtocol.ts";
 import * as MachineIdentity from "../machines/MachineIdentity.ts";
 import * as Machines from "../machines/Machines.ts";
 import * as PeerChannels from "../machines/PeerChannels.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ScheduledTasks from "../scheduledTasks/ScheduledTaskService.ts";
 import * as MachineHealth from "./MachineHealth.ts";
-import { STUCK_RUN_AFTER_MS } from "./healthChecks.ts";
+import { STUCK_RUN_AFTER_MS, newestMachineVersion } from "./healthChecks.ts";
 import { readStaleRuns } from "./staleRuns.ts";
 
 export class MachineHealthFixes extends Context.Service<
@@ -68,6 +71,7 @@ export function summarizeFixOutcomes(outcomes: ReadonlyArray<MachineHealthFixOut
 
 const make = Effect.gen(function* () {
   const health = yield* MachineHealth.MachineHealth;
+  const selfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
   const machines = yield* Machines.Machines;
   const channels = yield* PeerChannels.PeerChannels;
   const identity = yield* MachineIdentity.MachineIdentity;
@@ -210,6 +214,28 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  const updateHere = (targetVersion: string) =>
+    Effect.gen(function* () {
+      const self = yield* identity.self;
+      const view = yield* machines.list.pipe(
+        Effect.mapError((cause) => new MachineHealthError({ reason: "unavailable", cause })),
+      );
+      if (
+        selfUpdate.capability !== "boot-service" ||
+        !isExactServiceVersion(targetVersion) ||
+        !isExactServiceVersion(self.serverVersion) ||
+        targetVersion !== newestMachineVersion(view.machines) ||
+        compareExactServiceVersions(targetVersion, self.serverVersion) <= 0
+      ) {
+        return yield* new MachineHealthError({ reason: "unavailable" });
+      }
+      yield* selfUpdate
+        .update({ targetVersion })
+        .pipe(Effect.mapError((cause) => new MachineHealthError({ reason: "unavailable", cause })));
+      return {};
+    });
+  yield* channels.register(MachineVersionUpdate, ({ targetVersion }) => updateHere(targetVersion));
+
   const runFix = (item: MachineHealthItem): Effect.Effect<MachineHealthFixOutcome> => {
     const itemKey = item.key;
     const target = item.target;
@@ -244,6 +270,26 @@ const make = Effect.gen(function* () {
               Effect.as({ itemKey, status: "fixed", message: "Sync ran again." } as const),
               Effect.catch((error) => Effect.succeed(failed(error.message))),
             );
+      case "update-machine":
+        return Effect.gen(function* () {
+          if (target?._tag !== "machine") return failed("The machine to update is missing.");
+          const view = yield* machines.list;
+          const targetVersion = newestMachineVersion(view.machines);
+          if (targetVersion === undefined) return failed("The target version is unknown.");
+          const self = yield* identity.self;
+          if (target.environmentId === self.environmentId) yield* updateHere(targetVersion);
+          else
+            yield* machines
+              .call(target.environmentId, MachineVersionUpdate, { targetVersion })
+              .pipe(Effect.timeout(PEER_FIX_TIMEOUT));
+          return {
+            itemKey,
+            status: "fixed",
+            message: `Started updating to ${targetVersion}.`,
+          } as const;
+        }).pipe(
+          Effect.catch(() => Effect.succeed(failed("The machine update could not be started."))),
+        );
       case "setup-sandbox":
         return health.setupSandbox.pipe(
           Effect.map((result) =>
