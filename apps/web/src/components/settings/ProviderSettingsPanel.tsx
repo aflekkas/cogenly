@@ -91,8 +91,8 @@ import {
   PROVIDER_HEALTH_INTERVAL_STEP_SECONDS,
 } from "./SettingsPanels.logic";
 import {
-  PolicyTooltip,
   SettingResetButton,
+  SettingsEmpty,
   SettingsNumberField,
   SettingsRefreshAction,
   SettingsRow,
@@ -918,25 +918,6 @@ export function EnvironmentProviderSettings({
       <SettingsSection
         {...searchableSetting("providers")}
         variant="plain"
-        titleAction={
-          !readOnly ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="icon-xs"
-                    variant="ghost-muted"
-                    onClick={() => setIsAddInstanceDialogOpen(true)}
-                    aria-label="Add provider"
-                  >
-                    <PlusIcon />
-                  </Button>
-                }
-              />
-              <TooltipPopup side="top">Add provider</TooltipPopup>
-            </Tooltip>
-          ) : null
-        }
         headerAction={
           <>
             <ProviderUpdatesAction />
@@ -1000,11 +981,26 @@ export function EnvironmentProviderSettings({
                 <div className="space-y-6 p-4">{renderProviderInstance(selectedRow, "editor")}</div>
               </ScrollArea>
             ) : (
-              <div className="p-6 text-sm text-muted-foreground">
-                {targetInstanceMissing
-                  ? "This provider instance is no longer available on this device."
-                  : "No providers configured."}
-              </div>
+              <SettingsEmpty
+                title={targetInstanceMissing ? "Provider not found" : "No providers yet"}
+                description={
+                  targetInstanceMissing
+                    ? `This provider is no longer set up on ${environmentLabel}. Pick another one from the list.`
+                    : "Add Codex, Claude or another agent CLI so threads can run on this machine."
+                }
+                action={
+                  readOnly ? undefined : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setIsAddInstanceDialogOpen(true)}
+                    >
+                      <PlusIcon />
+                      Add provider
+                    </Button>
+                  )
+                }
+              />
             )}
           </div>
         </SettingsGroup>
@@ -1012,18 +1008,8 @@ export function EnvironmentProviderSettings({
 
       <SettingsSection title="Advanced">
         <SettingsRow
-          id={searchableSetting("provider-health-check-interval").id}
-          title={
-            <span className="inline-flex items-center gap-1.5">
-              {searchableSetting("provider-health-check-interval").title}
-              <PolicyTooltip>
-                This interval is configured here, then the shared Background activity policy decides
-                whether provider probes may run when the timer fires. Custom intervals appear as
-                Advanced in General settings.
-              </PolicyTooltip>
-            </span>
-          }
-          description="Refresh provider status, versions, and models in the background. Set to 0 to disable."
+          {...searchableSetting("provider-health-check-interval")}
+          description="How often to check each provider's sign-in, version and models. 0 turns checks off. Background activity in General can pause them to save power."
           resetAction={
             providerHealthRefreshIntervalSeconds !== defaultProviderHealthRefreshIntervalSeconds ? (
               <span

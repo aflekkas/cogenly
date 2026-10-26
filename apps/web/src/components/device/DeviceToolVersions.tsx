@@ -9,12 +9,15 @@ export function DeviceToolVersions({
   kind,
   owner,
   error,
+  missingLabel = "Not installed",
 }: {
   tools: ToolVersions | undefined;
   action?: ReactNode;
   kind?: keyof ToolVersions;
   owner?: string | undefined;
   error?: string | undefined;
+  /** The trigger's text while `kind` has no installed version. */
+  missingLabel?: string;
 }) {
   const selected = kind ? tools?.[kind] : undefined;
   const version =
@@ -39,7 +42,7 @@ export function DeviceToolVersions({
           ? version
             ? `v${version}`
             : selected
-              ? "Not installed"
+              ? missingLabel
               : "Version unknown"
           : error
             ? "Versions unavailable"

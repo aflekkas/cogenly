@@ -42,7 +42,7 @@ import {
 } from "@cogenly/contracts";
 import { PREVIEW_VIEWPORT_PRESETS } from "@cogenly/shared/previewViewport";
 import { MoreVertical, Plus as PlusIcon } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { type ReactNode, useCallback, useRef, useState } from "react";
 
 import { ScreenRotationIcon } from "~/browser/ScreenRotationIcon";
 import { AnimatedHeight } from "~/components/AnimatedHeight";
@@ -112,14 +112,15 @@ import {
 } from "~/hooks/useSettings";
 
 import {
+  SettingsDisclosure,
   SettingsUnavailableGroup,
   SettingResetButton,
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
+import { AgentAccessSettings } from "./AgentAccessSettings";
 import { IntegrationServicesSettings } from "./IntegrationServicesSettings";
-import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { BrowserImportWizard, type WizardTarget } from "./BrowserImportWizard";
 import type { ImportOutcome } from "./browserImportWizard.logic";
@@ -300,7 +301,7 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
   return (
     <SettingsRow
       {...searchableSetting("browser-default-viewport")}
-      description="Tab size for you and agents. Fill fits the panel; other sizes show the device toolbar."
+      description="Size of new tabs, for you and agents. Fill panel fits the browser panel; any other size shows the device toolbar."
       resetAction={
         !disabled && viewport._tag !== DEFAULT_BROWSER_VIEWPORT._tag ? (
           <SettingResetButton
@@ -319,7 +320,7 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
             <SelectTrigger
               size="sm"
               className="w-full min-w-0 sm:w-44"
-              aria-label="Default browser viewport"
+              aria-label="Default tab size"
             >
               <SelectValue>{viewportSelectLabel(viewport)}</SelectValue>
             </SelectTrigger>
@@ -409,7 +410,7 @@ function BrowserZoomSetting({ disabled }: { readonly disabled: boolean }) {
   return (
     <SettingsRow
       {...searchableSetting("browser-default-zoom")}
-      description="Page zoom applied to new browser tabs."
+      description="Page zoom for new tabs."
       resetAction={
         !disabled && zoomFactor !== DEFAULT_PREVIEW_ZOOM_FACTOR ? (
           <SettingResetButton
@@ -429,7 +430,7 @@ function BrowserZoomSetting({ disabled }: { readonly disabled: boolean }) {
             if (next !== undefined) updateSettings({ browserDefaultZoomFactor: next });
           }}
         >
-          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Default browser zoom">
+          <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Default tab zoom">
             <SelectValue>{zoomLabel(zoomFactor)}</SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -452,7 +453,7 @@ function BrowserAppearanceSettingRow({ disabled }: { readonly disabled: boolean 
   return (
     <SettingsRow
       {...searchableSetting("browser-default-appearance")}
-      description="The color scheme new tabs are told to prefer. Match Cogenly follows the app's theme; System follows your OS setting."
+      description="The color scheme pages see in new tabs. Match Cogenly follows the app's theme."
       resetAction={
         !disabled && appearance !== DEFAULT_BROWSER_APPEARANCE_SETTING ? (
           <SettingResetButton
@@ -473,11 +474,7 @@ function BrowserAppearanceSettingRow({ disabled }: { readonly disabled: boolean 
             }
           }}
         >
-          <SelectTrigger
-            size="sm"
-            className="w-full sm:w-40"
-            aria-label="Default browser appearance"
-          >
+          <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Tab color scheme">
             <SelectValue>{APPEARANCE_LABELS[appearance]}</SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -493,6 +490,31 @@ function BrowserAppearanceSettingRow({ disabled }: { readonly disabled: boolean 
   );
 }
 
+const RECORDING_TARGET_IDS = [
+  searchableSetting("browser-recording-frame-rate").id,
+  searchableSetting("browser-recording-key-presses").id,
+  searchableSetting("browser-recording-mouse-presses").id,
+];
+
+/** Recording options, folded under the browser rows; a search for one opens the fold. */
+function BrowserRecordingSettings({ disabled }: { readonly disabled: boolean }) {
+  const frameRate = useClientSettings((settings) => settings.browserRecordingFrameRate);
+  const showKeys = useClientSettings((settings) => settings.browserRecordingShowKeyPresses);
+  const showMouse = useClientSettings((settings) => settings.browserRecordingShowMousePresses);
+  const overlays = [showKeys ? "keys" : null, showMouse ? "clicks" : null].filter(Boolean);
+  return (
+    <SettingsDisclosure
+      id="browser-recordings"
+      targetIds={RECORDING_TARGET_IDS}
+      title="Recordings"
+      summary={`${frameRate} fps${overlays.length > 0 ? ` · shows ${overlays.join(" and ")}` : ""}`}
+    >
+      <BrowserRecordingFrameRateSetting disabled={disabled} />
+      <BrowserRecordingInputSettings disabled={disabled} />
+    </SettingsDisclosure>
+  );
+}
+
 function BrowserRecordingInputSettings({ disabled }: { readonly disabled: boolean }) {
   const showKeys = useClientSettings((settings) => settings.browserRecordingShowKeyPresses);
   const showMouse = useClientSettings((settings) => settings.browserRecordingShowMousePresses);
@@ -501,7 +523,7 @@ function BrowserRecordingInputSettings({ disabled }: { readonly disabled: boolea
     <>
       <SettingsRow
         {...searchableSetting("browser-recording-key-presses")}
-        description="Show pressed keys and shortcuts in new recordings. Password fields are excluded."
+        description="Overlay pressed keys and shortcuts. Password fields are never shown."
         control={
           <Switch
             disabled={disabled}
@@ -515,12 +537,12 @@ function BrowserRecordingInputSettings({ disabled }: { readonly disabled: boolea
       />
       <SettingsRow
         {...searchableSetting("browser-recording-mouse-presses")}
-        description="Highlight mouse presses and held buttons in new recordings."
+        description="Highlight clicks and held mouse buttons."
         control={
           <Switch
             disabled={disabled}
             checked={showMouse}
-            aria-label="Show mouse presses in recordings"
+            aria-label="Show clicks in recordings"
             onCheckedChange={(checked) =>
               updateSettings({ browserRecordingShowMousePresses: Boolean(checked) })
             }
@@ -538,7 +560,7 @@ function BrowserRecordingFrameRateSetting({ disabled }: { readonly disabled: boo
   return (
     <SettingsRow
       {...searchableSetting("browser-recording-frame-rate")}
-      description="Maximum recording rate. 30 fps saves CPU and storage; 60 fps is smoother."
+      description="30 fps saves CPU and disk space; 60 fps is smoother."
       resetAction={
         !disabled && frameRate !== DEFAULT_BROWSER_RECORDING_FRAME_RATE ? (
           <SettingResetButton
@@ -562,7 +584,7 @@ function BrowserRecordingFrameRateSetting({ disabled }: { readonly disabled: boo
         >
           <SelectTrigger
             size="sm"
-            className="w-full sm:w-40"
+            className="w-full sm:w-44"
             aria-label="Browser recording frame rate"
           >
             <SelectValue>{frameRate} fps</SelectValue>
@@ -581,7 +603,7 @@ function BrowserRecordingFrameRateSetting({ disabled }: { readonly disabled: boo
 }
 
 const LINK_TARGET_LABELS: Readonly<Record<BrowserLinkTarget, string>> = {
-  system: "Your default browser",
+  system: "Default browser",
   app: "Cogenly",
 };
 
@@ -592,7 +614,7 @@ function BrowserLinkTargetSetting({ disabled }: { readonly disabled: boolean }) 
   return (
     <SettingsRow
       {...searchableSetting("browser-link-target")}
-      description="Where links in the chat and terminal open. Hold ⌘ or Ctrl while clicking a link to open it in your default browser either way."
+      description="Where links in chats and the terminal open. ⌘- or Ctrl-click always opens your default browser."
       resetAction={
         !disabled && linkTarget !== DEFAULT_BROWSER_LINK_TARGET ? (
           <SettingResetButton
@@ -611,7 +633,7 @@ function BrowserLinkTargetSetting({ disabled }: { readonly disabled: boolean }) 
             }
           }}
         >
-          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Open links in">
+          <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Open links in">
             <SelectValue>{LINK_TARGET_LABELS[linkTarget]}</SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -792,11 +814,14 @@ function DeviceIntegrationControls({
         description={deviceHubDescription}
         control={
           <>
-            <DeviceToolVersions
-              action={versionActions("hub")}
-              kind="hub"
-              tools={state.hosts.find((host) => host.kind === "local")?.tools}
-            />
+            <span className="text-xs">
+              <DeviceToolVersions
+                action={versionActions("hub")}
+                kind="hub"
+                tools={state.hosts.find((host) => host.kind === "local")?.tools}
+                {...(enabled ? { missingLabel: "Installs when first used" } : {})}
+              />
+            </span>
             {pending === "hub" ? <DeviceHubSetupStatus state={state} pending compact /> : null}
             <Switch
               checked={enabled}
@@ -854,11 +879,14 @@ function DeviceIntegrationControls({
         description={agentDeviceDescription}
         control={
           <>
-            <DeviceToolVersions
-              action={versionActions("agent")}
-              kind="agent"
-              tools={state.hosts.find((host) => host.kind === "local")?.tools}
-            />
+            <span className="text-xs">
+              <DeviceToolVersions
+                action={versionActions("agent")}
+                kind="agent"
+                tools={state.hosts.find((host) => host.kind === "local")?.tools}
+                {...(agentAccessEnabled ? { missingLabel: "Installs when first used" } : {})}
+              />
+            </span>
             {pending === "agent" ? <AgentDeviceSetupStatus state={state} pending compact /> : null}
             <Switch
               checked={agentAccessEnabled}
@@ -1192,7 +1220,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   return (
     <SettingsRow
       {...searchableSetting("browser-profiles")}
-      description="Profiles separate cookies and logins. Incognito data is cleared when the app closes."
+      description="Each profile keeps its own cookies and sign-ins. Incognito is cleared when the app closes."
       control={
         <Menu onOpenChange={(open) => open && loadSources()}>
           <MenuTrigger
@@ -1491,36 +1519,37 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   );
 }
 
-export function IntegrationsSettingsPanel() {
-  // Client-local preview defaults are editable only where the preview exists.
-  const previewDefaultsDisabled = !isElectron;
-  const previewDefaults = (
-    <>
-      <BrowserProfilesSetting disabled={previewDefaultsDisabled} />
-      <BrowserViewportSetting disabled={previewDefaultsDisabled} />
-      <BrowserZoomSetting disabled={previewDefaultsDisabled} />
-      <BrowserAppearanceSettingRow disabled={previewDefaultsDisabled} />
-      <BrowserRecordingFrameRateSetting disabled={previewDefaultsDisabled} />
-      <BrowserRecordingInputSettings disabled={previewDefaultsDisabled} />
-      <BrowserLinkTargetSetting disabled={previewDefaultsDisabled} />
-    </>
+/** Client-local preview defaults are editable only where the preview exists. */
+function DesktopOnlyRows({ children }: { readonly children: ReactNode }) {
+  if (isElectron) return children;
+  return (
+    <SettingsUnavailableGroup message="Change these in the desktop app, where the browser runs.">
+      {children}
+    </SettingsUnavailableGroup>
   );
+}
 
+/**
+ * Services agents reach, what agents may use, then the defaults for the
+ * browser Cogenly embeds and the devices it drives. Browser rows are
+ * device-local; the rest are server settings.
+ */
+export function IntegrationsSettingsPanel() {
+  const disabled = !isElectron;
   return (
     <>
       <IntegrationServicesSettings />
-      {/* Server-authoritative agent access is scoped by the header selection;
-          the preview defaults below are device-local and ignore it. */}
-      <ProjectDefaultsSettings category="integrations" />
+      <AgentAccessSettings />
       <SettingsSection id="browser" title="Browser">
         <BrowserCookieImportSettings />
-        {previewDefaultsDisabled ? (
-          <SettingsUnavailableGroup message="Only available in the desktop app.">
-            {previewDefaults}
-          </SettingsUnavailableGroup>
-        ) : (
-          previewDefaults
-        )}
+        <DesktopOnlyRows>
+          <BrowserLinkTargetSetting disabled={disabled} />
+          <BrowserProfilesSetting disabled={disabled} />
+          <BrowserViewportSetting disabled={disabled} />
+          <BrowserZoomSetting disabled={disabled} />
+          <BrowserAppearanceSettingRow disabled={disabled} />
+          <BrowserRecordingSettings disabled={disabled} />
+        </DesktopOnlyRows>
       </SettingsSection>
       <DeviceIntegrationSettings />
     </>

@@ -23,7 +23,6 @@ import { TraitsPicker } from "../chat/TraitsPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
 import { Switch } from "../ui/switch";
-import { ComputerUsePermissionsSetting } from "./ComputerUsePermissionsSetting";
 import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
 import {
@@ -47,7 +46,7 @@ function isWorktreeSubmodules(value: string | null): value is WorktreeSubmodules
 export function ProjectDefaultsSettings({
   category,
 }: {
-  category: "models" | "new-threads" | "integrations" | "source-control";
+  category: "models" | "new-threads" | "source-control";
 }) {
   const { target, connectedEnvironments } = useSettingsScope();
   const settings = useScopedSettings();
@@ -91,8 +90,14 @@ export function ProjectDefaultsSettings({
       serverScoped
       settingKeys={["defaultModelSelection"]}
       {...searchableSetting("default-model")}
-      description="Default model for new threads."
-      status={!unavailable && settings.defaultModelSelection === null ? "Automatic" : undefined}
+      description="Used for new chats and threads."
+      status={
+        unavailable
+          ? undefined
+          : settings.defaultModelSelection === null
+            ? "Automatic: the first available model until you pick one"
+            : undefined
+      }
       resetAction={
         settings.defaultModelSelection !== null ? (
           <SettingResetButton label="default model" onClick={() => setModel(null)} />
@@ -187,20 +192,8 @@ export function ProjectDefaultsSettings({
 
   return (
     <SettingsSection
-      id={
-        category === "new-threads"
-          ? "project-defaults"
-          : category === "integrations"
-            ? "browser-access"
-            : "source-control-defaults"
-      }
-      title={
-        category === "new-threads"
-          ? "New threads"
-          : category === "integrations"
-            ? "Agent access"
-            : "Repositories"
-      }
+      id={category === "new-threads" ? "project-defaults" : "source-control-defaults"}
+      title={category === "new-threads" ? "New threads" : "Repositories"}
     >
       {category === "new-threads" ? (
         <>
@@ -274,7 +267,7 @@ export function ProjectDefaultsSettings({
             }
           />
         </>
-      ) : category === "source-control" ? (
+      ) : (
         <>
           <SettingsRow
             serverScoped
@@ -364,61 +357,6 @@ export function ProjectDefaultsSettings({
               </Select>
             }
           />
-        </>
-      ) : (
-        <>
-          <SettingsRow
-            serverScoped
-            settingKeys={["enableAgentBrowserAccess"]}
-            {...searchableSetting("agent-browser-access")}
-            description="Allow agents to use the shared browser. Applies when the agent session next starts."
-            resetAction={
-              settings.enableAgentBrowserAccess !==
-              DEFAULT_SERVER_SETTINGS.enableAgentBrowserAccess ? (
-                <SettingResetButton
-                  label="default browser access"
-                  onClick={() =>
-                    updateSettings({
-                      enableAgentBrowserAccess: DEFAULT_SERVER_SETTINGS.enableAgentBrowserAccess,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <Switch
-                aria-label="Agent browser access"
-                checked={settings.enableAgentBrowserAccess}
-                onCheckedChange={(enabled) => updateSettings({ enableAgentBrowserAccess: enabled })}
-              />
-            }
-          />
-          <SettingsRow
-            serverScoped
-            settingKeys={["enableAgentComputerUse"]}
-            {...searchableSetting("agent-computer-use")}
-            description="Allow agents to control this machine's apps: clicks, typing, screenshots. macOS asks once for Accessibility and Screen Recording."
-            resetAction={
-              settings.enableAgentComputerUse !== DEFAULT_SERVER_SETTINGS.enableAgentComputerUse ? (
-                <SettingResetButton
-                  label="default computer use"
-                  onClick={() =>
-                    updateSettings({
-                      enableAgentComputerUse: DEFAULT_SERVER_SETTINGS.enableAgentComputerUse,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <Switch
-                aria-label="Computer use"
-                checked={settings.enableAgentComputerUse}
-                onCheckedChange={(enabled) => updateSettings({ enableAgentComputerUse: enabled })}
-              />
-            }
-          />
-          <ComputerUsePermissionsSetting enabled={settings.enableAgentComputerUse} />
         </>
       )}
     </SettingsSection>

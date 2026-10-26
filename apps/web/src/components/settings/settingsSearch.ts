@@ -662,10 +662,10 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "integration-add",
-    title: "Connect with an agent",
+    title: "Connect a service",
     to: "/settings/integrations",
     searchTerms: [
-      "connect new service account custom mcp server setup oauth client id secret api key personal access token slack app manifest google cloud install uv",
+      "connect with an agent new service account custom mcp server setup oauth client id secret api key personal access token slack app manifest google cloud install uv",
     ],
   },
   {
@@ -740,38 +740,41 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "browser-default-viewport",
-    title: "Default browser viewport",
+    title: "Default tab size",
     to: "/settings/integrations",
-    searchTerms: ["preview size width height device desktop mobile rotate"],
+    searchTerms: ["browser viewport preview size width height device desktop mobile rotate"],
   },
   {
     id: "browser-default-zoom",
-    title: "Default browser zoom",
+    title: "Default tab zoom",
     to: "/settings/integrations",
-    searchTerms: ["preview page scale tabs percent"],
+    searchTerms: ["browser preview page scale tabs percent"],
   },
   {
     id: "browser-default-appearance",
-    title: "Default browser appearance",
+    title: "Tab color scheme",
     to: "/settings/integrations",
-    searchTerms: ["preview appearance color scheme light dark system os match cogenly"],
+    searchTerms: [
+      "default browser appearance preview color scheme light dark system os match cogenly theme",
+    ],
   },
   {
     id: "browser-recording-frame-rate",
-    title: "Browser recording frame rate",
+    title: "Recording frame rate",
     to: "/settings/integrations",
+    searchTerms: ["browser recordings fps video capture smooth"],
   },
   {
     id: "browser-recording-key-presses",
-    title: "Show key presses in recordings",
+    title: "Show key presses",
     to: "/settings/integrations",
-    searchTerms: ["browser preview keyboard shortcuts keystrokes overlay capture"],
+    searchTerms: ["browser recordings preview keyboard shortcuts keystrokes overlay capture"],
   },
   {
     id: "browser-recording-mouse-presses",
-    title: "Show mouse presses in recordings",
+    title: "Show clicks",
     to: "/settings/integrations",
-    searchTerms: ["browser preview clicks buttons drag overlay capture"],
+    searchTerms: ["browser recordings preview mouse presses buttons drag overlay capture"],
   },
   {
     id: "browser-link-target",

@@ -392,7 +392,7 @@ export function ProviderEnvironmentSection(props: {
   return (
     <SettingsRow
       title="Variables"
-      description="API keys, base URLs, and other per-instance CLI settings."
+      description="API keys, base URLs and other values passed to this provider's CLI."
       control={
         <Button type="button" size="sm" variant="outline" onClick={addVariable}>
           <PlusIcon className="size-3" />
@@ -917,9 +917,12 @@ export function ProviderInstanceCard({
           {titleIconNode}
           <span className="min-w-0 flex-1">
             <span className="flex min-w-0 items-center gap-2">
-              <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
+              {/* The name keeps its width; a long version string truncates first. */}
+              <span className="max-w-full shrink-0 truncate text-sm font-medium text-foreground">
+                {displayName}
+              </span>
               {versionLabel ? (
-                <code className="max-w-24 shrink-0 truncate text-xs text-muted-foreground">
+                <code className="min-w-0 truncate text-xs text-muted-foreground">
                   {versionLabel}
                 </code>
               ) : null}
@@ -1016,19 +1019,23 @@ export function ProviderInstanceCard({
     <>
       <SettingsSection title={displayName} icon={titleIconNode} headerAction={editorHeaderAction}>
         <SettingsRow
-          title="Display name"
-          status={
-            <>
-              <ProviderStatusDiagnostic detail={statusDiagnostic}>
-                <div
-                  tabIndex={statusDiagnostic ? 0 : undefined}
-                  className="flex min-w-0 flex-wrap items-baseline gap-x-1.5"
-                >
-                  {editorStatusNode}
-                </div>
-              </ProviderStatusDiagnostic>
-            </>
+          title="Status"
+          description={
+            <ProviderStatusDiagnostic detail={statusDiagnostic}>
+              <span
+                tabIndex={statusDiagnostic ? 0 : undefined}
+                className="flex min-w-0 flex-wrap items-baseline gap-x-1.5"
+              >
+                {editorStatusNode}
+              </span>
+            </ProviderStatusDiagnostic>
           }
+        />
+        <SettingsRow
+          title={
+            <label htmlFor={`provider-instance-${instanceId}-display-name`}>Name and color</label>
+          }
+          description="How this provider appears in the model picker."
           control={
             <div
               inert={readOnly}
@@ -1125,12 +1132,11 @@ export function ProviderInstanceCard({
       </SettingsSection>
 
       {driverOption !== undefined ? (
-        <SettingsSection title="Models">
+        <SettingsSection
+          title="Models"
+          footer="Saved on this machine, so every device connected to it sees the same models."
+        >
           <div className="px-3 py-3 sm:px-4">
-            <p className="mb-3 text-xs text-muted-foreground">
-              Model preferences and custom models are saved on the selected machine and shared
-              across connected devices.
-            </p>
             <ProviderModelsSection
               canManageCustomModels={!readOnly}
               canWritePreferences={canWriteSettings}
