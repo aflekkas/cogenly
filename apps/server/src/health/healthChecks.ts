@@ -770,7 +770,7 @@ export function tailscaleServeCheck(input: {
   const exposing = input.setup.steps.some(
     (entry) => entry.id === "expose" && entry.state === "working",
   );
-  if (tailscale.running && tailscale.signedIn && !tailscale.served && exposing) {
+  if (!tailscale.served && exposing) {
     return check("tailscale-serve", "Pointing Tailscale Serve at this server", []);
   }
   const failure = !tailscale.installed

@@ -334,44 +334,45 @@ export const buildMachineSetupStatus = (
           });
 
   const exposeTitle = `Make ${name} reachable`;
-  const expose: MachineSetupStep = !signedIn
-    ? blocked("expose", exposeTitle)
-    : served
-      ? step("expose", {
-          state: "done",
-          title: exposeTitle,
-          detail: `Your machines reach it privately at ${joinUrl}.`,
-        })
-      : funnel
+  const expose: MachineSetupStep =
+    !signedIn && !progress.working.has("expose")
+      ? blocked("expose", exposeTitle)
+      : served
         ? step("expose", {
-            state: "todo",
+            state: "done",
             title: exposeTitle,
-            detail:
-              "Tailscale Funnel puts this Cogenly on the public internet. Turn Funnel off to pair machines.",
-            handoff: commandHandoff(
-              `tailscale funnel --https=${String(servePort)} off`,
-              `Run this in a terminal on ${name}.`,
-            ),
+            detail: `Your machines reach it privately at ${joinUrl}.`,
           })
-        : choice?._tag === "none"
+        : funnel
           ? step("expose", {
               state: "todo",
               title: exposeTitle,
               detail:
-                "Tailscale Serve already uses every HTTPS port (443, 8443 and 10000) for something else. Free one with `tailscale serve status` and `tailscale serve --https=<port> off`.",
+                "Tailscale Funnel puts this Cogenly on the public internet. Turn Funnel off to pair machines.",
+              handoff: commandHandoff(
+                `tailscale funnel --https=${String(servePort)} off`,
+                `Run this in a terminal on ${name}.`,
+              ),
             })
-          : progress.serveApprovalUrl !== null
+          : choice?._tag === "none"
             ? step("expose", {
-                state: "waiting",
-                title: exposeTitle,
-                detail: "Waiting for HTTPS to be approved.",
-              })
-            : actionable("expose", observation, {
+                state: "todo",
                 title: exposeTitle,
                 detail:
-                  "Cogenly gives this machine a private address that only your machines can reach.",
-                action: "Turn on",
-              });
+                  "Tailscale Serve already uses every HTTPS port (443, 8443 and 10000) for something else. Free one with `tailscale serve status` and `tailscale serve --https=<port> off`.",
+              })
+            : progress.serveApprovalUrl !== null
+              ? step("expose", {
+                  state: "waiting",
+                  title: exposeTitle,
+                  detail: "Waiting for HTTPS to be approved.",
+                })
+              : actionable("expose", observation, {
+                  title: exposeTitle,
+                  detail:
+                    "Cogenly gives this machine a private address that only your machines can reach.",
+                  action: "Turn on",
+                });
 
   const steps = [install, start, signIn, https, expose];
   return {
