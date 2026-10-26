@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off globalConsole:off - a lint step; plain Node keeps a file scan instant.
 // Fails when user-facing markdown contains an em dash. Strings and JSX text in code are covered by
 // the t3code/no-em-dash-in-copy lint rule; this covers the prose oxlint does not parse.
 //
