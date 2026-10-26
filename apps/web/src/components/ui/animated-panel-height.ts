@@ -39,11 +39,22 @@ const DISABLED: AnimatedPanelHeight = { panelProps: {}, contentRef: () => {} };
  * later changes animate, and only while one is in flight. Under reduced motion the size snaps.
  * A panel anchored at its bottom (positioned with `bottom`, or a popup on `side="top"`) grows
  * upward with its bottom edge still.
+ *
+ * A `holdKey` keeps the panel from shrinking while the key stays the same, for a results list
+ * whose edge should not bob as each keystroke narrows it; a new key settles it on the content's
+ * height. Make the panel a `flex flex-col justify-end` column to keep the rows on the anchored
+ * edge, with the spare height on the far side.
  */
-export function useAnimatedPanelHeight(enabled = true): AnimatedPanelHeight {
+export function useAnimatedPanelHeight(
+  enabled = true,
+  options?: { readonly holdKey?: string },
+): AnimatedPanelHeight {
   const [content, setContent] = React.useState<HTMLElement | null>(null);
   const [size, setSize] = React.useState<PanelHeight | null>(null);
   const active = enabled && content !== null;
+  const holdKey = options?.holdKey;
+  const holdRef = React.useRef(holdKey !== undefined);
+  const measuredRef = React.useRef(0);
 
   React.useLayoutEffect(() => {
     if (!active || !content) return;
@@ -51,13 +62,22 @@ export function useAnimatedPanelHeight(enabled = true): AnimatedPanelHeight {
       const entry = entries.at(-1);
       if (!entry) return;
       const measured = entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height;
-      setSize((previous) => nextPanelHeight(previous, measured));
+      measuredRef.current = measured;
+      setSize((previous) => nextPanelHeight(previous, measured, { hold: holdRef.current }));
     });
     return () => {
       stop();
+      measuredRef.current = 0;
       setSize(null);
     };
   }, [active, content]);
+
+  React.useLayoutEffect(() => {
+    holdRef.current = holdKey !== undefined;
+    // The content did not resize, so no observer entry comes: settle on its last height.
+    const measured = measuredRef.current;
+    if (measured > 0) setSize((previous) => nextPanelHeight(previous, measured));
+  }, [holdKey]);
 
   return React.useMemo(() => {
     if (!enabled) return DISABLED;
