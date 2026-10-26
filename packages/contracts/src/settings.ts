@@ -31,7 +31,7 @@ import {
   ProviderOptionSelections,
 } from "./model.ts";
 import { ModelSelection } from "./modelSelection.ts";
-import { ProjectScript, type ProjectMutation } from "./project.ts";
+import { type ProjectMutation } from "./project.ts";
 import { DEFAULT_RUNTIME_MODE, RuntimeMode } from "./providerPolicy.ts";
 import { BrowserProfile, BrowserProfileId, DEFAULT_BROWSER_PROFILE_ID } from "./browserProfile.ts";
 import {
@@ -1228,10 +1228,6 @@ export const ServerSettings = Schema.Struct({
   /** The owner reviewed the one-time native-definition import offer. */
   nativeMcpImportReviewed: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   defaultAutoPull: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  /** Actions for a repository that has none of its own (`Project.scripts`). */
-  defaultProjectScripts: Schema.Array(ProjectScript).pipe(
-    Schema.withDecodingDefault(Effect.succeed([])),
-  ),
   defaultModelSelection: Schema.NullOr(ModelSelection).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
@@ -1678,7 +1674,6 @@ export const ServerSettingsPatch = Schema.Struct({
   useProviderConnectors: Schema.optionalKey(Schema.Boolean),
   nativeMcpImportReviewed: Schema.optionalKey(Schema.Boolean),
   defaultAutoPull: Schema.optionalKey(Schema.Boolean),
-  defaultProjectScripts: Schema.optionalKey(Schema.Array(ProjectScript)),
   defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
   enableAgentDeviceAccess: Schema.optionalKey(Schema.Boolean),
@@ -1772,8 +1767,7 @@ export function requiredScopesForServerSettingsPatch(
 
 /**
  * Project scripts run on the host when a worktree is created or a thread
- * settles, so a project mutation that carries them needs the same grant as
- * saving project scripts through settings, on top of `orchestration:operate`.
+ * settles, so changing them needs `settings:write` as well as `orchestration:operate`.
  */
 export function requiredScopesForProjectMutation(
   mutation: ProjectMutation,
@@ -1781,10 +1775,7 @@ export function requiredScopesForProjectMutation(
   if (mutation.type === "project.delete" || mutation.scripts === undefined) {
     return [AuthOrchestrationOperateScope];
   }
-  return [
-    AuthOrchestrationOperateScope,
-    ...requiredScopesForServerSettingsPatch({ defaultProjectScripts: mutation.scripts }),
-  ];
+  return [AuthOrchestrationOperateScope, AuthSettingsWriteScope];
 }
 
 export const ClientSettingsPatch = Schema.Struct({

@@ -72,8 +72,8 @@ import {
 import { mapSettingsSecrets, SECRET_REDACTED, type SettingsSecret } from "./settingsSecrets.ts";
 import {
   LEGACY_PROJECT_ACTIONS_FILE_NAME,
-  type LegacyProjectActions,
   LegacyProjectActionsJson,
+  type LegacyProjectActions,
   readLegacyProjectActions,
 } from "./project/legacyProjectActions.ts";
 
@@ -635,6 +635,9 @@ const make = Effect.gen(function* () {
               ...sparse,
               projectSettingsFolded: pendingLegacyProjectActions.folded,
               projectScriptOverrides: pendingLegacyProjectActions.scripts,
+              ...(pendingLegacyProjectActions.defaultScripts !== undefined
+                ? { defaultProjectScripts: pendingLegacyProjectActions.defaultScripts }
+                : {}),
             });
       return yield* writeFileStringAtomically({
         filePath: settingsPath,
@@ -694,7 +697,19 @@ const make = Effect.gen(function* () {
   /** Keeps a sidecar that is still waiting for the migration: it holds the older copy. */
   const saveLegacyProjectActions = (actions: LegacyProjectActions) =>
     Effect.gen(function* () {
-      if (yield* fs.exists(legacyProjectActionsPath)) return;
+      if (yield* fs.exists(legacyProjectActionsPath)) {
+        const previous = yield* fs
+          .readFileString(legacyProjectActionsPath)
+          .pipe(Effect.flatMap(Schema.decodeUnknownEffect(LegacyProjectActionsJson)));
+        // An unfinished older migration owns its lists; only add the retired machine fallback.
+        actions = {
+          ...actions,
+          ...previous,
+          ...(previous.defaultScripts === undefined && actions.defaultScripts !== undefined
+            ? { defaultScripts: actions.defaultScripts }
+            : {}),
+        };
+      }
       yield* writeFileStringAtomically({
         filePath: legacyProjectActionsPath,
         contents: `${yield* encodeLegacyProjectActions(actions)}\n`,

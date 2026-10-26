@@ -8,7 +8,6 @@ import * as Duration from "effect/Duration";
 import { describe, expect, it } from "vite-plus/test";
 import { resolveServerBackgroundActivitySettings } from "./backgroundActivitySettings.ts";
 import { createModelSelection } from "./model.ts";
-import { resolveProjectScripts } from "./projectScripts.ts";
 import {
   applyServerSettingsPatch,
   fallbackTextGenerationModelSelection,
@@ -118,23 +117,6 @@ describe("serverSettings helpers", () => {
     const edited = applyServerSettingsPatch(saved, { deviceHosts: [replacement] });
     expect(edited.deviceHosts).toEqual([replacement]);
     expect(applyServerSettingsPatch(edited, { deviceHosts: [] }).deviceHosts).toEqual([]);
-  });
-
-  it("uses a repository's own actions, else the machine's actions", () => {
-    const action = {
-      id: "check",
-      name: "Check",
-      command: "npm test",
-      icon: "play" as const,
-      runOnWorktreeCreate: false,
-    };
-    const own = { ...action, command: "npm run lint" };
-    const settings = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
-      defaultProjectScripts: [action],
-    });
-    expect(resolveProjectScripts(settings, { scripts: [] })).toEqual([action]);
-    expect(resolveProjectScripts(settings, { scripts: [own] })).toEqual([own]);
-    expect(resolveProjectScripts(DEFAULT_SERVER_SETTINGS, { scripts: [] })).toEqual([]);
   });
 
   it("replaces and clears conversation model defaults without retaining old options", () => {

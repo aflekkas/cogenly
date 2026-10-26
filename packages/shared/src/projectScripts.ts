@@ -1,15 +1,4 @@
-import type { ProjectScript, ServerSettings } from "@cogenly/contracts";
-
-/**
- * A repository's actions: its own list, else the machine's actions for
- * repositories without one.
- */
-export function resolveProjectScripts(
-  settings: Pick<ServerSettings, "defaultProjectScripts">,
-  project: { scripts: readonly ProjectScript[] },
-): readonly ProjectScript[] {
-  return project.scripts.length > 0 ? project.scripts : settings.defaultProjectScripts;
-}
+import type { ProjectScript } from "@cogenly/contracts";
 
 interface ProjectScriptRuntimeEnvInput {
   project: {

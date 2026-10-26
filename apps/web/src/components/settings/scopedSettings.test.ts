@@ -51,20 +51,12 @@ describe("scoped settings writes", () => {
     ).toEqual([]);
   });
 
-  it("writes lifecycle scripts only to the selected machine", () => {
-    const scripts = [
-      {
-        id: "setup",
-        name: "Setup",
-        command: "echo local",
-        icon: "play" as const,
-        runOnWorktreeCreate: true,
-        runOnSettle: true,
-      },
-    ];
+  it("writes a worktree directory only to the selected machine", () => {
     expect(
-      writtenTo(planScopedSettingsPatch(all, environments, { defaultProjectScripts: scripts })),
-    ).toEqual([[macId, { defaultProjectScripts: scripts }]]);
+      writtenTo(
+        planScopedSettingsPatch(all, environments, { worktreesDirectory: "/tmp/worktrees" }),
+      ),
+    ).toEqual([[macId, { worktreesDirectory: "/tmp/worktrees" }]]);
   });
 
   it("writes a universal setting to every connected machine", () => {

@@ -40,7 +40,7 @@ export const migrate = Effect.gen(function* () {
     const scripts = legacyProjectActionsTarget(legacy, project);
     if (scripts === null) continue;
     yield* projects.update({
-      commandId: CommandId.make(`legacy-project-actions:${project.id}`),
+      commandId: CommandId.make(`repository-actions-v2:${project.id}`),
       projectId: project.id,
       scripts,
     });
