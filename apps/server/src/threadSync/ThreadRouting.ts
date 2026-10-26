@@ -386,6 +386,24 @@ const make = Effect.gen(function* () {
           reason: "moving",
           detail: "This thread is moving to another machine. Try again when the move finishes.",
         });
+      if (
+        command.type === "thread.archive" ||
+        command.type === "thread.unarchive" ||
+        command.type === "thread.delete"
+      ) {
+        const view = yield* topology;
+        // Unpairing is the boundary between an offline owner and a lost owner.
+        // Recover metadata here without requiring the lost machine's checkout.
+        // Execution still requires a repository on this machine through the ordinary launch path.
+        if (
+          view.link._tag !== "spoke" &&
+          !ThreadSync.pairedMachines(view.machines).has(owner.owner)
+        ) {
+          const adopted = yield* replication.adopt(threadId, owner.owner);
+          if (adopted === undefined) return yield* new ThreadRemoteError({ reason: "moving" });
+          return Option.none();
+        }
+      }
       if (!validatePortableCommand(command))
         return yield* new ThreadRemoteError({
           reason: "not-owner",
