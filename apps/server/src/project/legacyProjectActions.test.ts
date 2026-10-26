@@ -263,8 +263,7 @@ it.effect(
           }),
       });
       const run = Migration.migrate.pipe(
-        Effect.provide(projectLayer),
-        Effect.provide(ServerSettings.layer),
+        Effect.provide(Layer.merge(projectLayer, ServerSettings.layer)),
       );
       yield* run;
       expect(yield* fs.exists(sidecarPath)).toBe(true);
@@ -282,5 +281,71 @@ it.effect(
       yield* run;
       expect(writes).toBe(1);
       expect(records.every((record) => record.scripts.length === 0)).toBe(true);
+    }).pipe(Effect.provide(layer)),
+);
+
+it.effect(
+  "preserves every retired project value when settings migrations overlap and the backup write fails",
+  () =>
+    Effect.gen(function* () {
+      const { settingsPath } = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      yield* fs.makeDirectory(path.dirname(settingsPath), { recursive: true });
+      const retired = {
+        projectSettingsFolded: true,
+        projectSettingsOverrides: {
+          [repo]: {
+            agentComputerUseEnabled: false,
+            agentBrowserAccess: false,
+            defaultRuntimeMode: "old-unrecognized-value",
+            defaultProjectScripts: [],
+            providerInstances: { codex: { enabled: false } },
+          },
+        },
+        projectAgentBrowserAccessOverrides: { [repo]: false },
+        projectAutoPullOverrides: { [repo]: false },
+        projectScriptOverrides: { [repo]: [] },
+      };
+      yield* fs.writeFileString(
+        settingsPath,
+        JSON.stringify({
+          deviceOnboardingCompleted: true,
+          defaultProjectScripts: [action("setup")],
+          ...retired,
+        }),
+      );
+      const backupPath = path.join(path.dirname(settingsPath), "legacy-project-settings.json");
+      yield* fs.makeDirectory(backupPath);
+      const failingFs = {
+        ...fs,
+        exists: (file: string) => (file === backupPath ? Effect.succeed(false) : fs.exists(file)),
+      };
+      yield* Effect.gen(function* () {
+        const service = yield* ServerSettings.ServerSettingsService;
+        const settings = yield* service.getSettings;
+        expect(settings.deviceOnboardingCompleted).toBe(false);
+        expect(settings).not.toHaveProperty("projectSettingsOverrides");
+        yield* service.updateSettings({ defaultAutoPull: true });
+        const saved = JSON.parse(yield* fs.readFileString(settingsPath));
+        for (const [key, value] of Object.entries(retired)) expect(saved[key]).toEqual(value);
+        expect(
+          yield* fs.exists(path.join(path.dirname(settingsPath), LEGACY_PROJECT_ACTIONS_FILE_NAME)),
+        ).toBe(true);
+      }).pipe(
+        Effect.provide(ServerSettings.layer),
+        Effect.provideService(FileSystem.FileSystem, failingFs),
+      );
+      yield* fs.remove(backupPath, { recursive: true });
+      const reload = ServerSettings.ServerSettingsService.pipe(
+        Effect.flatMap((service) => service.getSettings),
+        Effect.provide(ServerSettings.layer),
+      );
+      yield* reload;
+      expect(JSON.parse(yield* fs.readFileString(backupPath))).toEqual(retired);
+      const rewritten = JSON.parse(yield* fs.readFileString(settingsPath));
+      for (const key of Object.keys(retired)) expect(rewritten).not.toHaveProperty(key);
+      yield* reload;
+      expect(JSON.parse(yield* fs.readFileString(backupPath))).toEqual(retired);
     }).pipe(Effect.provide(layer)),
 );
