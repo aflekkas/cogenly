@@ -1,4 +1,4 @@
-import { ExternalLinkIcon, SearchIcon } from "lucide-react";
+import { ExternalLinkIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -14,8 +14,7 @@ import { Button } from "../ui/button";
 import { DisclosureChevron } from "../ui/disclosure";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { SearchInput } from "../ui/search-input";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { SettingsEmpty, SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingsEmpty, SettingsRow, SettingsSection, SettingsToolbar } from "./settingsLayout";
 
 type LicenseManifestState =
   | { readonly status: "loading" }
@@ -121,70 +120,32 @@ function LicenseCount({
   );
 }
 
-function LicenseHeaderAction({
+/** Filter box in the card toolbar: matches package names, versions, licenses and app parts. */
+function LicenseSearchInput({
   query,
   onQueryChange,
-  searchOpen,
-  onSearchOpenChange,
-  filteredCount,
-  totalCount,
 }: {
   query: string;
   onQueryChange: (value: string) => void;
-  searchOpen: boolean;
-  onSearchOpenChange: (open: boolean) => void;
-  filteredCount: number;
-  totalCount: number;
 }) {
-  if (!searchOpen) {
-    return (
-      <div className="flex items-center gap-1.5">
-        <LicenseCount filteredCount={filteredCount} totalCount={totalCount} />
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                aria-label="Search open-source licenses"
-                onClick={() => onSearchOpenChange(true)}
-                size="icon-micro"
-                type="button"
-                variant="ghost-muted"
-              >
-                <SearchIcon className="size-3" />
-              </Button>
-            }
-          />
-          <TooltipPopup side="top">Search licenses</TooltipPopup>
-        </Tooltip>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex items-center gap-2">
-      <div className="hidden sm:block">
-        <LicenseCount filteredCount={filteredCount} totalCount={totalCount} />
-      </div>
-      <SearchInput
-        aria-label="Search open-source licenses"
-        autoFocus
-        frameClassName="w-36 sm:w-44"
-        onBlur={() => {
-          if (query.length === 0) onSearchOpenChange(false);
-        }}
-        onChange={(event) => onQueryChange(event.currentTarget.value)}
-        onKeyDown={(event) => {
-          if (event.key !== "Escape") return;
-          event.preventDefault();
-          onQueryChange("");
-          onSearchOpenChange(false);
-        }}
-        placeholder="Search licenses"
-        value={query}
-        clearLabel="Clear license search"
-        onClear={() => onQueryChange("")}
-      />
-    </div>
+    <SearchInput
+      aria-label="Search open-source licenses"
+      frameClassName="basis-full sm:basis-0 sm:flex-1"
+      onChange={(event) => onQueryChange(event.currentTarget.value)}
+      onKeyDown={(event) => {
+        // The settings route treats an unhandled Escape as "go back";
+        // inside the search box it clears, then leaves the field.
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        if (query.length > 0) onQueryChange("");
+        else event.currentTarget.blur();
+      }}
+      placeholder="Search by package, version or license"
+      value={query}
+      clearLabel="Clear license search"
+      onClear={() => onQueryChange("")}
+    />
   );
 }
 
@@ -205,7 +166,6 @@ function LicenseManifestError({ message, onRetry }: { message: string; onRetry: 
 export function OpenSourceLicensesPanel() {
   const [state, setState] = useState<LicenseManifestState>({ status: "loading" });
   const [query, setQuery] = useState("");
-  const [searchOpen, setSearchOpen] = useState(false);
   const [openEntryKey, setOpenEntryKey] = useState<string | null>(null);
   const [requestVersion, setRequestVersion] = useState(0);
 
@@ -242,35 +202,42 @@ export function OpenSourceLicensesPanel() {
         title="Third-party notices"
         headerAction={
           state.status === "ready" ? (
-            <LicenseHeaderAction
-              query={query}
-              onQueryChange={setQuery}
-              searchOpen={searchOpen}
-              onSearchOpenChange={setSearchOpen}
-              filteredCount={filteredEntries.length}
-              totalCount={entries.length}
-            />
+            <LicenseCount filteredCount={filteredEntries.length} totalCount={entries.length} />
           ) : null
         }
       >
         {state.status === "ready" ? (
-          <div className="text-base sm:text-sm">
-            {filteredEntries.length > 0 ? (
-              filteredEntries.map((entry) => {
-                const entryKey = thirdPartyLicenseEntryKey(entry);
-                return (
-                  <LicenseNoticeRow
-                    key={entryKey}
-                    entry={entry}
-                    open={openEntryKey === entryKey}
-                    onOpenChange={(open) => setOpenEntryKey(open ? entryKey : null)}
-                  />
-                );
-              })
-            ) : (
-              <SettingsEmpty size="sm" title="No licenses match that search" />
-            )}
-          </div>
+          <>
+            <SettingsToolbar>
+              <LicenseSearchInput query={query} onQueryChange={setQuery} />
+            </SettingsToolbar>
+            <div className="text-base sm:text-sm">
+              {filteredEntries.length > 0 ? (
+                filteredEntries.map((entry) => {
+                  const entryKey = thirdPartyLicenseEntryKey(entry);
+                  return (
+                    <LicenseNoticeRow
+                      key={entryKey}
+                      entry={entry}
+                      open={openEntryKey === entryKey}
+                      onOpenChange={(open) => setOpenEntryKey(open ? entryKey : null)}
+                    />
+                  );
+                })
+              ) : (
+                <SettingsEmpty
+                  size="sm"
+                  title="No licenses match your search"
+                  description="Try a package name, a version or a license such as MIT."
+                  action={
+                    <Button size="sm" variant="outline" onClick={() => setQuery("")}>
+                      Clear search
+                    </Button>
+                  }
+                />
+              )}
+            </div>
+          </>
         ) : state.status === "error" ? (
           <LicenseManifestError message={state.message} onRetry={retry} />
         ) : (
