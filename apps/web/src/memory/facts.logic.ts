@@ -26,7 +26,7 @@ export const FACT_STATUS_FILTERS: ReadonlyArray<{ value: FactStatusFilter; label
   { value: "confirmed", label: "Confirmed" },
   { value: "superseded", label: "Replaced" },
   { value: "retracted", label: "Forgotten" },
-  { value: "all", label: "All" },
+  { value: "all", label: "All statuses" },
 ];
 
 const STATUS_RANK: Record<FactStatus, number> = {
