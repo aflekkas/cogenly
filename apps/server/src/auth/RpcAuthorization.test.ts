@@ -147,8 +147,6 @@ describe("RPC authorization scopes", () => {
 
   it("guards integration secret forms, the runtime installer and the sources feed, on the client too", () => {
     for (const method of [
-      WS_METHODS.integrationsPreviewNative,
-      WS_METHODS.integrationsImportNative,
       WS_METHODS.integrationsSaveOAuthClient,
       WS_METHODS.integrationsSaveApiKey,
     ]) {

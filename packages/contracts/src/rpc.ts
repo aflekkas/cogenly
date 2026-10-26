@@ -638,8 +638,6 @@ export const WS_METHODS = {
   repoMcpTrustSubscribe: "repoMcpTrust.subscribe",
   repoMcpTrustRespond: "repoMcpTrust.respond",
   integrationsList: "integrations.list",
-  integrationsPreviewNative: "integrations.previewNative",
-  integrationsImportNative: "integrations.importNative",
   integrationsCreate: "integrations.create",
   integrationsUpdate: "integrations.update",
   integrationsDelete: "integrations.delete",
@@ -2304,16 +2302,6 @@ const WsAgentsActivityRpc = Rpc.make(WS_METHODS.agentsActivity, {
   success: AgentWorkspace.AgentActivityResult,
   error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
 });
-const WsIntegrationsPreviewNativeRpc = Rpc.make(WS_METHODS.integrationsPreviewNative, {
-  payload: Schema.Struct({}),
-  success: Integrations.IntegrationNativeImportPreview,
-  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
-});
-const WsIntegrationsImportNativeRpc = Rpc.make(WS_METHODS.integrationsImportNative, {
-  payload: Schema.Struct({}),
-  success: Integrations.IntegrationNativeImportResult,
-  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
-});
 const WsRepoMcpTrustSubscribeRpc = Rpc.make(WS_METHODS.repoMcpTrustSubscribe, {
   payload: RepoMcpTrust.RepoMcpTrustThreadInput,
   success: RepoMcpTrust.RepoMcpTrustListResult,
@@ -2950,8 +2938,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsThreadApprovalsSubscribeRpc,
   WsAgentsStartWorkRpc,
   WsAgentsActivityRpc,
-  WsIntegrationsPreviewNativeRpc,
-  WsIntegrationsImportNativeRpc,
   WsRepoMcpTrustSubscribeRpc,
   WsRepoMcpTrustRespondRpc,
   WsIntegrationsListRpc,

@@ -1,5 +1,4 @@
 import {
-  IntegrationNativeImportPreview,
   IntegrationInstallRuntimeInput,
   IntegrationInstallRuntimeResult,
   IntegrationSetupGuideInput,
@@ -36,15 +35,6 @@ const shared = {
 };
 
 export const IntegrationsToolkit = Toolkit.make(
-  Tool.make("integration_native_preview", {
-    ...shared,
-    parameters: Tool.EmptyParams,
-    success: IntegrationNativeImportPreview,
-    description:
-      "Preview native Claude and Codex MCP definitions for migration. Returns disabled definitions, vault references instead of secrets, and reconnect warnings. Does not enable or import anything; use integration_add per reviewed definition.",
-  })
-    .annotate(Tool.Readonly, true)
-    .annotate(Tool.Destructive, false),
   Tool.make("integration_install_runtime", {
     ...shared,
     parameters: IntegrationInstallRuntimeInput,

@@ -102,14 +102,6 @@ const addedByAgent = (fail: (cause: unknown) => OrchestratorMcpFailure) =>
   });
 
 export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
-  integration_native_preview: McpToolAccess.writesEnvironment(() =>
-    Effect.gen(function* () {
-      const scope = yield* Invocation.McpInvocationContext;
-      return yield* (yield* Integrations.Integrations)
-        .previewNative()
-        .pipe(Effect.mapError(failureAt(scope.httpOrigin)));
-    }),
-  ),
   integration_install_runtime: McpToolAccess.writesEnvironment((input) =>
     Effect.gen(function* () {
       const scope = yield* Invocation.McpInvocationContext;
