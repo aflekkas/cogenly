@@ -255,10 +255,10 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "storage-delete-now",
-    title: "Preview cleanup and clean up now",
+    title: "Clean up now",
     to: "/settings/storage",
     searchTerms: [
-      "storage cleanup dry run preview run now results report removed kept failed unsaved agent worktrees",
+      "storage cleanup free up space preview cleanup dry run run now last run results report removed kept failed unsaved agent worktrees",
     ],
   },
   {
@@ -291,9 +291,11 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "storage-artifacts",
-    title: "Artifacts and logs",
+    title: "Build files, captures and logs",
     to: "/settings/storage",
-    searchTerms: ["disk storage browser screenshots captures rotated logs cleanup retention"],
+    searchTerms: [
+      "artifacts and logs disk storage browser artifacts screenshots captures rotated logs cleanup retention",
+    ],
   },
   {
     id: "project-defaults",
