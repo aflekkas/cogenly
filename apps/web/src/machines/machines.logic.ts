@@ -64,6 +64,14 @@ export function machineMoveTargetsForThreads(
   return machineMoveTargets(list, sharedOwner, allElsewhere);
 }
 
+/**
+ * The machines that hold a copy of every thread this one holds: its hub, its spokes,
+ * and the hub's other spokes. Empty for a standalone machine.
+ */
+export function pairedMachineIds(list: MachineListResult | null): ReadonlySet<EnvironmentId> {
+  return new Set(machineMoveTargets(list).map((machine) => machine.environmentId));
+}
+
 /** The paired machine that runs a replica; null for this machine's own threads. */
 export function threadOwnerMachine(
   list: MachineListResult | null,

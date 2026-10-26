@@ -269,12 +269,13 @@ the repository by text. Choose a result to insert it as a chip.
 Typing `@` finds more than files. The menu groups Work tasks and chats by title, agents and
 project folders by name, [sources](#sources) by service and account, and files and folders,
 closest matches first and then the most recent.
-`@` on its own shows a few recent ones from each group. Everything it offers is on the same
-server.
+`@` on its own shows a few recent ones from each group. Tasks and chats come from every
+paired machine, marked with the machine that runs them; everything else is on the same server.
 
-Another thread can be context too. Pick it from the `@` menu, or on web and desktop drag a
-thread out of the sidebar and drop it on the composer; a multi-selection drops together. The chip shows the thread's current title and
-opens it when selected. Your prompt only carries a reference: the agent reads the thread's
+Another thread can be context too. Pick it from the `@` menu, paste a thread link, or on web
+and desktop drag a thread out of the sidebar and drop it on the composer; a multi-selection
+drops together. The chip shows the thread's current title and opens it when selected. Your
+prompt only carries a reference: the agent reads the thread's
 history on demand, so attaching a long thread costs nothing until the agent looks. Attaching a
 thread does not change it, and the agent cannot send messages to it unless you ask.
 

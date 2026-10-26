@@ -8,6 +8,7 @@ import type {
   ComposerMentionItem,
 } from "@cogenly/client-runtime/composerThreadItems";
 import {
+  type EnvironmentId,
   type ProjectEntry,
   type ProviderDriverKind,
   type PullRequestContextMetadata,
@@ -41,6 +42,8 @@ import {
   SearchListRowText,
   SearchListRowTrailing,
 } from "../ui/search-list";
+import { useMachineLabel } from "../../machines/useMachineLabel";
+import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { IntegrationSourceRowContent } from "./ComposerSourcesPicker";
 import { ComposerBanner } from "./ComposerBanner";
@@ -276,6 +279,9 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
           />
         </SearchListRowTrailing>
       ) : null}
+      {props.item.type === "thread" && props.item.runsOn !== null ? (
+        <ThreadMachineBadge machineId={props.item.runsOn} via={props.item.thread.environmentId} />
+      ) : null}
     </CommandItem>
   );
 });
@@ -314,6 +320,20 @@ const SKILL_SOURCE_LABEL_BY_KIND: Record<ProviderSkillSourceKind, string> = {
   system: "System",
   other: "Provider",
 };
+
+/** The machine a task or chat from another paired machine runs on. */
+function ThreadMachineBadge(props: { machineId: EnvironmentId; via: EnvironmentId }) {
+  const machine = useMachineLabel(props.machineId, props.via);
+  if (machine === null) return null;
+  return (
+    <SearchListRowTrailing>
+      <SearchListRowBadge>
+        <EnvironmentMachineIcon aria-hidden kind={machine.kind} />
+        {machine.name}
+      </SearchListRowBadge>
+    </SearchListRowTrailing>
+  );
+}
 
 function SkillSourceBadge(props: { kind: ProviderSkillSourceKind; showSkillSuffix: boolean }) {
   const Icon = SKILL_SOURCE_ICON_BY_KIND[props.kind];

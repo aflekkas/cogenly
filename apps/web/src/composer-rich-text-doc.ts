@@ -465,6 +465,12 @@ function atomJsonForSegment(
       attrs: { citation: segment.citation, source: segment.source, citeKey: randomNodeKey() },
     };
   }
+  if (segment.type === "thread-link") {
+    return {
+      type: "composer-thread-link",
+      attrs: { threadId: segment.threadId, label: segment.label, source: segment.source },
+    };
+  }
   return {
     type: "composer-context-reference",
     attrs: {
@@ -819,6 +825,7 @@ function readAtomSource(node: ProseMirrorNode): string {
   switch (node.type.name) {
     case "composer-mention":
     case "composer-citation":
+    case "composer-thread-link":
     case "composer-context-reference":
       return typeof attrs.source === "string" ? attrs.source : "";
     case "composer-skill": {

@@ -1,11 +1,40 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  collectThreadLinks,
   formatThreadLink,
   parseAppThreadUrl,
   parseThreadLinkHref,
   relabelThreadLinks,
+  threadLinksToPlainText,
 } from "./threadLinks.ts";
+
+describe("collectThreadLinks", () => {
+  it("finds each pasted link with its position, so the composer can chip it", () => {
+    const text =
+      "See [Run the Requested Audit](cogenly-thread://v1/5c3db2c5-fb2a) and [x](https://example.com)";
+    expect(collectThreadLinks(text)).toEqual([
+      {
+        threadId: "5c3db2c5-fb2a",
+        label: "Run the Requested Audit",
+        source: "[Run the Requested Audit](cogenly-thread://v1/5c3db2c5-fb2a)",
+        start: 4,
+        end: 64,
+      },
+    ]);
+  });
+
+  it("round-trips the link @ inserts", () => {
+    const link = formatThreadLink("t-1", "Fix [login]");
+    expect(collectThreadLinks(`${link} `).map((found) => found.source)).toEqual([link]);
+  });
+
+  it("reads a link as its label in plain-text previews", () => {
+    expect(threadLinksToPlainText("Look at [Audit](cogenly-thread://v1/t1) first")).toBe(
+      "Look at Audit first",
+    );
+  });
+});
 
 describe("thread links", () => {
   it("takes the thread id verbatim, percent escapes included", () => {

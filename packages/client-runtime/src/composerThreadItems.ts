@@ -15,6 +15,7 @@ export const COMPOSER_MENTION_GROUPS = ["tasks", "chats", "agents", "projects", 
 export type ComposerMentionGroup = (typeof COMPOSER_MENTION_GROUPS)[number];
 
 export interface ComposerThreadCandidate {
+  /** The environment this copy was read from. */
   readonly environmentId: EnvironmentId;
   readonly id: ThreadId;
   readonly title: string;
@@ -22,6 +23,8 @@ export interface ComposerThreadCandidate {
   readonly archivedAt: string | null;
   /** Work tasks and chats get their own sections; agent conversations surface as the agent. */
   readonly kind: "work" | "chat" | "agentConversation";
+  /** The machine that runs it: the copy's `ownerMachine`, else its own environment. */
+  readonly runsOn: EnvironmentId;
 }
 
 export interface ComposerAgentCandidate {
@@ -45,7 +48,10 @@ export interface ComposerThreadItem {
   readonly id: string;
   readonly type: "thread";
   readonly group: "tasks" | "chats";
+  /** The copy the row was read from; the inserted link names only the thread id. */
   readonly thread: ScopedThreadRef;
+  /** The machine that runs it, when that is not the composer's own. */
+  readonly runsOn: EnvironmentId | null;
   readonly label: string;
   readonly description: string;
 }
@@ -187,11 +193,31 @@ function rank<T>(entries: ReadonlyArray<Ranked<T>>, limit: number): Ranked<T>[] 
 }
 
 /**
- * What the `@` picker offers next to file paths, grouped into sections. The agent can only
- * follow links on its own server, so candidates stay within the composer's environment.
- * Within a section the closest match leads and recency breaks ties; sections are ordered by
- * their closest match, so typing an agent's exact name puts Agents first. With no query each
- * section shows its most recent entries.
+ * The threads the composer's agent can follow a link to, one per thread id. Paired machines
+ * each hold a copy of every thread under the same id, so a thread listed from a paired
+ * machine resolves on the composer's own server too; a server outside the pairing does not.
+ * The composer's own copy wins, else the first one listed.
+ */
+export function reachableThreadCandidates(input: {
+  threads: ReadonlyArray<ComposerThreadCandidate>;
+  environmentId: EnvironmentId;
+  pairedEnvironmentIds: ReadonlySet<EnvironmentId>;
+}): ComposerThreadCandidate[] {
+  const byId = new Map<ThreadId, ComposerThreadCandidate>();
+  for (const thread of input.threads) {
+    const here = thread.environmentId === input.environmentId;
+    if (!here && !input.pairedEnvironmentIds.has(thread.environmentId)) continue;
+    if (here || !byId.has(thread.id)) byId.set(thread.id, thread);
+  }
+  return [...byId.values()];
+}
+
+/**
+ * What the `@` picker offers next to file paths, grouped into sections. Threads come from
+ * every paired machine (see `reachableThreadCandidates`); agents and project folders stay
+ * within the composer's environment. Within a section the closest match leads and recency
+ * breaks ties; sections are ordered by their closest match, so typing an agent's exact name
+ * puts Agents first. With no query each section shows its most recent entries.
  */
 export function matchComposerMentionItems(input: {
   threads: ReadonlyArray<ComposerThreadCandidate>;
@@ -200,6 +226,8 @@ export function matchComposerMentionItems(input: {
   /** This environment's sources, already kept to the thread's project. */
   sources?: ReadonlyArray<IntegrationSource>;
   environmentId: EnvironmentId;
+  /** Machines paired with the composer's environment. */
+  pairedEnvironmentIds?: ReadonlySet<EnvironmentId>;
   excludeThreadId: ThreadId | null;
   query: string;
 }): ComposerMentionItem[] {
@@ -208,10 +236,15 @@ export function matchComposerMentionItems(input: {
   const inEnvironment = <T extends { readonly environmentId: EnvironmentId }>(
     candidates: ReadonlyArray<T>,
   ) => candidates.filter((candidate) => candidate.environmentId === input.environmentId);
+  const threads = reachableThreadCandidates({
+    threads: input.threads,
+    environmentId: input.environmentId,
+    pairedEnvironmentIds: input.pairedEnvironmentIds ?? new Set(),
+  });
 
   const threadsOf = (kind: ComposerThreadCandidate["kind"], group: ComposerThreadItem["group"]) =>
     rank(
-      inEnvironment(input.threads).flatMap((thread): Ranked<ComposerThreadItem>[] => {
+      threads.flatMap((thread): Ranked<ComposerThreadItem>[] => {
         if (thread.kind !== kind || thread.archivedAt !== null) return [];
         if (thread.id === input.excludeThreadId) return [];
         const score = mentionMatchScore(thread.title, query);
@@ -221,10 +254,11 @@ export function matchComposerMentionItems(input: {
             score,
             at: thread.updatedAt,
             item: {
-              id: `thread:${thread.environmentId}:${thread.id}`,
+              id: `thread:${thread.id}`,
               type: "thread",
               group,
               thread: { environmentId: thread.environmentId, threadId: thread.id },
+              runsOn: thread.runsOn === input.environmentId ? null : thread.runsOn,
               label: thread.title,
               description: "",
             },

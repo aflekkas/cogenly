@@ -101,9 +101,14 @@ import { createIncrementalMarkdownPlugin } from "../markdown-incremental";
 import { defaultUrlTransform } from "react-markdown";
 import { parseAssistantCitationHref } from "@cogenly/shared/assistantCitations";
 import { parseComposerContextHref } from "@cogenly/shared/composerContextReferences";
-import { parseAppThreadUrl, parseThreadLinkHref } from "@cogenly/shared/threadLinks";
+import {
+  formatThreadLink,
+  parseAppThreadUrl,
+  parseThreadLinkHref,
+} from "@cogenly/shared/threadLinks";
 import { AssistantCitationChip } from "./chat/AssistantCitationChip";
 import { MarkdownThreadLink } from "./chat/MarkdownThreadLink";
+import { ThreadContextChip } from "./ThreadContextChip";
 import {
   artifactTemplateFromHastProperties,
   renderCodexInlineDirectivesAsMarkdown,
@@ -239,6 +244,8 @@ interface ChatMarkdownProps {
   extraRemarkPlugins?: NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
   /** Renders a `cogenly-context://` link as a chip; without it the link shows its label as text. */
   renderContextReference?: ((reference: ChatMarkdownContextReference) => ReactNode) | undefined;
+  /** Show `cogenly-thread://` links as the composer's thread chips, as a sent user message does. */
+  threadLinkChips?: boolean | undefined;
   /** Loads GitHub-hosted media through `cwd`'s GitHub credential, which a private repository's
       uploads need; without it those images and videos load unauthenticated and 404. */
   githubMedia?: boolean | undefined;
@@ -2208,6 +2215,7 @@ function useChatMarkdownState({
   imageBaseDir,
   onImageExpand,
   renderContextReference,
+  threadLinkChips = false,
   headingLevelOffset = 0,
   githubMedia = false,
 }: ChatMarkdownProps) {
@@ -2571,6 +2579,7 @@ function useChatMarkdownState({
       fileLinkChip,
       githubMedia,
       renderContextReference,
+      threadLinkChips,
       headingLevelOffset,
       imageBaseDir,
       inlineCodeFileLinkMetaByText,
@@ -2591,6 +2600,7 @@ function useChatMarkdownState({
       threadRef,
     }),
     [
+      threadLinkChips,
       canOperateHost,
       canOperatePreview,
       cwd,
@@ -2779,6 +2789,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       serverConfig,
       fileLinkChip,
       renderContextReference,
+      threadLinkChips,
       text,
     } = use(ChatMarkdownRendererContext);
     const citation = href ? parseAssistantCitationHref(href) : null;
@@ -2787,6 +2798,14 @@ const CHAT_MARKDOWN_COMPONENTS = {
     const linkedThreadId = href ? parseThreadLinkHref(href) : null;
     if (linkedThreadId) {
       const label = hastPlainTextDeep(node) || linkedThreadId;
+      if (threadLinkChips && environmentId) {
+        return (
+          <ThreadContextChip
+            record={{ environmentId, threadId: linkedThreadId, title: label }}
+            copyMarkdown={formatThreadLink(linkedThreadId, label)}
+          />
+        );
+      }
       return environmentId ? (
         <MarkdownThreadLink environmentId={environmentId} threadId={linkedThreadId} label={label} />
       ) : (

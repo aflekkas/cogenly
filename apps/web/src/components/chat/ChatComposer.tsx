@@ -230,6 +230,9 @@ import {
   integrationContextRecord,
 } from "~/lib/composerContextRecords";
 import { matchComposerMentionItems } from "@cogenly/client-runtime/composerThreadItems";
+import { formatThreadLink } from "@cogenly/shared/threadLinks";
+import { pairedMachineIds } from "~/machines/machines.logic";
+import { useEnvironmentMachineList } from "~/machines/useMachines";
 import { useAgents } from "~/agents/agentsClient";
 import { useThreadKindResolver } from "~/hooks/useThreadKind";
 import { useEnvironmentProjectLabels } from "~/projectLabels/useProjectLabels";
@@ -2506,6 +2509,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const { labels: mentionProjectFolders } = useEnvironmentProjectLabels(
     isPathTrigger ? environmentId : null,
   );
+  // Paired machines hold every thread under the same id, so `@` offers their tasks too.
+  const mentionMachineList = useEnvironmentMachineList(isPathTrigger ? environmentId : null);
   // Sources are kept to the thread's project, the same set its agent can call.
   const { currentId: composerProjectLabelId } = useComposerProjectFolder({
     environmentId,
@@ -2547,6 +2552,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               updatedAt: shell.updatedAt,
               archivedAt: shell.archivedAt,
               kind: resolveThreadKind(shell),
+              runsOn: shell.source.ownerMachine ?? shell.environmentId,
             })),
             agents: mentionAgents.map((agent) => ({
               environmentId: agent.environmentId,
@@ -2563,6 +2569,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             })),
             sources: mentionSources,
             environmentId,
+            pairedEnvironmentIds: pairedMachineIds(mentionMachineList),
             excludeThreadId: activeThreadId,
             query: composerTrigger.query,
           }),
@@ -2572,6 +2579,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       environmentId,
       environmentThreadShells,
       mentionAgents,
+      mentionMachineList,
       mentionProjectFolders,
       mentionSources,
       resolveThreadKind,
@@ -4140,8 +4148,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       if (trigger.kind !== "path") return;
       const shell = readThreadShell(item.thread);
       if (!shell) return;
-      const record = threadContextRecord(item.thread, shell.title);
-      const replacement = `${formatInlineContextReference(linkContextReference(record))} `;
+      // The canonical link names the thread by id alone, which every paired machine resolves,
+      // so the same reference goes in whichever machine the composer's thread runs on.
+      const replacement = `${formatThreadLink(shell.id, shell.title)} `;
       const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
         snapshot.value,
         trigger.rangeEnd,
@@ -4151,9 +4160,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd),
       });
       if (applied) {
-        addComposerDraftThreadContexts(attachmentDraftTarget, [record], {
-          appendReference: false,
-        });
         setComposerHighlightedItemId(null);
       }
       return;

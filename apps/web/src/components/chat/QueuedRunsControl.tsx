@@ -5,6 +5,7 @@ import {
 } from "@cogenly/client-runtime/state/runtime";
 import { deriveThreadQueueWorkflowState } from "@cogenly/client-runtime/state/thread-workflows";
 import { replaceComposerContextReferences } from "@cogenly/shared/composerContextReferences";
+import { threadLinksToPlainText } from "@cogenly/shared/threadLinks";
 import type {
   ChatAttachment as ContractChatAttachment,
   EnvironmentId,
@@ -647,10 +648,12 @@ export function QueuedRunsControl({
                 >
                   {presence.rows.map((slot) => {
                     const item = (slot.leaving ? undefined : itemsByKey.get(slot.key)) ?? slot.item;
-                    const previewText = replaceComposerContextReferences(item.text, (reference) =>
-                      reference.kind === "image" && item.thumbnails.length > 0
-                        ? ""
-                        : reference.label,
+                    const previewText = threadLinksToPlainText(
+                      replaceComposerContextReferences(item.text, (reference) =>
+                        reference.kind === "image" && item.thumbnails.length > 0
+                          ? ""
+                          : reference.label,
+                      ),
                     ).trim();
                     const rowRunId = item.runId;
                     const rowServerIndex = item.serverIndex;
