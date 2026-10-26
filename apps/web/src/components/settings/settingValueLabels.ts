@@ -37,13 +37,13 @@ const OPTION_LABELS: Partial<Record<keyof ServerSettings, Readonly<Record<string
 export function formatSettingValue(key: keyof ServerSettings, value: unknown): string {
   if (value === null || value === undefined) {
     return key === "pullRequestMergeMethod"
-      ? "Last selected"
+      ? "Last used"
       : key === "defaultModelSelection"
         ? "Automatic"
         : key === "sourceControlWriterModelSelection"
           ? "Text generation model"
           : key === "reviewGuideModelSelection"
-            ? "Source control writer model"
+            ? "Writing model"
             : key === "defaultThreadEnvMode" || key === "worktreeSubmodules"
               ? "Inherit"
               : "Not set";

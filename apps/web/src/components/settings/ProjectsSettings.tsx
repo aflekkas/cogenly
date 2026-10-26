@@ -6,7 +6,7 @@ import { SettingsScopeNotice } from "./SettingsScopeNotice";
 export function ProjectsSettings() {
   const { search } = useSettingsScope();
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col gap-8">
       {search.repository ? (
         <ProjectSettingsPanel projectKey={search.repository} />
       ) : (

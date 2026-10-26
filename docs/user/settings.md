@@ -21,7 +21,7 @@ New worktree branches are named when the worktree is created: a short slug
 from your first message under a `c/` prefix, such as `c/fix-login-redirect`.
 The worktree folder is named by that slug and never moves.
 
-In **Settings → Source control → Worktree branch naming**, choose a static prefix,
+In **Settings → Source control → Branch names**, choose a static prefix,
 a model-selected semantic prefix such as `feat/` or `fix/`, or custom instructions
 for the complete name. The static prefix defaults to `c/`; a trailing slash is
 optional, and an empty prefix adds nothing. Invalid characters in a static prefix
@@ -69,7 +69,8 @@ than** on the task.
 ## Defaults
 
 Models holds the default model for new threads and the text generation model. New threads holds
-the workspace, submodules and start-from-origin defaults, and where added repositories go.
+the workspace, submodules and start-from-origin defaults. Projects holds the projects folder, where
+new projects and clones go.
 Integrations controls agent browser access and computer use. Source control contains automatic pull, the default
 pull request merge method and the model that writes commit messages and pull requests.
 
@@ -86,10 +87,10 @@ to let the repository's file decide. A repository that still has a `t3.json` and
 use changes apply when an agent session next starts.
 
 New worktrees initialize git submodules recursively. If that step is slow because the repository
-declares many nested submodules, set **Submodules** in **Settings → New threads** to **Top level
-only** to stop at the ones the repository declares itself, or **Skip** to leave them for a setup
-script. It resolves in the same order as the workspace default: a `"worktreeSubmodules"` value in
-the `cogenly.json` of the branch being checked out applies while the setting is unset.
+declares many nested submodules, set **Worktree submodules** in **Settings → New threads** to **Top
+level only** to stop at the ones the repository declares itself, or **Skip** to leave them for a
+setup script. It resolves in the same order as the workspace default: a `"worktreeSubmodules"` value
+in the `cogenly.json` of the branch being checked out applies while the setting is unset.
 
 ## Worktree location
 

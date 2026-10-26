@@ -38,17 +38,15 @@ const MODE_OPTIONS: Record<SourceControlWritingStyleMode, { label: string; descr
   {
     repo_conventions: {
       label: "Repository conventions",
-      description:
-        "In each repository, matches recent change descriptions and change request titles.",
+      description: "Matches each repository's recent commit messages and pull request titles.",
     },
     conventional_commits: {
       label: "Conventional Commits",
-      description: "Use Conventional Commit prefixes and keep change request text concise.",
+      description: "Uses Conventional Commit prefixes and keeps pull request text short.",
     },
     custom: {
       label: "Custom instructions",
-      description:
-        "Use your instructions for change descriptions and change requests in every repository.",
+      description: "Follows your instructions in every repository.",
     },
   };
 
@@ -113,8 +111,7 @@ export function SourceControlWritingSettingsSection() {
     (entry) => entry.instanceId === activeSelection.instanceId,
   );
   return (
-    <SettingsSection id="source-control-text-generation" title="Text generation">
-      <BranchNamingSettings />
+    <SettingsSection id="source-control-text-generation" title="Generated text">
       <SettingsRow
         serverScoped
         settingKeys={["sourceControlWritingStyle"]}
@@ -148,11 +145,7 @@ export function SourceControlWritingSettingsSection() {
               });
             }}
           >
-            <SelectTrigger
-              size="sm"
-              className="w-full sm:w-56"
-              aria-label="Source control writing style"
-            >
+            <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Writing style">
               <SelectValue>
                 {(value: SourceControlWritingStyleMode) => MODE_OPTIONS[value].label}
               </SelectValue>
@@ -187,49 +180,17 @@ export function SourceControlWritingSettingsSection() {
         ) : null}
       </SettingsRow>
 
-      <SettingsRow
-        serverScoped
-        settingKeys={["sourceControlWritingStyle"]}
-        {...searchableSetting("follow-change-request-templates")}
-        description="Use the repository's template for change request descriptions when available."
-        resetAction={
-          style.followChangeRequestTemplates !== defaults.followChangeRequestTemplates ? (
-            <SettingResetButton
-              label="change request templates"
-              onClick={() =>
-                updateSettings({
-                  sourceControlWritingStyle: {
-                    followChangeRequestTemplates: defaults.followChangeRequestTemplates,
-                  },
-                })
-              }
-            />
-          ) : null
-        }
-        control={
-          <Switch
-            checked={style.followChangeRequestTemplates}
-            onCheckedChange={(checked) =>
-              updateSettings({
-                sourceControlWritingStyle: {
-                  followChangeRequestTemplates: Boolean(checked),
-                },
-              })
-            }
-            aria-label="Follow change request templates"
-          />
-        }
-      />
+      <BranchNamingSettings />
 
       <SettingsRow
         serverScoped
         settingKeys={["sourceControlWriterModelSelection"]}
         {...searchableSetting("source-control-writer-model")}
-        description="Model for source control text and branch or bookmark names. Off uses the text generation model."
+        description="Writes commit messages, pull requests and branch names. Off uses the text generation model from Models."
         control={
           !hasServerTargets ? (
             <span className="text-sm text-muted-foreground">
-              Connect a machine to choose its source control writer model.
+              Connect a machine to choose a writing model.
             </span>
           ) : (
             <div className="flex flex-wrap items-center justify-end gap-2">
@@ -247,7 +208,7 @@ export function SourceControlWritingSettingsSection() {
                   instanceEntries={instanceEntries}
                   modelOptionsByInstance={modelOptionsByInstance}
                   triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                  triggerAriaLabel="Source control writer model"
+                  triggerAriaLabel="Writing model"
                   {...(environmentId
                     ? {
                         onOpenProviderSetup: (instanceId: ProviderInstanceId) => {
@@ -264,7 +225,7 @@ export function SourceControlWritingSettingsSection() {
                     if (reason) {
                       toastManager.add({
                         type: "error",
-                        title: "Source control writer model not saved",
+                        title: "Writing model not saved",
                         description: reason,
                       });
                       return;
@@ -313,7 +274,7 @@ export function SourceControlWritingSettingsSection() {
                       : null,
                   })
                 }
-                aria-label="Use a separate source control writer model"
+                aria-label="Use a separate writing model"
               />
             </div>
           )

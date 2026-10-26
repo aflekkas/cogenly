@@ -174,9 +174,9 @@ const MOVED_GENERAL_ANCHORS: Readonly<Record<string, SettingsPath>> = {
   "new-threads": "/settings/new-threads",
   "worktree-submodules": "/settings/new-threads",
   "start-from-origin": "/settings/new-threads",
-  "projects-and-threads": "/settings/new-threads",
-  "add-project-starts-in": "/settings/new-threads",
-  "projects-folder": "/settings/new-threads",
+  "projects-and-threads": "/settings/project-tags",
+  "add-project-starts-in": "/settings/project-tags",
+  "projects-folder": "/settings/project-tags",
   "project-actions": "/settings/projects",
   diagnostics: "/settings/diagnostics",
   "time-format": "/settings/appearance",
@@ -297,7 +297,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "project-defaults",
-    title: "New threads",
+    title: "Workspace",
     to: "/settings/new-threads",
     searchTerms: [
       "defaults workspace worktree submodules start from origin repositories cogenly.json",
@@ -523,32 +523,32 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "new-threads",
-    title: "Workspace",
+    title: "Start new threads in",
     to: "/settings/new-threads",
-    searchTerms: ["new threads default workspace mode draft local worktree"],
+    searchTerms: ["new threads default workspace mode draft local current checkout worktree"],
   },
   {
     id: "worktree-submodules",
-    title: "Submodules",
+    title: "Worktree submodules",
     to: "/settings/new-threads",
     searchTerms: ["git submodule init recursive top-level none worktree cogenly.json"],
   },
   {
     id: "start-from-origin",
-    title: "Start from origin",
+    title: "Start worktrees from origin",
     to: "/settings/new-threads",
-    searchTerms: ["new worktrees latest matching remote branch local"],
+    searchTerms: ["new worktrees latest matching remote branch local fetch"],
   },
   {
     id: "add-project-starts-in",
-    title: "Add repository starts in",
-    to: "/settings/new-threads",
-    searchTerms: ["add project base directory folder browser path home"],
+    title: "Folder browser starts in",
+    to: "/settings/project-tags",
+    searchTerms: ["add repository project base directory folder browser path home"],
   },
   {
     id: "projects-folder",
     title: "Projects folder",
-    to: "/settings/new-threads",
+    to: "/settings/project-tags",
     searchTerms: ["projects root cogenly clone new repository location directory path"],
   },
   {
@@ -795,7 +795,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "automatic-pull",
     title: "Automatically pull",
     to: "/settings/source-control",
-    searchTerms: ["auto pull default branch current checkout fast forward upstream"],
+    searchTerms: ["auto pull default branch current checkout fast forward upstream git"],
   },
   {
     id: "remove-agent-credits-on-merge",
@@ -807,14 +807,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "pull-request-merge-method",
     title: "Default merge method",
     to: "/settings/source-control",
-    searchTerms: ["pull request merge squash rebase last selected"],
+    searchTerms: ["pull request merge squash rebase last used selected button"],
   },
   {
     id: "source-control",
     title: "Source control",
     to: "/settings/source-control",
     searchTerms: [
-      "version control git github hosting integrations credentials scan server environment",
+      "version control git github hosting integrations credentials scan rescan machine sign in",
     ],
   },
   {
@@ -822,15 +822,17 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Git fetch interval",
     to: "/settings/source-control",
     searchTerms: [
-      "automatic remote branch refresh background credentials security keys seconds off",
+      "background fetch automatic remote branch refresh credentials security keys seconds off",
     ],
     environmentOnly: true,
   },
   {
     id: "worktree-branch-naming",
-    title: "Worktree branch naming",
+    title: "Branch names",
     to: "/settings/source-control",
-    searchTerms: ["static semantic prefix custom prompt instructions feat fix refactor chore"],
+    searchTerms: [
+      "worktree branch naming static semantic prefix custom prompt instructions feat fix refactor chore",
+    ],
     environmentOnly: true,
   },
   {
@@ -845,26 +847,26 @@ export const SETTINGS_SEARCH_ITEMS = [
   ...SOURCE_CONTROL_HOST_SEARCH_ITEMS,
   {
     id: "source-control-writing-style",
-    title: "Source control writing style",
+    title: "Writing style",
     to: "/settings/source-control",
     searchTerms: [
-      "repository conventions conventional commits custom instructions change descriptions request titles",
+      "source control commit messages pull request titles descriptions repository conventions conventional commits custom instructions",
     ],
     environmentOnly: true,
   },
   {
     id: "follow-change-request-templates",
-    title: "Follow change request templates",
+    title: "Use pull request templates",
     to: "/settings/source-control",
-    searchTerms: ["repository pr pull request description structure"],
+    searchTerms: ["follow change request template repository pr description structure"],
     environmentOnly: true,
   },
   {
     id: "source-control-writer-model",
-    title: "Source control writer model",
+    title: "Writing model",
     to: "/settings/source-control",
     searchTerms: [
-      "override generated commit change request pr titles descriptions branch bookmark",
+      "source control writer model override generated commit messages pull request pr titles descriptions branch names",
     ],
     environmentOnly: true,
   },
@@ -1025,7 +1027,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/project-tags",
     searchTerms: [
       "folders new project archive github org sources files agents repositories",
-      "orphan folders outside any project adopt as project remove empty projects root",
+      "orphan folders without a project outside adopt make project remove empty projects root",
     ],
   },
 ] as const satisfies ReadonlyArray<SettingsSearchItem>;

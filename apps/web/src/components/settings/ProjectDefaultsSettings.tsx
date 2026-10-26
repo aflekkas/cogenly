@@ -18,7 +18,6 @@ import { useEnvironments } from "../../state/environments";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { resolveEnvModeLabel, WORKTREE_SUBMODULES_LABELS } from "../BranchToolbar.logic";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
-import { PULL_REQUEST_MERGE_METHOD_LABELS } from "~/lib/pullRequestContext";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
@@ -43,11 +42,7 @@ function isWorktreeSubmodules(value: string | null): value is WorktreeSubmodules
  * The default rows that new threads, repositories and agents start from,
  * grouped by the settings page that shows them.
  */
-export function ProjectDefaultsSettings({
-  category,
-}: {
-  category: "models" | "new-threads" | "source-control";
-}) {
+export function ProjectDefaultsSettings({ category }: { category: "models" | "new-threads" }) {
   const { target, connectedEnvironments } = useSettingsScope();
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
@@ -152,7 +147,7 @@ export function ProjectDefaultsSettings({
       serverScoped
       settingKeys={["defaultThreadEnvMode"]}
       {...searchableSetting("new-threads")}
-      description="Where new threads start. A repository's cogenly.json applies while this is unset."
+      description="A new worktree gives each thread its own branch and folder. A repository's cogenly.json applies while this is unset."
       resetAction={
         settings.defaultThreadEnvMode !== null ? (
           <SettingResetButton
@@ -169,7 +164,7 @@ export function ProjectDefaultsSettings({
               updateSettings({ defaultThreadEnvMode: value });
           }}
         >
-          <SelectTrigger size="sm" aria-label="Default workspace">
+          <SelectTrigger size="sm" aria-label="Start new threads in">
             <SelectValue>
               {(value: string | null) =>
                 value === "local" || value === "worktree"
@@ -191,174 +186,73 @@ export function ProjectDefaultsSettings({
   if (category === "models") return modelRow;
 
   return (
-    <SettingsSection
-      id={category === "new-threads" ? "project-defaults" : "source-control-defaults"}
-      title={category === "new-threads" ? "New threads" : "Repositories"}
-    >
-      {category === "new-threads" ? (
-        <>
-          {workspaceRow}
-          <SettingsRow
-            serverScoped
-            settingKeys={["worktreeSubmodules"]}
-            {...searchableSetting("worktree-submodules")}
-            description="How new worktrees populate git submodules. A repository's cogenly.json applies while this is unset."
-            resetAction={
-              settings.worktreeSubmodules !== null ? (
-                <SettingResetButton
-                  label="worktree submodules"
-                  onClick={() => updateSettings({ worktreeSubmodules: null })}
-                />
-              ) : null
+    <SettingsSection id="project-defaults" title="Workspace">
+      {workspaceRow}
+      <SettingsRow
+        serverScoped
+        settingKeys={["newWorktreesStartFromOrigin"]}
+        {...searchableSetting("start-from-origin")}
+        description="Branch new worktrees from the latest commit on origin instead of your local copy of the branch."
+        resetAction={
+          settings.newWorktreesStartFromOrigin !==
+          DEFAULT_SERVER_SETTINGS.newWorktreesStartFromOrigin ? (
+            <SettingResetButton
+              label="new worktrees start from origin"
+              onClick={() =>
+                updateSettings({
+                  newWorktreesStartFromOrigin: DEFAULT_SERVER_SETTINGS.newWorktreesStartFromOrigin,
+                })
+              }
+            />
+          ) : null
+        }
+        control={
+          <Switch
+            checked={settings.newWorktreesStartFromOrigin}
+            onCheckedChange={(checked) =>
+              updateSettings({ newWorktreesStartFromOrigin: Boolean(checked) })
             }
-            control={
-              <Select
-                value={effective?.worktreeSubmodules ?? null}
-                onValueChange={(value) => {
-                  if (isWorktreeSubmodules(value)) updateSettings({ worktreeSubmodules: value });
-                }}
-              >
-                <SelectTrigger size="sm" aria-label="Worktree submodules">
-                  <SelectValue>
-                    {(value: string | null) =>
-                      isWorktreeSubmodules(value)
-                        ? WORKTREE_SUBMODULES_LABELS[value]
-                        : "Unavailable"
-                    }
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {WORKTREE_SUBMODULES_OPTIONS.map((option) => (
-                    <SelectItem key={option} value={option}>
-                      {WORKTREE_SUBMODULES_LABELS[option]}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-            }
+            aria-label="Start worktrees from origin"
           />
-          <SettingsRow
-            serverScoped
-            settingKeys={["newWorktreesStartFromOrigin"]}
-            {...searchableSetting("start-from-origin")}
-            description="Creates the worktree from the latest matching branch on origin instead of your local branch."
-            resetAction={
-              settings.newWorktreesStartFromOrigin !==
-              DEFAULT_SERVER_SETTINGS.newWorktreesStartFromOrigin ? (
-                <SettingResetButton
-                  label="new worktrees start from origin"
-                  onClick={() =>
-                    updateSettings({
-                      newWorktreesStartFromOrigin:
-                        DEFAULT_SERVER_SETTINGS.newWorktreesStartFromOrigin,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <Switch
-                checked={settings.newWorktreesStartFromOrigin}
-                onCheckedChange={(checked) =>
-                  updateSettings({ newWorktreesStartFromOrigin: Boolean(checked) })
+        }
+      />
+      <SettingsRow
+        serverScoped
+        settingKeys={["worktreeSubmodules"]}
+        {...searchableSetting("worktree-submodules")}
+        description="Which git submodules a new worktree checks out. A repository's cogenly.json applies while this is unset."
+        resetAction={
+          settings.worktreeSubmodules !== null ? (
+            <SettingResetButton
+              label="worktree submodules"
+              onClick={() => updateSettings({ worktreeSubmodules: null })}
+            />
+          ) : null
+        }
+        control={
+          <Select
+            value={effective?.worktreeSubmodules ?? null}
+            onValueChange={(value) => {
+              if (isWorktreeSubmodules(value)) updateSettings({ worktreeSubmodules: value });
+            }}
+          >
+            <SelectTrigger size="sm" aria-label="Worktree submodules">
+              <SelectValue>
+                {(value: string | null) =>
+                  isWorktreeSubmodules(value) ? WORKTREE_SUBMODULES_LABELS[value] : "Unavailable"
                 }
-                aria-label="Start new worktrees from origin by default"
-              />
-            }
-          />
-        </>
-      ) : (
-        <>
-          <SettingsRow
-            serverScoped
-            settingKeys={["defaultAutoPull"]}
-            id="automatic-pull"
-            title="Automatically pull"
-            description="Keeps the default branch current when the checkout has no local changes or commits."
-            resetAction={
-              settings.defaultAutoPull ? (
-                <SettingResetButton
-                  label="default automatic pull"
-                  tooltip="Reset automatic pull to off"
-                  onClick={() => updateSettings({ defaultAutoPull: false })}
-                />
-              ) : null
-            }
-            control={
-              <Switch
-                aria-label="Default automatic pull"
-                checked={settings.defaultAutoPull}
-                onCheckedChange={(enabled) => updateSettings({ defaultAutoPull: enabled })}
-              />
-            }
-          />
-          <SettingsRow
-            serverScoped
-            settingKeys={["removeAgentCreditsOnMerge"]}
-            {...searchableSetting("remove-agent-credits-on-merge")}
-            description="Remove recognized agent credit lines from GitHub merge and squash messages, keeping human co-authors. Includes auto-merge. Excludes merge queues, stack merges, and existing commits."
-            resetAction={
-              settings.removeAgentCreditsOnMerge ? (
-                <SettingResetButton
-                  label="agent credit removal"
-                  tooltip="Keep agent credits"
-                  onClick={() => updateSettings({ removeAgentCreditsOnMerge: false })}
-                />
-              ) : null
-            }
-            control={
-              <Switch
-                aria-label="Remove agent credits when merging"
-                checked={settings.removeAgentCreditsOnMerge}
-                onCheckedChange={(enabled) =>
-                  updateSettings({ removeAgentCreditsOnMerge: enabled })
-                }
-              />
-            }
-          />
-          <SettingsRow
-            serverScoped
-            settingKeys={["pullRequestMergeMethod"]}
-            {...searchableSetting("pull-request-merge-method")}
-            description="Pull requests start with this method. Last selected reuses whatever you chose most recently on this device."
-            resetAction={
-              settings.pullRequestMergeMethod !== null ? (
-                <SettingResetButton
-                  label="default merge method"
-                  tooltip="Reset to last selected"
-                  onClick={() => updateSettings({ pullRequestMergeMethod: null })}
-                />
-              ) : null
-            }
-            control={
-              <Select
-                value={settings.pullRequestMergeMethod ?? "last"}
-                onValueChange={(value) => {
-                  if (value === "last") updateSettings({ pullRequestMergeMethod: null });
-                  else if (value === "merge" || value === "squash" || value === "rebase")
-                    updateSettings({ pullRequestMergeMethod: value });
-                }}
-              >
-                <SelectTrigger size="sm" aria-label="Default pull request merge method">
-                  <SelectValue>
-                    {(value: string | null) =>
-                      value === "merge" || value === "squash" || value === "rebase"
-                        ? PULL_REQUEST_MERGE_METHOD_LABELS[value]
-                        : "Last selected"
-                    }
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  <SelectItem value="last">Last selected</SelectItem>
-                  <SelectItem value="merge">{PULL_REQUEST_MERGE_METHOD_LABELS.merge}</SelectItem>
-                  <SelectItem value="squash">{PULL_REQUEST_MERGE_METHOD_LABELS.squash}</SelectItem>
-                  <SelectItem value="rebase">{PULL_REQUEST_MERGE_METHOD_LABELS.rebase}</SelectItem>
-                </SelectPopup>
-              </Select>
-            }
-          />
-        </>
-      )}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              {WORKTREE_SUBMODULES_OPTIONS.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {WORKTREE_SUBMODULES_LABELS[option]}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        }
+      />
     </SettingsSection>
   );
 }

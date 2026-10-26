@@ -6,9 +6,16 @@ import { buildSidebarProjectSnapshots } from "../../sidebarProjectGrouping";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { useProjects } from "../../state/entities";
 
-/** Settings uses the same logical projects as the sidebar, sorted by display name. */
+/**
+ * Settings uses the same logical projects as the sidebar, sorted by display
+ * name. The scratch folder behind unfiled chats is no repository to manage.
+ */
 export function useSettingsProjectGroups() {
-  const projects = useProjects();
+  const allProjects = useProjects();
+  const projects = useMemo(
+    () => allProjects.filter((project) => !project.isScratch),
+    [allProjects],
+  );
   const settings = useClientSettings(selectProjectGroupingSettings);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const { environments } = useEnvironments();
