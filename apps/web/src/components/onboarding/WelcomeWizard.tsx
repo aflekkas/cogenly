@@ -1019,7 +1019,7 @@ function AgentCard({
       <ProviderInstanceIcon
         driverKind={ProviderDriverKind.make(driver)}
         displayName={displayName}
-        iconClassName="size-5"
+        size="lg"
       />
       <div className="min-w-0 flex-1">
         <span className="block text-sm font-medium text-foreground">{displayName}</span>
@@ -1830,7 +1830,7 @@ function ImportRowMeta({
             <ProviderInstanceIcon
               driverKind={ProviderDriverKind.make("claudeAgent")}
               displayName="Claude Code"
-              iconClassName="size-3"
+              size="xs"
             />
           </span>
         ) : null}
@@ -1841,7 +1841,7 @@ function ImportRowMeta({
             <ProviderInstanceIcon
               driverKind={ProviderDriverKind.make("codex")}
               displayName="Codex"
-              iconClassName="size-3"
+              size="xs"
             />
           </span>
         ) : null}

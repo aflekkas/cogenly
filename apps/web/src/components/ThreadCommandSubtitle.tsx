@@ -104,9 +104,9 @@ export function ThreadCommandSubtitle(props: {
             displayName={props.providerDisplayName ?? props.driverKind}
             accentColor={props.providerAccentColor}
             showBadge={props.providerAccentColor !== undefined}
-            badgeClassName="size-1.5"
+            size="xs"
             indicatorBackground="var(--popover)"
-            iconClassName="size-3 shrink-0 opacity-70"
+            iconClassName="opacity-70"
           />
         </>
       ) : null}

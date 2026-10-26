@@ -262,7 +262,7 @@ function SubagentAvatar({
           driverKind={driver}
           displayName={provider?.displayName ?? driver}
           className="z-auto"
-          iconClassName="size-3.5"
+          size="sm"
         />
       ) : (
         <BotIcon className="size-3.5 text-muted-foreground" />
@@ -824,8 +824,7 @@ function HandoffEndpoint(props: {
               displayName={providerName}
               accentColor={accentColor}
               showBadge={accentColor !== undefined}
-              badgeClassName="size-1.5"
-              iconClassName="size-3"
+              size="xs"
             />
             <span
               className={cn("truncate font-medium", labelColor.className)}
