@@ -224,10 +224,13 @@ export class Integrations extends Context.Service<
   }
 >()("cogenly-server/integrations/Integrations") {}
 
-interface JsonRpcResponse {
-  readonly result?: unknown;
-  readonly error?: { readonly message?: unknown };
-}
+/** The JSON-RPC envelope; anything else, such as `"error": null`, is an upstream error. */
+const JsonRpcResponse = Schema.Struct({
+  result: Schema.optional(Schema.Unknown),
+  error: Schema.optional(Schema.Struct({ message: Schema.optional(Schema.Unknown) })),
+});
+type JsonRpcResponse = typeof JsonRpcResponse.Type;
+const decodeJsonRpcResponse = Schema.decodeUnknownOption(Schema.fromJsonString(JsonRpcResponse));
 
 /**
  * The JSON payloads of a response body: the body itself, or for an SSE stream
@@ -252,13 +255,10 @@ const rpcPayloads = (text: string): ReadonlyArray<string> => {
 };
 
 export const parseRpcBody = (text: string): JsonRpcResponse | undefined => {
+  // The last event that holds an envelope wins; a body with none is handled by the caller.
   for (const candidate of rpcPayloads(text).toReversed()) {
-    try {
-      const parsed: unknown = JSON.parse(candidate);
-      if (typeof parsed === "object" && parsed !== null) return parsed as JsonRpcResponse;
-    } catch {
-      // Try the next SSE event; a body with no JSON is handled by the caller.
-    }
+    const decoded = decodeJsonRpcResponse(candidate);
+    if (Option.isSome(decoded)) return decoded.value;
   }
   return undefined;
 };

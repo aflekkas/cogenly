@@ -89,6 +89,8 @@ const fakeUpstreamWith = (redirectTo?: string) =>
             });
           } else if (body.method === "tools/call" && body.params?.name === "hang") {
             // Never answers: the gateway timeout must map this.
+          } else if (body.method === "tools/call" && body.params?.name === "null-error") {
+            reply({ jsonrpc: "2.0", id: body.id, error: null });
           } else if (body.method === "tools/call" && body.params?.name === "fail") {
             reply({
               jsonrpc: "2.0",
@@ -192,8 +194,8 @@ describe("resolveHeaderTemplates", () => {
 
 describe("parseRpcBody", () => {
   it("reads plain JSON and SSE events whatever order their fields come in", () => {
-    const response = { jsonrpc: "2.0", id: 1, result: { tools: [] } };
-    const json = JSON.stringify(response);
+    const response = { result: { tools: [] } };
+    const json = JSON.stringify({ jsonrpc: "2.0", id: 1, ...response });
     expect(Integrations.parseRpcBody(json)).toEqual(response);
     expect(Integrations.parseRpcBody(`data: ${json}\n\n`)).toEqual(response);
     expect(Integrations.parseRpcBody(`event: message\r\nid: 7\r\ndata: ${json}\r\n\r\n`)).toEqual(
@@ -368,6 +370,14 @@ describe("Integrations gateway", () => {
         expect(failed._tag).toBe("Failure");
         if (failed._tag === "Failure") {
           expect(JSON.stringify(failed.failure)).toContain("upstream_error");
+        }
+        // A malformed envelope is an upstream error, not a crash.
+        const malformed = yield* service
+          .callTool(IntegrationName.make("errgw"), "null-error", {}, null)
+          .pipe(Effect.result);
+        expect(malformed._tag).toBe("Failure");
+        if (malformed._tag === "Failure") {
+          expect(JSON.stringify(malformed.failure)).toContain("upstream_error");
         }
         // The test clock drives the gateway timeout: start the hanging call,
         // advance past the bound, then collect its failure.
