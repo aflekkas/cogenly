@@ -161,3 +161,15 @@ export const revealBeforeAttach = (input: {
   !input.adopted &&
   input.agentOwned &&
   !input.background;
+/** A headless fallback is a pending handoff, never proof of the user's sign-in state. */
+export const openHandoffStatus = <A extends { sessionMismatch?: boolean | undefined }>(
+  status: A,
+): A & { status?: "pending_panel"; notice?: string } =>
+  status.sessionMismatch
+    ? {
+        ...status,
+        status: "pending_panel" as const,
+        notice:
+          "The tab is waiting for the signed-in browser panel. Retry preview_open with this tabId or preview_status; do not treat a background sign-in page as the user being signed out.",
+      }
+    : status;

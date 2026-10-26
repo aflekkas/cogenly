@@ -94,6 +94,8 @@ import * as ThreadLifecycleService from "./ThreadLifecycleService.ts";
 import * as ThreadForkService from "./ThreadForkService.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
+import * as InlineCardEvents from "./InlineCardEvents.ts";
+import * as InlineCardNotifications from "./InlineCardNotifications.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as LoginRequests from "../secrets/LoginRequests.ts";
 import * as Vault from "../vault/Vault.ts";
@@ -113,6 +115,7 @@ const layerProjectFilesProvided = ProjectFiles.layer.pipe(Layer.provide(ProjectL
 
 // One signal shared by every writer of agent_approvals and both approval streams.
 const layerApprovalChanges = ApprovalChanges.layer;
+const layerInlineCardEvents = InlineCardEvents.layer;
 export const layerVaultSyncCapture = VaultSyncCapture.layer.pipe(
   Layer.provide(SharedState.layer),
   Layer.provide(ServerEnvironment.layerIdentity),
@@ -127,6 +130,7 @@ const layerIntegrationCredentials = IntegrationCredentials.layer.pipe(
   Layer.provide(layerVaultProvided),
 );
 const layerLocalIntegrationsProvided = LocalIntegrations.layer.pipe(
+  Layer.provide(layerInlineCardEvents),
   Layer.provide(GoogleTokenStore.layer.pipe(Layer.provide(layerVaultProvided))),
   Layer.provide(LocalMcpRunner.layer),
   Layer.provide(layerIntegrationCredentials),
@@ -137,6 +141,7 @@ export const layerIntegrationSyncPeers = IntegrationSyncPeers.layer.pipe(
   Layer.provide(ServerEnvironment.layerIdentity),
 );
 export const layerIntegrationsProvided = Integrations.layer.pipe(
+  Layer.provide(layerInlineCardEvents),
   Layer.provide(layerIntegrationSyncPeers),
   Layer.provide(layerIntegrationCredentials),
   Layer.provide(IntegrationTokens.layer.pipe(Layer.provide(layerVaultProvided))),
@@ -428,12 +433,23 @@ const layerWorkHandoffProvided = WorkHandoff.layer.pipe(
 const layerThreadLifecycleProvided = ThreadLifecycleService.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
 );
-const layerSecretRequestsProvided = SecretRequests.layer.pipe(
+const layerInlineCardNotifications = InlineCardNotifications.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
+  Layer.provide(layerInlineCardEvents),
+);
+const layerSecretRequestsProvided = SecretRequests.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(layerThreadManagementProvided, layerVaultProvided, layerInlineCardNotifications),
+  ),
 );
 const layerLoginRequestsProvided = LoginRequests.layer.pipe(
   Layer.provide(
-    Layer.mergeAll(layerThreadManagementProvided, layerVaultProvided, AgentStore.layer),
+    Layer.mergeAll(
+      layerThreadManagementProvided,
+      layerVaultProvided,
+      AgentStore.layer,
+      layerInlineCardNotifications,
+    ),
   ),
 );
 const layerAgentsProvided = Agents.layer.pipe(
@@ -509,6 +525,7 @@ const layerAccountConnectionsProvided = AccountConnections.layer.pipe(
   ),
 );
 const layerAgentWorkspaceProvided = AgentWorkspace.layer.pipe(
+  Layer.provide(layerInlineCardNotifications),
   Layer.provide(
     Layer.mergeAll(
       AgentStore.layer,

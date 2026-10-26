@@ -27,7 +27,12 @@ export function isUndeliveredMailboxSteer(
   messageId: MessageId,
 ): boolean {
   const message = projection.messages.find((candidate) => candidate.id === messageId);
-  if (message?.delegatedCompletion === undefined) return false;
+  if (
+    message === undefined ||
+    (message.delegatedCompletion === undefined &&
+      !String(message.id).startsWith("message:inline-card:"))
+  )
+    return false;
   const run = projection.runs.find((candidate) => candidate.id === message.runId);
   return (
     run !== undefined &&

@@ -26,3 +26,13 @@ describe("agent setup knowledge", () => {
     expect(integrationSetupGuide("unknown").instructions).toContain("never argv");
   });
 });
+
+it("Google setup preserves once-only credentials and handles Testing/publication blockers", () => {
+  const guide = integrationSetupGuide("google-workspace");
+  expect(guide.instructions).toContain("vault_capture");
+  expect(guide.instructions).toContain("test user");
+  expect(guide.instructions).toContain("seven days");
+  expect(guide.instructions).toContain("Branding incomplete");
+  expect(guide.instructions).toContain("Publish does nothing");
+  expect(guide.instructions).toContain("Search Console");
+});

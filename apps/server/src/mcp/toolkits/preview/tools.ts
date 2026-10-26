@@ -67,6 +67,8 @@ const presentationFields = {
 
 const PreviewActionResult = Schema.Struct({
   ...presentationFields,
+  clicked: Schema.optional(Schema.String),
+  strategy: Schema.optional(Schema.String),
   dialog: Schema.optional(Schema.Struct({ type: Schema.String, message: Schema.String })),
 }).annotate({
   description: "The preview action completed successfully.",
@@ -244,7 +246,7 @@ export const PreviewSnapshotTool = safeBrowserTool(
 const PreviewClickTool = browserTool(
   Tool.make("preview_click", {
     description:
-      "Click exactly one target in the tab selected by tabId, or this agent session's current tab when omitted. Prefer a Playwright locator; selector accepts legacy CSS; x and y must be supplied together. Set button=right for a context menu or clickCount=2 for a double-click; server browser tabs only. Returns changes by default; output selects detail. Screenshots: preview_snapshot includeImage=true.",
+      "Click exactly one target in the tab selected by tabId, or this agent session's current tab when omitted. Prefer a Playwright locator; selector accepts legacy CSS; x and y must be supplied together. Set button=right for a context menu or clickCount=2 for a double-click; server browser tabs only. Returns what was clicked and its strategy, plus changes by default. Checkbox/radio clicks fall back to the input click only if their state did not change. CSS selector lists are supported; snapshot aria-ref and role/text locators must be used individually. Screenshots: preview_snapshot includeImage=true.",
     parameters: PreviewAutomationClickInput,
     success: PreviewActionResult,
     failure: PreviewToolFailure,

@@ -1649,7 +1649,7 @@ export const OrchestrationV2LoginRequest = Schema.Struct({
   /** The vault item the answer was saved to, once saved. */
   savedItemId: Schema.optional(TrimmedNonEmptyString),
   savedItemName: Schema.optional(TrimmedNonEmptyString),
-  /** False when the user chose not to keep it: the item is removed once the run ends. */
+  /** False when the user chose not to keep it: removed when the thread has no active work. */
   kept: Schema.optional(Schema.Boolean),
 });
 export type OrchestrationV2LoginRequest = typeof OrchestrationV2LoginRequest.Type;
@@ -1659,12 +1659,21 @@ export type OrchestrationV2LoginRequest = typeof OrchestrationV2LoginRequest.Typ
  * orchestration: the item carries only what was asked and how it was answered.
  * `login` marks a sign-in card (request_login) rather than a single secret.
  */
+const SecretVaultTarget = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  type: Schema.Literals(["login", "api_key", "card", "note"]),
+  domains: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  savedItemId: Schema.optional(TrimmedNonEmptyString),
+  savedItemName: Schema.optional(TrimmedNonEmptyString),
+});
+
 const OrchestrationV2SecretRequestFields = {
   type: Schema.Literal("secret_request"),
   label: TrimmedNonEmptyString,
   reason: Schema.String,
   placeholder: Schema.optional(Schema.String),
   secretStatus: OrchestrationV2SecretRequestStatus,
+  secretVault: Schema.optional(SecretVaultTarget),
   login: Schema.optional(OrchestrationV2LoginRequest),
 } as const;
 
@@ -3640,6 +3649,7 @@ const OrchestrationV2InternalCommand = Schema.Union([
     reason: Schema.String,
     placeholder: Schema.optional(Schema.String),
     secretStatus: OrchestrationV2SecretRequestStatus,
+    secretVault: Schema.optional(SecretVaultTarget),
     login: Schema.optional(OrchestrationV2LoginRequest),
   }),
 ]);

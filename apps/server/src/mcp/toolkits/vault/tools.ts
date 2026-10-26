@@ -14,10 +14,12 @@ import {
   VaultItemType,
   VaultPolicy,
   PreviewTabId,
+  PreviewVaultCaptureInput,
 } from "@cogenly/contracts";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
 
+import * as ServerBrowser from "../../../preview/ServerBrowser.ts";
 import * as AgentStore from "../../../agents/AgentStore.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Vault from "../../../vault/Vault.ts";
@@ -77,7 +79,7 @@ const VaultSaveTool = Tool.make("vault_save", {
 
 const VaultFillTool = Tool.make("vault_fill", {
   description:
-    "Type one field of a vault item (username, password, totp or value; for a card: cardNumber, cardExpiry as MM/YY, cardCvc or cardholderName) into the active preview tab at locator, without the value ever reaching you. The tab's host must match the item's allowedDomains (exact host or subdomain). If the owner must approve this use, the result says approval_required and the user gets an approval card in this thread (an agent's appears in its open items); wait for their decision, then call again. If the site rejects the filled login, ask for the new one with request_login and updateItemId.",
+    "Type one field of a vault item (username, password, totp or value; for a card: cardNumber, cardExpiry as MM/YY, cardCvc or cardholderName) into the active preview tab at locator, without the value ever reaching you. The tab's host must match the item's allowedDomains (exact host or subdomain). If the owner must approve this use, the result says approval_required and the user gets an approval card in this thread (an agent's appears in its open items); say you are waiting on the card. Its answer automatically notifies this thread, steering active work or starting a new turn. Do not ask the user to allow it or type continue. On approval, retry the fill with a fresh locator. If the site rejects the filled login, ask for the new one with request_login and updateItemId.",
   parameters: Schema.Struct({
     itemId: Schema.optional(Schema.String),
     name: Schema.optional(Schema.String),
@@ -135,6 +137,15 @@ export const VaultToolkit = Toolkit.make(
     .annotate(Tool.Readonly, false)
     .annotate(Tool.Destructive, false),
 
+  Tool.make("vault_capture", {
+    description:
+      "Capture a credential shown once on a page straight into the vault without seeing its value. Pass a snapshot locator, name, kind api_key or note, and optionally attribute (e.g. aria-label). Default reads an input value or element text. Never read secrets with preview_evaluate, extract or snapshot; use this tool before closing an OAuth client-created dialog. Returns vault metadata only.",
+    parameters: PreviewVaultCaptureInput,
+    success: VaultItemResult,
+    failure: OrchestratorMcpFailure,
+    failureMode: "return",
+    dependencies: [...dependencies, ServerBrowser.ServerBrowser],
+  }).annotate(Tool.Destructive, false),
   VaultListTool,
   VaultSaveTool,
   VaultFillTool,

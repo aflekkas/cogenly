@@ -19,9 +19,11 @@ import {
   type PreviewAutomationUploadInput,
   type PreviewAutomationWaitForInput,
 } from "@cogenly/contracts";
+import * as Effect from "effect/Effect";
 import { constVoid } from "effect/Function";
 import type { CDPSession, Locator, Page } from "playwright-core";
 import * as NodeCrypto from "node:crypto";
+import { redactPreview } from "./PreviewRedactor.ts";
 import { compactElements } from "./BrowserOutput.ts";
 import { BrowserControlInterrupted } from "./SessionControl.ts";
 
@@ -36,9 +38,9 @@ export class ServerBrowserOperationError extends Error {
   readonly detail: unknown;
 
   constructor(tag: string, message: string, detail?: unknown) {
-    super(message);
+    super(redactPreview(message));
     this.tag = tag;
-    this.detail = detail;
+    this.detail = redactPreview(detail);
   }
 }
 
@@ -105,6 +107,12 @@ const targetLocator = (
     /\\.|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`/g,
     " ",
   );
+  if (engines.includes(",") && /(?:^|[,>])\s*(?:aria-ref|role|text)\s*=/.test(engines)) {
+    throw new ServerBrowserOperationError(
+      "PreviewAutomationInvalidSelectorError",
+      "Comma lists support CSS selectors only (e.g. input[type=checkbox], label). Use one snapshot aria-ref locator per call; role= and text= locators cannot be comma-joined.",
+    );
+  }
   if (/(?:^|>>)\s*\*?aria-ref\s*=/.test(engines)) {
     const ref = /^\s*aria-ref\s*=\s*(\S+)\s*$/.exec(selector)?.[1];
     const nativeRef = ref === undefined ? undefined : pageRefs.get(page)?.refs.get(ref);
@@ -120,6 +128,42 @@ const targetLocator = (
   // Playwright's strict locators reject ambiguous controls rather than acting on row one.
   return page.locator(selector);
 };
+
+/** Reads one credential only for server-side vault storage; never use this for preview output. */
+export const capture = <A, E, R>(
+  page: Page,
+  input: { locator: string; attribute?: string | undefined },
+  save: (value: string) => Effect.Effect<A, E, R>,
+): Effect.Effect<A, E | ServerBrowserOperationError, R> =>
+  Effect.tryPromise({
+    try: async () => {
+      const value = await targetLocator(page, input)!.evaluate(
+        (element, attribute) => {
+          if (attribute) return element.getAttribute(attribute);
+          if ("value" in element) return String(element.value);
+          return element.textContent;
+        },
+        input.attribute,
+        { timeout: DEFAULT_TIMEOUT_MS },
+      );
+      if (!value?.trim()) throw new Error("empty capture");
+      return value;
+    },
+    // Selector errors can contain page values. Keep them out of errors and logs.
+    catch: () =>
+      new ServerBrowserOperationError(
+        "PreviewAutomationExecutionError",
+        "Could not capture the selected credential. Check the locator and attribute.",
+      ),
+  }).pipe(Effect.flatMap(save));
+
+/** Password values are collected separately from agent code so plain passwords are also masked. */
+export const passwordValues = async (page: Page): Promise<string[]> =>
+  page
+    .locator('input[type="password"]')
+    .evaluateAll((elements) =>
+      elements.map((element) => (element as unknown as { value: string }).value).filter(Boolean),
+    );
 
 /** An element's box in viewport CSS pixels. */
 export interface PointerTargetBox {
@@ -372,9 +416,36 @@ export const click = async (
   page: Page,
   input: PreviewAutomationClickInput,
   pointer: PointerReporter = noPointer,
-): Promise<{ readonly x: number; readonly y: number }> => {
+): Promise<{
+  readonly x: number;
+  readonly y: number;
+  readonly clicked?: string | undefined;
+  readonly strategy?: string;
+}> => {
   const timeout = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const locator = targetLocator(page, input);
+  const checkable =
+    locator === null
+      ? null
+      : await locator.evaluate(
+          (element) => {
+            const input = element.matches('input[type="checkbox"], input[type="radio"]')
+              ? element
+              : (element.querySelector('input[type="checkbox"], input[type="radio"]') ??
+                (element.closest("label") as unknown as { control?: typeof element } | null)
+                  ?.control);
+            if (input?.tagName !== "INPUT") return null;
+            const control = input as unknown as {
+              type: string;
+              checked: boolean;
+              disabled: boolean;
+            };
+            if (!["checkbox", "radio"].includes(control.type)) return null;
+            return { checked: control.checked, disabled: control.disabled, type: control.type };
+          },
+          undefined,
+          { timeout },
+        );
   const point = await targetPoint(page, locator, input, timeout);
   await pointer(point, "click");
   const options = { button: input.button ?? "left", clickCount: input.clickCount ?? 1 } as const;
@@ -392,7 +463,42 @@ export const click = async (
   } finally {
     page.off("dialog", onDialog);
   }
-  return point;
+  let strategy = "pointer";
+  if (
+    locator &&
+    checkable &&
+    !checkable.disabled &&
+    options.button === "left" &&
+    options.clickCount === 1
+  ) {
+    const fallback = await locator.evaluate(
+      (element, before) => {
+        const control = element.matches('input[type="checkbox"], input[type="radio"]')
+          ? element
+          : (element.querySelector('input[type="checkbox"], input[type="radio"]') ??
+            (element.closest("label") as unknown as { control?: typeof element } | null)?.control);
+        if (control?.tagName !== "INPUT") return false;
+        const input = control as unknown as {
+          type: string;
+          checked: boolean;
+          disabled: boolean;
+          click: () => void;
+        };
+        if (
+          input.disabled ||
+          input.checked !== before.checked ||
+          (input.type === "radio" && before.checked)
+        )
+          return false;
+        input.click();
+        return true;
+      },
+      checkable,
+      { timeout },
+    );
+    if (fallback) strategy = "input.click";
+  }
+  return { ...point, ...(locator ? { clicked: input.locator ?? input.selector, strategy } : {}) };
 };
 
 export const type = async (
@@ -670,7 +776,7 @@ export const evaluate = async (
   if (result.exceptionDetails) {
     throw new ServerBrowserOperationError(
       "PreviewAutomationExecutionError",
-      result.exceptionDetails.exception?.description ?? result.exceptionDetails.text,
+      "Page evaluation failed. Inspect the page without reading credential values.",
     );
   }
   const value =
@@ -683,7 +789,7 @@ export const evaluate = async (
       { maximumBytes: MAX_EVALUATION_BYTES },
     );
   }
-  return value;
+  return redactPreview(value);
 };
 
 export const waitFor = async (page: Page, input: PreviewAutomationWaitForInput) => {
