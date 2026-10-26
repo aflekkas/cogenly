@@ -5644,6 +5644,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
       lineBreaks
       parseRawHtml={false}
       renderContextReference={props.renderContextReference}
+      threadLinkChips
       headingLevelOffset={MESSAGE_HEADING_LEVEL}
     />
   );

@@ -24,7 +24,9 @@ import type {
   AssistantCitation,
   ComposerContextClipboardFragment,
   ServerProviderSkill,
+  ThreadId,
 } from "@cogenly/contracts";
+import { collectThreadLinks } from "@cogenly/shared/threadLinks";
 import {
   serializeAssistantCitation,
   withAssistantCitationComment,
@@ -104,7 +106,8 @@ import { FileTagChipContent } from "./chat/FileTagChip";
 import { SkillChipIcon } from "./chat/SkillInlineText";
 import { AssistantCitationChip } from "./chat/AssistantCitationChip";
 import { getTimelinePageScrollKey } from "./chat/pageScrollController";
-import { ContextChipPopover } from "./contextChipParts";
+import { ContextChipPopover, UnresolvedChip } from "./contextChipParts";
+import { ThreadContextChip } from "./ThreadContextChip";
 import { Button } from "./ui/button";
 import { ContextChip } from "./ContextChip";
 import {
@@ -548,6 +551,76 @@ function ComposerContextReferenceNodeView({ node }: NodeViewProps) {
         contextId={(node.attrs.contextId as string) ?? ""}
         label={(node.attrs.label as string) ?? ""}
       />
+    </NodeViewWrapper>
+  );
+}
+
+/** A typed `[label](cogenly-thread://v1/<id>)`, matched as its closing parenthesis lands. */
+const TYPED_THREAD_LINK = /\[[^\]\n]*\]\((?:cogenly|t3)-thread:\/\/v1\/[^\s)]+\)$/;
+
+/**
+ * A `cogenly-thread://` link as a chip. The node keeps the link as written, so the draft, the
+ * clipboard and the sent message all carry the canonical Markdown the agent can follow.
+ */
+const ComposerThreadLinkExtension = Node.create<{ chipTypedLinks: boolean }>({
+  name: "composer-thread-link",
+  group: "inline",
+  inline: true,
+  atom: true,
+  selectable: true,
+  addOptions() {
+    // Literal answers keep what was typed.
+    return { chipTypedLinks: true };
+  },
+  addAttributes() {
+    return {
+      threadId: { default: "" },
+      label: { default: "" },
+      source: { default: "" },
+    };
+  },
+  parseHTML() {
+    return [{ tag: "span[data-composer-thread-link]" }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ["span", { "data-composer-thread-link": "", ...HTMLAttributes }];
+  },
+  addInputRules() {
+    if (!this.options.chipTypedLinks) return [];
+    return [
+      new InputRule({
+        find: TYPED_THREAD_LINK,
+        handler: ({ state, range, match }) => {
+          const [link] = collectThreadLinks(match[0]);
+          if (!link) return null;
+          state.tr.replaceWith(
+            range.from,
+            range.to,
+            this.type.create({ threadId: link.threadId, label: link.label, source: link.source }),
+          );
+          return undefined;
+        },
+      }),
+    ];
+  },
+  addNodeView() {
+    return ReactNodeViewRenderer(ComposerThreadLinkNodeView);
+  },
+});
+
+function ComposerThreadLinkNodeView({ node }: NodeViewProps) {
+  const actions = use(ComposerContextActionsContext);
+  const threadId = node.attrs.threadId as ThreadId;
+  const label = (node.attrs.label as string) ?? "";
+  return (
+    <NodeViewWrapper as="span" className={CHIP_NODE_SELECTION_CLASS_NAME}>
+      {actions.environmentId ? (
+        <ThreadContextChip
+          record={{ environmentId: actions.environmentId, threadId, title: label }}
+        />
+      ) : (
+        <UnresolvedChip label={label || threadId} tooltip="Thread no longer available" />
+      )}
     </NodeViewWrapper>
   );
 }
@@ -1107,6 +1180,7 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
         ComposerMentionExtension,
         ComposerSkillExtension,
         ComposerCitationExtension,
+        ComposerThreadLinkExtension.configure({ chipTypedLinks: !literalText }),
         ComposerContextReferenceExtension,
         ComposerMarkersExtension,
         ComposerDictationExtension,

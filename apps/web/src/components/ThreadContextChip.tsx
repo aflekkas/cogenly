@@ -5,47 +5,82 @@ import type {
   IntegrationCatalogId,
   ProjectFolderContextRecord,
   ThreadContextRecord,
+  ThreadId,
 } from "@cogenly/contracts";
 import { Link } from "@tanstack/react-router";
 import { BotIcon, MessagesSquareIcon } from "lucide-react";
 
 import { useAgents } from "~/agents/agentsClient";
+import { useMachineLabel } from "~/machines/useMachineLabel";
 import { IntegrationSourceIcon, useComposerSources } from "./chat/ComposerSourcesPicker";
+import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
 import { useEnvironmentProjectLabels } from "~/projectLabels/useProjectLabels";
-import { useThreadShell } from "~/state/entities";
+import { useThreadShell, useThreadShells } from "~/state/entities";
 import { ContextChip, ContextChipLabel } from "./ContextChip";
 import { ContextChipShell } from "./contextChipParts";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 /**
- * Inline chip for an attached thread, in the composer and in sent messages. Prefers the
- * live title so a renamed thread never shows a stale label, and opens the thread on click.
+ * A thread's shell, read from `environmentId` first. Paired machines share thread ids, so a
+ * thread that environment does not hold yet is looked up in any connected one.
+ */
+function useReachableThreadShell(environmentId: EnvironmentId, threadId: ThreadId) {
+  const here = useThreadShell({ environmentId, threadId });
+  const everywhere = useThreadShells(here === null);
+  return here ?? everywhere.find((shell) => shell.id === threadId) ?? null;
+}
+
+/**
+ * Inline chip for a thread: an attached thread record, or a `cogenly-thread://` link in the
+ * composer and in sent messages. Prefers the live title so a renamed thread never shows a
+ * stale label, badges a thread that runs on another machine than `record.environmentId`,
+ * and opens the thread on click.
  */
 export function ThreadContextChip(props: {
   record: Pick<ThreadContextRecord, "environmentId" | "threadId" | "title">;
-  copyMarkdown?: string;
+  copyMarkdown?: string | undefined;
 }) {
   const { environmentId, threadId } = props.record;
-  const shell = useThreadShell({ environmentId, threadId });
-  const title = shell?.title?.trim() || props.record.title;
+  const shell = useReachableThreadShell(environmentId, threadId);
+  const runsOn = shell === null ? null : (shell.source.ownerMachine ?? shell.environmentId);
+  const runner = useMachineLabel(
+    runsOn === environmentId ? null : runsOn,
+    shell?.environmentId ?? null,
+  );
+  const title = shell?.title?.trim() || props.record.title || threadId;
+  const params = shell ? { environmentId: shell.environmentId, threadId: shell.id } : null;
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <ContextChip
             kind="thread"
-            render={<Link to="/$environmentId/$threadId" params={{ environmentId, threadId }} />}
-            aria-label={`Thread, ${title}`}
+            render={
+              params ? (
+                <Link to="/$environmentId/$threadId" params={params} />
+              ) : (
+                <span tabIndex={0} />
+              )
+            }
+            {...(params ? {} : { state: "unresolved" as const })}
+            aria-label={`Thread, ${title}${runner ? `, runs on ${runner.name}` : ""}`}
             data-markdown-copy={props.copyMarkdown}
             className="no-underline"
           >
             <MessagesSquareIcon />
             <ContextChipLabel>{title}</ContextChipLabel>
+            {runner ? <EnvironmentMachineIcon aria-hidden kind={runner.kind} /> : null}
           </ContextChip>
         }
       />
-      <TooltipPopup side="top">{shell ? "Open thread" : "Thread no longer available"}</TooltipPopup>
+      <TooltipPopup side="top">
+        {!params
+          ? "Thread no longer available"
+          : runner
+            ? `Open thread. ${runner.name} runs it.`
+            : "Open thread"}
+      </TooltipPopup>
     </Tooltip>
   );
 }

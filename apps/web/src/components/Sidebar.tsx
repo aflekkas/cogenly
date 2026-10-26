@@ -15,6 +15,7 @@ import { requestCustomSnooze } from "./CustomSnoozeDialog";
 import { WorkRowStatusMarker } from "./work/WorkRowStatusMarker";
 import { useAtomValue } from "@effect/atom-react";
 import { replaceComposerContextReferences } from "@cogenly/shared/composerContextReferences";
+import { threadLinksToPlainText } from "@cogenly/shared/threadLinks";
 import * as Schema from "effect/Schema";
 import { canSnooze, threadWokeAt } from "@cogenly/client-runtime/state/thread-settled";
 import { createInboxReturnTracker } from "@cogenly/client-runtime/state/thread-inbox";
@@ -710,7 +711,9 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
 }) {
   const { composer, draftId, onContextMenu, onDiscard, onNavigate } = props;
   const promptPreview =
-    replaceComposerContextReferences(composer.prompt, (occurrence) => occurrence.label)
+    threadLinksToPlainText(
+      replaceComposerContextReferences(composer.prompt, (occurrence) => occurrence.label),
+    )
       .trim()
       .split("\n", 1)[0] ?? "";
   // images mirrors persistedAttachments once rehydration finishes; before
