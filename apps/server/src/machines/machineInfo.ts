@@ -25,7 +25,6 @@ export function toMachineInfo(
   },
 ): MachineInfo {
   return {
-    serverVersion: report.serverVersion,
     environmentId: report.environmentId,
     name: report.name,
     kind: kindFor(report.role, input.relation),

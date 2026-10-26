@@ -54,13 +54,12 @@ export const MachineSelfReport = Schema.Struct({
 export type MachineSelfReport = typeof MachineSelfReport.Type;
 
 export const MachineInfo = Schema.Struct({
-  serverVersion: Schema.optional(TrimmedNonEmptyString),
   environmentId: EnvironmentId,
   name: TrimmedNonEmptyString,
   kind: MachineKind,
   hardware: MachineHardware,
   platform: ExecutionEnvironmentPlatformOs,
-  serverVersion: Schema.optionalKey(TrimmedNonEmptyString),
+  serverVersion: Schema.optional(TrimmedNonEmptyString),
   relation: MachineRelation,
   online: Schema.Boolean,
   /** Null for this machine and for a peer never seen since pairing. */
