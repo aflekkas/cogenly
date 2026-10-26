@@ -15,10 +15,11 @@ to keep a large paste editable in the composer instead.
 ## The new chat greeting
 
 The line above an empty chat's composer is written by your text generation model a
-few times a day (morning, afternoon, and evening) from the titles of what you have
-been working on. Without a connected provider, or late at night, the built-in
-greetings appear instead. To keep only the built-in greetings and make no model
-calls for them, turn off **Settings → General → AI greetings**.
+few times a day, including late at night, using recent work titles when available.
+If generation fails, the built-in greeting appears while Cogenly waits before
+retrying. Repeated failures appear in machine health; check the text generation
+model and its provider sign-in in Settings. To keep only the built-in greetings
+and make no model calls for them, turn off **Settings → General → AI greetings**.
 
 ## Formatting
 

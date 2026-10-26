@@ -665,13 +665,15 @@ const layerPairedMachines = Layer.mergeAll(
   Layer.provide(Scheduler.layer),
 );
 
+const layerChatGreetings = ChatGreetingService.layer.pipe(Layer.provide(ProjectionStoreV2.layer));
+
 // Machine health reports on the paired machines and their sync, so it sits
 // above that group. Alerts read paired machines' alerts over the link; their
 // state layer is the same reference turn context reads in the orchestration
 // runtime. Scheduler and identity are the same references the group uses.
 const layerMachineHealth = HealthAlerts.layer.pipe(
   Layer.provide(HealthAlertsState.layer),
-  Layer.provideMerge(MachineHealth.layer),
+  Layer.provideMerge(MachineHealth.layer.pipe(Layer.provide(layerChatGreetings))),
   Layer.provide(HealthCanary.layer),
   Layer.provide(layerMachineSetup),
   Layer.provide(Scheduler.layer),
@@ -699,7 +701,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
     Layer.provide(StorageInspection.layer),
     Layer.provide(ServerBackup.layer),
   ),
-  ChatGreetingService.layer.pipe(Layer.provide(ProjectionStoreV2.layer)),
+  layerChatGreetings,
   // Server-owned periodic jobs: nightly home backups and housekeeping.
   // Neither starts provider turns; both are plain service methods.
   ServerBackup.layer,
