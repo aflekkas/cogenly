@@ -42,6 +42,7 @@ import { threadEnvironment } from "~/state/threads";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { buildThreadRouteParams } from "~/threadRoutes";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
+import { useThreadRunner } from "~/machines/useThreadRunner";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { StopGlyph } from "../StopGlyph";
 import {
@@ -384,6 +385,7 @@ function ThreadDetailsMenuContent(props: {
     reportFailure: false,
   });
   const source = shell?.source;
+  const runner = useThreadRunner(props.environmentId, source?.ownerMachine);
 
   const openThread = (threadId: string) => {
     props.onNavigate();
@@ -458,7 +460,6 @@ function ThreadDetailsMenuContent(props: {
     });
   }
 
-  const machineLabel = serverConfig?.environment.label ?? "This machine";
   return (
     <div className="flex flex-col">
       <ThreadDetailsSection
@@ -466,14 +467,17 @@ function ThreadDetailsMenuContent(props: {
         title="Machine"
         separated={false}
       >
+        {/* The machine that runs the thread, which for a replica is another
+            paired machine. The chat header does not name it. */}
         <ThreadDetailsRow
           icon={
             <EnvironmentMachineIcon
-              kind={resolveEnvironmentMachineKind(serverConfig ?? null)}
+              kind={runner?.kind ?? resolveEnvironmentMachineKind(serverConfig ?? null)}
               className={THREAD_DETAILS_PANEL_ICON_CLASS}
             />
           }
-          label={machineLabel}
+          label={runner?.name ?? serverConfig?.environment.label ?? "This machine"}
+          secondary={runner?.online === false ? "offline" : null}
         />
         {revealLabel !== null && workspacePath !== null ? (
           <Tooltip>
