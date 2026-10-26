@@ -1,7 +1,7 @@
 import type { EnvironmentThreadShell } from "@cogenly/client-runtime/state/shell";
 import { describe, expect, it } from "vite-plus/test";
 
-import { modesNeedingAttention } from "./modeAttention.logic";
+import { modeIndicators } from "./modeIndicators.logic";
 import type { SidebarModeThreadClassifier } from "./sidebarModes.logic";
 
 const NOW = "2026-03-09T12:00:00.000Z";
@@ -32,17 +32,98 @@ function thread(overrides: Record<string, unknown> = {}): EnvironmentThreadShell
   } as unknown as EnvironmentThreadShell;
 }
 
-function attention(
+type Input = Parameters<typeof modeIndicators>[0];
+
+function indicators(
   threads: ReadonlyArray<EnvironmentThreadShell>,
-  agents: Parameters<typeof modesNeedingAttention>[0]["agents"] = [],
-  cap: Parameters<typeof modesNeedingAttention>[0]["capabilities"] = capabilities,
+  agents: Input["agents"] = [],
+  cap: Input["capabilities"] = capabilities,
 ) {
-  return [
-    ...modesNeedingAttention({ threads, classifier, agents, capabilities: cap, now: NOW }),
-  ].toSorted();
+  return Object.fromEntries(
+    modeIndicators({
+      threads,
+      classifier,
+      agents,
+      capabilities: cap,
+      lastVisitedAt: (thread) => thread.lastVisitedAt ?? undefined,
+      now: NOW,
+    }),
+  );
 }
 
-describe("modesNeedingAttention", () => {
+/** The modes whose dot says something waits on you. */
+function attention(
+  threads: ReadonlyArray<EnvironmentThreadShell>,
+  agents: Input["agents"] = [],
+  cap: Input["capabilities"] = capabilities,
+) {
+  return Object.entries(indicators(threads, agents, cap))
+    .filter(([, tone]) => tone === "warning")
+    .map(([mode]) => mode)
+    .toSorted();
+}
+
+const EARLIER = "2026-03-09T11:00:00.000Z";
+/** A thread whose turn finished after its last visit: the row's blue dot. */
+const unread = (overrides: Record<string, unknown> = {}) =>
+  thread({
+    lastVisitedAt: EARLIER,
+    latestRun: { runId: "run", status: "completed", completedAt: NOW },
+    ...overrides,
+  });
+
+describe("modeIndicators: unread", () => {
+  it("lights a mode blue for a finished turn you have not seen", () => {
+    expect(
+      indicators([unread({ id: "chat", source: { surface: "chat" } }), unread({ id: "work" })]),
+    ).toEqual({ chats: "info", tasks: "info" });
+  });
+
+  it("is quiet once the thread is visited after the reply, or was never tracked", () => {
+    expect(indicators([unread({ lastVisitedAt: NOW })])).toEqual({});
+    expect(indicators([unread({ lastVisitedAt: null })])).toEqual({});
+  });
+
+  it("shows amber over blue when the same mode also has something waiting", () => {
+    expect(
+      indicators([unread({ id: "a" }), thread({ id: "b", hasPendingApprovals: true })]),
+    ).toEqual({ tasks: "warning" });
+    expect(
+      indicators([thread({ id: "b", hasPendingApprovals: true }), unread({ id: "a" })]),
+    ).toEqual({ tasks: "warning" });
+  });
+
+  it("never lights a parent's mode for a subagent child's reply", () => {
+    expect(
+      indicators([unread({ id: "child", lineage: { relationshipToParent: "subagent" } })]),
+    ).toEqual({});
+  });
+
+  it("ignores unread Work that is settled or snoozed", () => {
+    expect(
+      indicators([
+        unread({ settledOverride: "settled" }),
+        unread({ id: "napping", snoozedUntil: "2026-03-10T12:00:00.000Z" }),
+      ]),
+    ).toEqual({});
+  });
+
+  it("lights Agents blue for unread messages, amber for decisions", () => {
+    const quiet = { approvals: [], requests: [], unreadCount: 0 };
+    expect(indicators([], [quiet, { ...quiet, unreadCount: 2 }])).toEqual({ agents: "info" });
+    expect(
+      indicators(
+        [],
+        [
+          { ...quiet, unreadCount: 2 },
+          { ...quiet, approvals: [{}] },
+        ],
+      ),
+    ).toEqual({ agents: "warning" });
+  });
+});
+
+describe("modeIndicators: needs you", () => {
   it("files each thread's request under its own surface", () => {
     expect(
       attention([
