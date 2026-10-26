@@ -447,7 +447,7 @@ another provider instance.
 On web and desktop, press **Resume** in an empty composer to continue a limited
 or interrupted turn manually.
 Queued messages stay saved while the limit blocks the thread. They run after
-the continuation finishes. If the queue was held by a restart, resume it then.
+the continuation finishes. You can also use **Send now** on a held queued message.
 
 When the provider reports a reset time, the thread continues on its own at the
 reset. Choose **Don't resume** in the thread's banner, its sidebar menu, or the

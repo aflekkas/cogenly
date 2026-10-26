@@ -415,13 +415,17 @@ export function QueuedRunsControl({
 
   const steerInFlightRef = useRef(false);
   const steer = async (queuedRunId: RunId) => {
-    if (activeRun === null || !workflow?.canPromoteToSteer || steerInFlightRef.current) return;
+    if ((activeRun !== null && !workflow?.canPromoteToSteer) || steerInFlightRef.current) return;
     steerInFlightRef.current = true;
     setBusyRunId(queuedRunId);
     try {
       await promote({
         environmentId: props.environmentId,
-        input: { threadId: props.threadId, queuedRunId, targetRunId: activeRun.id },
+        input: {
+          threadId: props.threadId,
+          queuedRunId,
+          ...(activeRun === null ? {} : { targetRunId: activeRun.id }),
+        },
       });
     } finally {
       steerInFlightRef.current = false;
@@ -450,7 +454,7 @@ export function QueuedRunsControl({
   useImperativeHandle(ref, () => ({
     steerNext(repeat) {
       const next = queued[0];
-      if (!next || !workflow?.canPromoteToSteer) return false;
+      if (!next || (activeRun !== null && !workflow?.canPromoteToSteer)) return false;
       if (!repeat && !anyBusy) void steer(next.run.id);
       return true;
     },
@@ -830,7 +834,7 @@ export function QueuedRunsControl({
                                       disabled={
                                         item.runId === null ||
                                         anyBusy ||
-                                        !workflow?.canPromoteToSteer
+                                        (activeRun !== null && !workflow?.canPromoteToSteer)
                                       }
                                       onClick={() => {
                                         if (item.runId !== null) {
@@ -839,12 +843,12 @@ export function QueuedRunsControl({
                                       }}
                                     >
                                       <CornerUpRightIcon className="size-3.5" />
-                                      Steer
+                                      {activeRun === null ? "Send now" : "Steer"}
                                     </Button>
                                   </TooltipTrigger>
                                   <TooltipPopup>
                                     {activeRun === null
-                                      ? "There is no active run to steer"
+                                      ? "Start a turn with this queued message"
                                       : !workflow?.canPromoteToSteer
                                         ? "Starts when the active turn finishes"
                                         : `Send as a steer instead${item.serverIndex === 0 && props.steerShortcutLabel ? ` (${props.steerShortcutLabel})` : ""}`}

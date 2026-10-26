@@ -255,7 +255,7 @@ export interface ReorderQueuedRunInput extends ThreadCommandInput {
 
 export interface PromoteQueuedRunInput extends ThreadCommandInput {
   readonly queuedRunId: RunId;
-  readonly targetRunId: RunId;
+  readonly targetRunId?: RunId;
 }
 
 export interface CancelQueuedRunInput extends ThreadCommandInput {
@@ -743,11 +743,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
   const serverResolvesCommandContext = yield* supportsServerResolvedCommandContext();
   const projection = serverResolvesCommandContext ? null : yield* getProjection(input.threadId);
   const activeRun = projection?.runs.findLast(
-    (run) =>
-      run.status === "preparing" ||
-      run.status === "starting" ||
-      run.status === "running" ||
-      run.status === "waiting",
+    (run) => run.status === "preparing" || run.status === "starting" || run.status === "running",
   );
   const activeProviderThread =
     activeRun === undefined

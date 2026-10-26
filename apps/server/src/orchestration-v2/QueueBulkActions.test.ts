@@ -1,7 +1,10 @@
 import { expect, it } from "@effect/vitest";
 import {
   CommandId,
+  EventId,
+  RunId,
   MessageId,
+  NodeId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -9,9 +12,12 @@ import {
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ProviderCapabilities,
 } from "@cogenly/contracts";
+import * as DateTime from "effect/DateTime";
+import * as EventSink from "./EventSink.ts";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 
+import { ClaudeProviderCapabilitiesV2 } from "./Adapters/ClaudeAdapterV2.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as Worker from "./EffectWorker.ts";
 import * as Orchestrator from "./Orchestrator.ts";
@@ -224,5 +230,159 @@ it.effect("clears a held queue without starting anything", () => {
       expect((yield* queuedRunFor(key)).status).toBe("cancelled");
     }
     expect(provider.turns).toHaveLength(1);
+  }).pipe(Effect.provide(runtime(provider)));
+});
+
+it.effect(
+  "Send now starts the selected held message while idle, including a stale Steer target",
+  () => {
+    const provider = makeControllableProvider(CodexProviderCapabilitiesV2);
+    return Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const worker = yield* Worker.OrchestrationEffectWorkerV2;
+      const ended = yield* failIntoHeldQueue(provider);
+      const selected = yield* queuedRunFor("two");
+      const sink = yield* EventSink.EventSinkV2;
+      const firstMessage = (yield* orchestrator.getThreadProjection(threadId)).messages.find(
+        (message) => message.id === MessageId.make("message:one"),
+      )!;
+      // Automatic completions normally precede user input; an explicit selection wins.
+      yield* sink.write({
+        events: [
+          {
+            id: EventId.make("event:automatic-ahead"),
+            type: "message.updated",
+            threadId,
+            occurredAt: yield* DateTime.now,
+            payload: {
+              ...firstMessage,
+              delegatedCompletion: {
+                parentRunId: ended.id,
+                generation: 1,
+                taskIds: [NodeId.make("task:finished")],
+              },
+            },
+          },
+        ],
+      });
+      yield* orchestrator.dispatch({
+        type: "queued-message.promote-to-steer",
+        commandId: CommandId.make("send-selected"),
+        threadId,
+        queuedRunId: selected.id,
+        targetRunId: ended.id,
+      });
+      yield* worker.drain();
+      expect(provider.turns.at(-1)?.message.text).toContain("Second");
+      expect((yield* queuedRunFor("two")).status).not.toBe("queued");
+      expect((yield* queuedRunFor("one")).status).toBe("queued");
+    }).pipe(Effect.provide(runtime(provider)));
+  },
+);
+
+it.effect.each([false, true])(
+  "the safety sweep repairs obsolete inherited holds (explicit Stop=%s)",
+  (stopped) => {
+    const provider = makeControllableProvider(CodexProviderCapabilitiesV2);
+    return Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const worker = yield* Worker.OrchestrationEffectWorkerV2;
+      const sink = yield* EventSink.EventSinkV2;
+      const ended = yield* failIntoHeldQueue(provider);
+      const now = yield* DateTime.now;
+      const projection = yield* orchestrator.getThreadProjection(threadId);
+      // A legacy snapshot: a failure held the queue, later successful turns did
+      // not release it. Runtime reconciliation intentionally skips terminal listeners.
+      yield* sink.write({
+        commandId: CommandId.make("command:runtime-reconcile:legacy-queue"),
+        events: [
+          ...projection.runs
+            .filter((run) => run.status === "queued")
+            .map((run, index) => ({
+              id: EventId.make(`legacy-held:${index}`),
+              type: "run.updated" as const,
+              threadId,
+              runId: run.id,
+              occurredAt: now,
+              payload: {
+                ...run,
+                queueHeld: true,
+                ...(stopped ? { queueHoldReason: "stopped" as const } : {}),
+              },
+            })),
+          {
+            id: EventId.make("legacy-healthy"),
+            type: "run.updated",
+            threadId,
+            occurredAt: now,
+            payload: {
+              ...ended,
+              id: RunId.make("run:later-healthy"),
+              ordinal: 5,
+              status: "completed",
+              completedAt: now,
+            },
+          },
+        ],
+      });
+      yield* orchestrator.resumeQueuedRuns;
+      yield* worker.drain();
+      expect(provider.turns).toHaveLength(stopped ? 1 : 2);
+      if (!stopped) {
+        expect((yield* queuedRunFor("one")).status).not.toBe("queued");
+        // Re-running the sweep cannot deliver the same message a second time.
+        yield* orchestrator.resumeQueuedRuns;
+        yield* worker.drain();
+        expect(provider.turns).toHaveLength(2);
+      }
+    }).pipe(Effect.provide(runtime(provider)));
+  },
+);
+
+it.effect.each([
+  { name: "Codex", capabilities: CodexProviderCapabilitiesV2, idle: false },
+  { name: "Claude", capabilities: ClaudeProviderCapabilitiesV2, idle: false },
+  { name: "Codex", capabilities: CodexProviderCapabilitiesV2, idle: true },
+  { name: "Claude", capabilities: ClaudeProviderCapabilitiesV2, idle: true },
+])("delivers a child failure notice once ($name, idle=$idle)", ({ capabilities, idle }) => {
+  const provider = makeControllableProvider(capabilities);
+  return Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const worker = yield* Worker.OrchestrationEffectWorkerV2;
+    if (idle) yield* failIntoHeldQueue(provider);
+    else yield* busyThreadWithQueue;
+    const command = {
+      type: "message.dispatch",
+      commandId: CommandId.make("notify-failure"),
+      threadId,
+      messageId: MessageId.make("message:failure-notice"),
+      text: "Child stopped: rate limit",
+      attachments: [],
+      notification: {
+        source: { kind: "delegated_task", taskIds: [NodeId.make("task:limited")] },
+        outcome: "failed",
+        summary: "Child stopped",
+      },
+      dispatchMode: { type: "queue_after_active" },
+      createdBy: "agent",
+      creationSource: "server",
+    } as const;
+    yield* orchestrator.dispatch(command);
+    yield* orchestrator.dispatch(command);
+    yield* worker.drain();
+    const after = yield* orchestrator.getThreadProjection(threadId);
+    const notices = after.messages.filter((message) => message.id === command.messageId);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.notification).toEqual(command.notification);
+    expect(after.runs.find((run) => run.userMessageId === command.messageId)?.status).not.toBe(
+      "queued",
+    );
+    if (idle) {
+      expect(provider.turns).toHaveLength(2);
+      expect(provider.turns.at(-1)?.message.text).toContain("Child stopped");
+    } else {
+      expect(provider.steers).toHaveLength(1);
+      expect(provider.steers[0]?.message.text).toContain("Child stopped");
+    }
   }).pipe(Effect.provide(runtime(provider)));
 });

@@ -1,5 +1,22 @@
 import { expect, it } from "@effect/vitest";
-import { CommandId, MessageId, ProjectId, ProviderInstanceId, ThreadId } from "@cogenly/contracts";
+import {
+  CommandId,
+  EventId,
+  MessageId,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+  TurnItemId,
+  ScheduledTaskId,
+} from "@cogenly/contracts";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Layer from "effect/Layer";
+import * as Sqlite from "../persistence/Sqlite.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import * as Receipts from "./CommandReceiptStore.ts";
+import * as Threads from "./ThreadManagementService.ts";
+import * as DateTime from "effect/DateTime";
+import * as EventSink from "./EventSink.ts";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import * as Worker from "./EffectWorker.ts";
@@ -23,12 +40,15 @@ it.effect.each(
   ].flatMap((scenario) => [
     { ...scenario, arrival: "before" },
     { ...scenario, arrival: "after" },
+    { ...scenario, arrival: "auto" },
+    { ...scenario, arrival: "scheduled" },
   ]),
 )(
-  "advances follow-ups while a child works ($providerName, arrival=$arrival)",
+  "advances user/MCP follow-ups while a child and monitor work ($providerName, arrival=$arrival)",
   ({ capabilities, arrival }) => {
     const supportsSteering = capabilities.turns.supportsActiveSteering;
     const provider = makeControllableProvider(capabilities);
+    const database = Sqlite.layerMemory;
     return Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
       const worker = yield* Worker.OrchestrationEffectWorkerV2;
@@ -81,17 +101,58 @@ it.effect.each(
         creationSource: "server",
       });
       yield* worker.drain();
-      const followup = orchestrator.dispatch({
-        type: "message.dispatch",
-        commandId: CommandId.make("follow-up"),
-        threadId,
-        messageId: MessageId.make("message:follow-up"),
-        text: "Follow up while the child works",
-        attachments: [],
-        dispatchMode: { type: "queue_after_active" },
-        createdBy: "user",
-        creationSource: "web",
+      const sink = yield* EventSink.EventSinkV2;
+      const monitorBase = (yield* orchestrator.getThreadProjection(threadId)).turnItems.find(
+        (item) => item.type === "user_message",
+      )!;
+      yield* sink.write({
+        events: [
+          {
+            id: EventId.make("event:monitor-started"),
+            type: "turn-item.updated",
+            threadId,
+            runId: parent.id,
+            occurredAt: yield* DateTime.now,
+            payload: {
+              ...monitorBase,
+              id: TurnItemId.make("item:monitor"),
+              type: "dynamic_tool",
+              status: "running",
+              toolName: "Monitor",
+              input: { persistent: true },
+            },
+          },
+        ],
       });
+      const followup =
+        arrival === "before"
+          ? orchestrator.dispatch({
+              type: "message.dispatch",
+              commandId: CommandId.make("follow-up"),
+              threadId,
+              messageId: MessageId.make("message:follow-up"),
+              text: "Follow up while the child works",
+              attachments: [],
+              dispatchMode: { type: "queue_after_active" },
+              createdBy: "user",
+              creationSource: "web",
+            })
+          : Threads.ThreadManagementService.use((threads) =>
+              threads.sendToThread({
+                projectId: ProjectId.make("project:test"),
+                commandId: CommandId.make("follow-up"),
+                threadId,
+                messageId: MessageId.make("message:follow-up"),
+                text: "Follow up while the child works",
+                attachments: [],
+                mode: arrival === "auto" ? "auto" : "queue",
+                createdBy: "agent",
+                creationSource: "mcp",
+                ...(arrival === "scheduled"
+                  ? { scheduledTaskId: ScheduledTaskId.make("task:scheduled") }
+                  : { senderThreadId: ThreadId.make("thread:sender") }),
+              }),
+            );
       if (arrival === "before") {
         yield* followup;
         expect((yield* orchestrator.getThreadProjection(threadId)).runs.at(-1)?.status).toBe(
@@ -111,11 +172,11 @@ it.effect.each(
         Stream.take(1),
         Stream.runDrain,
       );
-      if (arrival === "after") yield* followup;
+      if (arrival !== "before") yield* followup;
       const queued = (yield* orchestrator.getThreadProjection(threadId)).runs.find(
         (run) => run.userMessageId === MessageId.make("message:follow-up"),
       )!;
-      if (arrival === "after") expect(queued.status).toBe("starting");
+      if (arrival !== "before") expect(queued.status).toBe("starting");
       // The queue must advance on provider settlement, before checkpoint effects
       // are drained and without waiting for the delegated task to finish.
       yield* orchestrator.streamStoredEventsFrom({ afterSequence: 0, threadId }).pipe(
@@ -245,10 +306,20 @@ it.effect.each(
       }
     }).pipe(
       Effect.provide(
-        layerWithRegistry({ name: "delegated-completion-steer" }, provider.registry, {
-          runEffectWorker: false,
-          runContinuationWorker: true,
-        }),
+        Threads.layer.pipe(
+          Layer.provideMerge(
+            Layer.mergeAll(
+              layerWithRegistry({ name: "delegated-completion-steer" }, provider.registry, {
+                databaseLayer: database,
+                runEffectWorker: false,
+                runContinuationWorker: true,
+              }),
+              Receipts.layer.pipe(Layer.provide(database)),
+              ServerSettings.layerTest({}),
+            ),
+          ),
+          Layer.provide(NodeServices.layer),
+        ),
       ),
     );
   },

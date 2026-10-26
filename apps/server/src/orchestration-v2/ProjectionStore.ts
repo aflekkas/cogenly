@@ -3929,7 +3929,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   AND NOT EXISTS (
                     SELECT 1 FROM orchestration_v2_projection_runs AS active
                     WHERE active.thread_id = orchestration_v2_projection_runs.thread_id
-                      AND active.status IN ('preparing', 'starting', 'running', 'waiting')
+                      AND active.status IN ('preparing', 'starting', 'running')
                   )
               `;
             case "delegated-completions":
@@ -5096,7 +5096,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             AND NOT EXISTS (SELECT 1 FROM orchestration_v2_projection_runs
               WHERE thread_id = ${threadId}
                 AND (status IN ('preparing', 'starting', 'running')
-                  OR (status = 'queued' AND json_extract(payload_json, '$.queueHeld') = 1)))`;
+                  OR (status = 'queued' AND json_extract(payload_json, '$.queueHeld') = 1
+                    AND (json_extract(payload_json, '$.queueHoldReason') = 'stopped'
+                      OR NOT EXISTS (SELECT 1 FROM orchestration_v2_projection_runs AS healthy
+                        WHERE healthy.thread_id = ${threadId}
+                          AND healthy.status IN ('waiting', 'completed')
+                          AND healthy.ordinal > orchestration_v2_projection_runs.ordinal)))))`;
             return rows.length > 0;
           }),
         )

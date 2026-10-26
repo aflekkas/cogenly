@@ -60,6 +60,7 @@ export const MachineHealthFix = Schema.Literals([
   "run-now",
   "resume",
   "stop-runs",
+  "send-queue",
   "retry-sync",
   "setup-sandbox",
 ]);

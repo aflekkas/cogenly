@@ -32,7 +32,8 @@ import * as Sqlite from "../persistence/Sqlite.ts";
 import * as Tasks from "../scheduledTasks/ScheduledTaskService.ts";
 import * as Health from "./MachineHealth.ts";
 import * as Fixes from "./MachineHealthFixes.ts";
-import { STUCK_RUN_AFTER_MS } from "./healthChecks.ts";
+import { readStuckQueues } from "./staleRuns.ts";
+import { STUCK_RUN_AFTER_MS, stuckQueuesItems } from "./healthChecks.ts";
 
 const threadId = ThreadId.make("thread:health-race");
 const environmentId = EnvironmentId.make("test:health-race");
@@ -45,6 +46,7 @@ it.effect.each([
   "orphan beside healthy turn",
   "stale turn replaced before dispatch",
   "same stale turn still active",
+  "idle queued messages",
 ] as const)("Fix targets only stale work: %s", (scenario) => {
   const provider = makeControllableProvider(CodexProviderCapabilitiesV2);
   const database = Sqlite.layerMemory;
@@ -100,7 +102,39 @@ it.effect.each([
     );
     const staleIso = DateTime.formatIso(staleAt);
     const orphanId = NodeId.make("node:old-orphan");
-    if (scenario === "orphan beside healthy turn") {
+    if (scenario === "idle queued messages") {
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make("queue-for-health"),
+        threadId,
+        messageId: MessageId.make("message:health-queued"),
+        text: "Send this",
+        attachments: [],
+        dispatchMode: { type: "queue_after_active" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+      const turn = (yield* orchestrator.getThreadProjection(threadId)).providerTurns[0]!;
+      yield* provider.finish(provider.turns[0]!, turn.id, {
+        class: "provider_error",
+        message: "Failure",
+        code: null,
+        retryable: null,
+      });
+      yield* orchestrator.streamStoredEventsFrom({ afterSequence: 0, threadId }).pipe(
+        Stream.filter(
+          (row) => row.event.type === "run.updated" && row.event.payload.queueHeld === true,
+        ),
+        Stream.take(1),
+        Stream.runDrain,
+      );
+      yield* worker.drain();
+      expect(yield* readStuckQueues(yield* DateTime.now)).toEqual([]);
+      const queues = yield* readStuckQueues(
+        DateTime.makeUnsafe(DateTime.toEpochMillis(yield* DateTime.now) + 240_000),
+      );
+      expect(stuckQueuesItems(queues)[0]?.title).toBe("Queued messages not sending in Health");
+    } else if (scenario === "orphan beside healthy turn") {
       const task: OrchestrationV2Subagent = {
         id: orphanId,
         threadId,
@@ -174,7 +208,7 @@ it.effect.each([
               detail: "",
               since: staleAt,
               target: { _tag: "thread", threadId },
-              fix: "resume",
+              fix: scenario === "idle queued messages" ? "send-queue" : "resume",
             },
           ],
         },
@@ -215,7 +249,11 @@ it.effect.each([
     const after = yield* orchestrator.getThreadProjection(threadId);
     if (scenario !== "same stale turn still active")
       expect(result.outcomes[0]!.status).toBe("fixed");
-    if (scenario === "same stale turn still active") {
+    if (scenario === "idle queued messages") {
+      expect(after.runs.filter((run) => run.status === "queued")).toHaveLength(0);
+      expect(provider.turns.at(-1)?.message.text).toContain("Send this");
+      expect(provider.turns).toHaveLength(2);
+    } else if (scenario === "same stale turn still active") {
       expect(after.runs.find((run) => run.id === first.id)!.status).toBe("interrupted");
     } else {
       const healthy = after.runs.at(-1)!;

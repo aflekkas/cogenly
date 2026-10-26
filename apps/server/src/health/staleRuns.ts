@@ -71,3 +71,25 @@ export const readStaleRuns = (now: DateTime.Utc, threadId?: ThreadId) =>
     ]);
     return [...runs.flatMap(toActive("run")), ...subagents.flatMap(toActive("subagent"))];
   });
+
+/** Idle queues older than three minutes, owned by this environment. */
+export const readStuckQueues = (now: DateTime.Utc) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const cutoff = DateTime.formatIso(DateTime.makeUnsafe(DateTime.toEpochMillis(now) - 180_000));
+    const rows = yield* sql<Row>`
+      SELECT t.thread_id AS id, t.thread_id, t.title, MIN(q.requested_at) AS started_at
+      FROM orchestration_v2_projection_threads t
+      JOIN orchestration_v2_projection_runs q ON q.thread_id = t.thread_id AND q.status = 'queued'
+      WHERE t.archived_at IS NULL AND t.deleted_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM orchestration_v2_projection_runs held
+          WHERE held.thread_id = t.thread_id AND held.status = 'queued'
+            AND json_extract(held.payload_json, '$.queueHeld') = 1
+            AND json_extract(held.payload_json, '$.queueHoldReason') = 'stopped')
+        AND NOT EXISTS (SELECT 1 FROM thread_owners o WHERE o.thread_id = t.thread_id AND o.local = 0)
+        AND NOT EXISTS (SELECT 1 FROM orchestration_v2_projection_runs r
+          WHERE r.thread_id = t.thread_id AND r.status IN ('preparing', 'starting', 'running'))
+      GROUP BY t.thread_id HAVING MIN(q.requested_at) < ${cutoff}
+      ORDER BY started_at LIMIT ${STALE_RUN_QUERY_LIMIT}`;
+    return rows.flatMap(toActive("run"));
+  });

@@ -252,6 +252,17 @@ const make = Effect.gen(function* () {
               : failed(result.message),
           ),
         );
+      case "send-queue":
+        return target?._tag !== "thread"
+          ? Effect.succeed(failed("The thread to send to is missing."))
+          : Effect.gen(function* () {
+              yield* threads.dispatch({
+                type: "queue.resume",
+                threadId: target.threadId,
+                commandId: yield* commandId(`queue:${target.threadId}`),
+              });
+              return { itemKey, status: "fixed", message: "Started the queued messages." } as const;
+            }).pipe(Effect.catch(() => Effect.succeed(failed("The queue could not be sent."))));
       case "resume":
       case "stop-runs":
         return target?._tag !== "thread"

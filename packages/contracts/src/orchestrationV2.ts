@@ -632,8 +632,10 @@ export const OrchestrationV2Run = Schema.Struct({
   activeAttemptId: Schema.NullOr(RunAttemptId),
   status: OrchestrationV2RunStatus,
   queuePosition: Schema.optional(Schema.NullOr(PositiveInt)),
-  /** Restart recovery holds the queue until the user explicitly resumes it. */
+  /** A failure, restart, or explicit Stop paused delivery. */
   queueHeld: Schema.optional(Schema.Boolean),
+  /** An explicit Stop survives successful intervening turns and automatic queue recovery. */
+  queueHoldReason: Schema.optional(Schema.Literal("stopped")),
   requestedAt: Schema.DateTimeUtc,
   startedAt: Schema.NullOr(Schema.DateTimeUtc),
   completedAt: Schema.NullOr(Schema.DateTimeUtc),
@@ -3264,7 +3266,7 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     queuedRunId: RunId,
-    targetRunId: RunId,
+    targetRunId: Schema.optional(RunId),
   }),
   Schema.Struct({
     type: Schema.Literal("queue.resume"),
