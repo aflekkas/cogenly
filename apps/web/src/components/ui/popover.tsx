@@ -119,7 +119,11 @@ function PopoverPopup({
         // A panel's card already sits inside its own padding, so the panel can reach the edge.
         collisionPadding={collisionPadding ?? (variant === "panel" ? 0 : undefined)}
         className={cn(
-          "h-(--positioner-height) w-(--positioner-width) max-w-(--available-width) transition-transform data-instant:transition-none",
+          // Base UI sizes the positioner (and the popup, while it resizes) to the content's
+          // unclamped height, measured with --available-height lifted. Uncapped, a tall popup's
+          // positioner reaches past the window and scrolls the page while its viewport scrolls
+          // inside. Capped here, the viewport is the only thing that scrolls.
+          "h-(--positioner-height) max-h-(--available-height) w-(--positioner-width) max-w-(--available-width) transition-transform data-instant:transition-none",
           variant === "panel"
             ? // The card inside is the panel width, or the anchor less 12px per side; the viewport
               // pads it by --spacing(2) per side. Panels slide when their offset changes, e.g. to make
@@ -133,7 +137,7 @@ function PopoverPopup({
       >
         <PopoverPrimitive.Popup
           className={cn(
-            "relative flex h-(--popup-height,auto) w-(--popup-width,auto) origin-(--transform-origin) rounded-lg text-popover-foreground outline-none popup-motion transition-[width,height,opacity,scale,translate] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] has-data-[slot=calendar]:rounded-xl has-data-[slot=calendar]:before:rounded-[calc(var(--radius-xl)-1px)]",
+            "relative flex h-(--popup-height,auto) max-h-(--available-height) w-(--popup-width,auto) origin-(--transform-origin) rounded-lg text-popover-foreground outline-none popup-motion transition-[width,height,opacity,scale,translate] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] has-data-[slot=calendar]:rounded-xl has-data-[slot=calendar]:before:rounded-[calc(var(--radius-xl)-1px)]",
             variant !== "panel" && "dropdown-glass surface-raised surface-raised-floating",
             variant !== "panel" && popoverEndAlignedBesideClassName,
             tooltipStyle &&
