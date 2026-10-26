@@ -2577,18 +2577,6 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
             startedShell = spawnResult.shellLabel;
 
             const processPid = ptyProcess.pid;
-            if (session.agent) {
-              // The PTY makes the shell a session and group leader, so its PID
-              // is the group the ledger kills.
-              yield* processes.register({
-                threadId: session.threadId,
-                terminalId: session.terminalId,
-                command: session.agent.command,
-                pid: processPid,
-                scopeUnit: spawnResult.scopeUnit,
-                keepRunning: session.agent.keepRunning,
-              });
-            }
             let eventsActivated = false;
 
             let eventStamp: ReturnType<typeof advanceEventSequence> = {
@@ -2626,6 +2614,24 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
               eventStamp = advanceEventSequence(session);
               return [undefined, state] as const;
             });
+
+            // Subscribe before registering: registration reads the process
+            // table and writes the ledger, and a fast command can write and
+            // exit during that I/O. node-pty drops data with no listener but
+            // retains the exit, so registering first lost the output while
+            // still reporting exit 0. Queued events drain after startup below.
+            if (session.agent) {
+              // The PTY makes the shell a session and group leader, so its PID
+              // is the group the ledger kills.
+              yield* processes.register({
+                threadId: session.threadId,
+                terminalId: session.terminalId,
+                command: session.agent.command,
+                pid: processPid,
+                scopeUnit: spawnResult.scopeUnit,
+                keepRunning: session.agent.keepRunning,
+              });
+            }
 
             yield* publishEvent({
               type: eventType,

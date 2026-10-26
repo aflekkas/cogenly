@@ -21,6 +21,10 @@ import * as Option from "effect/Option";
 import * as TerminalMcpService from "./TerminalMcpService.ts";
 import * as Invocation from "./McpInvocationContext.ts";
 import * as Manager from "../terminal/Manager.ts";
+import * as AgentProcesses from "../process/AgentProcesses.ts";
+import * as Deferred from "effect/Deferred";
+import { processOutputRedactor } from "../vault/VaultRedactor.ts";
+import type { PtyExitEvent, PtyProcess } from "@cogenly/shared/PtyAdapter";
 import * as ProcessRunner from "../processRunner.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
@@ -328,4 +332,157 @@ it.effect(
       Effect.provide(ProcessRunner.layer.pipe(Layer.provideMerge(NodeServices.layer))),
       Effect.scoped,
     ),
+);
+
+it.effect("foreground terminal_run always returns fast output, with and without credentials", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-terminal-fast-" });
+    const workspace = `${directory}/workspace`;
+    yield* fs.makeDirectory(workspace);
+    // Models node-pty: exit is retained for a late subscriber, data is not.
+    class FastPty implements PtyProcess {
+      readonly pid = 4242;
+      readonly signals: Array<string | undefined> = [];
+      private dataListeners = new Set<(data: string) => void>();
+      private exitListeners = new Set<(event: PtyExitEvent) => void>();
+      private exitEvent: PtyExitEvent | undefined;
+      write() {}
+      resize() {}
+      kill(signal?: string) {
+        this.signals.push(signal);
+      }
+      onData(callback: (data: string) => void) {
+        this.dataListeners.add(callback);
+        return () => this.dataListeners.delete(callback);
+      }
+      onExit(callback: (event: PtyExitEvent) => void) {
+        if (this.exitEvent) {
+          callback(this.exitEvent);
+          return () => {};
+        }
+        this.exitListeners.add(callback);
+        return () => this.exitListeners.delete(callback);
+      }
+      emitOutputAndExit(data: string) {
+        for (const listener of this.dataListeners) listener(data);
+        this.exitEvent = { exitCode: 0, signal: null };
+        for (const listener of this.exitListeners) listener(this.exitEvent);
+        this.exitListeners.clear();
+      }
+    }
+    let current: FastPty | undefined;
+    const registered: Array<string> = [];
+    const terminated: Array<string> = [];
+    const ledger: AgentProcesses.AgentProcessesShape = {
+      ...AgentProcesses.AgentProcesses.defaultValue(),
+      register: (input) =>
+        Effect.sync(() => {
+          registered.push(input.terminalId);
+          // A fast command writes and exits while the manager registers it.
+          current?.emitOutputAndExit("hello-rc\n");
+        }),
+      terminate: (input) =>
+        Effect.sync(() => {
+          terminated.push(input.terminalId);
+          return [] as ReadonlyArray<number>;
+        }),
+    };
+    const sandbox = ReadOnlySandbox.ReadOnlySandbox.of({
+      setup: Effect.die("setup is not exercised here"),
+      status: { available: true as const, backend: "sandbox-exec" as const },
+      prepare: (input) =>
+        Effect.succeed({
+          shell: "/usr/bin/sandbox-exec",
+          args: ["-p", "(deny default)", input.shell, ...input.args],
+          env: {},
+        }),
+    });
+    const manager = yield* Manager.makeWithOptions({
+      logsDir: directory,
+      processKillGraceMs: 0,
+      processTable: Effect.succeed([]),
+      processes: ledger,
+      resolveProviderInstanceEnvironment: () => Effect.succeed({}),
+      ptyAdapter: {
+        spawn: () =>
+          Effect.sync(() => {
+            current = new FastPty();
+            return current;
+          }),
+      },
+    }).pipe(Effect.provideService(ReadOnlySandbox.ReadOnlySandbox, sandbox));
+    const project = {
+      id: liveThreadShell(ThreadId.make("A")).projectId,
+      title: "test",
+      workspaceRoot: workspace,
+      repositoryIdentity: null,
+      faviconPath: null,
+      projectIcon: null,
+      defaultModelSelection: null,
+      defaultThreadEnvMode: null,
+      autoPull: false,
+      scripts: [],
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+      deletedAt: null,
+    };
+    let withCredentials = false;
+    const dependencies = Layer.mergeAll(
+      Layer.succeed(ReadOnlySandbox.ReadOnlySandbox, sandbox),
+      Layer.mock(AgentStore.AgentStore)({ forThread: () => Effect.succeed(null) }),
+      Layer.mock(CliCredentials.CliCredentials)({
+        launch: () =>
+          withCredentials
+            ? Effect.succeed({
+                env: { TEST_TOKEN: "test-token-123456" },
+                redactOutput: processOutputRedactor(["test-token-123456"]),
+                complete: () => Effect.void,
+              })
+            : Effect.succeed({ env: {}, complete: () => Effect.void }),
+      }),
+      Layer.succeed(Manager.TerminalManager, manager),
+      Layer.mock(ThreadManagement.ThreadManagementService)({
+        getThreadRecords: (id) => Effect.succeed(idleThreadProjection(liveThreadShell(id))),
+        getThreadShell: (id) => Effect.succeed(liveThreadShell(id)),
+      }),
+      Layer.mock(ProjectService.ProjectService)({
+        getById: () => Effect.succeedSome(project),
+      }),
+      Layer.mock(ProjectFiles.ProjectFiles)({ folderForThread: () => Effect.succeed(null) }),
+      ThreadCommandExecutor.layer,
+      ServerSettings.layerTest(),
+    );
+    yield* Effect.gen(function* () {
+      const tools = yield* TerminalMcpService.TerminalMcpService;
+      const as = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+        effect.pipe(Effect.provideService(Invocation.McpInvocationContext, caller("A")));
+      for (const credentials of [false, true]) {
+        withCredentials = credentials;
+        for (let index = 0; index < 20; index++) {
+          const result = yield* as(tools.run({ command: "echo hello-rc" }));
+          expect(result.status).toBe("exited");
+          expect(result.exitCode).toBe(0);
+          expect(result.output).toBe("hello-rc\n");
+        }
+      }
+      expect(registered).toHaveLength(40);
+      // Background mode and terminal_read still deliver the same output.
+      const exited = yield* Deferred.make<void>();
+      yield* manager.subscribe((event) =>
+        event.type === "exited"
+          ? Deferred.succeed(exited, undefined).pipe(Effect.asVoid)
+          : Effect.void,
+      );
+      const started = yield* as(tools.run({ command: "echo hello-rc", background: true }));
+      yield* Deferred.await(exited);
+      const read = yield* as(tools.read({ terminalId: started.terminalId }));
+      expect(read.status).toBe("exited");
+      expect(read.output).toBe("hello-rc\n");
+      expect(terminated.length).toBeGreaterThan(0);
+    }).pipe(Effect.provide(TerminalMcpService.layer.pipe(Layer.provide(dependencies))));
+  }).pipe(
+    Effect.provide(ProcessRunner.layer.pipe(Layer.provideMerge(NodeServices.layer))),
+    Effect.scoped,
+  ),
 );
