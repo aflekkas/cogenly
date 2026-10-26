@@ -45,6 +45,7 @@ import * as Work from "../work/WorkHandoffService.ts";
 import * as Schedules from "../scheduledTasks/ScheduledTaskService.ts";
 import * as Integrations from "../integrations/Integrations.ts";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
+import { hostMatchesAnyDomain } from "../vault/VaultPolicy.ts";
 
 const decodeEventContext = Schema.decodeUnknownEffect(Schema.fromJsonString(AgentEventContext));
 const isAgentError = Schema.is(AgentError);
@@ -58,26 +59,22 @@ const decodeHistory = Schema.decodeUnknownEffect(Schema.fromJsonString(Commitmen
 const decodeJsonRecord = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
 );
-const decodeVaultPolicy = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(
-    // Local shape mirrors contracts VaultPolicy; kept inline to avoid a cycle.
-    Schema.Struct({
-      mode: Schema.Literals(["ask", "allow"]),
-      allowedAgentIds: Schema.Array(Schema.String),
-      allowedThreadIds: Schema.optional(Schema.Array(Schema.String)),
-      allowedDomains: Schema.Array(Schema.String),
-    }),
-  ),
+// Local shape mirrors contracts VaultPolicy; kept inline to avoid a cycle.
+// Every field must be listed, or an approval would drop it on rewrite.
+const StoredVaultPolicy = Schema.fromJsonString(
+  Schema.Struct({
+    mode: Schema.Literals(["ask", "allow", "deny"]),
+    allowedAgentIds: Schema.Array(Schema.String),
+    allowedThreadIds: Schema.optional(Schema.Array(Schema.String)),
+    allowedDomains: Schema.Array(Schema.String),
+    approvedDomains: Schema.optional(Schema.Array(Schema.String)),
+    ownerSet: Schema.optional(Schema.Boolean),
+  }),
 );
-const encodeVaultPolicy = Schema.encodeEffect(
-  Schema.fromJsonString(
-    Schema.Struct({
-      mode: Schema.Literals(["ask", "allow"]),
-      allowedAgentIds: Schema.Array(Schema.String),
-      allowedThreadIds: Schema.optional(Schema.Array(Schema.String)),
-      allowedDomains: Schema.Array(Schema.String),
-    }),
-  ),
+const decodeVaultPolicy = Schema.decodeUnknownEffect(StoredVaultPolicy);
+const encodeVaultPolicy = Schema.encodeEffect(StoredVaultPolicy);
+const decodeDomains = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Array(Schema.String)),
 );
 const decodeActivityRun = Schema.decodeUnknownEffect(AgentActivityRun);
 const decodeRunAction = Schema.decodeUnknownEffect(AgentRunAction);
@@ -707,32 +704,56 @@ const make = Effect.gen(function* () {
                 Effect.gen(function* () {
                   const rows = yield* sql<{
                     policy_json: string;
-                  }>`SELECT policy_json FROM vault_items WHERE id = ${payload.vaultItemId} AND deleted_at IS NULL`;
+                    allowed_domains_json: string;
+                  }>`SELECT policy_json, allowed_domains_json FROM vault_items WHERE id = ${payload.vaultItemId} AND deleted_at IS NULL`;
                   if (!rows[0]) return yield* fail("Vault item not found.");
                   const decoded = yield* decodeVaultPolicy(rows[0].policy_json);
-                  const policy = {
-                    mode: "allow" as const,
-                    allowedAgentIds: [
-                      ...new Set([
-                        ...decoded.allowedAgentIds,
-                        ...(approval.agentId ? [approval.agentId] : []),
-                      ]),
-                    ],
-                    allowedThreadIds: [
-                      ...new Set([
-                        ...(decoded.allowedThreadIds ?? []),
-                        ...(approval.agentId === null && payload.threadId
-                          ? [payload.threadId]
-                          : []),
-                      ]),
-                    ],
-                    allowedDomains: [
-                      ...new Set([
-                        ...decoded.allowedDomains,
-                        ...(payload.domain ? [payload.domain] : []),
-                      ]),
-                    ],
-                  };
+                  const itemDomains = yield* decodeDomains(rows[0].allowed_domains_json);
+                  // A fill outside the item's sites approves that site; the
+                  // rule's own lists are left as they are.
+                  const offSite =
+                    payload.domain !== null && !hostMatchesAnyDomain(payload.domain, itemDomains);
+                  const approvedDomains = [
+                    ...new Set([
+                      ...(decoded.approvedDomains ?? []),
+                      ...(offSite && payload.domain ? [payload.domain] : []),
+                    ]),
+                  ];
+                  // "Any agent" stays any agent: approving one use must not narrow it.
+                  const anyCaller =
+                    decoded.mode === "allow" &&
+                    decoded.allowedAgentIds.length === 0 &&
+                    (decoded.allowedThreadIds ?? []).length === 0;
+                  const policy = anyCaller
+                    ? { ...decoded, approvedDomains }
+                    : {
+                        ...decoded,
+                        mode: "allow" as const,
+                        allowedAgentIds: [
+                          ...new Set([
+                            ...decoded.allowedAgentIds,
+                            ...(approval.agentId ? [approval.agentId] : []),
+                          ]),
+                        ],
+                        allowedThreadIds: [
+                          ...new Set([
+                            ...(decoded.allowedThreadIds ?? []),
+                            ...(approval.agentId === null && payload.threadId
+                              ? [payload.threadId]
+                              : []),
+                          ]),
+                        ],
+                        allowedDomains:
+                          decoded.allowedDomains.length === 0 && !offSite
+                            ? []
+                            : [
+                                ...new Set([
+                                  ...decoded.allowedDomains,
+                                  ...(payload.domain ? [payload.domain] : []),
+                                ]),
+                              ],
+                        approvedDomains,
+                      };
                   yield* sql`UPDATE vault_items SET policy_json = ${yield* encodeVaultPolicy(policy)}, updated_at = ${yield* now} WHERE id = ${payload.vaultItemId}`;
                   yield* sql`UPDATE agent_approvals SET status = 'approved', decided_at = ${yield* now}, decided_by = 'user' WHERE id = ${id} AND status = 'pending'`;
                 }),

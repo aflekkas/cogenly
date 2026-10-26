@@ -91,7 +91,7 @@ it.effect("a failed saveToVault leaves the private answer available for retry", 
         ),
     }),
     Layer.mock(Vault.Vault)({
-      list: () => Effect.succeed({ items: [] }),
+      list: () => Effect.succeed({ items: [], sites: [] }),
       saveSecretValue: () =>
         failSave
           ? Effect.fail(new VaultError({ reason: "storage" }))
@@ -475,10 +475,15 @@ const loginFixture = (
     Layer.mock(Accounts.AccountConnections)({}),
     Layer.mock(Secrets.SecretRequests)({}),
     Layer.mock(Vault.Vault)({
-      list: () =>
-        Effect.succeed({
-          items: [{ id: VaultItemId.make("vault:old"), name: "GitHub", type: "login" } as never],
-        }),
+      findLogin: (input) =>
+        Effect.succeed(
+          input.itemId === "vault:old"
+            ? {
+                status: "found" as const,
+                item: { id: VaultItemId.make("vault:old"), name: "GitHub", type: "login" } as never,
+              }
+            : { status: "not_found" as const },
+        ),
     }),
   );
   const scope = {

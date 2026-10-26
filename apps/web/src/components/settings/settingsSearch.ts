@@ -320,6 +320,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [
       "secrets passwords logins credentials api keys cards notes one-time codes totp approvals access ask first usage log recent activity",
       "share vault sharing sync synced other machines this machine only keep on this machine",
+      "logins sign in username email favicon site allow block missing username add email integration signs in with",
     ],
   },
   {

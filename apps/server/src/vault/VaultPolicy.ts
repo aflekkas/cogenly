@@ -25,6 +25,14 @@ export const hostMatchesAnyDomain = (
   allowedDomains: ReadonlyArray<string>,
 ): boolean => allowedDomains.some((domain) => hostMatchesDomain(hostOrUrl, domain));
 
+/** One of the item's allowed sites, or a site where the owner approved a fill of it. */
+export const isApprovedSite = (
+  domain: string | null | undefined,
+  item: { readonly allowedDomains: ReadonlyArray<string>; readonly policy: VaultPolicy },
+): boolean =>
+  !!domain &&
+  hostMatchesAnyDomain(domain, [...item.allowedDomains, ...(item.policy.approvedDomains ?? [])]);
+
 export type VaultUseCaller =
   | { readonly kind: "human" }
   | { readonly kind: "server" }
@@ -36,7 +44,9 @@ export type VaultPolicyDecision = "allow" | "ask" | "deny";
 /**
  * Human and server-internal callers are allowed. MCP threads and persistent
  * agents require `allow` for their identity and the destination domain. Empty
- * identity lists mean any thread or agent; everything else asks the owner.
+ * identity lists mean any thread or agent; `deny` refuses them; everything
+ * else asks the owner. Whether the page is one of the item's allowed sites is
+ * checked separately (see `isApprovedSite`).
  */
 export const evaluateVaultPolicy = (input: {
   readonly policy: VaultPolicy;
@@ -44,6 +54,7 @@ export const evaluateVaultPolicy = (input: {
   readonly domain?: string | null | undefined;
 }): VaultPolicyDecision => {
   if (input.caller.kind === "human" || input.caller.kind === "server") return "allow";
+  if (input.policy.mode === "deny") return "deny";
   if (input.policy.mode !== "allow") return "ask";
   const caller = input.caller;
   const threads = input.policy.allowedThreadIds ?? [];

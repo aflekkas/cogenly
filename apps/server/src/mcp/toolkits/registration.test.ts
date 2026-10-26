@@ -273,7 +273,7 @@ const layerStubServices = Layer.mergeAll(
     sharingStatus: Effect.succeed({ peers: [], itemsShared: 0, itemsWaiting: 0 }),
   }),
   Layer.mock(Vault.Vault)({
-    list: () => Effect.succeed({ items: [] }),
+    list: () => Effect.succeed({ items: [], sites: [] }),
     scrubText: (text) => Effect.succeed(text),
     scrubValue: (value) => Effect.succeed(value),
   }),
@@ -864,13 +864,14 @@ const smokeCases = [
       "vault_list",
       "vault_save",
       "vault_fill",
+      "vault_link_integration",
       "vault_delete",
       "vault_sharing_status",
       "vault_sharing_update",
     ],
     tool: "vault_list",
     args: {},
-    expected: { items: [] },
+    expected: { items: [], sites: [] },
   },
 ];
 

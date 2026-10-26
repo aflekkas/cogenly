@@ -28,6 +28,7 @@ import * as ProjectLabels from "./projectLabels/ProjectLabelService.ts";
 import * as ProjectLabelClone from "./projectLabels/ProjectLabelCloneRepository.ts";
 import * as RepositoryCheckout from "./project/RepositoryCheckout.ts";
 import * as RepositoryIconResolver from "./project/RepositoryIconResolver.ts";
+import * as SiteIconCache from "./assets/SiteIconCache.ts";
 import { resolveProjectsRootDirectory } from "./project/ProjectsRoot.ts";
 import * as ProjectLabelFolders from "./projectLabels/ProjectLabelFolders.ts";
 import * as ProjectLabelFork from "./projectLabels/ProjectLabelForkToProject.ts";
@@ -1148,6 +1149,7 @@ const makeWsRpcHandlers = (
     const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
     const repositoryCheckout = yield* RepositoryCheckout.RepositoryCheckout;
     const repositoryIcons = yield* RepositoryIconResolver.RepositoryIconResolver;
+    const siteIcons = yield* SiteIconCache.SiteIconCache;
     const repositoryIdentityResolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
     const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
     const agentSessionImporter = yield* AgentSessionImporter.AgentSessionImporter;
@@ -2442,6 +2444,12 @@ const makeWsRpcHandlers = (
               workspaceRoot: input.resource.cwd,
             });
           }
+          if (input.resource._tag === "site-icon") {
+            return yield* issueAssetUrl({
+              resource: input.resource,
+              siteIconPath: yield* siteIcons.resolve(input.resource.host),
+            });
+          }
           if (input.resource._tag === "repository-icon") {
             return yield* issueAssetUrl({
               resource: input.resource,
@@ -2906,6 +2914,7 @@ type WsRequestServices =
   | ProjectStore.ProjectStoreV2
   | RepositoryCheckout.RepositoryCheckout
   | RepositoryIconResolver.RepositoryIconResolver
+  | SiteIconCache.SiteIconCache
   | ProviderAuthService.ProviderAuthService
   | ProviderInstanceRegistry.ProviderInstanceRegistry
   | ProviderLatestVersions.ProviderLatestVersions

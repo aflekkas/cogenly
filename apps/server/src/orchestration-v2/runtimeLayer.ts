@@ -101,6 +101,7 @@ import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as LoginRequests from "../secrets/LoginRequests.ts";
 import * as Vault from "../vault/Vault.ts";
 import * as VaultSyncCapture from "../vault/VaultSyncCapture.ts";
+import * as SiteIconCache from "../assets/SiteIconCache.ts";
 import * as SharedState from "../sync/SharedState.ts";
 import * as Accounts from "../accounts/Accounts.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -121,7 +122,10 @@ export const layerVaultSyncCapture = VaultSyncCapture.layer.pipe(
   Layer.provide(SharedState.layer),
   Layer.provide(ServerEnvironment.layerIdentity),
 );
+// One icon cache: the vault prefetches into it, the asset route serves from it.
+const layerSiteIconCache = SiteIconCache.layer;
 export const layerVaultProvided = Vault.layer.pipe(
+  Layer.provide(layerSiteIconCache),
   Layer.provide(layerVaultSyncCapture),
   Layer.provide(ServerEnvironment.layerIdentity),
   Layer.provide(layerProjectFilesProvided),
@@ -644,6 +648,7 @@ const layerProductionBase = Layer.mergeAll(
   layerThreadLaunchProvided,
   layerRepositoryCheckoutProvided,
   RepositoryIconResolver.layer,
+  layerSiteIconCache,
   RepositoryCheckout.layerRelocation.pipe(
     Layer.provide(Layer.mergeAll(layerRepositoryCheckoutProvided, layerProjectLabelsProvided)),
   ),

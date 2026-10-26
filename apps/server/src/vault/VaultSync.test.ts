@@ -57,6 +57,14 @@ const login = (name: string, password: string, domain = "github.com") => ({
   secretFields: { username: `${name}-user`, password },
 });
 
+/** An item whose name must stay unique in its scope, unlike a login's. */
+const key = (name: string, password: string) => ({
+  name,
+  type: "api_key" as const,
+  allowedDomains: [],
+  secretFields: { password },
+});
+
 const documentOf = (node: Node, itemId: string) =>
   node.state.get("vault", itemId).pipe(Effect.map((document) => document!));
 
@@ -162,7 +170,8 @@ describe("vault sync between paired machines", () => {
         expect(yield* reveal(hub, item.id)).toBe("spoke-password-1");
         const arrived = yield* hub.vault.getMetadata(item.id);
         expect(arrived).toMatchObject({ name: "GitHub", allowedDomains: ["github.com"] });
-        expect(arrived.policy.mode).toBe("ask");
+        // An arrival takes the default rule here: agents fill it on its sites.
+        expect(arrived.policy).toEqual({ mode: "allow", allowedAgentIds: [], allowedDomains: [] });
 
         // A grant on the hub is the hub's alone and writes nothing to sync.
         const before = yield* changeCount(hub);
@@ -177,6 +186,10 @@ describe("vault sync between paired machines", () => {
         });
         expect(yield* changeCount(hub)).toBe(before);
         // An approval request on the spoke stays on the spoke.
+        yield* spoke.vault.update({
+          id: item.id,
+          policy: { mode: "ask", allowedAgentIds: [], allowedDomains: [], ownerSet: true },
+        });
         const asked = yield* spoke.vault.use({
           itemId: item.id,
           field: "password",
@@ -368,10 +381,10 @@ describe("vault sync between paired machines", () => {
         expect(yield* documentOf(hub, item.id)).toEqual(yield* documentOf(spoke, item.id));
 
         // A delete, then a later edit elsewhere: the edit brings the item
-        // back everywhere, as a new arrival that asks first.
+        // back everywhere, as a new arrival with the default rule.
         yield* spoke.vault.update({
           id: item.id,
-          policy: { mode: "allow", allowedAgentIds: [], allowedDomains: [] },
+          policy: { mode: "ask", allowedAgentIds: [], allowedDomains: [], ownerSet: true },
         });
         yield* spoke.vault.delete({ id: item.id });
         yield* TestClock.adjust(Duration.seconds(1));
@@ -379,7 +392,7 @@ describe("vault sync between paired machines", () => {
         yield* settle(hub, [spoke]);
         expect(yield* reveal(hub, item.id)).toBe("after-delete");
         expect(yield* reveal(spoke, item.id)).toBe("after-delete");
-        expect((yield* spoke.vault.getMetadata(item.id)).policy.mode).toBe("ask");
+        expect((yield* spoke.vault.getMetadata(item.id)).policy.mode).toBe("allow");
 
         // An edit, then a later delete elsewhere: the delete wins everywhere.
         yield* hub.vault.update({ id: item.id, secretFields: { password: "before-delete" } });
@@ -389,9 +402,15 @@ describe("vault sync between paired machines", () => {
         expect((yield* hub.vault.list({})).items).toEqual([]);
         expect((yield* spoke.vault.list({})).items).toEqual([]);
 
-        // Both machines already have a "Work" item; each keeps its own name.
-        const fromSpoke = (yield* spoke.vault.create(login("Work", "spoke-work"))).item;
-        const fromHub = (yield* hub.vault.create(login("Work", "hub-work"))).item;
+        // Logins for one site share its name, so they arrive as they are.
+        const spokeLogin = (yield* spoke.vault.create(login("Mail", "spoke-mail"))).item;
+        yield* hub.vault.create(login("Mail", "hub-mail"));
+        yield* settle(hub, [spoke]);
+        expect((yield* hub.vault.getMetadata(spokeLogin.id)).name).toBe("Mail");
+
+        // Both machines already have a "Work" key; each keeps its own name.
+        const fromSpoke = (yield* spoke.vault.create(key("Work", "spoke-work"))).item;
+        const fromHub = (yield* hub.vault.create(key("Work", "hub-work"))).item;
         yield* settle(hub, [spoke]);
         expect((yield* hub.vault.getMetadata(fromSpoke.id)).name).toBe("Work (from Laptop)");
         expect((yield* spoke.vault.getMetadata(fromHub.id)).name).toBe("Work (from Server)");
@@ -404,8 +423,8 @@ describe("vault sync between paired machines", () => {
 
         // A long machine name is cut so the renamed item stays within the name limit.
         network.names.set(hub.environmentId, "H".repeat(300));
-        const long = (yield* hub.vault.create(login("W".repeat(200), "long-1"))).item;
-        yield* spoke.vault.create(login("W".repeat(200), "long-2"));
+        const long = (yield* hub.vault.create(key("W".repeat(200), "long-1"))).item;
+        yield* spoke.vault.create(key("W".repeat(200), "long-2"));
         yield* settle(hub, [spoke]);
         const renamed = (yield* spoke.vault.getMetadata(long.id)).name;
         expect(renamed.length).toBeLessThanOrEqual(200);

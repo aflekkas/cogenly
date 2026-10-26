@@ -64,6 +64,7 @@ import {
   type ScheduledTaskUpsertInput,
   type ServerProvider,
   ThreadId,
+  VaultItemId,
 } from "@cogenly/contracts";
 import { latestExecutedRun, runRanAfter } from "@cogenly/shared/orchestrationV2ThreadError";
 import { applyModelEffortDefaults } from "@cogenly/shared/model";
@@ -118,6 +119,7 @@ import * as Metrics from "../observability/Metrics.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import { normalizeHost } from "../vault/VaultPolicy.ts";
 import * as Vault from "../vault/Vault.ts";
+import * as SiteIconCache from "../assets/SiteIconCache.ts";
 
 const DEFAULT_WAIT_TIMEOUT_MS = 10 * 60 * 1_000;
 const MAX_WAIT_TIMEOUT_MS = 60 * 60 * 1_000;
@@ -969,6 +971,7 @@ const make = Effect.gen(function* () {
       : Effect.succeed(project.defaultModelSelection);
   const secretRequests = yield* SecretRequests.SecretRequests;
   const vault = yield* Vault.Vault;
+  const siteIcons = yield* Effect.serviceOption(SiteIconCache.SiteIconCache);
   const accountConnections = yield* AccountConnections.AccountConnections;
 
   /** The tool wait is bounded; the durable card remains answerable after it returns. */
@@ -2266,18 +2269,39 @@ const make = Effect.gen(function* () {
           onSome: (url) =>
             url.protocol === "http:" || url.protocol === "https:" ? url.origin : `https://${host}`,
         });
-        // An update must name a login this thread can see, checked before the
-        // user types anything.
-        const updateTarget = input.updateItemId
-          ? yield* vault.list({}, threadId).pipe(
+        // An update must name one login this thread can see, by id, label or
+        // username, checked before the user types anything.
+        const target = input.updateItemId?.trim();
+        const findUpdate = (selector: Vault.VaultLoginSelector) =>
+          vault
+            .findLogin({ ...selector, domain: host, threadId })
+            .pipe(
               Effect.mapError(() => failure("orchestration_error", "Unable to read the vault.")),
-              Effect.map(({ items }) => items.find((item) => item.id === input.updateItemId)),
-            )
-          : undefined;
-        if (input.updateItemId && updateTarget?.type !== "login") {
+            );
+        const found = !target
+          ? undefined
+          : target.startsWith("vault:")
+            ? yield* findUpdate({ itemId: VaultItemId.make(target) })
+            : yield* findUpdate({ label: target }).pipe(
+                Effect.flatMap((byLabel) =>
+                  byLabel.status === "not_found"
+                    ? findUpdate({ username: target })
+                    : Effect.succeed(byLabel),
+                ),
+              );
+        if (found?.status === "ambiguous") {
           return yield* failure(
             "invalid_request",
-            `No vault login with id ${input.updateItemId}. Use an id from vault_list, or omit updateItemId to save a new login.`,
+            `Several vault logins match ${target}: ${found.candidates
+              .map((candidate) => `${candidate.label} (id ${candidate.id})`)
+              .join(", ")}. Pass the id of the one to update.`,
+          );
+        }
+        const updateTarget = found?.status === "found" ? found.item : undefined;
+        if (target && updateTarget?.type !== "login") {
+          return yield* failure(
+            "invalid_request",
+            `No vault login matches ${target}. Use an id, label or username from vault_list, or omit updateItemId to save a new login.`,
           );
         }
         const login: OrchestrationV2LoginRequest = {
@@ -2326,6 +2350,9 @@ const make = Effect.gen(function* () {
               ),
             );
         yield* record("pending");
+        // The card shows the site's icon; one the agent supplied replaces the favicon.
+        if (input.iconUrl !== undefined && Option.isSome(siteIcons))
+          yield* siteIcons.value.provide(host, input.iconUrl);
         const status = yield* awaitSecretCard({
           threadId,
           turnItemId,
