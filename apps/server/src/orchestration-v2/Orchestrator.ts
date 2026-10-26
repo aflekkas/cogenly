@@ -8083,6 +8083,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             label: command.label,
             reason: command.reason,
             ...(command.placeholder === undefined ? {} : { placeholder: command.placeholder }),
+            ...(command.integrationSetup === undefined
+              ? {}
+              : { integrationSetup: command.integrationSetup }),
             secretStatus: command.secretStatus,
             ...(login === undefined ? {} : { login }),
           };

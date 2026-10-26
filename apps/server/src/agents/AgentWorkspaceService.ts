@@ -1,5 +1,3 @@
-import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
-import { MessageId } from "@cogenly/contracts";
 import { decideFallback } from "./providerFallback.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { AgentHandoffBrief } from "@cogenly/contracts";
@@ -19,6 +17,8 @@ import {
   Commitment,
   CommitmentHistory,
   CommandId,
+  MessageId,
+  type Integration,
   ScheduledTaskId,
   ThreadId,
   type Agent,
@@ -43,6 +43,7 @@ import * as Agents from "./AgentService.ts";
 import * as Work from "../work/WorkHandoffService.ts";
 import * as Schedules from "../scheduledTasks/ScheduledTaskService.ts";
 import * as Integrations from "../integrations/Integrations.ts";
+import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 
 const decodeEventContext = Schema.decodeUnknownEffect(Schema.fromJsonString(AgentEventContext));
 const isAgentError = Schema.is(AgentError);
@@ -197,6 +198,7 @@ const make = Effect.gen(function* () {
   // Optional so workspaces built without the gateway (unit tests) still
   // approve other actions; an integration approval then fails clearly.
   const integrations = yield* Effect.serviceOption(Integrations.Integrations);
+  const threads = yield* Effect.serviceOption(Threads.ThreadManagementService);
   const approvalChanges = yield* ApprovalChanges.optional;
   const notifyApprovals = approvalChanges.notify;
   const lock = yield* Semaphore.make(1);
@@ -515,7 +517,7 @@ const make = Effect.gen(function* () {
     expireApprovals().pipe(
       Effect.andThen(
         sql`SELECT a.* FROM agent_approvals a JOIN orchestration_v2_projection_threads t ON t.thread_id = COALESCE(json_extract(a.action_json, '$.threadId'), json_extract(a.action_json, '$.payload.threadId'))
-          WHERE a.status = 'pending' AND a.agent_id IS NULL AND json_extract(a.action_json, '$.actionKind') IN ('vault_use', 'integration_add', 'integration_update')
+          WHERE a.status = 'pending' AND (a.agent_id IS NULL OR json_extract(a.action_json, '$.actionKind') IN ('integration_add', 'integration_update')) AND json_extract(a.action_json, '$.actionKind') IN ('vault_use', 'integration_add', 'integration_update')
             AND (${threadId ?? null} IS NULL OR t.thread_id = ${threadId ?? null})
             AND t.deleted_at IS NULL AND t.archived_at IS NULL AND json_extract(t.payload_json, '$.settledOverride') IS NOT 'settled'
           ORDER BY a.requested_at, a.id LIMIT 200`,
@@ -697,8 +699,9 @@ const make = Effect.gen(function* () {
               const agent = approval.agentId === null ? null : yield* store.get(approval.agentId);
               if (!agent && !action.threadId)
                 return yield* fail("An integration approval needs a calling thread.");
+              let connected: Integration;
               if (action.actionKind === "integration_add") {
-                yield* integrations.value
+                connected = (yield* integrations.value
                   .create(action.payload, {
                     approveCredentials: true,
                     approveExecutable: true,
@@ -707,11 +710,11 @@ const make = Effect.gen(function* () {
                       ? { id: agent.id, name: agent.name }
                       : { id: action.threadId!, name: "Coding agent" },
                   })
-                  .pipe(Effect.mapError((cause) => fail(cause.message)));
+                  .pipe(Effect.mapError((cause) => fail(cause.message)))).integration;
               } else {
-                yield* integrations.value
+                connected = (yield* integrations.value
                   .update(action.payload, { approveCredentials: true, approveExecutable: true })
-                  .pipe(Effect.mapError((cause) => fail(cause.message)));
+                  .pipe(Effect.mapError((cause) => fail(cause.message)))).integration;
               }
               yield* sql.withTransaction(
                 Effect.gen(function* () {
@@ -720,6 +723,36 @@ const make = Effect.gen(function* () {
                     yield* sql`INSERT INTO agent_run_actions(id, agent_id, run_id, kind, target_id, at) VALUES (${`approval-action:${id}`}, ${agent.id}, ${approval.sourceRunId}, ${action.actionKind}, ${id}, ${yield* now}) ON CONFLICT(id) DO NOTHING`;
                 }),
               );
+              // An owner can approve after the provider has ended its waiting call.
+              if (action.threadId && threads._tag === "Some") {
+                const shell = yield* threads.value.getThreadShell(action.threadId);
+                if (
+                  shell &&
+                  shell.activeRunId === null &&
+                  shell.deletedAt === null &&
+                  shell.archivedAt === null
+                ) {
+                  yield* threads.value
+                    .sendToThread({
+                      projectId: shell.projectId,
+                      threadId: action.threadId,
+                      commandId: CommandId.make(`integration-approved:${id}`),
+                      messageId: MessageId.make(`message:integration-approved:${id}`),
+                      text: `The owner approved ${connected.displayName}. Continue setup with integration_update name ${connected.name}; use the inline sign-in card, then integration_test and list the tools.`,
+                      attachments: [],
+                      mode: "auto",
+                      createdBy: "system",
+                      creationSource: "server",
+                    })
+                    .pipe(
+                      Effect.catch((error) =>
+                        Effect.logWarning("Could not resume approved integration setup", {
+                          errorTag: error._tag,
+                        }),
+                      ),
+                    );
+                }
+              }
               return { approval: yield* getApproval(id) };
             }
             if (approval.agentId === null) return yield* fail("An agent approval needs an agent.");

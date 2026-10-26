@@ -41,6 +41,8 @@ export interface MockAuthServer {
   tokenEndpoint?: string;
   readonly tokenRequests: Array<string>;
   registrations: number;
+  registrationError?: { status: number; error: string; error_description: string };
+  readonly registrationRequests: Array<unknown>;
   refreshes: number;
   /** Refresh tokens answer invalid_grant, as after the user revokes access. */
   revoked: boolean;
@@ -72,6 +74,7 @@ export const startMockAuthServer = Effect.gen(function* () {
     base: "",
     tokenRequests: [],
     registrations: 0,
+    registrationRequests: [],
     refreshes: 0,
     revoked: false,
     clients: new Map(),
@@ -130,6 +133,9 @@ export const startMockAuthServer = Effect.gen(function* () {
     HttpRouter.add("POST", "/auth/register", (request) =>
       request.json.pipe(
         Effect.map((body) => {
+          mock.registrationRequests.push(body);
+          if (mock.registrationError)
+            return reply(mock.registrationError, mock.registrationError.status);
           mock.registrations += 1;
           const clientId = `client-${mock.registrations}`;
           mock.clients.set(clientId, (body as { redirect_uris: Array<string> }).redirect_uris);

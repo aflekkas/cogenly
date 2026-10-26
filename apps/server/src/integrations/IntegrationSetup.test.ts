@@ -11,7 +11,6 @@ import {
   agentFailureMessage,
   agentNextStep,
   catalogSetupFor,
-  settingsSetupUrl,
   setupActionFor,
 } from "./IntegrationSetup.ts";
 
@@ -229,7 +228,6 @@ describe("setupActionFor, from errors", () => {
 describe("agentNextStep", () => {
   it("gives the agent private setup instructions rather than a Settings wizard", () => {
     const text = agentNextStep(catalogSetupFor({ entry: entry("slack"), mode: "oauth_app" })!, {
-      settingsUrl: settingsSetupUrl(undefined),
       entry: entry("slack"),
       accountLabel: "Acme",
     });
@@ -253,7 +251,6 @@ describe("agentNextStep", () => {
     ] as const;
     for (const [action, service] of cases) {
       const text = agentNextStep(action, {
-        settingsUrl: settingsSetupUrl(undefined),
         entry: service,
       });
       expect(text).toContain("collaborative browser");
@@ -265,7 +262,6 @@ describe("agentNextStep", () => {
       expect(text).not.toMatch(/into view|reply "?go/i);
     }
     const googleText = agentNextStep(google, {
-      settingsUrl: settingsSetupUrl(undefined),
       entry: entry("google-workspace"),
     });
     // Reuse before create, and the client goes straight to the vault.
@@ -277,16 +273,42 @@ describe("agentNextStep", () => {
   });
 
   it("keeps precise failures while directing setup to the agent", () => {
-    const { message, transient } = agentFailureMessage(
-      { reason: "google_client_missing" },
-      undefined,
-    );
+    const { message, transient } = agentFailureMessage({
+      operation: "create",
+      reason: "google_client_missing",
+    });
     expect(transient).toBe(false);
     expect(message).toContain("google-oauth-client");
     expect(message).not.toContain("google_client_missing");
-    expect(agentFailureMessage({ reason: "upstream_timeout" }, undefined).transient).toBe(true);
-    expect(agentFailureMessage({ reason: "not_found" }, undefined).message).toContain(
+    expect(agentFailureMessage({ operation: "test", reason: "upstream_timeout" }).transient).toBe(
+      true,
+    );
+    expect(agentFailureMessage({ operation: "update", reason: "not_found" }).message).toContain(
       "No connected integration",
     );
+  });
+
+  it("names the refusing step and the OAuth server's error instead of a generic failure", () => {
+    const refused = agentFailureMessage({
+      operation: "validate private endpoint",
+      reason: "invalid_request",
+    }).message;
+    expect(refused).toContain('"validate private endpoint"');
+    expect(refused).not.toContain("/settings/");
+    const oauth = agentFailureMessage({
+      operation: "register",
+      reason: "upstream_error",
+      oauthFailure: {
+        stage: "DCR",
+        host: "mcp-auth.wisprflow.com",
+        status: 400,
+        error: "invalid_redirect_uri",
+        description: "Redirect not allowed",
+      },
+    });
+    expect(oauth.message).toBe(
+      "OAuth DCR failed at mcp-auth.wisprflow.com (HTTP 400): invalid_redirect_uri — Redirect not allowed.",
+    );
+    expect(oauth.transient).toBe(true);
   });
 });

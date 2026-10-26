@@ -1,3 +1,5 @@
+import { AnimatedHeight } from "../AnimatedHeight";
+import { IntegrationSetupCard } from "./IntegrationSetupCard";
 import {
   loginRequestDisplay,
   loginRequestSite,
@@ -32,10 +34,17 @@ import { WorkLogRow } from "./WorkLog";
 export function SecretRequestCard(props: {
   readonly environmentId: EnvironmentId;
   readonly item: SecretRequestItem;
+  readonly onToggle?: (collapsed: boolean) => void;
   readonly visibility: OrchestrationV2ProjectedTurnItem["visibility"];
 }) {
   const { item } = props;
-  // A sign-in card (request_login) shares the secret card's lifecycle.
+  // Integration setup and sign-in (request_login) cards share the secret card's lifecycle.
+  if (item.integrationSetup !== undefined)
+    return (
+      <AnimatedHeight>
+        <IntegrationSetupCard {...props} />
+      </AnimatedHeight>
+    );
   const display = item.login
     ? loginRequestDisplay(item, props.visibility)
     : secretRequestDisplay(item, props.visibility);

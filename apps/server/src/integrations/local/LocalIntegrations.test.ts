@@ -519,13 +519,12 @@ describe("managed Google integrations", () => {
           integration?: unknown;
           setup?: { type: string };
           nextStep?: string;
-          settingsUrl?: string;
         };
         if (missing) {
-          // Nothing is created; the agent relays Settings' guided steps or collects the client privately.
+          // Nothing is created; the agent sets up the client itself, never via a Settings link.
           expect(reply.integration).toBeUndefined();
           expect(reply.setup?.type).toBe("oauth_client");
-          expect(reply.settingsUrl).toBe("/settings/integrations?setup=google-workspace");
+          expect(reply).not.toHaveProperty("settingsUrl");
           expect(reply.nextStep).toContain("request_secret");
           expect(reply.nextStep).toContain("google-oauth-client");
           expect(reply.nextStep).toContain("Retry integration_add");

@@ -165,6 +165,7 @@ describe("integration_add approval gating", () => {
       expect(proposals).toEqual([
         {
           actionKind: "integration_add",
+          threadId: agent.conversationThreadId,
           payload: expect.objectContaining({
             name: "linear-support",
             url: "https://mcp.linear.app/mcp",
