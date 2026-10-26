@@ -1,6 +1,7 @@
 import type {
   AgentId,
   ProjectLabelId,
+  ThreadId,
   VaultCreateInput,
   VaultItemId,
   VaultItemMetadata,
@@ -260,6 +261,7 @@ const OUTCOME_LABELS: Readonly<Record<string, string>> = {
   denied_domain: "Blocked on this site",
   denied_policy: "Denied",
   field_missing: "Field missing",
+  saved: "Saved",
 };
 
 const ACTION_LABELS: Readonly<Record<string, string>> = {
@@ -267,6 +269,19 @@ const ACTION_LABELS: Readonly<Record<string, string>> = {
   resolve: "Used by Cogenly",
   use: "Used",
 };
+
+/**
+ * An entry written when the user answered an agent's sign-in card, with the
+ * thread it was saved from; null for any other use.
+ */
+export function vaultSavedFromThread(
+  entry: Pick<VaultUsageEntry, "action" | "threadId">,
+): { readonly threadId: ThreadId; readonly updated: boolean } | null {
+  if (entry.threadId === null) return null;
+  if (entry.action === "saved_from_request") return { threadId: entry.threadId, updated: false };
+  if (entry.action === "updated_from_request") return { threadId: entry.threadId, updated: true };
+  return null;
+}
 
 const humanize = (text: string) => {
   const spaced = text.replaceAll("_", " ").trim();
@@ -276,4 +291,8 @@ const humanize = (text: string) => {
 export const vaultOutcomeLabel = (outcome: string) => OUTCOME_LABELS[outcome] ?? humanize(outcome);
 export const vaultActionLabel = (action: string) => ACTION_LABELS[action] ?? humanize(action);
 export const vaultOutcomeTone = (outcome: string): "success" | "warning" | "error" =>
-  outcome === "allowed" ? "success" : outcome === "approval_required" ? "warning" : "error";
+  outcome === "allowed" || outcome === "saved"
+    ? "success"
+    : outcome === "approval_required"
+      ? "warning"
+      : "error";

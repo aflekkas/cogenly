@@ -16,6 +16,31 @@ export const SecretRequestAnswerInput = Schema.Struct({
 });
 export type SecretRequestAnswerInput = typeof SecretRequestAnswerInput.Type;
 
+const LoginValue = Schema.String.check(Schema.isMaxLength(8192));
+
+/**
+ * The user's answer to an agent's sign-in request (request_login). A save goes
+ * straight into the vault as a login allowed on the request's site; the
+ * thread learns only which item it was saved to. `keep: false` removes the
+ * item once the agent's run ends.
+ */
+export const LoginRequestAnswerInput = Schema.Struct({
+  threadId: ThreadId,
+  turnItemId: TurnItemId,
+  answer: Schema.Union([
+    Schema.Struct({
+      type: Schema.Literal("save"),
+      username: Schema.optional(LoginValue),
+      password: Schema.optional(LoginValue),
+      totpSecret: Schema.optional(Schema.String.check(Schema.isMaxLength(1024))),
+      note: Schema.optional(Schema.String.check(Schema.isMaxLength(65536))),
+      keep: Schema.Boolean,
+    }),
+    Schema.Struct({ type: Schema.Literal("decline") }),
+  ]),
+});
+export type LoginRequestAnswerInput = typeof LoginRequestAnswerInput.Type;
+
 const SECRET_REQUEST_FAILURE_MESSAGES = {
   load_failed: "Could not load the secret request.",
   not_found: "This secret request no longer exists.",
@@ -29,6 +54,9 @@ const SECRET_REQUEST_FAILURE_MESSAGES = {
     "That secretRef was already used or does not exist. Ask the user again with request_secret.",
   ref_expired: "That secretRef expired. Ask the user again with request_secret.",
   consume_failed: "Could not use that secretRef. Try again.",
+  not_a_login: "This request is not a sign-in request.",
+  login_empty: "Enter the login details before saving.",
+  vault_failed: "Could not save the login to the vault.",
 } as const;
 
 export const SecretRequestFailureReason = Schema.Literals(

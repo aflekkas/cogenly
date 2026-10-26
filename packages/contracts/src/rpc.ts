@@ -362,7 +362,11 @@ import {
   ScheduledTaskUpsertInput,
   ScheduledTaskMutationResult,
 } from "./scheduledTask.ts";
-import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
+import {
+  LoginRequestAnswerInput,
+  SecretRequestAnswerInput,
+  SecretRequestError,
+} from "./secretRequest.ts";
 import {
   ProjectCloneActionInput,
   ProjectCloneActionResult,
@@ -620,6 +624,7 @@ export const WS_METHODS = {
   scheduledTasksRunNow: "scheduledTasks.runNow",
   scheduledTasksRotateWebhookToken: "scheduledTasks.rotateWebhookToken",
   secretsAnswerRequest: "secrets.answerRequest",
+  secretsAnswerLoginRequest: "secrets.answerLoginRequest",
   accountsConnect: "accounts.connect",
   accountsUse: "accounts.use",
   accountsRemoveAccess: "accounts.removeAccess",
@@ -2745,6 +2750,11 @@ const WsSecretsAnswerRequestRpc = Rpc.make(WS_METHODS.secretsAnswerRequest, {
   error: Schema.Union([SecretRequestError, EnvironmentAuthorizationError]),
 });
 
+const WsSecretsAnswerLoginRequestRpc = Rpc.make(WS_METHODS.secretsAnswerLoginRequest, {
+  payload: LoginRequestAnswerInput,
+  error: Schema.Union([SecretRequestError, EnvironmentAuthorizationError]),
+});
+
 const WsAccountsConnectRpc = Rpc.make(WS_METHODS.accountsConnect, {
   payload: Accounts.AccountThreadConnectInput,
   success: Accounts.AccountConnectResult,
@@ -3044,6 +3054,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsScheduledTasksRunNowRpc,
   WsScheduledTasksRotateWebhookTokenRpc,
   WsSecretsAnswerRequestRpc,
+  WsSecretsAnswerLoginRequestRpc,
   WsAccountsConnectRpc,
   WsAccountsUseRpc,
   WsAccountsRemoveAccessRpc,

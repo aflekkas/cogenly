@@ -8086,6 +8086,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         existing !== undefined &&
         (existing.secretStatus !== "pending" || command.secretStatus === "pending");
       const pending = command.secretStatus === "pending";
+      // A close that does not restate the sign-in card keeps what it asked.
+      const login =
+        command.login ?? (existing?.type === "secret_request" ? existing.login : undefined);
       const turnItem: OrchestrationV2TurnItem = unchanged
         ? existing
         : {
@@ -8112,6 +8115,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             reason: command.reason,
             ...(command.placeholder === undefined ? {} : { placeholder: command.placeholder }),
             secretStatus: command.secretStatus,
+            ...(login === undefined ? {} : { login }),
           };
       yield* emit(
         events,

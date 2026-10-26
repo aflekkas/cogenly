@@ -304,6 +304,13 @@ export function summarizeT3ToolCalls(
     case "secret-request":
       label = phrase("Asked for", "ask for", quantity(selected.length, "secret"));
       break;
+    case "login-request":
+      label = phrase(
+        "Asked to sign in to",
+        "ask to sign in to",
+        quantity(countEntities(entityIds("site")), "site"),
+      );
+      break;
     case "worktree-handoff":
       label = phrase(
         "Handed off to",

@@ -80,6 +80,17 @@ legacy backfill reads metadata only and preserves item ids and encrypted
 bodies. Account lookups filter by project, including direct id lookups; an
 unfiled caller sees only all-project accounts.
 
+Sign-in cards (`request_login`) are `secret_request` turn items with a `login`
+block, so they share that item's pending, notification, fork and restart
+handling; a new turn item type would have to be taught to each of those. The
+answer travels only in the `secrets.answerLoginRequest` RPC payload to
+[LoginRequests](../../apps/server/src/secrets/LoginRequests.ts), which writes the
+vault item before recording the card as saved; the item records only the saved
+item's id. New logins are created `allow` for any thread or agent, limited to the
+card's host, because the owner typed them for that site. Updating an existing
+login keeps its policy. A login the owner chose not to keep is created
+machine-only and deleted by a sweep once the asking run has ended.
+
 CLI process exposure uses separate revision-bound grants, including for owner
 threads. It reuses `vault_use` approvals with a `processExposure` payload; this
 branch must never update the browser policy. Approval grants this thread by

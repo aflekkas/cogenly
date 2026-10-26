@@ -119,6 +119,11 @@ const make = Effect.gen(function* () {
       if (item.secretStatus !== "pending") {
         return yield* new SecretRequestError({ reason: "already_answered" });
       }
+      // A sign-in card is saved through LoginRequests, straight into the vault;
+      // a single value stored here would never be read.
+      if (item.login !== undefined && input.answer.type === "save") {
+        return yield* new SecretRequestError({ reason: "not_found" });
+      }
       // The agent is waiting inside the run that asked; once it has ended,
       // nobody will ever receive the ref, so a value saved now would be lost.
       const run = records.runs.find((candidate) => candidate.id === item.runId);

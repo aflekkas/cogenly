@@ -96,6 +96,7 @@ import * as ThreadForkService from "./ThreadForkService.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
+import * as LoginRequests from "../secrets/LoginRequests.ts";
 import * as Vault from "../vault/Vault.ts";
 import * as VaultSyncCapture from "../vault/VaultSyncCapture.ts";
 import * as SharedState from "../sync/SharedState.ts";
@@ -432,6 +433,11 @@ const layerThreadLifecycleProvided = ThreadLifecycleService.layer.pipe(
 const layerSecretRequestsProvided = SecretRequests.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
 );
+const layerLoginRequestsProvided = LoginRequests.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(layerThreadManagementProvided, layerVaultProvided, AgentStore.layer),
+  ),
+);
 const layerAgentsProvided = Agents.layer.pipe(
   Layer.provide(Membership.layer),
   Layer.provide(RemoteThreadLaunch.layer),
@@ -636,6 +642,7 @@ const layerProductionBase = Layer.mergeAll(
   AgentStore.layer,
   layerScheduledTaskProvided,
   layerSecretRequestsProvided,
+  layerLoginRequestsProvided,
   layerVaultProvided,
   layerAccountsProvided,
   layerAccountAccessProvided,

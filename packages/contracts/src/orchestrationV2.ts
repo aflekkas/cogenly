@@ -1622,9 +1622,42 @@ export const OrchestrationV2SecretRequestStatus = Schema.Literals([
 ]);
 export type OrchestrationV2SecretRequestStatus = typeof OrchestrationV2SecretRequestStatus.Type;
 
+/** A field a login request card asks for; `note` is kept as the item's recovery note. */
+export const OrchestrationV2LoginRequestField = Schema.Literals([
+  "username",
+  "password",
+  "totp",
+  "note",
+]);
+export type OrchestrationV2LoginRequestField = typeof OrchestrationV2LoginRequestField.Type;
+
+/**
+ * What a login request card asks for (request_login). Its values go straight
+ * into the vault; the item records only the site, the asked fields and which
+ * vault item the answer was saved to.
+ */
+export const OrchestrationV2LoginRequest = Schema.Struct({
+  /** Where the login is used, e.g. `https://github.com`; the saved item is allowed only there. */
+  origin: TrimmedNonEmptyString,
+  siteName: Schema.optional(TrimmedNonEmptyString),
+  /** Shown as the username field's initial text; the agent's guess, never a stored value. */
+  usernameHint: Schema.optional(Schema.String),
+  fields: Schema.Array(OrchestrationV2LoginRequestField),
+  /** Set when the answer replaces the secrets of an existing vault login. */
+  updateItemId: Schema.optional(TrimmedNonEmptyString),
+  updateItemName: Schema.optional(TrimmedNonEmptyString),
+  /** The vault item the answer was saved to, once saved. */
+  savedItemId: Schema.optional(TrimmedNonEmptyString),
+  savedItemName: Schema.optional(TrimmedNonEmptyString),
+  /** False when the user chose not to keep it: the item is removed once the run ends. */
+  kept: Schema.optional(Schema.Boolean),
+});
+export type OrchestrationV2LoginRequest = typeof OrchestrationV2LoginRequest.Type;
+
 /**
  * A secret an agent asked the user for. The value never passes through
  * orchestration: the item carries only what was asked and how it was answered.
+ * `login` marks a sign-in card (request_login) rather than a single secret.
  */
 const OrchestrationV2SecretRequestFields = {
   type: Schema.Literal("secret_request"),
@@ -1632,6 +1665,7 @@ const OrchestrationV2SecretRequestFields = {
   reason: Schema.String,
   placeholder: Schema.optional(Schema.String),
   secretStatus: OrchestrationV2SecretRequestStatus,
+  login: Schema.optional(OrchestrationV2LoginRequest),
 } as const;
 
 /**
@@ -3601,6 +3635,7 @@ const OrchestrationV2InternalCommand = Schema.Union([
     reason: Schema.String,
     placeholder: Schema.optional(Schema.String),
     secretStatus: OrchestrationV2SecretRequestStatus,
+    login: Schema.optional(OrchestrationV2LoginRequest),
   }),
 ]);
 export type OrchestrationV2InternalCommand = typeof OrchestrationV2InternalCommand.Type;

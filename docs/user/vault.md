@@ -33,7 +33,16 @@ leave a secret field blank to keep it, or type a new value to replace it.
   the item's domains and types the value in. The agent gets only a "filled"
   confirmation. At checkout it can fill a card's number, expiry, CVC, and
   cardholder name the same way, one field at a time.
-- If an agent needs a secret only you know, it asks with a private card.
+- When a site needs a login the vault doesn't have, the agent shows a
+  **Sign in to (site)** card in the thread instead of asking in chat. Enter
+  the username and password there and choose **Submit**. With **Save to
+  vault** on (the default), the login is saved for that site and any agent
+  can sign in there next time without asking; turn it off to use it for the
+  current task only. **Skip** tells the agent you declined. If a saved
+  password stops working, the agent shows the card again to update that
+  login. Cards from scheduled runs wait for you and mark the thread as
+  needing input.
+- If an agent needs another secret only you know, it asks with a private card.
   It can keep your answer in the vault so it never has to ask again.
 - Secret values are scrubbed from tool results and terminal output, so a
   filled password does not leak back into the conversation.
@@ -53,7 +62,8 @@ items. CLI process exposure always needs its own approval.
 ## Usage log
 
 Every use is recorded: which item, which agent or chat, which site, and
-whether it was allowed, denied, or waited on approval. In Settings → Vault,
+whether it was allowed, denied, or waited on approval. A login you entered on
+a sign-in card shows which thread and agent it was saved from. In Settings → Vault,
 the history button on an item shows its uses, and **Recent activity** lists
 uses across the vault, including items you have since deleted.
 

@@ -33,6 +33,7 @@ import {
   OrchestrationV2Actor,
   OrchestrationV2CreationSource,
   OrchestrationV2DelegatedTaskRecovery,
+  OrchestrationV2LoginRequestField,
   OrchestrationV2RunStatus,
   OrchestrationV2TurnItemStatus,
 } from "./orchestrationV2.ts";
@@ -765,6 +766,70 @@ export const OrchestratorMcpRequestSecretResult = Schema.Union([
   }),
 ]);
 export type OrchestratorMcpRequestSecretResult = typeof OrchestratorMcpRequestSecretResult.Type;
+
+export const OrchestratorMcpRequestLoginInput = Schema.Struct({
+  site: TrimmedNonEmptyString.check(Schema.isMaxLength(2048)).annotate({
+    description:
+      "The sign-in page URL or its host, e.g. 'https://github.com/login'. The saved login is allowed only on this host and its subdomains.",
+  }),
+  siteName: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(100))).annotate({
+    description: "Display name for the site, e.g. 'GitHub'. Also names a new vault item.",
+  }),
+  reason: TrimmedNonEmptyString.check(Schema.isMaxLength(500)).annotate({
+    description: "One sentence on what you need to do after signing in.",
+  }),
+  usernameHint: Schema.optional(Schema.String.check(Schema.isMaxLength(320))).annotate({
+    description:
+      "A username or email you expect, prefilled for the user to confirm. Only something you already know; never guess.",
+  }),
+  fields: Schema.optional(
+    Schema.Array(OrchestrationV2LoginRequestField).check(Schema.isMinLength(1)),
+  ).annotate({
+    description:
+      "What the card asks for. Default ['username', 'password']. Add 'totp' for the one-time code secret (not a code) when the site uses an authenticator, or 'note' for recovery codes.",
+  }),
+  updateItemId: Schema.optional(TrimmedNonEmptyString).annotate({
+    description:
+      "A vault login (id from vault_list) whose stored password stopped working. The answer replaces its secrets instead of creating a new item.",
+  }),
+  timeoutMs: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 1_000, maximum: 60 * 60 * 1_000 })),
+  ).annotate({
+    description:
+      "How long to wait for the user. Default 10 minutes; use the 1 hour maximum in scheduled runs, where the user may be away.",
+  }),
+  clientRequestId: Schema.optional(OrchestratorMcpClientRequestId).annotate({
+    description:
+      "Reuse when retrying a call that lost its result. Use a new id to ask again after declined, timed_out or cancelled.",
+  }),
+});
+export type OrchestratorMcpRequestLoginInput = typeof OrchestratorMcpRequestLoginInput.Type;
+
+export const OrchestratorMcpRequestLoginResult = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("saved").annotate({
+      description:
+        "The login is in the vault. Sign in with vault_fill (field username / password / totp) using vaultItemId; you never see the values.",
+    }),
+    vaultItemId: TrimmedNonEmptyString,
+    vaultItemName: TrimmedNonEmptyString,
+    domain: TrimmedNonEmptyString,
+    updated: Schema.Boolean.annotate({
+      description: "True when an existing item (updateItemId) was updated.",
+    }),
+    kept: Schema.Boolean.annotate({
+      description:
+        "False when the user chose not to keep it: it is removed once this run ends, so use it now.",
+    }),
+  }),
+  Schema.Struct({
+    status: Schema.Literals(["declined", "cancelled", "timed_out"]).annotate({
+      description:
+        "declined: the user chose not to sign in; continue without it or ask again later with a new clientRequestId if they ask you to. cancelled: the request ended with the run. timed_out: nobody answered in time; the card is closed.",
+    }),
+  }),
+]);
+export type OrchestratorMcpRequestLoginResult = typeof OrchestratorMcpRequestLoginResult.Type;
 
 export const OrchestratorMcpDeleteScheduledTaskInput = Schema.Struct({
   scheduledTaskId: ScheduledTaskId,
