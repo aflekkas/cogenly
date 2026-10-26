@@ -606,72 +606,70 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
           Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
           Effect.flatMap(({ encodedResult }) =>
             Effect.gen(function* () {
-              const snapshot = encodedResult as SnapshotMetadata & {
-                readonly url: string;
-                /** The tab read, so the agent can say which page it saw. */
+              const snapshot = encodedResult as Partial<SnapshotMetadata> & {
+                readonly url?: string;
                 readonly tab?: unknown;
-                readonly screenshot: {
-                  readonly mimeType: "image/png";
+                readonly screenshot?: {
+                  readonly mimeType: "image/png" | "image/jpeg";
                   readonly data: string;
                   readonly width: number;
                   readonly height: number;
                 };
               };
               const { screenshot, ...page } = snapshot;
-              const png = new Uint8Array(Buffer.from(screenshot.data, "base64"));
-              const screenshotPath =
-                payload?.save === true ? yield* saveScreenshot(snapshot.url, png) : undefined;
-              // Images stay out of tool history unless asked for: providers replay them on every
-              // later request, and some reject inline images outright.
-              const includeImage = payload?.includeImage === true;
-              if (screenshotPath !== undefined && !includeImage) {
-                // The agent only wants a file to show the user. The url keeps the site icon on the tool row.
-                const saved = {
-                  url: cutText(snapshot.url, MAX_SNAPSHOT_IDENTIFIER_CHARS),
-                  screenshotPath,
+              const png = screenshot
+                ? new Uint8Array(Buffer.from(screenshot.data, "base64"))
+                : undefined;
+              const saved =
+                payload?.save === true && png
+                  ? yield* saveScreenshot(snapshot.url ?? "", png).pipe(
+                      Effect.map((screenshotPath) => ({ screenshotPath })),
+                      Effect.orElseSucceed(() => ({
+                        screenshotError:
+                          "Screenshot could not be saved; structured page data is still available.",
+                      })),
+                    )
+                  : {};
+              const includeImage = payload?.includeImage === true && screenshot !== undefined;
+              if ("screenshotPath" in saved && !includeImage) {
+                const value = {
+                  url: snapshot.url,
+                  ...saved,
                   ...(snapshot.tab === undefined ? {} : { tab: snapshot.tab }),
                 };
                 return new McpSchema.CallToolResult({
                   isError: false,
-                  structuredContent: saved,
-                  content: [{ type: "text", text: encodeJsonText(saved) }],
+                  structuredContent: value,
+                  content: [{ type: "text", text: encodeJsonText(value) }],
                 });
               }
               const metadata = {
                 ...page,
-                screenshot: {
-                  mimeType: screenshot.mimeType,
-                  width: screenshot.width,
-                  height: screenshot.height,
-                },
-                ...(screenshotPath === undefined ? {} : { screenshotPath }),
+                ...saved,
+                ...(screenshot
+                  ? {
+                      screenshot: {
+                        mimeType: screenshot.mimeType,
+                        width: screenshot.width,
+                        height: screenshot.height,
+                      },
+                    }
+                  : {}),
               };
-              const bounded = boundSnapshotMetadata(metadata);
+              const bounded =
+                typeof metadata.visibleText === "string"
+                  ? boundSnapshotMetadata(metadata as SnapshotMetadata)
+                  : { value: metadata, text: encodeJsonText(metadata), omitted: [] };
+              const value =
+                bounded.omitted.length === 0
+                  ? bounded.value
+                  : { ...bounded.value, omitted: bounded.omitted };
               return new McpSchema.CallToolResult({
                 isError: false,
-                structuredContent:
-                  bounded.omitted.length === 0
-                    ? bounded.value
-                    : { ...bounded.value, omitted: bounded.omitted },
+                structuredContent: value,
                 content: [
-                  // Keep the page identity readable even if a provider truncates the snapshot.
-                  {
-                    type: "text",
-                    text: encodeJsonText({
-                      url: cutText(snapshot.url, MAX_SNAPSHOT_IDENTIFIER_CHARS),
-                      ...(snapshot.tab === undefined ? {} : { tab: snapshot.tab }),
-                    }),
-                  },
-                  { type: "text", text: bounded.text },
-                  ...(bounded.omitted.length === 0
-                    ? []
-                    : [
-                        {
-                          type: "text" as const,
-                          text: `Snapshot text was bounded. Omitted: ${bounded.omitted.join("; ")}.`,
-                        },
-                      ]),
-                  ...(includeImage
+                  { type: "text", text: encodeJsonText(value) },
+                  ...(includeImage && screenshot && png
                     ? [{ type: "image" as const, data: png, mimeType: screenshot.mimeType }]
                     : []),
                 ],

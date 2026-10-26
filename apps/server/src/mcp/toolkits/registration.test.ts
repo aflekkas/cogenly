@@ -685,6 +685,7 @@ const smokeCases = [
       "preview_dialog",
       "preview_drag",
       "preview_evaluate",
+      "preview_extract",
       "preview_hover",
       "preview_navigate",
       "preview_open",

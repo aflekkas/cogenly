@@ -84,3 +84,120 @@ describe("origin-bound vault typing", () => {
     expect(fields.events).toEqual(["input", "change"]);
   });
 });
+
+describe("optional browser screenshots", () => {
+  const fakePage = () =>
+    ({
+      viewportSize: () => ({ width: 2560, height: 1600 }),
+      on: vi.fn(),
+      evaluate: async () => ({
+        url: "https://example.com",
+        title: "Form",
+        loading: false,
+        visibleText: "Save",
+        interactiveElements: [],
+      }),
+      ariaSnapshot: async () => '- button "Save" [ref=e1] [box=0,0,100,30]',
+      title: async () => "Form",
+      url: () => "https://example.com",
+    }) as unknown as Page;
+
+  it("returns structured data even if screenshot capture fails", async () => {
+    const cdp = {
+      send: vi.fn(async () => {
+        throw new Error("UnknownVizError");
+      }),
+    } as unknown as import("playwright-core").CDPSession;
+    const result = await BrowserPage.snapshot({
+      page: fakePage(),
+      cdp,
+      renderScale: 1,
+      consoleEntries: [],
+      networkEntries: [],
+      actionTimeline: [],
+    });
+    expect(result.title).toBe("Form");
+    expect(result.accessibilityTree).toContain('button "Save"');
+    expect(result.screenshot).toBeUndefined();
+    expect(result.screenshotError).toContain("structured page data is still available");
+  });
+
+  it("never invokes screenshot CDP when images are not requested", async () => {
+    const send = vi.fn();
+    await BrowserPage.snapshot({
+      page: fakePage(),
+      cdp: { send } as unknown as import("playwright-core").CDPSession,
+      renderScale: 1,
+      includeScreenshot: false,
+      consoleEntries: [],
+      networkEntries: [],
+      actionTimeline: [],
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("downscales and compresses requested images and isolates their failure", async () => {
+    const send = vi.fn(async (method: string) =>
+      method === "Page.getLayoutMetrics"
+        ? { cssVisualViewport: { pageX: 0, pageY: 0 } }
+        : { data: "aW1hZ2U=" },
+    );
+    const input = {
+      page: fakePage(),
+      cdp: { send } as unknown as import("playwright-core").CDPSession,
+      renderScale: 1,
+    };
+    expect(await BrowserPage.screenshot(input)).toEqual({
+      screenshot: { mimeType: "image/jpeg", data: "aW1hZ2U=", width: 1280, height: 800 },
+    });
+    expect(send).toHaveBeenLastCalledWith("Page.captureScreenshot", {
+      format: "jpeg",
+      quality: 70,
+      clip: { x: 0, y: 0, width: 2560, height: 1600, scale: 0.5 },
+    });
+    send.mockRejectedValueOnce(new Error("capture failed"));
+    expect(await BrowserPage.screenshot(input)).toMatchObject({
+      screenshotError: expect.any(String),
+    });
+  });
+
+  it("keeps refs stable across observations and invalidates them on takeover", async () => {
+    const page = fakePage();
+    const first = await BrowserPage.observe(page);
+    const second = await BrowserPage.observe(page);
+    expect(first.elements?.[0]?.ref).toBe(second.elements?.[0]?.ref);
+    BrowserPage.invalidateRefs(page);
+    expect((await BrowserPage.observe(page)).elements?.[0]?.ref).not.toBe(first.elements?.[0]?.ref);
+  });
+});
+
+it("extracts bounded JSON without a tree or image and quotes selectors and attributes safely", async () => {
+  const selector = 'a[data-label="a\\"b"]';
+  const attributes = ["href", "text", "missing"];
+  const querySelectorAll = vi.fn(() =>
+    Array.from({ length: 3 }, (_, index) => ({
+      innerText: ` Link ${index} `,
+      getAttribute: (name: string) => (name === "missing" ? null : `${name}:${index}`),
+    })),
+  );
+  const send = vi.fn(async (_method: string, params: { expression: string }) => ({
+    result: {
+      value: new Function("document", `return ${params.expression}`)({ querySelectorAll }),
+    },
+  }));
+  const value = await BrowserPage.extract(
+    { send } as unknown as import("playwright-core").CDPSession,
+    { selector, attributes, limit: 2 },
+    15000,
+  );
+  expect(querySelectorAll).toHaveBeenCalledWith(selector);
+  expect(value).toEqual({
+    items: [
+      { text: "Link 0", attributes: { href: "href:0", text: "text:0", missing: null } },
+      { text: "Link 1", attributes: { href: "href:1", text: "text:1", missing: null } },
+    ],
+    total: 3,
+    omitted: 1,
+  });
+  expect(send).toHaveBeenCalledTimes(1);
+});
