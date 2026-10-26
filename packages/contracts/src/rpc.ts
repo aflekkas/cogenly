@@ -685,6 +685,7 @@ export const WS_METHODS = {
   machinesHealthSubscribe: "machines.healthSubscribe",
   machinesHealthAlertsSubscribe: "machines.healthAlertsSubscribe",
   machinesHealthRetrySync: "machines.healthRetrySync",
+  machinesHealthFix: "machines.healthFix",
   machinesHealthTestAlertChannels: "machines.healthTestAlertChannels",
 
   // Cloud environment methods
@@ -2523,6 +2524,12 @@ const WsMachinesHealthRetrySyncRpc = Rpc.make(WS_METHODS.machinesHealthRetrySync
   success: Schema.Struct({}),
   error: machineHealthErrors,
 });
+/** Runs the direct fix of each health item, on the machine the items are on. */
+const WsMachinesHealthFixRpc = Rpc.make(WS_METHODS.machinesHealthFix, {
+  payload: MachineHealth.MachineHealthFixInput,
+  success: MachineHealth.MachineHealthFixResult,
+  error: machineHealthErrors,
+});
 /** Sends a test message through each enabled external alert channel. */
 const WsMachinesHealthTestAlertChannelsRpc = Rpc.make(WS_METHODS.machinesHealthTestAlertChannels, {
   payload: Schema.Struct({}),
@@ -2980,6 +2987,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsMachinesHealthSubscribeRpc,
   WsMachinesHealthAlertsSubscribeRpc,
   WsMachinesHealthRetrySyncRpc,
+  WsMachinesHealthFixRpc,
   WsMachinesHealthTestAlertChannelsRpc,
   WsFactsListRpc,
   WsFactsCreateRpc,

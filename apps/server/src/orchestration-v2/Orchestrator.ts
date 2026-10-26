@@ -551,6 +551,7 @@ export function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId
     case "checkpoint.rollback":
     case "checkpoint.rollback.fail":
     case "thread.background-work.settle":
+    case "thread.stale-work.settle":
     case "thread.stop":
     case "provider.switch":
       return command.threadId;
@@ -10199,6 +10200,81 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
     });
 
+  const dispatchStaleWorkSettle = (
+    command: Extract<OrchestrationV2InternalCommand, { readonly type: "thread.stale-work.settle" }>,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) =>
+    Effect.gen(function* () {
+      const projection = yield* projectionStore
+        .getThreadRecords(
+          command.threadId,
+          ["runs", "nodes", "subagents", "turnItems", "providerThreads"],
+          { turnItemTypes: ["subagent"] },
+        )
+        .pipe(
+          Effect.mapError(
+            (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+          ),
+        );
+      if (projection.thread.deletedAt !== null) return;
+      const hasLiveSession = (
+        providerThreadId: OrchestrationV2ProviderThread["id"] | null | undefined,
+      ) =>
+        Effect.gen(function* () {
+          const sessionId = projection.providerThreads.find(
+            (candidate) => candidate.id === providerThreadId,
+          )?.providerSessionId;
+          if (sessionId === null || sessionId === undefined) return false;
+          return Option.isSome(
+            yield* providerSessions.get(sessionId).pipe(Effect.orElseSucceed(() => Option.none())),
+          );
+        });
+      const unreachable = new Set(command.unreachableChildThreadIds ?? []);
+      const childIsLive = (childThreadId: ThreadId | null) =>
+        childThreadId === null || unreachable.has(childThreadId)
+          ? Effect.succeed(false)
+          : projectionStore.getThreadRecords(childThreadId, ["runs"]).pipe(
+              Effect.map(
+                ({ thread, runs }) =>
+                  thread.deletedAt === null &&
+                  (hasLiveRun({ runs }) ||
+                    runs.some((run) => run.status === "queued" && run.queueHeld !== true)),
+              ),
+              // A child that is gone can never end its task.
+              Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(false) }),
+              mapDispatchError(command),
+            );
+      const now = yield* DateTime.now;
+      for (const subagentId of new Set(command.subagentIds)) {
+        const subagent = projection.subagents.find((candidate) => candidate.id === subagentId);
+        if (subagent === undefined || !isOrchestrationV2WorkActive(subagent.status)) continue;
+        const runProviderThreadId = projection.runs.find(
+          (run) => run.id === subagent.runId,
+        )?.providerThreadId;
+        const live =
+          subagent.origin === "app_owned"
+            ? yield* childIsLive(subagent.childThreadId)
+            : (yield* hasLiveSession(subagent.providerThreadId)) ||
+              (yield* hasLiveSession(runProviderThreadId));
+        if (live) continue;
+        const ended = yield* endOrphanedNativeSubagent({
+          projection,
+          subagentId,
+          status: "interrupted",
+          includeDelegated: true,
+          ...(subagent.result === null ? { result: command.reason } : {}),
+          now,
+          emitted: yield* Ref.get(events),
+          allocateEventId: () =>
+            idAllocator.allocate.event({
+              threadId: command.threadId,
+              commandId: command.commandId,
+            }),
+        }).pipe(mapDispatchError(command));
+        yield* Ref.update(events, (current) => [...current, ...ended]);
+      }
+    });
+
   const dispatchSubagentStop = (
     command: Extract<OrchestrationV2Command, { readonly type: "subagent.stop" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
@@ -12258,6 +12334,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.background-work.settle":
         yield* dispatchBackgroundWorkSettle(command, events, effects);
         break;
+      case "thread.stale-work.settle":
+        yield* dispatchStaleWorkSettle(command, events);
+        break;
       case "thread.fork":
         yield* dispatchThreadFork(command, events);
         break;
@@ -12440,6 +12519,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         // its expected outcome, not a failure.
         planned.events.length > 0 ||
         command.type === "thread.background-work.settle" ||
+        command.type === "thread.stale-work.settle" ||
         command.type === "thread.stop" ||
         command.type === "subagent.stop"
           ? Effect.succeed(planned)

@@ -9,6 +9,7 @@ import {
   type IntegrationCatalogId,
   type MachineHealthChannelTestResult,
   type MachineHealthCheck,
+  type MachineHealthCheckId,
   type MachineHealthItem,
   type MachineHealthReport,
   type MachineHealthStatus,
@@ -31,6 +32,7 @@ import { useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import {
   healthItemActions,
+  healthTargetAction,
   machineHealthAnchorId,
   type MachineHealthAction,
   type MachineHealthActionContext,
@@ -220,6 +222,7 @@ function MachineHealthSection({
     view._tag === "connecting" ? "connecting" : view._tag === "report" ? view.overall : null;
   const context: MachineHealthActionContext = {
     originEnvironmentId: machine.environmentId,
+    originMachineName: machine.name,
     viaEnvironmentId: viewed.environmentId,
     isConnected,
   };
@@ -303,7 +306,7 @@ function HealthReportRows({
             {check.items.length > 0 ? (
               <ul className="space-y-3 pt-1 pb-2">
                 {check.items.map((item) => (
-                  <HealthItemRow key={item.key} item={item} context={context} />
+                  <HealthItemRow key={item.key} item={item} checkId={check.id} context={context} />
                 ))}
               </ul>
             ) : null}
@@ -398,7 +401,12 @@ function OtherChecksRow({
               {check.items.length > 0 ? (
                 <ul className="space-y-3 ps-6.5">
                   {check.items.map((item) => (
-                    <HealthItemRow key={item.key} item={item} context={context} />
+                    <HealthItemRow
+                      key={item.key}
+                      item={item}
+                      checkId={check.id}
+                      context={context}
+                    />
                   ))}
                 </ul>
               ) : null}
@@ -452,12 +460,31 @@ function HealthLine({
 
 function HealthItemRow({
   item,
+  checkId,
   context,
 }: {
   readonly item: MachineHealthItem;
+  readonly checkId: MachineHealthCheckId;
   readonly context: MachineHealthActionContext;
 }) {
-  const { fix, open } = healthItemActions(item, context);
+  // A passing line ("Canary passed") needs no Fix, only its link.
+  const { fix, open } =
+    item.status === "ok"
+      ? {
+          fix: null,
+          open: item.target === null ? null : healthTargetAction(item.target, context),
+        }
+      : healthItemActions(
+          {
+            itemKey: item.key,
+            checkId,
+            title: item.title,
+            detail: item.detail,
+            fix: item.fix,
+            target: item.target,
+          },
+          context,
+        );
   const since =
     item.since === null || item.status === "ok" ? null : `since ${isoLabel(item.since)}`;
   return (

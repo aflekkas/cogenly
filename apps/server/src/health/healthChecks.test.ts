@@ -36,6 +36,7 @@ import {
   serverCheck,
   stuckRunsCheck,
   syncCheck,
+  tailscaleServeCheck,
   trackSyncProgress,
   worstStatus,
 } from "./healthChecks.ts";
@@ -45,12 +46,18 @@ import {
   peerReachabilityItem,
   unreachableReport,
 } from "./peerReachability.ts";
+import {
+  buildMachineSetupStatus,
+  emptyProgress,
+  type MachineSetupObservation,
+} from "../tailscale/machineSetupSteps.ts";
 
 const NOW_MS = Date.parse("2026-10-24T12:00:00.000Z");
 const now = DateTime.makeUnsafe(NOW_MS);
 const ago = (ms: number) => DateTime.makeUnsafe(NOW_MS - ms);
 const iso = (ms: number) => DateTime.formatIso(ago(ms));
 const minutes = (count: number) => count * 60_000;
+const days = (count: number) => count * 24 * 60 * 60_000;
 const seconds = (count: number) => count * 1000;
 const GB = 1024 ** 3;
 
@@ -572,32 +579,109 @@ describe("scheduledTasksCheck", () => {
 });
 
 describe("stuckRunsCheck", () => {
-  it("fails runs and subagents active past the limit, targeting the thread", () => {
-    const threadId = ThreadId.make("thread-1");
-    const active = (kind: "run" | "subagent", id: string, threadTitle: string, age: number) => ({
-      kind,
-      id,
-      threadId,
-      threadTitle,
-      startedAt: ago(age),
-    });
+  const active = (
+    kind: "run" | "subagent",
+    id: string,
+    thread: string,
+    threadTitle: string,
+    age: number,
+  ) => ({ kind, id, threadId: ThreadId.make(thread), threadTitle, startedAt: ago(age) });
+
+  it("one item per thread, past the limit, with a Fix that stops them", () => {
     const result = stuckRunsCheck({
       active: [
-        active("run", "run-1", "Fix login", STUCK_RUN_AFTER_MS),
-        active("subagent", "sub-1", "Fix login", STUCK_RUN_AFTER_MS + 1),
-        active("run", "run-2", "Recent", minutes(5)),
+        active("run", "run-1", "thread-1", "Fix login", STUCK_RUN_AFTER_MS),
+        active("subagent", "sub-1", "thread-1", "Fix login", STUCK_RUN_AFTER_MS + 1),
+        active("run", "run-2", "thread-2", "Recent", minutes(5)),
       ],
       now,
     });
     assert.strictEqual(result.status, "fail");
+    assert.strictEqual(result.summary, "2 stuck runs");
     assert.deepStrictEqual(
-      result.items.map((entry) => [entry.key, entry.fix, entry.target]),
+      result.items.map((entry) => [entry.key, entry.fix, entry.target, entry.title]),
       [
-        ["stuck-runs:subagent:sub-1", "resume", { _tag: "thread", threadId }],
-        ["stuck-runs:run:run-1", "resume", { _tag: "thread", threadId }],
+        [
+          "stuck-runs:thread:thread-1",
+          "stop-runs",
+          { _tag: "thread", threadId: ThreadId.make("thread-1") },
+          `"Fix login" and 1 subagent stuck for 6 hours`,
+        ],
       ],
     );
-    assert.strictEqual(result.items[1]?.title, `"Fix login" has been running for 6 hours`);
+  });
+
+  it("collapses many stuck subagents in one thread into one counted item", () => {
+    const title = "Athens Racing — Master: Fixes, Kifissia & Riviera";
+    const result = stuckRunsCheck({
+      active: [
+        ...Array.from({ length: 18 }, (_, index) =>
+          active("subagent", `sub-${index}`, "athens", title, days(2) + index),
+        ),
+        active("subagent", "other", "thread-3", "Other", STUCK_RUN_AFTER_MS),
+      ],
+      now,
+    });
+    assert.strictEqual(result.summary, "19 stuck runs in 2 threads");
+    assert.deepStrictEqual(
+      result.items.map((entry) => entry.title),
+      [
+        `18 subagents stuck in "Athens Racing — Master: Fixes, Kifissia & Riviera" for 2 days`,
+        `A subagent in "Other" has been running for 6 hours`,
+      ],
+    );
+  });
+});
+
+describe("tailscaleServeCheck", () => {
+  const setup = (overrides: Partial<MachineSetupObservation>) =>
+    buildMachineSetupStatus(
+      {
+        machineName: "Contabo VPS",
+        host: { platform: "linux", root: false, passwordlessSudo: false, homebrew: false },
+        installed: true,
+        version: "1.104.2",
+        status: {
+          backendState: "Running",
+          authUrl: null,
+          magicDnsName: "contabo-vps.tail300b9e.ts.net",
+          tailnetName: "alex@example.com",
+          httpsEnabled: true,
+        },
+        serveMappings: [],
+        localPort: 4773,
+        serveMode: { enabled: true, servePort: 443 },
+        progress: emptyProgress,
+        ...overrides,
+      },
+      now,
+    );
+
+  it("serves when the mapping points at this server's port", () => {
+    const result = tailscaleServeCheck({
+      serveEnabled: true,
+      setup: setup({
+        serveMappings: [{ port: 443, target: "http://127.0.0.1:4773", funnel: false }],
+      }),
+    });
+    expect(result).toMatchObject({
+      status: "ok",
+      summary: "Serving at https://contabo-vps.tail300b9e.ts.net/",
+    });
+  });
+
+  it("doesn't call a restart broken while Cogenly points Serve back at this run", () => {
+    // `--tailscale-serve` removes the mapping at shutdown; the new run adds it back.
+    const restarting = tailscaleServeCheck({
+      serveEnabled: true,
+      setup: setup({ progress: { ...emptyProgress, working: new Set(["expose"]) } }),
+    });
+    expect(restarting).toMatchObject({ status: "ok", items: [] });
+    const broken = tailscaleServeCheck({ serveEnabled: true, setup: setup({}) });
+    expect(broken).toMatchObject({
+      status: "fail",
+      summary: "Tailscale Serve isn't forwarding to this server",
+    });
   });
 });
 

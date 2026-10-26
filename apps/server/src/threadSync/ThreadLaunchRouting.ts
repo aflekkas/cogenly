@@ -248,6 +248,30 @@ const make = Effect.gen(function* () {
         .pipe(Effect.timeout(LAUNCH_TIMEOUT), fromPeer(nameOf(view, payload.target)));
     });
 
+  /**
+   * Pushes this machine's threads to `hop` before a child or fork starts there.
+   * A fork copies its source's history on the target, so it needs the push. A
+   * delegated child records its parent only by id, so a replication stream
+   * stuck on some other thread must not block it: it logs and launches.
+   */
+  const pushHistory = (hop: EnvironmentId, required: boolean, name: string) =>
+    threadSync.sync(hop).pipe(
+      Effect.catchTags({
+        ThreadReplicationError: (error) =>
+          required
+            ? Effect.fail(
+                new ThreadRemoteError({
+                  reason: "behind",
+                  detail: `Thread history could not be sent to ${name} (${error.reason}), so the fork cannot start there yet.`,
+                }),
+              )
+            : Effect.logWarning("Launching a delegated child before thread replication caught up", {
+                hop,
+                reason: error.reason,
+              }),
+      }),
+    );
+
   /** The project link a remote sits under; `preferred` first, as it is the launch's own. */
   const linkingProject = (remote: string, preferred: ProjectLabelId | undefined) =>
     sql<{ readonly label_id: string }>`SELECT label_id FROM label_repositories
@@ -376,15 +400,7 @@ const make = Effect.gen(function* () {
         Effect.provideContext(context),
       );
       if (input.subagent !== undefined || input.fork !== undefined)
-        yield* threadSync.sync(yield* nextHop(view, machine)).pipe(
-          Effect.mapError(
-            () =>
-              new ThreadRemoteError({
-                reason: "behind",
-                detail: "The parent could not reach the target machine yet.",
-              }),
-          ),
-        );
+        yield* pushHistory(yield* nextHop(view, machine), input.fork !== undefined, name);
       const result = yield* callTarget(view, {
         target: machine,
         commandId: input.commandId,
@@ -775,9 +791,11 @@ const make = Effect.gen(function* () {
         if (view.link._tag !== "hub" || payload.target === caller.environmentId)
           return yield* new ThreadRemoteError({ reason: "not-owner" });
         if (payload.launch.subagent !== undefined || payload.launch.fork !== undefined)
-          yield* threadSync
-            .sync(payload.target)
-            .pipe(Effect.mapError(() => new ThreadRemoteError({ reason: "behind" })));
+          yield* pushHistory(
+            payload.target,
+            payload.launch.fork !== undefined,
+            nameOf(view, payload.target),
+          );
         const relayed = yield* callTarget(view, payload);
         yield* threadSync.sync(caller.environmentId).pipe(Effect.ignore);
         return relayed;

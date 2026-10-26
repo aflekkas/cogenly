@@ -45,6 +45,7 @@ import * as MachineIdentity from "./machines/MachineIdentity.ts";
 import * as Machines from "./machines/Machines.ts";
 import * as MachineSecurity from "./security/MachineSecurity.ts";
 import * as MachineHealth from "./health/MachineHealth.ts";
+import * as MachineHealthFixes from "./health/MachineHealthFixes.ts";
 import * as HealthCanary from "./health/HealthCanary.ts";
 import * as HealthAlerts from "./health/HealthAlerts.ts";
 import * as HealthAlertsState from "./health/HealthAlertsState.ts";
@@ -683,6 +684,8 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   MachineSecurity.layer,
   layerMachineSetup,
   layerMachineHealth,
+  // Fix stops runs and runs tasks, so it sits with the orchestration services below.
+  MachineHealthFixes.layer.pipe(Layer.provide(layerMachineHealth)),
   // Universal settings follow the user to paired machines.
   SettingsSync.layer.pipe(
     Layer.provide(SharedState.layer),

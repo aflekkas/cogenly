@@ -1,4 +1,3 @@
-import { scopeProjectRef } from "@cogenly/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -12,9 +11,7 @@ import {
   type IntegrationSummary,
 } from "@cogenly/contracts";
 import { useState } from "react";
-import { useComposerDraftStore } from "~/composerDraftStore";
-import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
-import { useScratchProject } from "~/hooks/useScratchProject";
+import { useOpenAgentChat } from "~/hooks/useOpenAgentChat";
 import { AnimatedHeight } from "~/components/AnimatedHeight";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
@@ -48,8 +45,7 @@ import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings"
 
 /** Opens a new chat on the selected environment, preserving existing drafts. */
 function useConnectWithAgent(environmentId: EnvironmentId | null) {
-  const { openScratchProject } = useScratchProject();
-  const newThread = useNewThreadHandler();
+  const openAgentChat = useOpenAgentChat();
   const [pending, setPending] = useState(false);
   return {
     pending,
@@ -58,12 +54,7 @@ function useConnectWithAgent(environmentId: EnvironmentId | null) {
       if (environmentId === null || pending) return;
       setPending(true);
       try {
-        const project = await openScratchProject(environmentId);
-        if (!project) return;
-        const opened = await newThread(scopeProjectRef(environmentId, project.id), {
-          surface: "chat",
-        });
-        if (opened) useComposerDraftStore.getState().setPrompt(opened.draftId, request);
+        await openAgentChat(environmentId, request);
       } finally {
         setPending(false);
       }

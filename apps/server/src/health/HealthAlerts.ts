@@ -46,8 +46,9 @@ import {
   type HealthRound,
 } from "./healthAlertEngine.ts";
 import {
-  alertMessage,
+  alertGroupMessage,
   emailSendCall,
+  groupAlertsByCheck,
   slackSendCall,
   testMessage,
   type AlertMessage,
@@ -203,11 +204,15 @@ const make = Effect.gen(function* () {
     }),
   );
 
-  /** Once per transition; a failure is logged, never retried. */
-  const deliver = (alert: MachineHealthAlert, transition: "opened" | "resolved") =>
+  /**
+   * Once per transition, one message per machine and check in a round, so
+   * eighteen stuck runs send once; a failure is logged, never retried.
+   */
+  const deliver = (alerts: ReadonlyArray<MachineHealthAlert>, transition: "opened" | "resolved") =>
     Effect.gen(function* () {
+      const message = alertGroupMessage(alerts, transition);
+      if (message === null) return;
       const configured = yield* configuredChannels;
-      const message = alertMessage(alert, transition);
       yield* Effect.forEach(
         ["slack", "email"] as const,
         (channel) => {
@@ -220,7 +225,7 @@ const make = Effect.gen(function* () {
                     Effect.logWarning("Health alert delivery failed", {
                       channel: error.channel,
                       reason: error.reason,
-                      alertId: alert.id,
+                      alertIds: alerts.map((alert) => alert.id),
                       transition,
                     }),
                 }),
@@ -232,7 +237,7 @@ const make = Effect.gen(function* () {
       Effect.catchTags({
         ServerSettingsError: () =>
           Effect.logWarning("Health alert delivery skipped: settings unavailable", {
-            alertId: alert.id,
+            alertIds: alerts.map((alert) => alert.id),
           }),
       }),
     );
@@ -325,8 +330,8 @@ const make = Effect.gen(function* () {
       yield* published.publish(merged);
     }
 
-    for (const alert of evaluation.opened) yield* deliver(alert, "opened");
-    for (const alert of evaluation.resolved) yield* deliver(alert, "resolved");
+    for (const group of groupAlertsByCheck(evaluation.opened)) yield* deliver(group, "opened");
+    for (const group of groupAlertsByCheck(evaluation.resolved)) yield* deliver(group, "resolved");
   });
 
   const evaluateWhenDue = Effect.gen(function* () {

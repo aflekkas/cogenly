@@ -6,7 +6,93 @@ import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as ServerConfig from "../config.ts";
 import { pair } from "../machines/testkit.ts";
-import { startThreadMachine } from "./testkit.ts";
+import { startThreadMachine, threadCreated, userMessage } from "./testkit.ts";
+
+it.live(
+  "a spoke delegates to its hub while its own replication to the hub is stuck",
+  () =>
+    Effect.gen(function* () {
+      const hub = yield* startThreadMachine("stuck-hub", "cloud-server", () => [], undefined, true);
+      const laptop = yield* startThreadMachine(
+        "stuck-laptop",
+        "computer",
+        () => [],
+        undefined,
+        true,
+      );
+      yield* pair(hub, laptop);
+      const parent = Option.getOrThrow(laptop.engine);
+      const config = yield* laptop.run(ServerConfig.ServerConfig);
+      const projectId = ProjectId.make("scratch");
+      yield* laptop.sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES (${projectId},'No project',${`${config.baseDir}/scratch`},'[]','2026-10-24T00:00:00Z','2026-10-24T00:00:00Z')`;
+      // The hub refuses the batch holding an older laptop thread on every
+      // pass, so nothing the laptop wrote after it reaches the hub.
+      const at = yield* DateTime.now;
+      yield* laptop.sink.write({
+        events: [threadCreated("event:laptop-own", at), userMessage("event:stuck", at, "stuck")],
+      });
+      yield* hub.sql`CREATE TRIGGER refuse_laptop BEFORE INSERT ON orchestration_v2_projection_messages
+        WHEN NEW.thread_id = 'thread:on-laptop' BEGIN SELECT RAISE(FAIL, 'refused'); END`;
+      expect((yield* Effect.result(laptop.sync.sync(hub.environmentId)))._tag).toBe("Failure");
+
+      const parentId = ThreadId.make("parent");
+      const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" };
+      yield* parent.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("parent-create"),
+        threadId: parentId,
+        projectId,
+        title: "Parent",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* parent.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make("parent-message"),
+        threadId: parentId,
+        messageId: MessageId.make("message:parent"),
+        text: "Delegate work",
+        attachments: [],
+        dispatchMode: { type: "start_immediately" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* Option.getOrThrow(laptop.worker).drain();
+      const run = (yield* parent.getThreadProjection(parentId)).runs[0]!;
+      const accepted = yield* parent.dispatch({
+        type: "delegated_task.request",
+        commandId: CommandId.make("delegate-to-hub"),
+        parentThreadId: parentId,
+        parentRunId: run.id,
+        parentNodeId: run.rootNodeId!,
+        machine: hub.environmentId,
+        task: "Do the task on the hub",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        completionWake: "always",
+        createdBy: "agent",
+        creationSource: "mcp",
+      });
+      const task = accepted.storedEvents.find((row) => row.event.type === "subagent.updated")!;
+      if (task.event.type !== "subagent.updated") return yield* Effect.die("Missing task");
+      const childId = task.event.payload.childThreadId!;
+      expect(hub.launched.map((launch) => launch.threadId)).toEqual([childId]);
+      expect((yield* parent.getThreadProjection(childId)).thread.ownerMachine).toBe(
+        hub.environmentId,
+      );
+      // The parent never reached the hub; the child names it only by id.
+      expect(yield* Effect.result(hub.projections.getThreadProjection(parentId))).toMatchObject({
+        _tag: "Failure",
+      });
+    }).pipe(Effect.scoped),
+  30000,
+);
 
 it.live.each([
   "complete",

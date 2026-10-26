@@ -176,23 +176,28 @@ export function evaluateHealthAlerts(
     if (observation === undefined) continue;
     const { item } = observation;
     if (previous !== undefined && alert !== null) {
-      // Worse in place keeps the alert's id; better or equal changes nothing.
+      // The alert keeps its id. Worse in place escalates it; a new title at the
+      // same severity (a count or an age that grew) is picked up so it never
+      // reads stale. Better changes nothing until it resolves.
       const escalated = severity[item.status] > severity[alert.status];
+      const retitled =
+        severity[item.status] === severity[alert.status] && item.title !== alert.title;
       tracked.set(key, {
         ...previous,
         okSince: null,
-        alert: escalated
-          ? {
-              ...alert,
-              status: item.status,
-              title: item.title,
-              detail: item.detail,
-              target: item.target,
-              fix: item.fix,
-            }
-          : alert,
+        alert:
+          escalated || retitled
+            ? {
+                ...alert,
+                status: escalated ? item.status : alert.status,
+                title: item.title,
+                detail: item.detail,
+                target: item.target,
+                fix: item.fix,
+              }
+            : alert,
       });
-      if (escalated) changed = true;
+      if (escalated || retitled) changed = true;
       continue;
     }
     const badSince = previous?.badSince ?? now;

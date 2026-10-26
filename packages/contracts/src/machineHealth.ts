@@ -47,15 +47,19 @@ export const MachineHealthTarget = Schema.Union([
 export type MachineHealthTarget = typeof MachineHealthTarget.Type;
 
 /**
- * A one-click remedy. Clients map each kind to an existing command or screen:
- * `sign-in` opens the provider or integration sign-in, `run-now` runs the
- * scheduled task, `resume` opens the stuck thread, `retry-sync` calls
- * `machines.healthRetrySync`.
+ * A direct remedy, run by `machines.healthFix` on the machine the item is on:
+ * `run-now` runs the scheduled task, `stop-runs` stops the thread's stale runs
+ * and subagents, `retry-sync` retries sync with the target machine,
+ * `setup-sandbox` installs the chat sandbox. `sign-in` needs the owner, so
+ * clients open the provider or integration sign-in instead. `resume` is what
+ * servers before 0.3.2 sent for stuck runs; it is handled as `stop-runs`.
+ * An item without a fix gets an agent: clients start a chat to investigate it.
  */
 export const MachineHealthFix = Schema.Literals([
   "sign-in",
   "run-now",
   "resume",
+  "stop-runs",
   "retry-sync",
   "setup-sandbox",
 ]);
@@ -108,6 +112,42 @@ export type MachineHealthInput = typeof MachineHealthInput.Type;
 
 export const MachineHealthRetrySyncInput = Schema.Struct({ environmentId: EnvironmentId });
 export type MachineHealthRetrySyncInput = typeof MachineHealthRetrySyncInput.Type;
+
+/** At most this many items per Fix: a grouped alert sends every item it collapsed. */
+export const MACHINE_HEALTH_FIX_MAX_ITEMS = 100;
+
+const MachineHealthFixItemKeys = Schema.Array(TrimmedNonEmptyString).check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(MACHINE_HEALTH_FIX_MAX_ITEMS),
+);
+
+export const MachineHealthFixInput = Schema.Struct({
+  /** The machine the items are on. Omit for this machine; a paired one runs it over the peer link. */
+  environmentId: Schema.optionalKey(EnvironmentId),
+  itemKeys: MachineHealthFixItemKeys,
+});
+export type MachineHealthFixInput = typeof MachineHealthFixInput.Type;
+
+/**
+ * What Fix did with one item. `fixed`: the remedy ran. `failed`: it ran and
+ * didn't fix it. `resolved`: the item was already gone. `manual`: no direct
+ * fix, so an agent or the owner has to look (the message says where).
+ */
+export const MachineHealthFixOutcome = Schema.Struct({
+  itemKey: TrimmedNonEmptyString,
+  status: Schema.Literals(["fixed", "failed", "resolved", "manual"]),
+  message: Schema.String,
+});
+export type MachineHealthFixOutcome = typeof MachineHealthFixOutcome.Type;
+
+export const MachineHealthFixResult = Schema.Struct({
+  environmentId: EnvironmentId,
+  machineName: TrimmedNonEmptyString,
+  /** One or two sentences for a toast or an agent. */
+  summary: Schema.String,
+  outcomes: Schema.Array(MachineHealthFixOutcome),
+});
+export type MachineHealthFixResult = typeof MachineHealthFixResult.Type;
 
 const ChannelTestOutcome = Schema.Struct({
   /** False when the channel is off or not configured; nothing was sent. */
@@ -182,6 +222,15 @@ export const MachineHealthRead = makePeerChannel({
   scope: AuthSyncReplicateScope,
   payload: Schema.Struct({}),
   success: MachineHealthReport,
+  error: MachineHealthError,
+});
+
+/** Runs Fix on the machine the items are on, from a paired machine. */
+export const MachineHealthFixRun = makePeerChannel({
+  name: "health.fix.v1",
+  scope: AuthSyncReplicateScope,
+  payload: Schema.Struct({ itemKeys: MachineHealthFixItemKeys }),
+  success: MachineHealthFixResult,
   error: MachineHealthError,
 });
 

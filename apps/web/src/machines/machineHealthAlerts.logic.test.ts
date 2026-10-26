@@ -2,12 +2,15 @@ import type {
   EnvironmentId,
   MachineHealthAlert,
   MachineHealthAlertsSnapshot,
+  ThreadId,
 } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   healthAlertGroupKey,
+  healthAlertGroupView,
+  healthAlertProblems,
   mergeHealthAlertSnapshots,
   parseSeenHealthAlertIds,
   planHealthAlertNotifications,
@@ -50,10 +53,58 @@ describe("mergeHealthAlertSnapshots", () => {
     const shared = alert("a");
     const merged = mergeHealthAlertSnapshots([
       [HUB, snapshot([shared])],
-      [LAPTOP, snapshot([shared, alert("b", { openedAt: DateTime.makeUnsafe(500) })])],
+      [
+        LAPTOP,
+        snapshot([
+          shared,
+          alert("b", { checkId: "disk", itemKey: "disk:free", openedAt: DateTime.makeUnsafe(500) }),
+        ]),
+      ],
     ]);
     expect(merged.open.map(({ alert }) => alert.id)).toEqual(["b", "a"]);
     expect(merged.open.find(({ alert }) => alert.id === "a")?.via).toBe(HUB);
+  });
+
+  it("groups one machine's items of one check into one counted alert", () => {
+    const title = "Athens Racing — Master: Fixes, Kifissia & Riviera";
+    // What a 0.3.0 server sends: one alert per stuck subagent.
+    const stuck = Array.from({ length: 18 }, (_, index) =>
+      alert(`stuck-${index}`, {
+        checkId: "stuck-runs",
+        itemKey: `stuck-runs:subagent:${index}`,
+        status: "fail",
+        title: `A subagent in "${title}" has been running for 2 days`,
+        fix: "resume",
+        target: { _tag: "thread", threadId: "e6c109f2" as ThreadId },
+        openedAt: DateTime.makeUnsafe(1_000 + index),
+      }),
+    );
+    const merged = mergeHealthAlertSnapshots([
+      [LAPTOP, snapshot([...stuck, alert("other", { originEnvironmentId: LAPTOP })])],
+    ]);
+    expect(merged.open).toHaveLength(2);
+    const group = merged.open.find(({ alert }) => alert.checkId === "stuck-runs")!;
+    expect(group.items).toHaveLength(18);
+    expect(group.ids).toHaveLength(18);
+    expect(healthAlertGroupView(group)).toEqual({
+      status: "fail",
+      title: "18 stuck runs in one thread",
+      description: `Contabo VPS: A subagent in "${title}" has been running for 2 days; A subagent in "${title}" has been running for 2 days; and 16 more.`,
+    });
+    expect(healthAlertProblems(group).map((problem) => problem.fix)).toEqual(
+      Array.from({ length: 18 }, () => "resume"),
+    );
+  });
+
+  it("reads a group of one as its own alert", () => {
+    const merged = mergeHealthAlertSnapshots([
+      [HUB, snapshot([alert("a", { detail: "Sign in again." })])],
+    ]);
+    expect(healthAlertGroupView(merged.open[0]!)).toEqual({
+      status: "warn",
+      title: "Alert a",
+      description: "Contabo VPS: Sign in again.",
+    });
   });
 
   it("collapses alerts two servers raised for the same machine and item", () => {
@@ -82,10 +133,26 @@ describe("mergeHealthAlertSnapshots", () => {
 
 describe("planHealthAlertNotifications", () => {
   it("toasts only alerts this device has not seen", () => {
-    const merged = mergeHealthAlertSnapshots([[HUB, snapshot([alert("a"), alert("b")])]]);
+    const merged = mergeHealthAlertSnapshots([
+      [HUB, snapshot([alert("a"), alert("b", { checkId: "disk", itemKey: "disk:free" })])],
+    ]);
     const plan = planHealthAlertNotifications(merged, new Set(["a"]), new Set());
     expect(plan.toast.map(({ alert }) => alert.id)).toEqual(["b"]);
     expect(plan.retract).toEqual([]);
+  });
+
+  it("keeps a seen group quiet when another of its items opens, across reloads", () => {
+    const first = mergeHealthAlertSnapshots([[HUB, snapshot([alert("a")])]]);
+    const toasted = planHealthAlertNotifications(first, new Set(), new Set());
+    expect(toasted.toast).toHaveLength(1);
+    const seen = rememberSeenHealthAlertIds([], toasted.remember, new Set());
+    // A reload, then one more provider problem on the same machine.
+    const grown = mergeHealthAlertSnapshots([
+      [HUB, snapshot([alert("a"), alert("b", { openedAt: DateTime.makeUnsafe(2_000) })])],
+    ]);
+    const next = planHealthAlertNotifications(grown, new Set(seen), new Set());
+    expect(next.toast).toEqual([]);
+    expect(next.remember).toEqual(["b"]);
   });
 
   it("toasts nothing again once every open alert is remembered as seen", () => {
@@ -120,7 +187,16 @@ describe("planHealthAlertNotifications", () => {
 
   it("retracts only resolved alerts whose toast this session showed", () => {
     const merged = mergeHealthAlertSnapshots([
-      [HUB, snapshot([], [alert("a", { state: "resolved" }), alert("b", { state: "resolved" })])],
+      [
+        HUB,
+        snapshot(
+          [],
+          [
+            alert("a", { state: "resolved", checkId: "disk", itemKey: "disk:free" }),
+            alert("b", { state: "resolved" }),
+          ],
+        ),
+      ],
     ]);
     const plan = planHealthAlertNotifications(
       merged,

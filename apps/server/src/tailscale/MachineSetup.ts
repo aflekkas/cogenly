@@ -114,6 +114,13 @@ export const make = Effect.gen(function* () {
 
   const progress = yield* Ref.make<MachineSetupProgress>(emptyProgress);
   const localPort = yield* Ref.make(config.port);
+  /**
+   * Until `start` has pointed Serve at this run, a missing mapping is expected:
+   * `--tailscale-serve` removes it at shutdown and this run puts it back. The
+   * "expose" step reads as working meanwhile, so health doesn't report a
+   * restart as Serve being broken.
+   */
+  const started = yield* Ref.make(false);
   const changes = yield* PubSub.sliding<void>(1);
   const notify = PubSub.publish(changes, undefined).pipe(Effect.asVoid);
   const update = (f: (current: MachineSetupProgress) => MachineSetupProgress) =>
@@ -149,7 +156,7 @@ export const make = Effect.gen(function* () {
     });
 
   const observe = Effect.gen(function* () {
-    const [setupHost, probe, mode, self, current, port] = yield* Effect.all(
+    const [setupHost, probe, mode, self, recorded, port, hasStarted] = yield* Effect.all(
       [
         host.host,
         host.probe,
@@ -157,9 +164,14 @@ export const make = Effect.gen(function* () {
         identity.self,
         Ref.get(progress),
         Ref.get(localPort),
+        Ref.get(started),
       ],
       { concurrency: "unbounded" },
     );
+    const current =
+      !hasStarted && mode.enabled
+        ? { ...recorded, working: adding(recorded.working, "expose") }
+        : recorded;
     const observation: MachineSetupObservation = {
       machineName: self.name,
       host: setupHost,
@@ -356,7 +368,7 @@ export const make = Effect.gen(function* () {
     }),
   );
 
-  const start: MachineSetup["Service"]["start"] = Effect.fn("MachineSetup.start")(function* (port) {
+  const startServe = Effect.fn("MachineSetup.start")(function* (port: number) {
     yield* Ref.set(localPort, port);
     const observation = yield* observe;
     if (!observation.serveMode.enabled || observation.status?.backendState !== "Running") return;
@@ -381,6 +393,8 @@ export const make = Effect.gen(function* () {
     yield* update((current) => ({ ...current, working: adding(current.working, "expose") }));
     yield* launch("expose", "serve", observation, servePort);
   });
+  const start: MachineSetup["Service"]["start"] = (port) =>
+    startServe(port).pipe(Effect.ensuring(Ref.set(started, true).pipe(Effect.andThen(notify))));
 
   const lastAdoptCheck = yield* Ref.make<number | null>(null);
   const adoptServe: MachineSetup["Service"]["adoptServe"] = Effect.gen(function* () {

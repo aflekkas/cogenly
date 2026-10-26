@@ -6,10 +6,14 @@ import { Atom } from "effect/reactivity";
 import { useCallback } from "react";
 
 import { toastManager } from "../components/ui/toast";
+import { useOpenAgentChat } from "../hooks/useOpenAgentChat";
 import { machinesRpc } from "../rpc/machines";
-import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
-import type { MachineHealthAction } from "./machineHealthLinks.logic";
+import {
+  machineHealthAgentPrompt,
+  problemsLeftForAgent,
+  type MachineHealthAction,
+} from "./machineHealthLinks.logic";
 import { useOpenMachineHealthLink } from "./useOpenMachineHealthLink";
 
 const ALWAYS_PERMITTED = Atom.make(true).pipe(Atom.withLabel("machine-health:open-permitted"));
@@ -19,12 +23,11 @@ export function machineHealthActionPermissionAtom(action: MachineHealthAction): 
   switch (action.kind) {
     case "open":
       return ALWAYS_PERMITTED;
-    case "runTask":
-      return serverEnvironment.runScheduledTaskNow.permissionAtom(action.environmentId);
-    case "setupSandbox":
-      return machinesRpc.sandboxSetup.permissionAtom(action.environmentId);
-    case "retrySync":
-      return machinesRpc.healthRetrySync.permissionAtom(action.environmentId);
+    case "fix":
+      return machinesRpc.healthFix.permissionAtom(action.environmentId);
+    // Starting a chat is an operate grant on the server it opens on, as Fix is.
+    case "agent":
+      return machinesRpc.healthFix.permissionAtom(action.request.environmentId);
   }
 }
 
@@ -35,64 +38,72 @@ function failureMessage(cause: unknown): string {
 }
 
 /**
- * Runs a health item's fix or opens its target. Commands report their
- * outcome in a toast; resolves true when the action went through.
+ * Runs a health Fix or opens its target. A direct fix reports its outcome in
+ * a toast and hands what it couldn't fix to an agent chat, which opens with
+ * the problem filled in. Resolves true when the action went through.
  */
 export function useRunMachineHealthAction(): (action: MachineHealthAction) => Promise<boolean> {
   const open = useOpenMachineHealthLink();
-  const runTask = useAtomCommand(serverEnvironment.runScheduledTaskNow, { reportFailure: false });
-  const setupSandbox = useAtomCommand(machinesRpc.sandboxSetup, { reportFailure: false });
-  const retrySync = useAtomCommand(machinesRpc.healthRetrySync, { reportFailure: false });
+  const openAgentChat = useOpenAgentChat();
+  const healthFix = useAtomCommand(machinesRpc.healthFix, { reportFailure: false });
   return useCallback(
     async (action: MachineHealthAction) => {
-      if (action.kind === "open") {
-        open(action.link);
-        return true;
-      }
-      if (action.kind === "setupSandbox") {
-        const outcome = await setupSandbox({ environmentId: action.environmentId, input: {} });
-        if (outcome._tag === "Success") {
-          toastManager.add({
-            type: outcome.value.available ? "success" : "info",
-            title: outcome.value.available
-              ? "Chat commands enabled"
-              : "Chat sandbox needs attention",
-            description: outcome.value.message,
-            timeout: outcome.value.available ? 5000 : 0,
+      switch (action.kind) {
+        case "open":
+          open(action.link);
+          return true;
+        case "agent":
+          return openAgentChat(action.request.environmentId, action.request.prompt);
+        case "fix": {
+          const outcome = await healthFix({
+            environmentId: action.environmentId,
+            input: {
+              ...(action.environmentId === action.originEnvironmentId
+                ? {}
+                : { environmentId: action.originEnvironmentId }),
+              itemKeys: action.itemKeys,
+            },
           });
-          return outcome.value.available;
+          if (outcome._tag !== "Success") {
+            if (!isAtomCommandInterrupted(outcome))
+              toastManager.add({
+                type: "error",
+                title: `Couldn't fix it on ${action.originMachineName}`,
+                description: failureMessage(squashAtomCommandFailure(outcome)),
+              });
+            return false;
+          }
+          const result = outcome.value;
+          const failed = result.outcomes.some((entry) => entry.status === "failed");
+          toastManager.add({
+            type: failed ? "warning" : "success",
+            title: failed
+              ? `Fix needs attention on ${result.machineName}`
+              : `Fixed on ${result.machineName}`,
+            description: result.summary,
+            // A failure explains what to do next; leave it until read.
+            ...(failed ? { timeout: 0 } : {}),
+          });
+          const left = problemsLeftForAgent(
+            action,
+            result.outcomes
+              .filter((entry) => entry.status === "manual")
+              .map((entry) => entry.itemKey),
+          );
+          if (left.length > 0) {
+            await openAgentChat(
+              action.environmentId,
+              machineHealthAgentPrompt(left, {
+                environmentId: action.originEnvironmentId,
+                name: action.originMachineName,
+                local: action.environmentId === action.originEnvironmentId,
+              }),
+            );
+          }
+          return !failed;
         }
-        if (!isAtomCommandInterrupted(outcome))
-          toastManager.add({
-            type: "error",
-            title: "Couldn't set up the sandbox",
-            description: failureMessage(squashAtomCommandFailure(outcome)),
-          });
-        return false;
       }
-      const result =
-        action.kind === "runTask"
-          ? await runTask({ environmentId: action.environmentId, input: { id: action.taskId } })
-          : await retrySync({
-              environmentId: action.environmentId,
-              input: { environmentId: action.peerEnvironmentId },
-            });
-      if (result._tag === "Success") {
-        toastManager.add({
-          type: "success",
-          title: action.kind === "runTask" ? "Task started" : "Retrying sync",
-        });
-        return true;
-      }
-      if (!isAtomCommandInterrupted(result)) {
-        toastManager.add({
-          type: "error",
-          title: action.kind === "runTask" ? "Couldn't run the task" : "Couldn't retry sync",
-          description: failureMessage(squashAtomCommandFailure(result)),
-        });
-      }
-      return false;
     },
-    [open, retrySync, runTask, setupSandbox],
+    [healthFix, open, openAgentChat],
   );
 }

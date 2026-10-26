@@ -72,6 +72,7 @@ import * as ProjectMove from "../../threadSync/ProjectMove.ts";
 import * as ThreadTransfer from "../../threadSync/ThreadTransfer.ts";
 import * as MachineSetup from "../../tailscale/MachineSetup.ts";
 import * as MachineHealth from "../../health/MachineHealth.ts";
+import * as MachineHealthFixes from "../../health/MachineHealthFixes.ts";
 import * as McpHttpServer from "../McpHttpServer.ts";
 import * as McpSessionRegistry from "../McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "../PreviewAutomationBroker.ts";
@@ -229,6 +230,7 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(MachineSetup.MachineSetup)({}),
   Layer.mock(StorageCleanup.StorageCleanup)({}),
   Layer.mock(MachineHealth.MachineHealth)({}),
+  Layer.mock(MachineHealthFixes.MachineHealthFixes)({}),
   Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
   Layer.mock(DeviceService.DeviceService)({
     list: Effect.succeed({

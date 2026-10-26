@@ -273,6 +273,8 @@ function writtenIds(
  * Ends a provider-native subagent, its node and its turn item once the provider
  * process that ran it is gone, since no terminal event will come from it. Each
  * record is skipped if already settled or already ended by `emitted`.
+ * `includeDelegated` ends an app-owned task the same way, for a caller that
+ * checked its child thread has no live run left to end it.
  */
 export const endOrphanedNativeSubagent = <E>(input: {
   readonly projection: Pick<OrchestrationV2ThreadProjection, "nodes" | "subagents" | "turnItems">;
@@ -280,6 +282,7 @@ export const endOrphanedNativeSubagent = <E>(input: {
   readonly status: "completed" | "failed" | "interrupted" | "cancelled";
   readonly completedAt?: DateTime.Utc;
   readonly result?: string | null;
+  readonly includeDelegated?: boolean;
   readonly now: DateTime.Utc;
   readonly emitted: ReadonlyArray<OrchestrationV2DomainEvent>;
   readonly allocateEventId: () => Effect.Effect<EventId, E>;
@@ -287,7 +290,8 @@ export const endOrphanedNativeSubagent = <E>(input: {
   Effect.gen(function* () {
     const { now, status, subagentId, completedAt = now } = input;
     const subagent = input.projection.subagents.find((entry) => entry.id === subagentId);
-    if (subagent?.origin !== "provider_native") return [];
+    if (subagent === undefined) return [];
+    if (subagent.origin !== "provider_native" && input.includeDelegated !== true) return [];
     const node = input.projection.nodes.find((entry) => entry.id === subagentId);
     const item = input.projection.turnItems.find(
       (entry) => entry.type === "subagent" && entry.subagentId === subagentId,

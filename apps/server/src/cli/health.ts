@@ -4,6 +4,7 @@
  * `machine_health` MCP tool. Exits non-zero when the report fails.
  */
 import {
+  AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthSettingsWriteScope,
   EnvironmentId,
@@ -23,6 +24,7 @@ import { FetchHttpClient } from "effect/http";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerConfig from "../config.ts";
+import { directlyFixableItemKeys } from "../health/healthChecks.ts";
 import { readPersistedServerRuntimeState } from "../serverRuntimeState.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import { liveWebSocketUrl, liveWebSocketUrlSource, makeLiveRpcClient } from "./liveServer.ts";
@@ -91,8 +93,9 @@ export const runHealth = (flags: {
       });
     }
     const issued = yield* environmentAuth.issueSession({
-      scopes:
-        flags.fix || flags.storage?.fix || flags.storage?.dryRun
+      scopes: flags.fix
+        ? [AuthOrchestrationReadScope, AuthOrchestrationOperateScope]
+        : flags.storage?.fix || flags.storage?.dryRun
           ? [AuthOrchestrationReadScope, AuthSettingsWriteScope]
           : [AuthOrchestrationReadScope],
       label: "cogenly health cli",
@@ -144,21 +147,11 @@ export const runHealth = (flags: {
         );
       return;
     }
-    if (flags.fix) {
-      if (Option.isSome(flags.machine))
-        return yield* new HealthCliError({
-          reason:
-            "Run health --fix on the affected machine, or use its Fix action in Settings → Machines.",
-        });
-      const result = yield* client[WS_METHODS.machineSandboxSetup]({});
-      if (!flags.json) yield* Console.log(result.message);
-    }
-    const report = yield* client[WS_METHODS.machinesHealth](
-      Option.match(flags.machine, {
-        onNone: () => ({}),
-        onSome: (environmentId) => ({ environmentId: EnvironmentId.make(environmentId.trim()) }),
-      }),
-    ).pipe(
+    const target = Option.match(flags.machine, {
+      onNone: () => ({}),
+      onSome: (environmentId) => ({ environmentId: EnvironmentId.make(environmentId.trim()) }),
+    });
+    const readReport = client[WS_METHODS.machinesHealth](target).pipe(
       Effect.mapError(
         (cause) =>
           new HealthCliError({
@@ -167,6 +160,29 @@ export const runHealth = (flags: {
           }),
       ),
     );
+    if (flags.fix) {
+      // Every direct fix, on the named machine (over the peer link) or this one.
+      const [first, ...rest] = directlyFixableItemKeys(yield* readReport);
+      if (first !== undefined) {
+        const result = yield* client[WS_METHODS.machinesHealthFix]({
+          ...target,
+          itemKeys: [first, ...rest],
+        }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new HealthCliError({
+                reason: cause instanceof Error ? cause.message : String(cause),
+                cause,
+              }),
+          ),
+        );
+        if (!flags.json) {
+          for (const outcome of result.outcomes)
+            yield* Console.log(`${outcome.itemKey}: ${outcome.status}. ${outcome.message}`);
+        }
+      } else if (!flags.json) yield* Console.log("Nothing has a direct fix right now.");
+    }
+    const report = yield* readReport;
     yield* Console.log(
       flags.json
         ? yield* encodeReportJson(report).pipe(Effect.orDie)
@@ -182,7 +198,9 @@ export const runHealth = (flags: {
 export const healthCommand = Command.make("health", {
   ...projectLocationFlags,
   fix: Flag.Boolean("fix").pipe(
-    Flag.withDescription("Provision the chat command sandbox using root or passwordless sudo."),
+    Flag.withDescription(
+      "Run every direct fix (stop stuck runs, rerun failed tasks, retry sync, set up the chat sandbox) on the machine, or on --machine over the peer link.",
+    ),
     Flag.withDefault(false),
   ),
   json: Flag.Boolean("json").pipe(

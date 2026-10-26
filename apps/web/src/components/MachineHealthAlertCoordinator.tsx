@@ -8,6 +8,8 @@ import { getClientSettings, useClientSettings } from "../hooks/useSettings";
 import { useStableCallback } from "../hooks/useStableCallback";
 import {
   healthAlertGroupKey,
+  healthAlertGroupView,
+  healthAlertProblems,
   mergeHealthAlertSnapshots,
   parseSeenHealthAlertIds,
   planHealthAlertNotifications,
@@ -16,7 +18,11 @@ import {
   type MergedHealthAlert,
 } from "../machines/machineHealthAlerts.logic";
 import { useMachineHealthAlertStore } from "../machines/machineHealthAlertsStore";
-import { healthAlertActions } from "../machines/machineHealthLinks.logic";
+import {
+  healthFixAction,
+  machineHealthLink,
+  type MachineHealthAction,
+} from "../machines/machineHealthLinks.logic";
 import {
   machineHealthActionPermissionAtom,
   useRunMachineHealthAction,
@@ -52,13 +58,16 @@ function writeSeenAlertIds(ids: ReadonlyArray<string>) {
 interface ShownAlert {
   readonly toastId: string;
   readonly notification: Notification | null;
+  /** What the toast says now, so a grown count updates it in place. */
+  readonly signature: string;
 }
 
 /**
  * Machine health alerts on every client: one stream per connected server,
- * deduped by alert id, a toast (and a desktop notification in the
- * background) once per alert, and the Settings dot while any is open.
- * Ids this device toasted persist, so a reload or reconnect stays quiet.
+ * deduped by alert id, one toast (and a desktop notification in the
+ * background) per machine and problem kind with a count, and the Settings dot
+ * while any is open. Ids this device toasted persist, so a reload or
+ * reconnect stays quiet.
  */
 export function MachineHealthAlertCoordinator() {
   const environmentIds = useEnvironmentIds();
@@ -68,61 +77,100 @@ export function MachineHealthAlertCoordinator() {
   const setWorstOpenStatus = useMachineHealthAlertStore((store) => store.setWorstOpenStatus);
   const snapshots = useRef(new Map<EnvironmentId, MachineHealthAlertsSnapshot>());
   const seen = useRef<string[] | null>(null);
-  // Keyed by healthAlertGroupKey: one toast per problem, whichever server's id it came under.
+  // Keyed by healthAlertGroupKey: one toast per machine and check, whichever server it came from.
   const shown = useRef(new Map<string, ShownAlert>());
 
-  const present = (entry: MergedHealthAlert, connected: ReadonlySet<EnvironmentId>): ShownAlert => {
+  /** The toast's content: one Fix, the X, and the title opening Settings → Machines health. */
+  const toastContent = (
+    entry: MergedHealthAlert,
+    connected: ReadonlySet<EnvironmentId>,
+    toastId: () => string,
+  ) => {
     const { alert } = entry;
-    const { primary, secondary } = healthAlertActions(
-      alert,
-      { viaEnvironmentId: entry.via, isConnected: (id) => connected.has(id) },
-      (action) => appAtomRegistry.get(machineHealthActionPermissionAtom(action)),
-    );
-    const description = alert.detail.trim()
-      ? `${alert.originMachineName}: ${alert.detail}`
-      : alert.originMachineName;
-    const failing = alert.status === "fail";
-    const toastId = toastManager.add({
-      type: failing ? "error" : "warning",
-      title: alert.title,
-      description,
-      // A failure stays until dismissed or it clears; a warning leaves after the
-      // usual time. Settings → Machines and the nav-rail dot keep showing both.
-      ...(failing ? { timeout: 0 } : {}),
-      data: {
-        hideCopyButton: true,
-        ...(secondary === null
+    const view = healthAlertGroupView(entry);
+    const context = {
+      originEnvironmentId: alert.originEnvironmentId,
+      originMachineName: alert.originMachineName,
+      viaEnvironmentId: entry.via,
+      isConnected: (id: EnvironmentId) => connected.has(id),
+    };
+    const details: MachineHealthAction = {
+      kind: "open",
+      label: "Details",
+      link: machineHealthLink(alert.originEnvironmentId, context),
+    };
+    const fix = healthFixAction(healthAlertProblems(entry), context);
+    const primary =
+      fix !== null && appAtomRegistry.get(machineHealthActionPermissionAtom(fix)) ? fix : null;
+    const openDetails = () => {
+      toastManager.close(toastId());
+      void runAction(details);
+    };
+    const failing = view.status === "fail";
+    return {
+      view,
+      details,
+      content: {
+        type: failing ? ("error" as const) : ("warning" as const),
+        title: (
+          <button
+            type="button"
+            className="text-start hover:underline focus-visible:underline focus-visible:outline-none"
+            onClick={openDetails}
+          >
+            {view.title}
+          </button>
+        ),
+        description: view.description,
+        data: { hideCopyButton: true },
+        ...(primary === null
           ? {}
           : {
-              secondaryActionProps: {
-                children: secondary.label,
+              actionProps: {
+                children: primary.label,
                 onClick: () => {
-                  toastManager.close(toastId);
-                  void runAction(secondary);
+                  toastManager.close(toastId());
+                  void runAction(primary);
                 },
               },
             }),
       },
-      actionProps: {
-        children: primary.label,
-        onClick: () => {
-          toastManager.close(toastId);
-          void runAction(primary);
-        },
-      },
+    };
+  };
+
+  const present = (entry: MergedHealthAlert, connected: ReadonlySet<EnvironmentId>): ShownAlert => {
+    let toastId = "";
+    const { view, details, content } = toastContent(entry, connected, () => toastId);
+    toastId = toastManager.add({
+      ...content,
+      // A failure stays until dismissed or it clears; a warning leaves after the
+      // usual time. Settings → Machines and the nav-rail dot keep showing both.
+      ...(view.status === "fail" ? { timeout: 0 } : {}),
     });
     // A click on the notification only opens a screen; it never runs a command.
-    const opener = primary.kind === "open" ? primary : (secondary ?? primary);
     const notification = showBackgroundNotification(mode, {
-      title: alert.title,
-      body: description,
-      tag: `machine-health:${alert.id}`,
+      title: view.title,
+      body: view.description,
+      tag: `machine-health:${healthAlertGroupKey(entry.alert)}`,
       onClick: () => {
         toastManager.close(toastId);
-        if (opener.kind === "open") void runAction(opener);
+        void runAction(details);
       },
     });
-    return { toastId, notification };
+    return { toastId, notification, signature: JSON.stringify(view) };
+  };
+
+  /** A shown group whose count or titles changed says so in place, without a new toast. */
+  const refresh = (
+    entry: MergedHealthAlert,
+    current: ShownAlert,
+    connected: ReadonlySet<EnvironmentId>,
+  ): ShownAlert => {
+    const signature = JSON.stringify(healthAlertGroupView(entry));
+    if (signature === current.signature) return current;
+    const { content } = toastContent(entry, connected, () => current.toastId);
+    toastManager.update(current.toastId, content);
+    return { ...current, signature };
   };
 
   const reconcile = useStableCallback(() => {
@@ -147,8 +195,13 @@ export function MachineHealthAlertCoordinator() {
         description: alert.title,
       });
     }
+    const connected = new Set(connectedIds);
+    for (const entry of merged.open) {
+      const key = healthAlertGroupKey(entry.alert);
+      const current = shown.current.get(key);
+      if (current !== undefined) shown.current.set(key, refresh(entry, current, connected));
+    }
     if (plan.toast.length > 0) {
-      const connected = new Set(connectedIds);
       for (const entry of plan.toast) {
         shown.current.set(healthAlertGroupKey(entry.alert), present(entry, connected));
       }
