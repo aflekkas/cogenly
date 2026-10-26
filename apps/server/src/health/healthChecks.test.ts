@@ -927,3 +927,21 @@ it("reports a warning while database writes use the main-thread fallback", () =>
     databaseCheck({ answered: true, sizeBytes: 4096, writerWorkerUnavailable: false }).status,
   ).toBe("ok");
 });
+
+it("chat sandbox health distinguishes AppArmor userns blocking from missing bubblewrap", () => {
+  const blocked = chatSandboxCheck({
+    available: false,
+    failure: "apparmor-userns",
+    reason: "bubblewrap is blocked by AppArmor user-namespace restriction",
+  });
+  expect(blocked.items[0]).toMatchObject({
+    title: "Chat commands are off: bubblewrap is blocked by AppArmor user-namespace restriction",
+    fix: "setup-sandbox",
+  });
+  expect(blocked.items[0]?.detail).toContain("kernel.apparmor_restrict_unprivileged_userns=1");
+  expect(blocked.items[0]?.detail).toContain("/etc/apparmor.d/cogenly-bwrap");
+  expect(blocked.items[0]?.detail).toContain("flags=(unconfined)");
+  expect(blocked.items[0]?.detail).toContain("apparmor_parser -r");
+  expect(blocked.items[0]?.detail).toContain("global restriction stays on");
+  expect(blocked.items[0]?.detail).not.toContain("installs the distro bubblewrap package");
+});

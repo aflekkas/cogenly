@@ -28,6 +28,47 @@ export const sandboxInstallCommand = (manager: PackageManager, root: boolean) =>
     .map((args) => `${root ? "" : "sudo "}${args.join(" ")}`)
     .join(" && ");
 
+/** Where Ubuntu reads the per-program AppArmor exception for bubblewrap. */
+export const apparmorBwrapProfilePath = "/etc/apparmor.d/cogenly-bwrap";
+
+export const apparmorUsernsSysctlPath = "/proc/sys/kernel/apparmor_restrict_unprivileged_userns";
+
+/** True only when `kernel.apparmor_restrict_unprivileged_userns` is exactly on. */
+export const isAppArmorUsernsRestricted = (sysctlValue: string | null | undefined): boolean =>
+  sysctlValue?.trim() === "1";
+
+/**
+ * Ubuntu 24.04's documented per-program `userns` exception: an unconfined
+ * profile scoped to the one binary, leaving the global restriction on.
+ */
+export const apparmorBwrapProfile = (bwrapPath: string) =>
+  `# Allow bubblewrap (only) to create unprivileged user namespaces on Ubuntu 24.04.\n` +
+  `# The global kernel.apparmor_restrict_unprivileged_userns restriction stays enabled.\n` +
+  `abi <abi/4.0>,\n` +
+  `include <tunables/global>\n` +
+  `\n` +
+  `profile ${bwrapPath} flags=(unconfined) {\n` +
+  `  userns,\n` +
+  `}\n`;
+
+/** Privileged steps to install and load the profile, without sudo prefixes. */
+export const apparmorProfileInstallCommands = () =>
+  [
+    ["tee", apparmorBwrapProfilePath],
+    ["apparmor_parser", "-r", apparmorBwrapProfilePath],
+  ] as const;
+
+/** The exact commands to run by hand when root/passwordless sudo is unavailable. */
+export const apparmorProfileInstallCommand = (bwrapPath: string, root: boolean) => {
+  const prefix = root ? "" : "sudo ";
+  return (
+    `${prefix}tee ${apparmorBwrapProfilePath} >/dev/null <<'EOF'\n` +
+    apparmorBwrapProfile(bwrapPath) +
+    `EOF\n` +
+    `${prefix}apparmor_parser -r ${apparmorBwrapProfilePath}`
+  );
+};
+
 export type SandboxFailure =
   | "sandbox-exec-failed"
   | "bwrap-missing"

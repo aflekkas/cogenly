@@ -981,9 +981,12 @@ export const chatSandboxCheck = (status: SandboxStatus): MachineHealthCheck => {
         key: "chat-terminal-sandbox",
         status: "warn",
         title,
-        detail: fixable
-          ? "Fix installs the distro bubblewrap package using root or passwordless sudo, then checks the sandbox again. If elevation is unavailable, it shows the command to run."
-          : "Chat commands stay off until this host supports the required sandbox.",
+        detail:
+          status.failure === "apparmor-userns"
+            ? "bubblewrap is installed, but kernel.apparmor_restrict_unprivileged_userns=1 blocks its user namespaces. Fix installs a narrowly scoped AppArmor profile at /etc/apparmor.d/cogenly-bwrap for the bubblewrap binary only (flags=(unconfined), userns), reloads it with apparmor_parser -r, then checks the sandbox again. The global restriction stays on. If the profile already exists, Fix leaves it unchanged; if elevation is unavailable, it shows the exact commands to run."
+            : fixable
+              ? "Fix installs the distro bubblewrap package using root or passwordless sudo, then checks the sandbox again. If elevation is unavailable, it shows the command to run."
+              : "Chat commands stay off until this host supports the required sandbox.",
         since: null,
         target: null,
         fix: fixable ? "setup-sandbox" : null,
