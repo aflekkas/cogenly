@@ -105,10 +105,11 @@ neighbours are computed at scrub time and take the same whole-token pass.
 Scrubbing fails closed: when the secrets cannot be loaded, every string in the
 result is replaced by a withheld notice and the error is logged.
 
-Delivered process values and their base64, URL-encoded and JSON-escaped forms
-stay registered for the server lifetime, including old revisions after
-replacement/deletion. This deliberately outlives a PTY: descendants and retained
-output may outlive it. Account terminals also redact across PTY chunk boundaries
+Every value the vault hands out (filled, resolved for an integration, or
+delivered to a process, with base64, URL-encoded and JSON-escaped forms for the
+last) stays registered for the server lifetime, up to a bound of the newest
+10,000, including old revisions after replacement/deletion. This deliberately
+outlives a PTY and the item: pages, descendants and retained output keep copies. Account terminals also redact across PTY chunk boundaries
 before output enters events or persisted history. Tokens are resolved after
 provider environment configuration and overlay only the selected terminal's
 environment; they never enter settings or launch arguments. Provider-native

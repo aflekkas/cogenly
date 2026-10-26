@@ -288,6 +288,10 @@ export class Vault extends Context.Service<
 >()("cogenly-server/vault/Vault") {}
 
 const KEY_PAIR_STORE_NAME = "vault-x25519-key-pair";
+/** How a value appears inside a JSON string, where pages and tools often echo it. */
+const jsonEscaped = (value: string): string => JSON.stringify(value).slice(1, -1);
+/** Bounds the delivered-value registry; a value is a few hundred bytes at most. */
+const MAX_DELIVERED_SECRETS = 10_000;
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -307,7 +311,28 @@ const make = Effect.gen(function* () {
     totpSecrets: [],
   });
 
-  const processSecrets = yield* Ref.make(new Set<string>());
+  /**
+   * Every value this process has handed out (filled, resolved, or exposed to a
+   * process), kept after the item is deleted or rotated: copies remain in
+   * pages, terminal buffers and child processes. Oldest entries go first past
+   * the bound.
+   */
+  const deliveredSecrets = yield* Ref.make(new Set<string>());
+  const registerDelivered = (values: Iterable<string>) =>
+    Ref.update(deliveredSecrets, (current) => {
+      const next = new Set(current);
+      for (const value of values) {
+        if (value.length === 0) continue;
+        // Re-adding moves a value to the newest end.
+        next.delete(value);
+        next.add(value);
+      }
+      for (const oldest of next) {
+        if (next.size <= MAX_DELIVERED_SECRETS) break;
+        next.delete(oldest);
+      }
+      return next;
+    });
   const environmentId = yield* identity.getEnvironmentId;
 
   // VaultMachineKeyStore (file-backed today; Keychain replaces this on macOS).
@@ -712,6 +737,7 @@ const make = Effect.gen(function* () {
         return yield* new VaultError({ reason: "field_missing" });
       }
       yield* record("allowed");
+      yield* registerDelivered([value, jsonEscaped(value)]);
       return { status: "allowed", item, field: input.field, value } as const;
     }).pipe(Effect.mapError(wrap));
 
@@ -802,16 +828,14 @@ const make = Effect.gen(function* () {
         secretFields: input.type === "login" ? { password: input.value } : { value: input.value },
       }),
     registerProcessSecrets: (values) =>
-      Ref.update(processSecrets, (current) => {
-        const next = new Set(current);
-        for (const value of values) {
-          next.add(value);
-          next.add(Buffer.from(value).toString("base64"));
-          next.add(encodeURIComponent(value));
-          next.add(JSON.stringify(value).slice(1, -1));
-        }
-        return next;
-      }),
+      registerDelivered(
+        values.flatMap((value) => [
+          value,
+          Buffer.from(value).toString("base64"),
+          encodeURIComponent(value),
+          jsonEscaped(value),
+        ]),
+      ),
     scrubText: (text) =>
       scrubSets.pipe(
         Effect.map(({ secrets, shortSecrets }) =>
@@ -819,7 +843,7 @@ const make = Effect.gen(function* () {
         ),
         withheldOnFailure(() => VAULT_WITHHELD),
         Effect.flatMap((scrubbed) =>
-          Ref.get(processSecrets).pipe(Effect.map((secrets) => redactText(scrubbed, secrets))),
+          Ref.get(deliveredSecrets).pipe(Effect.map((secrets) => redactText(scrubbed, secrets))),
         ),
       ),
     scrubValue: (value) =>
@@ -829,7 +853,7 @@ const make = Effect.gen(function* () {
         ),
         withheldOnFailure(() => withholdValue(value)),
         Effect.flatMap((scrubbed) =>
-          Ref.get(processSecrets).pipe(Effect.map((secrets) => redactValue(scrubbed, secrets))),
+          Ref.get(deliveredSecrets).pipe(Effect.map((secrets) => redactValue(scrubbed, secrets))),
         ),
       ),
   });

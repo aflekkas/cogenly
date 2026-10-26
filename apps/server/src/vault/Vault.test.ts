@@ -349,6 +349,25 @@ describe("Vault service", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("keeps scrubbing a delivered value after its item is rotated or deleted", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const { item } = yield* vault.create({
+        name: "Token",
+        type: "api_key",
+        secretFields: { value: "first-token-value" },
+      });
+      const fill = () => vault.use({ itemId: item.id, field: "value", caller: { kind: "human" } });
+      yield* fill();
+      yield* vault.update({ id: item.id, secretFields: { value: "second-token-value" } });
+      yield* fill();
+      yield* vault.delete({ id: item.id });
+      expect(yield* vault.scrubText("page kept first-token-value and second-token-value")).toBe(
+        "page kept [redacted vault secret] and [redacted vault secret]",
+      );
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("withholds tool output when the secrets to scrub cannot be loaded", () =>
     Effect.gen(function* () {
       const vault = yield* Vault.Vault;
