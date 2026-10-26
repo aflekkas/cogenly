@@ -118,7 +118,7 @@ export function PendingLoginRequestForm(props: {
     >
       <div className="flex min-w-0 items-start gap-3">
         <span className="mt-0.5 flex size-5 shrink-0" aria-hidden>
-          <SiteFavicon host={site.host} />
+          <SiteFavicon host={site.host} environmentId={props.environmentId} />
         </span>
         <div className="flex min-w-0 flex-col gap-1">
           <p className="text-sm font-medium text-foreground">
@@ -175,7 +175,8 @@ export function PendingLoginRequestForm(props: {
       </div>
       {updating ? (
         <p className="text-xs text-muted-foreground">
-          Replaces the saved details of {login.updateItemName ?? "this login"}.
+          Saved into {login.updateItemName ?? "this login"}. Anything left blank keeps its saved
+          value.
         </p>
       ) : (
         <label className="flex min-w-0 items-center gap-2 text-sm text-foreground">

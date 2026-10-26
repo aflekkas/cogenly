@@ -155,7 +155,10 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
         secretFields: { username: "octo-user", password: "octo-password-123" },
       });
       expect(JSON.stringify(saved)).not.toContain("octo-password-123");
-      expect(JSON.stringify(saved)).not.toContain("octo-user");
+      // The username is the login's display text; the password never comes back.
+      expect(saved).toMatchObject({
+        item: { username: "octo-user", policy: { mode: "allow", allowedAgentIds: [] } },
+      });
 
       const listed = yield* call("vault_list", {});
       expect(JSON.stringify(listed)).not.toContain("octo-password-123");
@@ -169,15 +172,7 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
       });
       expect(evaluated).toBe(1);
 
-      const asked = yield* call("vault_fill", { name: "GitHub", field: "password" });
-      expect(asked).toMatchObject({ status: "approval_required" });
-      expect(typed).toHaveLength(0);
-      const savedItem = (yield* Context.get(context, Vault.Vault).list({})).items[0]!;
-      yield* Context.get(context, Vault.Vault).update({
-        id: savedItem.id,
-        policy: { mode: "allow", allowedAgentIds: [], allowedDomains: ["github.com"] },
-      });
-
+      // Saved with the default rule: on its own site it fills without asking.
       const filled = yield* call("vault_fill", {
         name: "GitHub",
         field: "password",
@@ -281,7 +276,8 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
         field: "password",
         locator: "input[name=password]",
       });
-      expect(denied).toMatchObject({ status: "denied" });
+      // Another site asks the user instead of typing anything.
+      expect(denied).toMatchObject({ status: "approval_required" });
       expect(typed).toHaveLength(2);
 
       // The scrub hook in McpToolAccess redacts stored values from any result.
@@ -421,7 +417,7 @@ it.effect("vault_fill fills card fields by field and never returns them", () =>
         field: "cardNumber",
         locator: "input[name=cardNumber]",
       });
-      expect(denied).toMatchObject({ status: "denied" });
+      expect(denied).toMatchObject({ status: "approval_required" });
       expect(typed).toHaveLength(4);
     }),
   ),

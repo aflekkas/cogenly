@@ -1,3 +1,4 @@
+import { defaultVaultPolicy, isDefaultVaultPolicy } from "@cogenly/contracts";
 import type {
   AgentId,
   ProjectLabelId,
@@ -44,8 +45,8 @@ export interface VaultFormField {
 export const VAULT_FIELDS_BY_TYPE: Readonly<Record<VaultItemType, ReadonlyArray<VaultFormField>>> =
   {
     login: [
-      { key: "label", title: "Description", placeholder: "Work GitHub" },
       { key: "username", title: "Username or email" },
+      { key: "label", title: "Label", placeholder: "Site · username" },
       { key: "password", title: "Password", required: true },
       { key: "totpSecret", title: "One-time code secret", placeholder: "Optional" },
     ],
@@ -76,6 +77,10 @@ export interface VaultDraft {
   readonly policyMode: VaultPolicyMode;
   readonly policyAgentIds: ReadonlyArray<AgentId>;
   readonly policyDomains: string;
+  /** Sites outside the allowed ones the owner approved fills on; kept as they are. */
+  readonly policyApprovedDomains: ReadonlyArray<string>;
+  /** The owner picked the access rule by hand, so a later default change leaves it. */
+  readonly policyOwnerSet: boolean;
   /**
    * The owner's own choice; a rule can still keep a `shared` item here. Null
    * when the server predates vault sync, so saving leaves it alone.
@@ -98,18 +103,23 @@ const EMPTY_SECRETS: Record<VaultSecretKey, string> = {
 /** A blank draft for a new item, or the editable metadata of a saved one; secrets stay blank. */
 export function vaultDraftFromItem(
   item: VaultItemMetadata | null,
-  defaults: { readonly scopeProjectId?: ProjectLabelId | null } = {},
+  defaults: {
+    readonly scopeProjectId?: ProjectLabelId | null;
+    readonly type?: VaultItemType;
+  } = {},
 ): VaultDraft {
   return {
     name: item?.name ?? "",
-    type: item?.type ?? "login",
+    type: item?.type ?? defaults.type ?? "login",
     label: item?.label ?? "",
     secrets: EMPTY_SECRETS,
     allowedDomains: item?.allowedDomains.join(", ") ?? "",
     scopeProjectId: item ? item.scopeProjectId : (defaults.scopeProjectId ?? null),
-    policyMode: item?.policy.mode ?? "ask",
+    policyMode: item?.policy.mode ?? defaultVaultPolicy.mode,
     policyAgentIds: item?.policy.allowedAgentIds ?? [],
     policyDomains: item?.policy.allowedDomains.join(", ") ?? "",
+    policyApprovedDomains: item?.policy.approvedDomains ?? [],
+    policyOwnerSet: item?.policy.ownerSet ?? false,
     portability: vaultOwnerPortability(item),
   };
 }
@@ -160,13 +170,20 @@ export function vaultDraftProblem(draft: VaultDraft, mode: "create" | "edit"): s
 }
 
 function vaultPolicyFromDraft(draft: VaultDraft): VaultPolicy {
-  return draft.policyMode === "ask"
-    ? { mode: "ask", allowedAgentIds: [], allowedDomains: [] }
-    : {
+  const extras = {
+    ...(draft.policyApprovedDomains.length > 0
+      ? { approvedDomains: [...draft.policyApprovedDomains] }
+      : {}),
+    ...(draft.policyOwnerSet ? { ownerSet: true } : {}),
+  };
+  return draft.policyMode === "allow"
+    ? {
         mode: "allow",
         allowedAgentIds: [...draft.policyAgentIds],
         allowedDomains: parseDomainList(draft.policyDomains),
-      };
+        ...extras,
+      }
+    : { mode: draft.policyMode, allowedAgentIds: [], allowedDomains: [], ...extras };
 }
 
 /** The secret fields this type uses that the owner typed something into. */
@@ -216,12 +233,37 @@ export function vaultUpdateInput(id: VaultItemId, draft: VaultDraft): VaultUpdat
   };
 }
 
-/** "Asks you first", or who (and where) may use the item without asking. */
+/**
+ * The item's rule after the owner picked an access option in place: the
+ * mode and agents change, sites they approved before stay, and the rule is
+ * marked as the owner's own choice.
+ */
+export function vaultPolicyWithAccess(
+  policy: VaultPolicy,
+  patch: { readonly mode?: VaultPolicyMode; readonly agentIds?: ReadonlyArray<AgentId> },
+): VaultPolicy {
+  const mode = patch.mode ?? policy.mode;
+  return {
+    ...policy,
+    mode,
+    allowedAgentIds: mode === "allow" ? [...(patch.agentIds ?? policy.allowedAgentIds)] : [],
+    allowedThreadIds: mode === "allow" ? (policy.allowedThreadIds ?? []) : [],
+    allowedDomains: mode === "allow" ? policy.allowedDomains : [],
+    ownerSet: true,
+  };
+}
+
+/**
+ * The access rule in a few words: the default ("Agents fill it on its sites"),
+ * "Asks you first", "Blocked", or who (and where) may use it without asking.
+ */
 export function vaultPolicySummary(
   policy: VaultPolicy,
   agentName: (id: AgentId) => string | undefined,
 ): string {
   if (policy.mode === "ask") return "Asks you first";
+  if (policy.mode === "deny") return "Blocked for agents";
+  if (isDefaultVaultPolicy(policy)) return "Agents fill it on its sites";
   const agents =
     policy.allowedAgentIds.length === 0
       ? "Any agent"
@@ -243,16 +285,47 @@ export function sortVaultItems(
   );
 }
 
-/** The newest usage time per item. */
+/** The newest use per item: a fill or other delivery that went through, else any entry. */
 export function lastUsedByItem(
   usage: ReadonlyArray<VaultUsageEntry>,
-): ReadonlyMap<VaultItemId, string> {
-  const latest = new Map<VaultItemId, string>();
+): ReadonlyMap<VaultItemId, VaultUsageEntry> {
+  const latest = new Map<VaultItemId, VaultUsageEntry>();
   for (const entry of usage) {
     const current = latest.get(entry.itemId);
-    if (current === undefined || entry.at > current) latest.set(entry.itemId, entry.at);
+    const better =
+      current === undefined ||
+      (entry.outcome === "allowed" && current.outcome !== "allowed") ||
+      ((entry.outcome === "allowed") === (current.outcome === "allowed") && entry.at > current.at);
+    if (better) latest.set(entry.itemId, entry);
   }
   return latest;
+}
+
+/** "Used 2 hours ago by Inbox agent", "… in a chat", or "Never used". */
+export function vaultLastUsedText(
+  entry: VaultUsageEntry | undefined,
+  agentName: (id: AgentId) => string | undefined,
+  relative: (at: string) => string,
+): string {
+  if (entry === undefined) return "Never used";
+  const who = entry.agentId
+    ? ` by ${agentName(entry.agentId) ?? "a deleted agent"}`
+    : entry.threadId
+      ? " in a chat"
+      : "";
+  return `Used ${relative(entry.at)}${who}`;
+}
+
+/** Logins first (they get their own list), then everything else. */
+export function splitVaultItems(items: ReadonlyArray<VaultItemMetadata>): {
+  readonly logins: ReadonlyArray<VaultItemMetadata>;
+  readonly others: ReadonlyArray<VaultItemMetadata>;
+} {
+  const sorted = sortVaultItems(items);
+  return {
+    logins: sorted.filter((item) => item.type === "login"),
+    others: sorted.filter((item) => item.type !== "login"),
+  };
 }
 
 const OUTCOME_LABELS: Readonly<Record<string, string>> = {

@@ -1,6 +1,7 @@
 import { ProjectLabelId } from "./projectLabel.ts";
 import { MachineInfo } from "./machine.ts";
 import { AgentId } from "./agent.ts";
+import { VaultIconUrl } from "./vault.ts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
@@ -790,7 +791,11 @@ export const OrchestratorMcpRequestLoginInput = Schema.Struct({
   }),
   updateItemId: Schema.optional(TrimmedNonEmptyString).annotate({
     description:
-      "A vault login (id from vault_list) whose stored password stopped working. The answer replaces its secrets instead of creating a new item.",
+      "An existing vault login for this site, by its id, label or username from vault_list: one whose password stopped working, or a password-only login missing its username (ask fields ['username']). The answer is merged into it instead of creating a new login. When several logins match, the call fails and lists them; pass an id.",
+  }),
+  iconUrl: Schema.optional(VaultIconUrl).annotate({
+    description:
+      "The site's icon (an https image URL or image data URL) when you know a better one than its favicon, e.g. from the page's <link rel=icon>. Cogenly fetches the favicon itself otherwise.",
   }),
   timeoutMs: Schema.optional(
     Schema.Int.check(Schema.isBetween({ minimum: 1_000, maximum: 60 * 60 * 1_000 })),

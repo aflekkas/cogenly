@@ -11,7 +11,9 @@ import {
   VaultListInput,
   VaultListResult,
   VaultSecretFields,
+  VaultIconUrl,
   VaultItemType,
+  VaultLoginSummary,
   VaultPolicy,
   PreviewTabId,
 } from "@cogenly/contracts";
@@ -34,17 +36,19 @@ const dependencies = [
 ];
 
 const VaultFillResult = Schema.Struct({
-  status: Schema.Literals(["filled", "approval_required", "denied"]),
+  status: Schema.Literals(["filled", "approval_required", "denied", "choose_login"]),
   item: Schema.optional(VaultItemMetadata),
   field: VaultField,
   domain: Schema.NullOr(Schema.String),
   message: Schema.String,
   approvalId: Schema.optional(Schema.NullOr(Schema.String)),
+  /** choose_login: the logins that match; call again with one's itemId. */
+  candidates: Schema.optional(Schema.Array(VaultLoginSummary)),
 });
 
 const VaultListTool = Tool.make("vault_list", {
   description:
-    "List vault items (logins, API keys, cards, notes) as metadata only: name, type, allowed domains, policy and which secret fields exist. Never returns secret values or usernames. Check it before signing in anywhere; when no login is allowed on the site, call request_login.",
+    "List vault items (logins, API keys, cards, notes) as metadata only: name, type, label, allowed domains, policy and which secret fields exist, plus `sites`: the saved logins grouped by site with each login's id, label and username or email (missingUsername marks a password-only login). Never returns passwords, codes or other secret values. Always check it before signing in anywhere or setting up an integration that signs in to a site: reuse a matching login with vault_fill. A site can have several logins; pick the one the task needs by itemId. When none fits, call request_login; for a login missing its username, call request_login with updateItemId and fields ['username'].",
   parameters: VaultListInput,
   success: VaultListResult,
   failure: OrchestratorMcpFailure,
@@ -58,7 +62,7 @@ const VaultListTool = Tool.make("vault_list", {
 
 const VaultSaveTool = Tool.make("vault_save", {
   description:
-    "Store a secret you generated or obtained (e.g. a password created at signup) in the vault under a name, so it can be filled later with vault_fill without asking the user. The value comes from you; for a login only the user knows, use request_login; for other secrets only the user knows, use request_secret with saveToVault.",
+    "Store a secret you generated or obtained (e.g. a password created at signup) in the vault, so it can be filled later with vault_fill without asking the user. For a login, name it after the site (e.g. 'GitHub'), set allowedDomains to the site's host and put both username (or email) and password in secretFields; several logins for one site share the name and get the label '<Site> · <username>' unless you pass one. Omit policy: by default any agent may fill it on its allowed sites without asking. Pass iconUrl when the page shows a better icon than its favicon. The value comes from you; for a login only the user knows, use request_login; for other secrets only the user knows, use request_secret with saveToVault.",
   parameters: Schema.Struct({
     name: VaultItemResult.fields.item.fields.name,
     type: VaultItemType,
@@ -66,6 +70,7 @@ const VaultSaveTool = Tool.make("vault_save", {
     allowedDomains: Schema.optional(Schema.Array(Schema.String)),
     policy: Schema.optional(VaultPolicy),
     secretFields: VaultSecretFields,
+    iconUrl: Schema.optional(VaultIconUrl),
   }),
   success: VaultItemResult,
   failure: OrchestratorMcpFailure,
@@ -77,10 +82,12 @@ const VaultSaveTool = Tool.make("vault_save", {
 
 const VaultFillTool = Tool.make("vault_fill", {
   description:
-    "Type one field of a vault item (username, password, totp or value; for a card: cardNumber, cardExpiry as MM/YY, cardCvc or cardholderName) into the active preview tab at locator, without the value ever reaching you. The tab's host must match the item's allowedDomains (exact host or subdomain). If the owner must approve this use, the result says approval_required and the user gets an approval card in this thread (an agent's appears in its open items); wait for their decision, then call again. If the site rejects the filled login, ask for the new one with request_login and updateItemId.",
+    "Type one field of a vault item (username, password, totp or value; for a card: cardNumber, cardExpiry as MM/YY, cardCvc or cardholderName) into the active preview tab at locator, without the value ever reaching you. Name the item by itemId, name, label or username; with none, the logins for the tab's site are used. When several logins match, nothing is filled and the result is choose_login with the candidates: pick one and call again with its itemId; never guess. On one of the item's allowed sites (exact host or subdomain) the fill goes through at once. On any other site, or for an item the owner set to ask first, the result is approval_required and the user gets an approval card in this thread (an agent's appears in its open items); wait for their decision, then call again. denied means the owner blocked agents from it. If the site rejects the filled login, ask for the new one with request_login and updateItemId.",
   parameters: Schema.Struct({
     itemId: Schema.optional(Schema.String),
     name: Schema.optional(Schema.String),
+    label: Schema.optional(Schema.String),
+    username: Schema.optional(Schema.String),
     field: VaultField,
     locator: Schema.optional(Schema.String),
     selector: Schema.optional(Schema.String),
@@ -106,6 +113,23 @@ const VaultDeleteTool = Tool.make("vault_delete", {
 })
   .annotate(Tool.Title, "Delete a vault item")
   .annotate(Tool.Destructive, true);
+
+const VaultLinkIntegrationTool = Tool.make("vault_link_integration", {
+  description:
+    "Record that a vault login signs in to an integration (integration id from integrations_list), e.g. the Google account used for the Google Cloud console while setting up Google Workspace. The integration's Settings page then shows which login it signs in with. Pass unlink: true to remove the link. Stores no secret.",
+  parameters: Schema.Struct({
+    itemId: Schema.String,
+    integrationId: Schema.String,
+    unlink: Schema.optional(Schema.Boolean),
+  }),
+  success: VaultItemResult,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Title, "Link a login to an integration")
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, true);
 
 export const VaultToolkit = Toolkit.make(
   Tool.make("vault_sharing_status", {
@@ -138,5 +162,6 @@ export const VaultToolkit = Toolkit.make(
   VaultListTool,
   VaultSaveTool,
   VaultFillTool,
+  VaultLinkIntegrationTool,
   VaultDeleteTool,
 );

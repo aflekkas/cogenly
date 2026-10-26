@@ -15,13 +15,20 @@ import {
   VaultError,
   VaultItemId,
   VaultPolicy,
+  VAULT_LOGIN_USERNAME_MAX_LENGTH,
+  defaultVaultLoginLabel,
   defaultVaultPolicy,
+  groupVaultLoginsBySite,
+  vaultLoginLabel,
+  vaultLoginSummary,
   type VaultCreateInput,
   type VaultDeleteInput,
   type VaultField,
   type VaultItemMetadata,
   type VaultItemType,
   type VaultListInput,
+  type VaultLoginSite,
+  type VaultLoginSummary,
   type VaultSecretFields,
   type VaultUpdateInput,
   type VaultUsageListInput,
@@ -43,6 +50,7 @@ import * as ApprovalChanges from "../agents/ApprovalChanges.ts";
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as SiteIconCache from "../assets/SiteIconCache.ts";
 import * as VaultCrypto from "./VaultCrypto.ts";
 import { makeVaultKeyPairLoader } from "./VaultKeyPair.ts";
 import {
@@ -54,6 +62,7 @@ import * as VaultSyncCapture from "./VaultSyncCapture.ts";
 import {
   evaluateVaultPolicy,
   hostMatchesAnyDomain,
+  isApprovedSite,
   normalizeHost,
   type VaultUseCaller,
 } from "./VaultPolicy.ts";
@@ -68,9 +77,7 @@ import {
 } from "./VaultRedactor.ts";
 import { totp } from "./VaultTotp.ts";
 
-export interface VaultUseInput {
-  readonly itemId?: VaultItemId | undefined;
-  readonly name?: string | undefined;
+export interface VaultUseInput extends VaultLoginSelector {
   /** Project (label) scope to prefer when a name exists in several scopes. */
   readonly scopeProjectId?: string | null | undefined;
   readonly field: VaultField;
@@ -107,6 +114,12 @@ export type VaultUseResult =
       readonly item: VaultItemMetadata;
       readonly field: VaultField;
       readonly reason: string;
+    }
+  | {
+      /** Several logins match and none was named: the caller must pick one. */
+      readonly status: "ambiguous";
+      readonly field: VaultField;
+      readonly candidates: ReadonlyArray<VaultLoginSummary>;
     };
 
 const isVaultError = Schema.is(VaultError);
@@ -132,6 +145,7 @@ interface VaultRow {
   readonly portability: string;
   readonly sync_attachment_json: string | null;
   readonly sync_extras: string | null;
+  readonly integration_ids_json?: string | null;
 }
 
 const FIELD_KEYS = [
@@ -202,6 +216,7 @@ const MetadataJson = Schema.fromJsonString(
     label: Schema.optional(Schema.String),
     fields: Schema.optional(Schema.Array(Schema.String)),
     cardLast4: Schema.optional(Schema.String),
+    username: Schema.optional(Schema.String),
   }),
 );
 const PolicyJson = Schema.fromJsonString(VaultPolicy);
@@ -246,6 +261,7 @@ interface MetadataShape {
   readonly label?: string | undefined;
   readonly fields?: ReadonlyArray<string> | undefined;
   readonly cardLast4?: string | undefined;
+  readonly username?: string | undefined;
 }
 const decodeMetadataOption = Schema.decodeUnknownOption(MetadataJson);
 const decodePolicyOption = Schema.decodeUnknownOption(PolicyJson);
@@ -256,6 +272,54 @@ const decodeStoredFieldsOption = Schema.decodeUnknownOption(StoredFieldsJson);
 const decodeAttachmentOption = Schema.decodeUnknownOption(AttachmentJson);
 const parseMetadata = (text: string): MetadataShape =>
   Option.getOrElse(decodeMetadataOption(text), () => ({}));
+
+/**
+ * A login's username kept as plaintext display text (see contracts). Other
+ * types keep `username` secret: integration token items hold a client secret
+ * in it.
+ */
+const displayUsernameOf = (type: string, stored: StoredFields): string | undefined =>
+  type === "login" &&
+  stored.username !== undefined &&
+  stored.username.length <= VAULT_LOGIN_USERNAME_MAX_LENGTH
+    ? stored.username
+    : undefined;
+
+/** The plaintext metadata a row keeps, derived from its type, label and secrets. */
+const metadataJsonFor = (type: string, label: string | undefined, stored: StoredFields) => {
+  const cardLast4 = cardLast4Of(stored);
+  const username = displayUsernameOf(type, stored);
+  return encodeMetadataJson({
+    ...(label ? { label } : {}),
+    fields: fieldsOf(stored),
+    ...(cardLast4 ? { cardLast4 } : {}),
+    ...(username === undefined ? {} : { username }),
+  });
+};
+
+const IntegrationIdsJson = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Array(Schema.NullOr(Schema.String))),
+);
+const integrationIdsOf = (row: VaultRow): Array<string> =>
+  row.integration_ids_json
+    ? Option.match(IntegrationIdsJson(row.integration_ids_json), {
+        onNone: () => [],
+        onSome: (ids) => ids.filter((id): id is string => typeof id === "string" && id !== ""),
+      })
+    : [];
+
+/** How an agent names a login: by id, by label or name, or by username. */
+export interface VaultLoginSelector {
+  readonly itemId?: VaultItemId | undefined;
+  readonly name?: string | undefined;
+  readonly label?: string | undefined;
+  readonly username?: string | undefined;
+}
+
+export type VaultFindResult =
+  | { readonly status: "found"; readonly item: VaultItemMetadata }
+  | { readonly status: "ambiguous"; readonly candidates: ReadonlyArray<VaultLoginSummary> }
+  | { readonly status: "not_found" };
 
 /** Server-internal extras for `create` and `update`, never reachable from RPC or MCP. */
 export interface VaultWriteOptions {
@@ -289,7 +353,28 @@ export class Vault extends Context.Service<
     readonly list: (
       input: VaultListInput,
       threadId?: ThreadId,
-    ) => Effect.Effect<{ items: ReadonlyArray<VaultItemMetadata> }, VaultError>;
+    ) => Effect.Effect<
+      { items: ReadonlyArray<VaultItemMetadata>; sites: ReadonlyArray<VaultLoginSite> },
+      VaultError
+    >;
+    /**
+     * The one item a selector names, as a caller in `threadId` sees the vault.
+     * With no id, name, label or username, the logins for `domain` are the
+     * candidates; several of them come back as `ambiguous`, never a guess.
+     */
+    readonly findLogin: (
+      input: VaultLoginSelector & {
+        readonly domain?: string | null | undefined;
+        readonly threadId?: ThreadId | undefined;
+        readonly scopeProjectId?: string | null | undefined;
+      },
+    ) => Effect.Effect<VaultFindResult, VaultError>;
+    /**
+     * Startup upgrade: copies each login's username into its display metadata
+     * (older items kept it only encrypted) and caches every login site's icon.
+     * Password-only logins stay as they are; lists mark them missing a username.
+     */
+    readonly upgradeLogins: Effect.Effect<{ readonly usernames: number }, VaultError>;
     readonly getMetadata: (itemId: VaultItemId) => Effect.Effect<VaultItemMetadata, VaultError>;
     readonly create: (
       input: VaultCreateInput,
@@ -345,6 +430,8 @@ export class Vault extends Context.Service<
     readonly saveLogin: (input: {
       readonly name: string;
       readonly domain: string;
+      /** A site icon the agent supplied, cached for the domain. */
+      readonly iconUrl?: string | undefined;
       readonly secretFields: Pick<
         VaultSecretFields,
         "username" | "password" | "totpSecret" | "value"
@@ -426,7 +513,28 @@ interface ScrubCache {
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  // Every read of a live row carries its account association and integration links.
+  const rowColumns = sql`vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id, (SELECT json_group_array(l.integration_id) FROM vault_login_integrations l WHERE l.item_id = vault_items.id) AS integration_ids_json`;
   const store = yield* ServerSecretStore.ServerSecretStore;
+  const siteIcons = yield* Effect.serviceOption(SiteIconCache.SiteIconCache);
+  const layerScope = yield* Effect.scope;
+  /**
+   * Caches a login site's icon in the background: an agent-supplied one, else
+   * the fetched favicon. Saving never waits on, or fails with, the network.
+   */
+  const prefetchIcon = (host: string | null | undefined, iconUrl?: string) =>
+    Option.isNone(siteIcons) || !host
+      ? Effect.void
+      : (iconUrl === undefined
+          ? siteIcons.value.ensure(host)
+          : siteIcons.value
+              .provide(host, iconUrl)
+              .pipe(
+                Effect.flatMap((provided) =>
+                  provided ? Effect.void : siteIcons.value.ensure(host),
+                ),
+              )
+        ).pipe(Effect.forkIn(layerScope), Effect.asVoid);
   const identity = yield* ServerEnvironment.ServerEnvironmentIdentity;
   const crypto = yield* Crypto.Crypto;
   const notifyApprovals = (yield* ApprovalChanges.optional).notify;
@@ -496,6 +604,12 @@ const make = Effect.gen(function* () {
   ): VaultItemMetadata => {
     const metadata = parseMetadata(row.metadata_json);
     const cardLast4 = stored ? cardLast4Of(stored) : metadata.cardLast4;
+    const username = stored
+      ? displayUsernameOf(row.type, stored)
+      : row.type === "login"
+        ? metadata.username
+        : undefined;
+    const integrationIds = integrationIdsOf(row);
     const portability = effectivePortability(row, machineOnly);
     return {
       id: VaultItemId.make(row.id),
@@ -511,6 +625,8 @@ const make = Effect.gen(function* () {
       policy: parsePolicy(row.policy_json),
       fields: stored ? fieldsOf(stored) : ((metadata.fields ?? []) as VaultItemMetadata["fields"]),
       ...(cardLast4 ? { cardLast4 } : {}),
+      ...(username === undefined ? {} : { username }),
+      ...(row.type === "login" && integrationIds.length > 0 ? { integrationIds } : {}),
       portability: portability.portability,
       ...(portability.reason ? { portabilityReason: portability.reason } : {}),
       createdAt: row.created_at as VaultItemMetadata["createdAt"],
@@ -521,7 +637,7 @@ const make = Effect.gen(function* () {
   const loadRow = (itemId: string) =>
     Effect.gen(function* () {
       const rows =
-        yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE id = ${itemId} AND deleted_at IS NULL`;
+        yield* sql<VaultRow>`SELECT ${rowColumns} FROM vault_items WHERE id = ${itemId} AND deleted_at IS NULL`;
       if (!rows[0]) return yield* new VaultError({ reason: "not_found" });
       return rows[0];
     });
@@ -540,10 +656,59 @@ const make = Effect.gen(function* () {
       }
       if (!input.name) return yield* new VaultError({ reason: "invalid_input" });
       const rows =
-        yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE name = ${input.name} AND deleted_at IS NULL ORDER BY updated_at DESC`;
+        yield* sql<VaultRow>`SELECT ${rowColumns} FROM vault_items WHERE name = ${input.name} AND deleted_at IS NULL ORDER BY updated_at DESC`;
       const scoped = rows.filter((row) => visibleIn(row, input.scopeProjectId));
       if (scoped.length === 0) return yield* new VaultError({ reason: "not_found" });
       if (scoped.length === 1) return scoped[0]!;
+      return yield* new VaultError({ reason: "ambiguous_name" });
+    });
+
+  /**
+   * The row a selector names. Without an id, name, label and username narrow
+   * the visible items, and with none of them the logins allowed on `domain`
+   * are the candidates. Several logins left over are returned for the caller
+   * to choose from; several items of other types stay `ambiguous_name`.
+   */
+  const resolveRow = (
+    input: VaultLoginSelector & {
+      readonly domain?: string | null | undefined;
+      readonly scopeProjectId?: string | null | undefined;
+    },
+  ) =>
+    Effect.gen(function* () {
+      if (input.itemId)
+        return {
+          row: yield* findRow({ itemId: input.itemId, scopeProjectId: input.scopeProjectId }),
+        };
+      const name = input.name?.trim().toLowerCase();
+      const label = input.label?.trim().toLowerCase();
+      const username = input.username?.trim().toLowerCase();
+      if (!name && !label && !username && !input.domain)
+        return yield* new VaultError({ reason: "invalid_input" });
+      const rows =
+        (yield* sql<VaultRow>`SELECT ${rowColumns} FROM vault_items WHERE deleted_at IS NULL ORDER BY updated_at DESC`).filter(
+          (row) => visibleIn(row, input.scopeProjectId),
+        );
+      const machineOnly = yield* rules;
+      const entries = rows.map((row) => ({ row, item: metadataOf(row, machineOnly) }));
+      const onSite = (entry: (typeof entries)[number]) =>
+        !!input.domain && hostMatchesAnyDomain(input.domain, entry.item.allowedDomains);
+      let matches = entries.filter(
+        (entry) =>
+          (!name || entry.item.name.toLowerCase() === name) &&
+          (!label ||
+            vaultLoginLabel(entry.item).toLowerCase() === label ||
+            entry.item.name.toLowerCase() === label) &&
+          (!username || entry.item.username?.toLowerCase() === username) &&
+          (name || label || username ? true : entry.item.type === "login" && onSite(entry)),
+      );
+      // A name shared by several sites' logins: the page's site decides.
+      if (matches.length > 1 && input.domain && matches.some(onSite))
+        matches = matches.filter(onSite);
+      if (matches.length === 0) return yield* new VaultError({ reason: "not_found" });
+      if (matches.length === 1) return { row: matches[0]!.row };
+      if (matches.every((entry) => entry.item.type === "login"))
+        return { candidates: matches.map((entry) => vaultLoginSummary(entry.item)) };
       return yield* new VaultError({ reason: "ambiguous_name" });
     });
 
@@ -665,7 +830,7 @@ const make = Effect.gen(function* () {
     const cache = yield* Ref.get(scrubCache);
     if (cache.loaded) return cache;
     const rows =
-      yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE deleted_at IS NULL`.pipe(
+      yield* sql<VaultRow>`SELECT ${rowColumns} FROM vault_items WHERE deleted_at IS NULL`.pipe(
         Effect.mapError(wrap),
       );
     const secrets = new Set<string>();
@@ -684,8 +849,11 @@ const make = Effect.gen(function* () {
         continue;
       }
       const stored = yield* decryptStored(row);
-      for (const value of Object.values(stored))
-        if (typeof value === "string" && value.length > 0)
+      // A login's username is display text, listed by vault_list; scrubbing it
+      // would blank the list it belongs in.
+      const shown = displayUsernameOf(row.type, stored) !== undefined;
+      for (const [key, value] of Object.entries(stored))
+        if (typeof value === "string" && value.length > 0 && !(shown && key === "username"))
           (value.length < 6 ? shortSecrets : secrets).add(value);
       // Card values echo back in shapes other than the stored one: a page may
       // return the number digits-only or grouped, and the expiry as MM/YYYY.
@@ -820,8 +988,18 @@ const make = Effect.gen(function* () {
       const encrypted = yield* encryptStored(id, stored);
       const at = yield* now;
       const policy = input.policy ?? defaultVaultPolicy;
+      if (input.type === "login")
+        yield* assertLoginLabelFree({
+          scopeProjectId: input.scopeProjectId ?? null,
+          name: input.name,
+          label: vaultLoginLabel({
+            name: input.name,
+            label: input.label,
+            username: displayUsernameOf("login", stored),
+          }),
+        });
 
-      yield* sql`INSERT INTO vault_items(id, name, type, scope_project_id, metadata_json, policy_json, allowed_domains_json, ciphertext, wrapped_keys_json, created_at, updated_at, portability, sync_attachment_json) VALUES (${id}, ${input.name}, ${input.type}, ${input.scopeProjectId ?? null}, ${encodeMetadataJson({ ...(input.label ? { label: input.label } : {}), fields: fieldsOf(stored), ...(cardLast4Of(stored) ? { cardLast4: cardLast4Of(stored) } : {}) })}, ${encodePolicyJson(policy)}, ${encodeDomainsJson(input.allowedDomains ?? [])}, ${encrypted.ciphertext}, ${encrypted.wrappedKeys}, ${at}, ${at}, ${input.portability ?? "shared"}, ${encodeAttachment(options?.syncAttachment ?? null)})`.pipe(
+      yield* sql`INSERT INTO vault_items(id, name, type, scope_project_id, metadata_json, policy_json, allowed_domains_json, ciphertext, wrapped_keys_json, created_at, updated_at, portability, sync_attachment_json) VALUES (${id}, ${input.name}, ${input.type}, ${input.scopeProjectId ?? null}, ${metadataJsonFor(input.type, input.label, stored)}, ${encodePolicyJson(policy)}, ${encodeDomainsJson(input.allowedDomains ?? [])}, ${encrypted.ciphertext}, ${encrypted.wrappedKeys}, ${at}, ${at}, ${input.portability ?? "shared"}, ${encodeAttachment(options?.syncAttachment ?? null)})`.pipe(
         Effect.mapError((cause) =>
           String(cause).includes("UNIQUE")
             ? new VaultError({ reason: "name_conflict", cause })
@@ -835,23 +1013,55 @@ const make = Effect.gen(function* () {
     }).pipe(
       sql.withTransaction,
       Effect.tap(() => invalidateScrubCache),
+      Effect.tap(({ item }) =>
+        item.type === "login" ? prefetchIcon(item.allowedDomains[0], input.iconUrl) : Effect.void,
+      ),
       Effect.mapError(wrap),
     );
+
+  /**
+   * Logins for one site share its name, so each needs its own label (shown
+   * label: the owner's, else "<Site> · <username>").
+   */
+  const assertLoginLabelFree = (input: {
+    readonly scopeProjectId: string | null;
+    readonly name: string;
+    readonly label: string;
+    readonly exceptId?: string;
+  }) =>
+    Effect.gen(function* () {
+      const rows = yield* sql<{
+        id: string;
+        name: string;
+        metadata_json: string;
+      }>`SELECT id, name, metadata_json FROM vault_items WHERE type = 'login' AND deleted_at IS NULL AND COALESCE(scope_project_id, '') = ${input.scopeProjectId ?? ""} AND name = ${input.name} AND id <> ${input.exceptId ?? ""}`;
+      const wanted = input.label.toLowerCase();
+      const taken = rows.some((row) => {
+        const metadata = parseMetadata(row.metadata_json);
+        return (
+          vaultLoginLabel({
+            name: row.name,
+            label: metadata.label as VaultItemMetadata["label"],
+            username: metadata.username,
+          }).toLowerCase() === wanted
+        );
+      });
+      if (taken) return yield* new VaultError({ reason: "label_conflict" });
+    });
 
   const list: Vault["Service"]["list"] = (input, threadId) =>
     Effect.gen(function* () {
       const scope =
         threadId === undefined ? input.scopeProjectId : yield* projectForThread(threadId);
       const rows =
-        yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE deleted_at IS NULL ORDER BY name`.pipe(
+        yield* sql<VaultRow>`SELECT ${rowColumns} FROM vault_items WHERE deleted_at IS NULL ORDER BY name`.pipe(
           Effect.mapError(wrap),
         );
       const machineOnly = yield* rules;
-      return {
-        items: rows
-          .filter((row) => visibleIn(row, scope))
-          .map((row) => metadataOf(row, machineOnly)),
-      };
+      const items = rows
+        .filter((row) => visibleIn(row, scope))
+        .map((row) => metadataOf(row, machineOnly));
+      return { items, sites: groupVaultLoginsBySite(items) };
     });
 
   const update: Vault["Service"]["update"] = (input, options) =>
@@ -875,6 +1085,34 @@ const make = Effect.gen(function* () {
       const policy = input.policy ?? parsePolicy(row.policy_json);
       const label =
         input.label === null ? undefined : (input.label ?? parseMetadata(row.metadata_json).label);
+      const type = input.type ?? row.type;
+      const name = input.name ?? row.name;
+      if (
+        type === "login" &&
+        (input.name !== undefined ||
+          input.label !== undefined ||
+          input.type !== undefined ||
+          input.scopeProjectId !== undefined ||
+          input.secretFields?.username !== undefined)
+      )
+        yield* assertLoginLabelFree({
+          scopeProjectId:
+            input.scopeProjectId === undefined ? row.scope_project_id : input.scopeProjectId,
+          name,
+          label: vaultLoginLabel({
+            name,
+            label: label as VaultItemMetadata["label"],
+            username: displayUsernameOf("login", stored),
+          }),
+          exceptId: row.id,
+        });
+      if (input.integrationIds !== undefined) {
+        if (type !== "login") return yield* new VaultError({ reason: "invalid_input" });
+        const linkedAt = yield* now;
+        yield* sql`DELETE FROM vault_login_integrations WHERE item_id = ${row.id}`;
+        for (const integrationId of new Set(input.integrationIds))
+          yield* sql`INSERT INTO vault_login_integrations(item_id, integration_id, linked_at) VALUES (${row.id}, ${integrationId}, ${linkedAt})`;
+      }
       // Policy is local; an edit that changes only policy has nothing to sync.
       const synced =
         input.name !== undefined ||
@@ -889,7 +1127,7 @@ const make = Effect.gen(function* () {
         options?.syncAttachment === undefined
           ? row.sync_attachment_json
           : encodeAttachment(options.syncAttachment);
-      yield* sql`UPDATE vault_items SET name = ${input.name ?? row.name}, type = ${input.type ?? row.type}, scope_project_id = ${input.scopeProjectId === undefined ? row.scope_project_id : input.scopeProjectId}, metadata_json = ${encodeMetadataJson({ ...(label ? { label } : {}), fields: fieldsOf(stored), ...(cardLast4Of(stored) ? { cardLast4: cardLast4Of(stored) } : {}) })}, policy_json = ${encodePolicyJson(policy)}, allowed_domains_json = ${encodeDomainsJson(input.allowedDomains ?? parseDomains(row.allowed_domains_json))}, ${input.secretFields ? sql`ciphertext = ${ciphertext}, wrapped_keys_json = ${wrappedKeys}, credential_revision = credential_revision + 1,` : sql``} portability = ${input.portability ?? row.portability}, sync_attachment_json = ${attachment}, updated_at = ${at} WHERE id = ${row.id}`.pipe(
+      yield* sql`UPDATE vault_items SET name = ${name}, type = ${type}, scope_project_id = ${input.scopeProjectId === undefined ? row.scope_project_id : input.scopeProjectId}, metadata_json = ${metadataJsonFor(type, label, stored)}, policy_json = ${encodePolicyJson(policy)}, allowed_domains_json = ${encodeDomainsJson(input.allowedDomains ?? parseDomains(row.allowed_domains_json))}, ${input.secretFields ? sql`ciphertext = ${ciphertext}, wrapped_keys_json = ${wrappedKeys}, credential_revision = credential_revision + 1,` : sql``} portability = ${input.portability ?? row.portability}, sync_attachment_json = ${attachment}, updated_at = ${at} WHERE id = ${row.id}`.pipe(
         Effect.mapError((cause) =>
           String(cause).includes("UNIQUE")
             ? new VaultError({ reason: "name_conflict", cause })
@@ -905,6 +1143,11 @@ const make = Effect.gen(function* () {
     }).pipe(
       sql.withTransaction,
       Effect.tap(() => invalidateScrubCache),
+      Effect.tap(({ item }) =>
+        item.type === "login" && input.allowedDomains !== undefined
+          ? prefetchIcon(item.allowedDomains[0])
+          : Effect.void,
+      ),
       Effect.mapError(wrap),
     );
 
@@ -932,11 +1175,21 @@ const make = Effect.gen(function* () {
                 : input.threadId,
             )
           : input.scopeProjectId;
-      const row = yield* findRow({
+      const resolved = yield* resolveRow({
         itemId: input.itemId,
         name: input.name,
+        label: input.label,
+        username: input.username,
+        domain: input.domain,
         scopeProjectId: scope,
       });
+      if ("candidates" in resolved)
+        return {
+          status: "ambiguous",
+          field: input.field,
+          candidates: resolved.candidates,
+        } as const;
+      const row = resolved.row;
       if (
         input.expectedRevision !== undefined &&
         row.credential_revision !== input.expectedRevision
@@ -954,11 +1207,15 @@ const make = Effect.gen(function* () {
           domain: input.domain,
           outcome,
         });
-      if (
+      const isAgent = input.caller.kind === "agent" || input.caller.kind === "thread";
+      const offSite =
         (input.enforceAllowedDomains ||
           (input.enforceRestrictedDomains && item.allowedDomains.length > 0)) &&
-        !(input.domain && hostMatchesAnyDomain(input.domain, item.allowedDomains))
-      ) {
+        !(isAgent
+          ? isApprovedSite(input.domain, item)
+          : input.domain && hostMatchesAnyDomain(input.domain, item.allowedDomains));
+      // Server destinations outside the allowed sites are refused outright.
+      if (offSite && !isAgent) {
         yield* record("denied_domain");
         return {
           status: "denied",
@@ -967,11 +1224,14 @@ const make = Effect.gen(function* () {
           reason: "domain_not_allowed",
         } as const;
       }
-      const decision = evaluateVaultPolicy({
+      // Block wins everywhere; a page outside the item's sites always asks the
+      // owner, whatever the rule; on its sites the rule decides.
+      const policyDecision = evaluateVaultPolicy({
         policy: item.policy,
         caller: input.caller,
         domain: input.domain,
       });
+      const decision = policyDecision === "deny" ? "deny" : offSite ? "ask" : policyDecision;
       if (decision === "ask") {
         // Reuse the existing agent approval mechanism: one pending approval
         // per agent/item/field/domain, decided by the owner (see
@@ -1014,6 +1274,9 @@ const make = Effect.gen(function* () {
         }
         yield* record("approval_required");
         // A thread's approval shows as a card in that thread; an agent's in its workspace.
+        const why = offSite
+          ? `${input.domain ?? "This page"} is not one of this item's allowed sites, so the user decides.`
+          : "The owner set this item to ask first.";
         const where =
           input.caller.kind === "thread"
             ? "The user sees an approval card in this thread."
@@ -1023,7 +1286,7 @@ const make = Effect.gen(function* () {
           item,
           field: input.field,
           approvalId,
-          message: `Waiting on the user: this vault use needs their approval. ${where} ${
+          message: `Waiting on the user: this vault use needs their approval. ${why} ${where} ${
             declinedBefore
               ? "They declined the last request for this; don't retry unless they ask you to."
               : "Wait for them to decide, then call again; it succeeds once they allow it."
@@ -1040,8 +1303,10 @@ const make = Effect.gen(function* () {
         yield* record("field_missing");
         return yield* new VaultError({ reason: "field_missing" });
       }
-      // Never deliver a value we cannot keep scrubbing for this process's lifetime.
-      yield* registerDelivered([value], input.field === "totp");
+      // Never deliver a value we cannot keep scrubbing for this process's
+      // lifetime. A login's username is display text, not a secret to scrub.
+      if (!(input.field === "username" && item.username === value))
+        yield* registerDelivered([value], input.field === "totp");
       yield* record("allowed");
       return { status: "allowed", item, field: input.field, value } as const;
     }).pipe(Effect.mapError(wrap));
@@ -1063,7 +1328,8 @@ const make = Effect.gen(function* () {
         }>`SELECT id FROM vault_items WHERE COALESCE(scope_project_id, '') = ${payload.scopeProjectId ?? ""} AND name = ${name} AND deleted_at IS NULL AND id <> ${itemId}`.pipe(
           Effect.map((rows) => rows.length > 0),
         );
-      // Two machines can each have an item with this name; the arrival is renamed here.
+      // Two machines can each have an item with this name; the arrival is renamed
+      // here. Logins for one site share its name, so they keep theirs.
       const label =
         sourceLabel.length > SYNC_LABEL_LIMIT
           ? `${sourceLabel.slice(0, SYNC_LABEL_LIMIT - 1).trimEnd()}…`
@@ -1071,13 +1337,11 @@ const make = Effect.gen(function* () {
       const withSuffix = (suffix: string) =>
         `${payload.name.slice(0, SYNC_NAME_LIMIT - suffix.length).trimEnd()}${suffix}`;
       let name: string = payload.name;
-      if (yield* taken(name)) name = withSuffix(` (from ${label})`);
-      if (yield* taken(name)) name = withSuffix(` (from ${label}, ${itemId.slice(-6)})`);
-      const metadata = encodeMetadataJson({
-        ...(payload.label ? { label: payload.label } : {}),
-        fields: fieldsOf(stored),
-        ...(cardLast4Of(stored) ? { cardLast4: cardLast4Of(stored) } : {}),
-      });
+      if (payload.type !== "login") {
+        if (yield* taken(name)) name = withSuffix(` (from ${label})`);
+        if (yield* taken(name)) name = withSuffix(` (from ${label}, ${itemId.slice(-6)})`);
+      }
+      const metadata = metadataJsonFor(payload.type, payload.label, stored);
       const domains = encodeDomainsJson(payload.allowedDomains);
       const attachment = payload.attachment ? encodeAttachmentJson(payload.attachment) : null;
       if (existing) {
@@ -1087,10 +1351,10 @@ const make = Effect.gen(function* () {
         // Local policy, approvals and portability stay as they are.
         yield* sql`UPDATE vault_items SET name = ${name}, type = ${payload.type}, scope_project_id = ${payload.scopeProjectId}, metadata_json = ${metadata}, allowed_domains_json = ${domains}, ciphertext = ${encrypted.ciphertext}, wrapped_keys_json = ${encrypted.wrappedKeys}, credential_revision = credential_revision + ${secretsChanged ? 1 : 0}, sync_attachment_json = ${attachment}, sync_extras = ${sealedExtras}, created_at = ${payload.createdAt}, updated_at = ${payload.updatedAt} WHERE id = ${itemId} AND deleted_at IS NULL`;
       } else if (found) {
-        // Back from a local delete: like a first arrival, it asks before any agent uses it.
+        // Back from a local delete: like a first arrival, it takes the default rule.
         yield* sql`UPDATE vault_items SET name = ${name}, type = ${payload.type}, scope_project_id = ${payload.scopeProjectId}, metadata_json = ${metadata}, policy_json = ${encodePolicyJson(defaultVaultPolicy)}, allowed_domains_json = ${domains}, ciphertext = ${encrypted.ciphertext}, wrapped_keys_json = ${encrypted.wrappedKeys}, credential_revision = credential_revision + 1, sync_attachment_json = ${attachment}, sync_extras = ${sealedExtras}, created_at = ${payload.createdAt}, updated_at = ${payload.updatedAt}, deleted_at = NULL WHERE id = ${itemId}`;
       } else {
-        // A first arrival asks before any agent here may use it.
+        // A first arrival takes the default rule: the owner's agents may fill it on its sites.
         yield* sql`INSERT INTO vault_items(id, name, type, scope_project_id, metadata_json, policy_json, allowed_domains_json, ciphertext, wrapped_keys_json, created_at, updated_at, sync_attachment_json, sync_extras) VALUES (${itemId}, ${name}, ${payload.type}, ${payload.scopeProjectId}, ${metadata}, ${encodePolicyJson(defaultVaultPolicy)}, ${domains}, ${encrypted.ciphertext}, ${encrypted.wrappedKeys}, ${payload.createdAt}, ${payload.updatedAt}, ${attachment}, ${sealedExtras})`;
       }
       yield* invalidateScrubCache;
@@ -1105,7 +1369,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const at = yield* now;
       const removed =
-        yield* sql`UPDATE vault_items SET deleted_at = ${at}, ciphertext = '', wrapped_keys_json = '[]', sync_extras = NULL, updated_at = ${at} WHERE id = ${itemId} AND deleted_at IS NULL RETURNING id`;
+        yield* sql`UPDATE vault_items SET deleted_at = ${at}, ciphertext = '', wrapped_keys_json = '[]', sync_extras = NULL, metadata_json = json_remove(metadata_json, '$.username'), updated_at = ${at} WHERE id = ${itemId} AND deleted_at IS NULL RETURNING id`;
       yield* invalidateScrubCache;
       if (removed.length > 0) yield* PubSub.publish(syncedChanges, { itemId, removed: true });
     }).pipe(
@@ -1125,12 +1389,70 @@ const make = Effect.gen(function* () {
       yield* captureRow(itemId);
     }).pipe(sql.withTransaction, Effect.mapError(wrap));
 
+  const findLogin: Vault["Service"]["findLogin"] = (input) =>
+    Effect.gen(function* () {
+      const scope =
+        input.threadId === undefined
+          ? input.scopeProjectId
+          : yield* projectForThread(input.threadId);
+      const resolved = yield* resolveRow({ ...input, scopeProjectId: scope }).pipe(
+        Effect.map((found) => Option.some(found)),
+        Effect.catchIf(
+          (error) => error.reason === "not_found",
+          () => Effect.succeed(Option.none()),
+        ),
+      );
+      if (Option.isNone(resolved)) return { status: "not_found" } as const;
+      if ("candidates" in resolved.value)
+        return { status: "ambiguous", candidates: resolved.value.candidates } as const;
+      return {
+        status: "found",
+        item: metadataOf(resolved.value.row, yield* rules),
+      } as const;
+    }).pipe(Effect.mapError(wrap));
+
+  const upgradeLogins: Vault["Service"]["upgradeLogins"] = Effect.gen(function* () {
+    const rows =
+      yield* sql<VaultRow>`SELECT * FROM vault_items WHERE type = 'login' AND deleted_at IS NULL`;
+    let usernames = 0;
+    for (const row of rows) {
+      const metadata = parseMetadata(row.metadata_json);
+      if (metadata.username === undefined && (metadata.fields ?? []).includes("username")) {
+        // A peer's item not wrapped for this machine is upgraded where it can be read.
+        const stored = yield* decryptStored(row).pipe(Effect.option);
+        if (Option.isSome(stored) && displayUsernameOf(row.type, stored.value) !== undefined) {
+          // Display metadata only: no new revision, and nothing new to sync.
+          yield* sql`UPDATE vault_items SET metadata_json = ${metadataJsonFor(row.type, metadata.label, stored.value)} WHERE id = ${row.id} AND deleted_at IS NULL`;
+          usernames += 1;
+        }
+      }
+    }
+    if (usernames > 0) yield* invalidateScrubCache;
+    for (const host of new Set(
+      rows.flatMap((row) => parseDomains(row.allowed_domains_json).slice(0, 1)),
+    ))
+      yield* prefetchIcon(host);
+    return { usernames };
+  }).pipe(Effect.mapError(wrap), Effect.withSpan("Vault.upgradeLogins"));
+
+  yield* upgradeLogins.pipe(
+    Effect.catchCause((cause) => Effect.logWarning("Could not upgrade vault logins", cause)),
+    Effect.forkScoped,
+  );
+
   return Vault.of({
+    findLogin,
+    upgradeLogins,
     readCredential: (itemId) =>
       Effect.gen(function* () {
         const row = yield* loadRow(itemId);
         const secretFields = yield* decryptStored(row);
-        yield* registerDelivered(Object.values(secretFields));
+        const shown = displayUsernameOf(row.type, secretFields);
+        yield* registerDelivered(
+          Object.entries(secretFields).flatMap(([key, value]) =>
+            key === "username" && shown !== undefined ? [] : [value],
+          ),
+        );
         yield* audit({ itemId, action: "resolve", outcome: "allowed" });
         return { secretFields, revision: row.credential_revision, attachment: attachmentOf(row) };
       }).pipe(Effect.mapError(wrap)),
@@ -1172,7 +1494,8 @@ const make = Effect.gen(function* () {
           const deleted = yield* sql<{
             name: string;
             portability: string;
-          }>`UPDATE vault_items SET deleted_at = ${at}, ciphertext = '', wrapped_keys_json = '[]', sync_extras = NULL, updated_at = ${at} WHERE id = ${input.id} AND deleted_at IS NULL RETURNING name, portability`;
+          }>`UPDATE vault_items SET deleted_at = ${at}, ciphertext = '', wrapped_keys_json = '[]', sync_extras = NULL, metadata_json = json_remove(metadata_json, '$.username'), updated_at = ${at} WHERE id = ${input.id} AND deleted_at IS NULL RETURNING name, portability`;
+          yield* sql`DELETE FROM vault_login_integrations WHERE item_id = ${input.id}`;
           if (deleted[0])
             yield* capture({
               id: input.id,
@@ -1242,6 +1565,8 @@ const make = Effect.gen(function* () {
         });
         if (result.status === "denied" && result.reason === "domain_not_allowed")
           return yield* new VaultError({ reason: "domain_not_allowed" });
+        if (result.status === "ambiguous")
+          return yield* new VaultError({ reason: "ambiguous_name" });
         if (result.status !== "allowed")
           return yield* new VaultError({ reason: "approval_required" });
         return { item: result.item, field: result.field, value: result.value };
@@ -1286,25 +1611,33 @@ const make = Effect.gen(function* () {
               : { allowedDomains: [...domains, domain] as never }),
           });
           yield* record(item.id, "updated_from_request");
+          if (input.iconUrl !== undefined) yield* prefetchIcon(domain, input.iconUrl);
           return { item, updated: true };
         }
-        // A taken name gets a numbered sibling: the user already typed the
-        // login, so a name clash must not throw it away.
+        // Logins for one site share its name and differ by label, "<Site> ·
+        // <username>" by default. A taken label gets a numbered sibling: the
+        // user already typed the login, so a clash must not throw it away.
+        const baseLabel = defaultVaultLoginLabel(input.name, secretFields.username);
         const created = yield* Effect.gen(function* () {
           for (let attempt = 1; ; attempt += 1) {
-            const name = attempt === 1 ? input.name : `${input.name} (${attempt})`;
+            const label = attempt === 1 ? undefined : `${baseLabel} (${attempt})`;
             const result = yield* create({
-              name: name as never,
+              name: input.name as never,
+              ...(label === undefined ? {} : { label: label as never }),
+              ...(input.iconUrl === undefined ? {} : { iconUrl: input.iconUrl as never }),
               type: "login",
               scopeProjectId: null,
               allowedDomains: [domain] as never,
-              policy: { mode: "allow", allowedAgentIds: [], allowedDomains: [domain] as never },
+              // The default rule: the item's allowed site is the card's host.
+              policy: defaultVaultPolicy,
               ...(input.temporary ? { portability: "machine" as const } : {}),
               secretFields,
             }).pipe(
               Effect.asSome,
               Effect.catchIf(
-                (error) => error.reason === "name_conflict" && attempt < 20,
+                (error) =>
+                  (error.reason === "label_conflict" || error.reason === "name_conflict") &&
+                  attempt < 20,
                 () => Effect.succeedNone,
               ),
             );

@@ -8,12 +8,15 @@ import {
   SettingsListFilter,
   SettingsListEmpty,
 } from "./SettingsList";
-import type {
-  AgentId,
-  EnvironmentId,
-  SharedSyncPeerStatus,
-  VaultItemMetadata,
-  VaultPeerSharing,
+import {
+  vaultLoginLabel,
+  type AgentId,
+  type EnvironmentId,
+  type IntegrationSummary,
+  type SharedSyncPeerStatus,
+  type VaultItemMetadata,
+  type VaultItemType,
+  type VaultPeerSharing,
 } from "@cogenly/contracts";
 import { HistoryIcon, KeyRoundIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
@@ -41,12 +44,17 @@ import { VaultItemDialog } from "../../vault/VaultItemDialog";
 import { VaultUsageList } from "../../vault/VaultUsageList";
 import {
   lastUsedByItem,
-  sortVaultItems,
+  splitVaultItems,
   VAULT_TYPE_LABELS,
+  VAULT_TYPES,
   vaultCreateInput,
+  vaultLastUsedText,
   vaultPolicySummary,
   vaultUpdateInput,
 } from "../../vault/vault.logic";
+import { VaultLoginsSection } from "../../vault/VaultLogins";
+import { integrationsRpc } from "../../rpc/integrations";
+import { useEnvironmentQuery } from "../../state/query";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { OverlayPresence } from "../ui/overlay-presence";
@@ -63,8 +71,13 @@ import {
 } from "./settingsLayout";
 
 const NO_WRITE_TITLE = "This connection cannot change the vault.";
+const EMPTY_INTEGRATIONS: ReadonlyArray<IntegrationSummary> = [];
 
-type Editing = { readonly kind: "create" } | { readonly kind: "edit"; item: VaultItemMetadata };
+type Editing =
+  | { readonly kind: "create"; readonly type: VaultItemType }
+  | { readonly kind: "edit"; item: VaultItemMetadata };
+
+const OTHER_TYPES = VAULT_TYPES.filter((type) => type !== "login");
 
 /**
  * Settings → Vault. Logins, keys, cards and notes agents use without seeing,
@@ -98,16 +111,27 @@ export function VaultSettings() {
   const [editing, setEditing] = useState<Editing | null>(null);
   const [query, setQuery] = useState("");
   const [type, setType] = useState("all");
+  const { logins, others } = useMemo(() => splitVaultItems(list.items), [list.items]);
   const items = useMemo(
     () =>
-      sortVaultItems(list.items).filter(
+      others.filter(
         (item) =>
           (type === "all" || item.type === type) &&
           matchesSettingsListQuery(query, [item.name, item.label, VAULT_TYPE_LABELS[item.type]]),
       ),
-    [list.items, query, type],
+    [others, query, type],
   );
   const lastUsed = useMemo(() => lastUsedByItem(activity.usage), [activity.usage]);
+  const integrationsQuery = useEnvironmentQuery(
+    environmentId === null ? null : integrationsRpc.list({ environmentId, input: {} }),
+  );
+  const integrations = integrationsQuery.data?.integrations ?? EMPTY_INTEGRATIONS;
+  const confirmDelete = async (item: VaultItemMetadata) => {
+    const message = `Delete “${item.type === "login" ? vaultLoginLabel(item) : item.name}”?\nAgents can no longer use it. Its usage log stays.`;
+    const confirmed =
+      (await requestConfirmDialog(message, { variant: "destructive" })) ?? window.confirm(message);
+    if (confirmed) await actions.remove(item.id);
+  };
   const agentName = (id: AgentId) => agents.find((agent) => agent.id === id)?.name;
   const itemName = (id: string) => list.items.find((item) => item.id === id)?.name;
   const scopeName = (id: string | null) =>
@@ -115,12 +139,12 @@ export function VaultSettings() {
 
   const filtered = query !== "" || type !== "all";
   // Search and filters only once there is something to narrow down.
-  const showToolbar = list.isLoaded && (list.items.length > 0 || filtered);
+  const showToolbar = list.isLoaded && (others.length > 0 || filtered);
   const addButton = () => (
     <Button
       disabled={!actions.canWrite}
       title={actions.canWrite ? undefined : NO_WRITE_TITLE}
-      onClick={() => setEditing({ kind: "create" })}
+      onClick={() => setEditing({ kind: "create", type: "api_key" })}
     >
       <PlusIcon />
       Add item
@@ -129,14 +153,28 @@ export function VaultSettings() {
 
   return (
     <>
+      {environmentId !== null && list.isLoaded && list.error === null ? (
+        <VaultLoginsSection
+          environmentId={environmentId}
+          logins={logins}
+          lastUsed={lastUsed}
+          agents={agents}
+          integrations={integrations}
+          canWrite={actions.canWrite}
+          onAdd={() => setEditing({ kind: "create", type: "login" })}
+          onEdit={(item) => setEditing({ kind: "edit", item })}
+          onUpdate={actions.update}
+          onDelete={confirmDelete}
+        />
+      ) : null}
       <SettingsSection
         id="vault"
-        title="Vault"
+        title={environmentId !== null && list.isLoaded ? "Keys, cards and notes" : "Vault"}
         headerAction={
           <SettingsSectionAction
             disabled={!actions.canWrite}
             title={actions.canWrite ? undefined : NO_WRITE_TITLE}
-            onClick={() => setEditing({ kind: "create" })}
+            onClick={() => setEditing({ kind: "create", type: "api_key" })}
           >
             Add item
           </SettingsSectionAction>
@@ -151,7 +189,7 @@ export function VaultSettings() {
               onValueChange={setType}
               options={[
                 { value: "all", label: "All types" },
-                ...Object.entries(VAULT_TYPE_LABELS).map(([value, label]) => ({ value, label })),
+                ...OTHER_TYPES.map((value) => ({ value, label: VAULT_TYPE_LABELS[value] })),
               ]}
             />
           </SettingsListToolbar>
@@ -182,8 +220,8 @@ export function VaultSettings() {
           ) : (
             <SettingsListEmpty
               icon={<KeyRoundIcon />}
-              title="Nothing in the vault yet"
-              description="Store logins, API keys, cards and notes so agents can use them without ever seeing them."
+              title="No keys, cards or notes yet"
+              description="Store API keys, cards and notes so agents can use them without ever seeing them."
             >
               {addButton()}
             </SettingsListEmpty>
@@ -197,18 +235,16 @@ export function VaultSettings() {
                 item={item}
                 scope={scopeName(item.scopeProjectId)}
                 policy={vaultPolicySummary(item.policy, agentName)}
-                lastUsedAt={lastUsed.get(item.id) ?? null}
+                lastUsed={vaultLastUsedText(
+                  lastUsed.get(item.id),
+                  agentName,
+                  formatRelativeTimeLabel,
+                )}
                 agentName={agentName}
                 canWrite={actions.canWrite}
                 paired={paired}
                 onEdit={() => setEditing({ kind: "edit", item })}
-                onDelete={async () => {
-                  const message = `Delete “${item.name}”?\nAgents can no longer use it. Its usage log stays.`;
-                  const confirmed =
-                    (await requestConfirmDialog(message, { variant: "destructive" })) ??
-                    window.confirm(message);
-                  if (confirmed) await actions.remove(item.id);
-                }}
+                onDelete={() => confirmDelete(item)}
               />
             ))}
           </SettingsList>
@@ -239,6 +275,7 @@ export function VaultSettings() {
           <VaultItemDialog
             item={current.kind === "edit" ? current.item : null}
             defaultScopeProjectId={null}
+            {...(current.kind === "create" ? { defaultType: current.type } : {})}
             labels={sortedLabels}
             agents={agents}
             paired={paired}
@@ -262,7 +299,7 @@ function VaultItemRow(props: {
   readonly item: VaultItemMetadata;
   readonly scope: string | null;
   readonly policy: string;
-  readonly lastUsedAt: string | null;
+  readonly lastUsed: string;
   readonly agentName: (id: AgentId) => string | undefined;
   readonly canWrite: boolean;
   readonly paired: boolean;
@@ -298,9 +335,7 @@ function VaultItemRow(props: {
           {/* Items work in every project unless limited to one; only the limit is news. */}
           {props.scope ? `Only in ${props.scope}` : null}
           {item.allowedDomains.length > 0 ? item.allowedDomains.join(", ") : null}
-          {props.lastUsedAt
-            ? `Last used ${formatRelativeTimeLabel(props.lastUsedAt)}`
-            : "Never used"}
+          {props.lastUsed}
         </SettingsListMeta>
       }
       control={

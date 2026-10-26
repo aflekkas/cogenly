@@ -140,12 +140,14 @@ describe("LoginRequests", () => {
       expect(items[0]).toMatchObject({
         type: "login",
         allowedDomains: ["github.com"],
-        policy: { mode: "allow", allowedDomains: ["github.com"] },
+        // The default rule: any agent, on the item's allowed site.
+        policy: { mode: "allow", allowedAgentIds: [], allowedDomains: [] },
+        username: USERNAME,
         fields: ["username", "password"],
         portability: "shared",
       });
 
-      // A later fill on that site needs no approval; elsewhere it is refused.
+      // A later fill on that site needs no approval; elsewhere the user decides.
       expect(yield* fill(vault, itemId, "password")).toMatchObject({
         status: "allowed",
         value: PASSWORD,
@@ -158,7 +160,7 @@ describe("LoginRequests", () => {
         domain: "evil.example",
         enforceAllowedDomains: true,
       });
-      expect(elsewhere.status).toBe("denied");
+      expect(elsewhere.status).toBe("approval_required");
 
       const { usage } = yield* vault.listUsage({ itemId: VaultItemId.make(itemId) });
       expect(usage).toContainEqual(

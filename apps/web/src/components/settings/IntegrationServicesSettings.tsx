@@ -5,6 +5,7 @@ import {
 import { useAtomValue } from "@effect/atom-react";
 import {
   integrationCatalogEntryFor,
+  vaultLoginLabel,
   type EnvironmentId,
   type IntegrationId,
   type IntegrationSummary,
@@ -18,6 +19,8 @@ import { DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
 import { integrationsRpc } from "../../rpc/integrations";
+import { useVaultItems } from "../../vault/useVault";
+import { VaultLoginIcon } from "../../vault/VaultLogins";
 import { useEnvironmentQuery } from "../../state/query";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { IntegrationSourceIcon } from "../chat/ComposerSourcesPicker";
@@ -396,6 +399,7 @@ function IntegrationDetail({
           <SetupNotes text={integration.setupNotes} updatedAt={integration.setupNotesUpdatedAt} />
         ) : null}
       </SettingsRow>
+      <IntegrationSignInRow environmentId={environmentId} integrationId={integration.id} />
       <SettingsRow
         title="Projects"
         description={
@@ -406,6 +410,40 @@ function IntegrationDetail({
         }
       />
     </SettingsSection>
+  );
+}
+
+/**
+ * The vault logins an agent linked to this account while setting it up, e.g.
+ * the Google account that owns its Cloud project. Shown only when there is one.
+ */
+function IntegrationSignInRow({
+  environmentId,
+  integrationId,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly integrationId: IntegrationId;
+}) {
+  const logins = useVaultItems(environmentId).items.filter((item) =>
+    item.integrationIds?.includes(integrationId),
+  );
+  if (logins.length === 0) return null;
+  return (
+    <SettingsRow
+      title="Signs in with"
+      description={
+        <span className="flex flex-col gap-1">
+          {logins.map((item) => (
+            <span key={item.id} className="flex min-w-0 items-center gap-1.5">
+              <VaultLoginIcon environmentId={environmentId} item={item} />
+              <span className="truncate">
+                {item.username ?? vaultLoginLabel(item)} <span>(vault)</span>
+              </span>
+            </span>
+          ))}
+        </span>
+      }
+    />
   );
 }
 

@@ -67,6 +67,12 @@ export const AssetResource = Schema.Union([
     // A cache-key hint only: the recorded icon path, so a new one asks again.
     path: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH))),
   }),
+  // A website's icon by host, as the server cached it for a vault login: the
+  // icon an agent supplied, else the site's favicon. A server with none
+  // answers the favicon fallback marker, like a project without an icon.
+  Schema.TaggedStruct("site-icon", {
+    host: TrimmedNonEmptyString.check(Schema.isMaxLength(253)),
+  }),
   // An upload a pull request body points at on GitHub. A private repository serves these only
   // to a request that carries a credential, which the client has none of, so the server fetches
   // them with the `gh` credential the repository at `cwd` authenticates with.

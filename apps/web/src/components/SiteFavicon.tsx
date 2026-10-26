@@ -1,14 +1,17 @@
+import type { AssetResource, EnvironmentId } from "@cogenly/contracts";
 import { faviconUrlForOrigin } from "@cogenly/shared/favicon";
+import { isProjectFaviconFallbackUrl } from "@cogenly/shared/projectFavicon";
 import { GlobeIcon } from "lucide-react";
-import { memo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 
+import { useAssetUrlState } from "../assets/assetUrls";
 import { cn } from "../lib/utils";
 import { GitHubIcon } from "./Icons";
 
 const SITE_FAVICON_CLASS_NAME = "block size-full shrink-0 select-none";
 
-/** Hosts whose favicon request already failed this session — skip straight to the globe. */
-const failedFaviconHosts = new Set<string>();
+/** Image URLs whose request already failed this session — skip straight to the next choice. */
+const failedFaviconUrls = new Set<string>();
 
 /** Sites whose brand mark (drawn in `currentColor`) replaces the fetched favicon so it follows the theme. */
 function hasBrandMark(host: string): boolean {
@@ -17,26 +20,43 @@ function hasBrandMark(host: string): boolean {
 }
 
 /**
- * A website's icon by host: its brand mark, its favicon, or a globe when it
- * has none. Fills its parent, which sets the size.
+ * A website's icon by host: its brand mark, the icon `environmentId`'s server
+ * cached for it (vault logins: the agent's choice or the site's favicon),
+ * the public favicon, or a globe when it has none. Fills its parent, which
+ * sets the size.
  */
-export const SiteFavicon = memo(function SiteFavicon({ host }: { host: string }) {
-  const [failedHost, setFailedHost] = useState<string | null>(null);
+export const SiteFavicon = memo(function SiteFavicon({
+  host,
+  environmentId = null,
+}: {
+  readonly host: string;
+  readonly environmentId?: EnvironmentId | null;
+}) {
+  const [failed, setFailed] = useState<ReadonlySet<string>>(() => new Set());
+  const resource = useMemo<AssetResource | null>(
+    () => (environmentId === null || hasBrandMark(host) ? null : { _tag: "site-icon", host }),
+    [environmentId, host],
+  );
+  const cached = useAssetUrlState(environmentId, resource);
   if (hasBrandMark(host)) return <GitHubIcon className={SITE_FAVICON_CLASS_NAME} />;
-  const faviconUrl = faviconUrlForOrigin(`https://${host}`);
-  if (faviconUrl === null || failedHost === host || failedFaviconHosts.has(host)) {
-    return <GlobeIcon className={SITE_FAVICON_CLASS_NAME} />;
-  }
+  const cachedUrl =
+    cached._tag === "Success" && !isProjectFaviconFallbackUrl(cached.url) ? cached.url : null;
+  const url = [cachedUrl, faviconUrlForOrigin(`https://${host}`)].find(
+    (candidate): candidate is string =>
+      candidate !== null && !failed.has(candidate) && !failedFaviconUrls.has(candidate),
+  );
+  if (url === undefined) return <GlobeIcon className={SITE_FAVICON_CLASS_NAME} />;
   return (
     <img
-      src={faviconUrl}
+      key={url}
+      src={url}
       alt=""
       loading="lazy"
       draggable={false}
       className={cn(SITE_FAVICON_CLASS_NAME, "rounded-sm")}
       onError={() => {
-        failedFaviconHosts.add(host);
-        setFailedHost(host);
+        failedFaviconUrls.add(url);
+        setFailed((current) => new Set(current).add(url));
       }}
     />
   );
