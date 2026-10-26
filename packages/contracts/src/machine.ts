@@ -59,6 +59,7 @@ export const MachineInfo = Schema.Struct({
   kind: MachineKind,
   hardware: MachineHardware,
   platform: ExecutionEnvironmentPlatformOs,
+  serverVersion: Schema.optionalKey(TrimmedNonEmptyString),
   relation: MachineRelation,
   online: Schema.Boolean,
   /** Null for this machine and for a peer never seen since pairing. */
@@ -360,7 +361,11 @@ export const PeerPush = Schema.Union([
     channel: TrimmedNonEmptyString,
     payload: Schema.Json,
   }),
-  Schema.TaggedStruct("Machines", { machines: Schema.Array(MachineInfo) }),
+  Schema.TaggedStruct("Machines", {
+    machines: Schema.Array(MachineInfo),
+    // Optional for peers released before route refresh was supported.
+    hubRoutes: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  }),
   Schema.TaggedStruct("Unpaired", {}),
 ]);
 export type PeerPush = typeof PeerPush.Type;

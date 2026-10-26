@@ -370,3 +370,11 @@ describe("machineHealthLink", () => {
     });
   });
 });
+
+it("routes a version-skew Fix through the origin machine", () => {
+  const action = healthFixAction(
+    [problem({ fix: "update-machine", target: { _tag: "machine", environmentId: OTHER } })],
+    context([HUB]),
+  );
+  expect(action).toMatchObject({ kind: "fix", direct: { kind: "healthFix" } });
+});

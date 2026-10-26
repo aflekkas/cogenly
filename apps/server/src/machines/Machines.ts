@@ -36,7 +36,7 @@ import * as HubLink from "./HubLink.ts";
 import * as MachineIdentity from "./MachineIdentity.ts";
 import { relateHubMachine, toMachineInfo } from "./machineInfo.ts";
 import { hubPublicKey } from "./peerCrypto.ts";
-import { normalizePeerRoute } from "./peerRoutes.ts";
+import { advertisedPeerRoutes } from "./peerRoutes.ts";
 import * as PeerHub from "./PeerHub.ts";
 
 export class Machines extends Context.Service<
@@ -113,6 +113,7 @@ const make = Effect.gen(function* () {
               }),
             )
           : relateHubMachine(fromHub)),
+        serverVersion: fromHub?.serverVersion ?? view.link.hub.serverVersion,
         online: hubOnline,
         lastSeenAt: hubOnline ? null : view.link.lastSeenAt,
         pairedAt: view.link.pairedAt,
@@ -201,15 +202,7 @@ const make = Effect.gen(function* () {
       Effect.mapError(storage),
     );
     // Tailnet first: it is encrypted and follows the machine between networks.
-    const routes = (yield* endpoints.resolve())
-      .toSorted((left, right) => Number(right.kind === "tailnet") - Number(left.kind === "tailnet"))
-      .flatMap((endpoint) => {
-        try {
-          return [normalizePeerRoute(endpoint.httpBaseUrl)];
-        } catch {
-          return [];
-        }
-      });
+    const routes = advertisedPeerRoutes(yield* endpoints.resolve());
     return {
       grant: grant.credential,
       hubEnvironmentId: self.environmentId,

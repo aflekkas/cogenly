@@ -30,6 +30,7 @@ export function toMachineInfo(
     kind: kindFor(report.role, input.relation),
     hardware: report.hardware,
     platform: report.platform,
+    serverVersion: report.serverVersion,
     relation: input.relation,
     online: input.online,
     lastSeenAt: input.lastSeenAt,

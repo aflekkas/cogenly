@@ -1,3 +1,4 @@
+import type { ServerDirectEndpoint } from "@cogenly/contracts";
 import { isLocalLoopbackHost } from "@cogenly/shared/hostClassification";
 
 /** Network peer traffic requires TLS. Plaintext is only for a local SSH forward. */
@@ -22,3 +23,15 @@ export const normalizePeerRoutes = (routes: ReadonlyArray<string>) => {
   }
   return normalized;
 };
+
+/** Advertise only peer-safe addresses, with stable tailnet names first. */
+export const advertisedPeerRoutes = (endpoints: ReadonlyArray<ServerDirectEndpoint>) =>
+  endpoints
+    .toSorted((left, right) => Number(right.kind === "tailnet") - Number(left.kind === "tailnet"))
+    .flatMap((endpoint) => {
+      try {
+        return [normalizePeerRoute(endpoint.httpBaseUrl)];
+      } catch {
+        return [];
+      }
+    });

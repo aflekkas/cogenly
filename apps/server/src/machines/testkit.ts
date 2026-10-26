@@ -40,6 +40,7 @@ interface MachineOverrides {
     secrets: ServerSecretStore.ServerSecretStore["Service"],
   ) => ServerSecretStore.ServerSecretStore["Service"];
   readonly fetch?: typeof globalThis.fetch;
+  readonly endpoints?: DirectEndpoints.DirectEndpoints["Service"]["resolve"];
   readonly crypto?: (crypto: Crypto.Crypto) => Crypto.Crypto;
   readonly auth?: (
     auth: EnvironmentAuth.EnvironmentAuth["Service"],
@@ -111,7 +112,9 @@ const machineLayer = (
     ),
     Layer.provideMerge(infra),
     Layer.provide(
-      Layer.mock(DirectEndpoints.DirectEndpoints)({ resolve: () => Effect.succeed([]) }),
+      Layer.mock(DirectEndpoints.DirectEndpoints)({
+        resolve: overrides.endpoints ?? (() => Effect.succeed([])),
+      }),
     ),
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(Layer.succeed(FetchHttpClient.Fetch, overrides.fetch ?? globalThis.fetch)),
