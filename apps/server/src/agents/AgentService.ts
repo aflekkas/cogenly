@@ -764,8 +764,6 @@ const make = Effect.gen(function* () {
     send: (input) =>
       Effect.gen(function* () {
         const agent = yield* store.get(input.id);
-        if (agent.ownerMachine !== undefined && agent.ownerMachine !== shared.environmentId)
-          return yield* new AgentError({ message: "This agent runs on another machine." });
         yield* ensureConversation(agent);
         // Backoff and daily caps govern background reservations only.
         // An owner text always reaches the provider. Intake claims its pending

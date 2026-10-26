@@ -463,10 +463,14 @@ function AgentRow({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [pending, setPending] = useState(false);
   const since = formatRelativeTime(agent.updatedAt);
+  const identities = useEnvironmentIdentities();
   const environmentLabel =
-    useEnvironmentIdentities().find((entry) => entry.environmentId === agent.environmentId)
-      ?.label ?? null;
-  const environmentMachine = useEnvironmentMachines().get(agent.environmentId) ?? "server";
+    agent.ownerName ??
+    identities.find((entry) => entry.environmentId === (agent.ownerMachine ?? agent.environmentId))
+      ?.label ??
+    null;
+  const environmentMachine =
+    useEnvironmentMachines().get(agent.ownerMachine ?? agent.environmentId) ?? "server";
   const configs = useServerConfigs();
   const providerEntry = useMemo(
     () =>
@@ -817,7 +821,10 @@ function AgentRow({
                       kind={environmentMachine}
                       className="size-3 shrink-0"
                     />
-                    <span className="truncate">{environmentLabel}</span>
+                    <span className="truncate">
+                      {environmentLabel}
+                      {agent.ownerOnline === false ? " · Offline" : ""}
+                    </span>
                   </span>
                 ) : null}
                 {providerEntry ? (

@@ -738,6 +738,28 @@ describe("agent execution", () => {
     }),
   );
 
+  it.effect(
+    "sends replica conversations through thread routing without creating local agent work",
+    () =>
+      Effect.gen(function* () {
+        const h = yield* makeHarness;
+        yield* Effect.gen(function* () {
+          const store = yield* Store.AgentStore;
+          const agents = yield* Agents.AgentService;
+          yield* store.save({ ...h.fixture, ownerMachine: EnvironmentId.make("remote:owner") });
+          const result = yield* agents.send({
+            id: h.fixture.id,
+            commandId: CommandId.make("remote:send"),
+            messageId: MessageId.make("remote:message"),
+            text: "Hello",
+          });
+          expect(result.threadId).toBe(h.fixture.conversationThreadId);
+          expect(result.delivery).toBe("queued");
+          expect(h.launches).toEqual([]);
+        }).pipe(Effect.provide(h.layer));
+      }),
+  );
+
   it.effect("owner texts claim their uploads into the conversation, as a chat send does", () =>
     Effect.gen(function* () {
       const h = yield* makeHarness;

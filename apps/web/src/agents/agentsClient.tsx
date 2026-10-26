@@ -267,6 +267,13 @@ const subscribeToContext = () => () => {};
 
 export function LiveAgentsProvider({ children }: { children: ReactNode }) {
   const environmentIds = useConnectedEnvironmentIds();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const machineQuery = useEnvironmentQuery(
+    primaryEnvironmentId === null
+      ? null
+      : serverEnvironment.machinesLive({ environmentId: primaryEnvironmentId, input: {} }),
+  );
+  const machines = machineQuery.data?.machines;
   const projects = useProjects();
   const configs = useServerConfigs();
   const threads = useThreadShells();
@@ -447,6 +454,13 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
             return {
               ...record,
               environmentId,
+              ownerName: machines?.find(
+                (machine) => machine.environmentId === (record.ownerMachine ?? environmentId),
+              )?.name,
+              ownerOnline:
+                machines?.find(
+                  (machine) => machine.environmentId === (record.ownerMachine ?? environmentId),
+                )?.online ?? environmentIds.includes(record.ownerMachine ?? environmentId),
               state,
               updatedAt: shell?.updatedAt ?? record.updatedAt,
               // A text that only carried files has no words to preview.
@@ -483,7 +497,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
           });
         }),
       ),
-    [results, tasks, threads, hydrated, outbox],
+    [results, tasks, threads, hydrated, outbox, machines, idsKey],
   );
   const snapshot = useMemo<AgentsSnapshot>(
     () => ({

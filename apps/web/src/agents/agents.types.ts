@@ -73,6 +73,8 @@ export interface AgentRequest {
 }
 export interface AgentContact extends AgentListItem {
   environmentId: EnvironmentId;
+  ownerName?: string;
+  ownerOnline?: boolean;
   state: AgentFaceState;
   messages: ReadonlyArray<AgentMessage>;
   hasMoreMessages?: boolean;
