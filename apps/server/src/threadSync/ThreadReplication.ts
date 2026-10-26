@@ -1,4 +1,5 @@
 import { projectReplicaFilings } from "./replicaFiling.ts";
+import { normalizeLegacySession } from "./legacySessionIdentity.ts";
 /**
  * ThreadReplication: copies thread event logs between paired machines. Each
  * thread has one owner, the only machine that appends its events; others
@@ -190,6 +191,7 @@ const encodeMeta = Schema.encodeEffect(ThreadReplicaMeta);
 const decodeReceipt = Schema.decodeUnknownOption(ThreadReplicaCommandReceipt);
 const decodeReceiptTime = Schema.decodeUnknownEffect(Schema.DateTimeUtcFromString);
 const decodeMeta = Schema.decodeUnknownOption(ThreadReplicaMeta);
+const decodeEnvironmentId = Schema.decodeUnknownOption(EnvironmentId);
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeJsonOption = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
 /**
@@ -430,6 +432,7 @@ const make = Effect.gen(function* () {
         .filter((item) => wanted.has(item.sequence))
         .sort((left, right) => left.sequence - right.sequence);
       const raw = yield* rawEvents(stored.map((item) => item.event.id));
+      const eventOwners = yield* ownerRows([...runs.keys()]);
       const commandIds = [
         ...new Set(stored.flatMap((item) => (item.commandId === null ? [] : [item.commandId]))),
       ];
@@ -449,8 +452,21 @@ const make = Effect.gen(function* () {
       for (const item of stored) {
         // A newer build's fields this one cannot read travel on as received.
         const kept = raw.get(item.event.id);
-        const encoded =
+        let encoded =
           kept === undefined ? ((yield* encodeEventJson(item.event)) as Schema.Json) : kept;
+        if (
+          normalizeLegacySession(item.event, environmentId) !== item.event &&
+          rawField(encoded, "cogenlyReplicaSessionOrigin") === undefined
+        ) {
+          const owner = eventOwners.get(item.event.threadId);
+          encoded = {
+            ...(encoded as object),
+            cogenlyReplicaSessionOrigin:
+              item.commandId?.startsWith(REPLICA_COMMAND_PREFIX) === true && owner !== undefined
+                ? owner.owner_env
+                : environmentId,
+          } as Schema.Json;
+        }
         const receipt = item.commandId == null ? undefined : byCommand.get(item.commandId);
         events.push(
           receipt !== undefined && receipt.aggregate_id === item.event.threadId
@@ -718,9 +734,28 @@ const make = Effect.gen(function* () {
         payload.id !== event.threadId
       );
     };
-    const rawById = new Map(items.map((item) => [item.event.id, item.raw]));
+    // Keep the original wire history plus its origin. A relay or a later owner
+    // must derive the same session id, rather than using its own environment.
+    const normalized = items.map(({ event, raw }) => {
+      const origin = rawField(raw, "cogenlyReplicaSessionOrigin");
+      const decodedOrigin = decodeEnvironmentId(origin);
+      const owner = accepted.get(event.threadId)?.meta.owner ?? source;
+      const sessionOrigin = Option.getOrElse(decodedOrigin, () => owner);
+      const scoped = normalizeLegacySession(event, sessionOrigin);
+      return {
+        event: scoped,
+        raw:
+          scoped === event
+            ? raw
+            : {
+                ...(raw as object),
+                cogenlyReplicaSessionOrigin: sessionOrigin,
+              },
+      };
+    });
+    const rawById = new Map(normalized.map((item) => [item.event.id, item.raw]));
     const candidates: Array<OrchestrationV2DomainEvent> = [];
-    for (const { event } of items) {
+    for (const { event } of normalized) {
       if (!accepted.has(event.threadId)) continue;
       if (consistent(event)) candidates.push(event);
       else return yield* new ThreadReplicationError({ reason: "invalid-batch" });
