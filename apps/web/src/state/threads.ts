@@ -1,6 +1,10 @@
 import { useAtomValue } from "@effect/atom-react";
 import { enabledEnvironmentIds } from "@cogenly/client-runtime/state/connections";
-import { arrayElementsEqual } from "@cogenly/client-runtime/state/entities";
+import {
+  arrayElementsEqual,
+  parseThreadKey,
+  threadKey,
+} from "@cogenly/client-runtime/state/entities";
 import {
   createEnvironmentThreadDetailAtoms,
   createEnvironmentThreadShellAtoms,
@@ -26,7 +30,19 @@ export const threadEnvironment: ThreadEnvironmentAtoms = createThreadEnvironment
   connectionAtomRuntime,
   environmentSnapshotAtom,
 );
-const environmentThreads = createEnvironmentThreadStateAtoms(connectionAtomRuntime);
+const threadExistsAtom = Atom.family((key: string) => {
+  const { environmentId, threadId } = parseThreadKey(key);
+  return Atom.make(
+    (get) =>
+      get(environmentSnapshotAtom(environmentId))?.threads.some(
+        (thread) => thread.id === threadId && thread.deletedAt === null,
+      ) ?? false,
+  );
+});
+const environmentThreads = createEnvironmentThreadStateAtoms(
+  connectionAtomRuntime,
+  (environmentId, threadId) => threadExistsAtom(threadKey({ environmentId, threadId })),
+);
 /** The one live state atom per thread; mounting it loads and follows the thread. */
 export const environmentThreadStateAtom = environmentThreads.stateAtom;
 export const environmentThreadDetails = createEnvironmentThreadDetailAtoms(

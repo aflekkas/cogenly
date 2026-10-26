@@ -987,6 +987,10 @@ export function createEnvironmentThreadStateAtoms<R, E>(
     | R,
     E
   >,
+  threadExistsAtom?: (
+    environmentId: EnvironmentIdType,
+    threadId: ThreadIdType,
+  ) => Atom.Atom<boolean>,
 ) {
   // Cache definitions must outlive collectible live-atom definitions. The
   // registry retains these nodes without retaining environment or RPC scopes.
@@ -1016,6 +1020,11 @@ export function createEnvironmentThreadStateAtoms<R, E>(
         (get) => {
           get.mount(resumeAtom);
           const resume = get.once(resumeAtom);
+          // A cold 404 can precede a remote launch's commit. The shell's arrival
+          // is durable evidence to reopen a detail stream parked by that miss.
+          const exists =
+            threadExistsAtom === undefined ? false : get(threadExistsAtom(environmentId, threadId));
+          if (exists && resume.snapshot?.state.status === "deleted") resume.snapshot = undefined;
           retained.opened(key);
           get.addFinalizer(() => retained.closed(key, resume));
           const live = threadStateChanges(environmentId, threadId, resume);

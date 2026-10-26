@@ -230,9 +230,10 @@ cloud-server`. `--reset` goes back to the detected name and kind.
 
 Each machine reports the state of what it depends on: the server and its
 scheduler, the database, free disk space, provider sign-ins and usage limits,
-paired machines and sync, integrations, scheduled tasks, runs stuck far longer
-than any real one, the background service, and Tailscale Serve. Each problem
-has a **Fix**. Where Cogenly can fix it directly, Fix does it on the machine
+paired machines and sync, integrations, scheduled tasks, unresponsive runs,
+the background service, and Tailscale Serve. A turn with no provider activity
+for five minutes warns you to open the thread, stop it, and retry if needed.
+Each problem has a **Fix**. Where Cogenly can fix it directly, Fix does it on the machine
 with the problem, even when you are connected to the other one: it stops a
 thread's stuck runs (they lost their provider session, so they can't be
 resumed; send the thread a message to carry on), runs a failed task again,

@@ -60,6 +60,8 @@ export const SCHEDULED_TASK_STUCK_AFTER_MS = 60 * 60_000;
 
 /** A turn or subagent still running after this long is stuck, not slow. */
 export const STUCK_RUN_AFTER_MS = 6 * 60 * 60_000;
+/** Missing provider activity warrants attention well before the absolute run limit. */
+export const RUN_INACTIVITY_AFTER_MS = 5 * 60_000;
 /** Stuck runs listed per report; the summary counts them all. */
 const STUCK_RUN_ITEM_LIMIT = 20;
 
@@ -687,6 +689,7 @@ export interface ActiveRun {
   readonly threadId: ThreadId;
   readonly threadTitle: string;
   readonly startedAt: DateTime.Utc;
+  readonly inactiveSince?: DateTime.Utc;
 }
 
 export const stuckRunsItemKey = (threadId: ThreadId) => `stuck-runs:thread:${threadId}`;
@@ -710,7 +713,12 @@ export function stuckRunsCheck(input: {
   readonly now: DateTime.Utc;
 }): MachineHealthCheck {
   const stuck = input.active
-    .filter((run) => millisBetween(run.startedAt, input.now) >= STUCK_RUN_AFTER_MS)
+    .filter(
+      (run) =>
+        millisBetween(run.startedAt, input.now) >= STUCK_RUN_AFTER_MS ||
+        (run.inactiveSince !== undefined &&
+          millisBetween(run.inactiveSince, input.now) >= RUN_INACTIVITY_AFTER_MS),
+    )
     .toSorted(
       (left, right) =>
         DateTime.toEpochMillis(left.startedAt) - DateTime.toEpochMillis(right.startedAt),
@@ -725,20 +733,29 @@ export function stuckRunsCheck(input: {
     const subagents = runs.filter((run) => run.kind === "subagent").length;
     return item({
       key: stuckRunsItemKey(oldest.threadId),
-      status: "fail",
-      title: stuckThreadTitle(
-        oldest.threadTitle,
-        runs.length - subagents,
-        subagents,
-        formatAgo(millisBetween(oldest.startedAt, input.now)),
-      ),
+      status: runs.some((run) => millisBetween(run.startedAt, input.now) >= STUCK_RUN_AFTER_MS)
+        ? "fail"
+        : "warn",
+      title:
+        oldest.inactiveSince !== undefined
+          ? `${quoted(oldest.threadTitle)} has had no provider activity for ${formatAgo(millisBetween(oldest.inactiveSince, input.now))}`
+          : stuckThreadTitle(
+              oldest.threadTitle,
+              runs.length - subagents,
+              subagents,
+              formatAgo(millisBetween(oldest.startedAt, input.now)),
+            ),
       detail:
-        runs.length === 1
-          ? "It has likely lost its provider session. Fix stops it so the thread can continue."
-          : "They have likely lost their provider sessions. Fix stops them so the thread can continue.",
+        oldest.inactiveSince !== undefined
+          ? "The turn may be stuck starting or waiting for its provider. Open the thread to stop it and retry if needed."
+          : runs.length === 1
+            ? "It has likely lost its provider session. Fix stops it so the thread can continue."
+            : "They have likely lost their provider sessions. Fix stops them so the thread can continue.",
       since: oldest.startedAt,
       target: { _tag: "thread", threadId: oldest.threadId },
-      fix: "resume",
+      fix: runs.some((run) => millisBetween(run.startedAt, input.now) >= STUCK_RUN_AFTER_MS)
+        ? "resume"
+        : null,
     });
   });
   return check(
