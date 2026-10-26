@@ -856,6 +856,14 @@ const make = Effect.gen(function* () {
 
   yield* channels.register(ThreadLaunchRemote, (payload, caller) =>
     Effect.gen(function* () {
+      // Older callers require a bulk replica before recording their parent link.
+      // Refuse before launch so a lagging 0.3.2 caller cannot orphan a child here.
+      if (payload.launch.subagent !== undefined && payload.priority !== true)
+        return yield* new ThreadRemoteError({
+          reason: "rejected",
+          detail:
+            "Cloud subagents need Cogenly 0.3.3 or later on both machines. Update the calling machine before delegating.",
+        });
       if (payload.target !== self) {
         const view = yield* topology;
         // Only the hub relays, and never back to the machine that asked.

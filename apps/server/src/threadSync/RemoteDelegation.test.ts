@@ -1,5 +1,13 @@
 import { expect, it } from "@effect/vitest";
-import { CommandId, MessageId, ProjectId, ProviderInstanceId, ThreadId } from "@cogenly/contracts";
+import {
+  CommandId,
+  MessageId,
+  NodeId,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+  ThreadLaunchRemote,
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -267,6 +275,34 @@ it.live.each([
         return;
       }
       if (outcome === "legacy") {
+        // A 0.3.2 caller also gets a clear refusal from a new target, before launch.
+        const oldCaller = yield* hub.machines
+          .call(laptop.environmentId, ThreadLaunchRemote, {
+            target: laptop.environmentId,
+            commandId: CommandId.make("legacy-launch"),
+            threadId: ThreadId.make("legacy-child"),
+            project: { kind: "scratch" },
+            launch: {
+              subagent: {
+                parentThreadId: parentId,
+                rootThreadId: parentId,
+                taskNodeId: NodeId.make("legacy-task"),
+              },
+              title: "Old caller",
+              modelSelection,
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              workspaceStrategy: { type: "root" },
+              createdBy: "agent",
+              creationSource: "mcp",
+            },
+            files: [],
+          })
+          .pipe(Effect.flip);
+        expect(oldCaller).toMatchObject({
+          reason: "handler-failed",
+          error: { reason: "rejected", detail: expect.stringContaining("0.3.3") },
+        });
         const error = yield* parent.dispatch(request).pipe(Effect.flip);
         expect(error).toMatchObject({ reason: "rejected" });
         expect(error.message).toContain("0.3.3");
