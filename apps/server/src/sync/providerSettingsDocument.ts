@@ -13,6 +13,23 @@ const secretEnvironmentName = (name: string) =>
     name,
   ) || /KEY|AUTH|BEARER|SESSION|COOKIE|PRIVATE|CREDENTIAL|PASS/i.test(name);
 
+/**
+ * The only provider environment variables that replicate. Everything else is
+ * machine-local: a `sync:replicate` peer must never be able to inject
+ * executable variables (`NODE_OPTIONS`, `BASH_ENV`, `LD_PRELOAD`, `DYLD_*`,
+ * `PATH`, …) into another machine's provider or terminal environment.
+ * - `TZ`: display timezone only; no loader or interpreter reads it for code.
+ * - `LANG`: locale selection only.
+ * - `NO_COLOR`: boolean-ish display flag; values are never executed.
+ */
+export const REPLICATED_PROVIDER_ENV_NAMES: ReadonlySet<string> = new Set([
+  "TZ",
+  "LANG",
+  "NO_COLOR",
+]);
+export const isReplicatedProviderEnvName = (name: string): boolean =>
+  REPLICATED_PROVIDER_ENV_NAMES.has(name);
+
 // Never replicate the opaque driver config: it can hold passwords, machine
 // paths and arbitrary command arguments. Only these portable settings travel.
 const PortableProvider = Schema.NullOr(
@@ -70,7 +87,10 @@ export function encodeProviderSettings(
     ...(instance.accentColor === undefined ? {} : { accentColor: instance.accentColor }),
     ...(instance.enabled === undefined ? {} : { enabled: instance.enabled }),
     environment: (instance.environment ?? []).flatMap((entry) =>
-      entry.sensitive || entry.valueRedacted || secretEnvironmentName(entry.name)
+      entry.sensitive ||
+      entry.valueRedacted ||
+      secretEnvironmentName(entry.name) ||
+      !isReplicatedProviderEnvName(entry.name)
         ? []
         : [{ name: entry.name, value: entry.value, sensitive: false as const }],
     ),
@@ -104,10 +124,16 @@ export function applyProviderSettings(
     ...(remote.displayName === undefined ? {} : { displayName: remote.displayName }),
     ...(remote.accentColor === undefined ? {} : { accentColor: remote.accentColor }),
     ...(remote.enabled === undefined ? {} : { enabled: remote.enabled }),
+    // Anything already received from a peer is re-filtered here: a poisoned
+    // document written before this allowlist (or by a compromised peer) must
+    // never reach the provider or terminal environment. Every machine-local
+    // variable survives; only allowlisted names may be overridden remotely.
     environment: [
-      ...remote.environment,
+      ...remote.environment.filter((entry) => isReplicatedProviderEnvName(entry.name)),
       ...(current?.environment ?? []).filter(
-        (entry) => entry.sensitive || secretEnvironmentName(entry.name),
+        (entry) =>
+          !isReplicatedProviderEnvName(entry.name) ||
+          !remote.environment.some((remoteEntry) => remoteEntry.name === entry.name),
       ),
     ],
     config: {

@@ -73,6 +73,56 @@ describe("portable provider configuration", () => {
     expect(JSON.stringify(value)).not.toContain("DO_NOT_REPLICATE");
   });
 
+  it("never replicates executable environment variables", () => {
+    const dangerous = [
+      "NODE_OPTIONS",
+      "BASH_ENV",
+      "LD_PRELOAD",
+      "DYLD_INSERT_LIBRARIES",
+      "DYLD_LIBRARY_PATH",
+      "PATH",
+    ];
+    const value = encodeProviderSettings({
+      driver,
+      environment: [
+        ...dangerous.map((name) => ({ name, value: "EVIL", sensitive: false })),
+        { name: "TZ", value: "Europe/London", sensitive: false },
+        { name: "NO_COLOR", value: "1", sensitive: false },
+      ],
+      config: {},
+    });
+    expect(JSON.stringify(value)).not.toContain("EVIL");
+    expect(value).toMatchObject({
+      environment: [
+        { name: "TZ", value: "Europe/London", sensitive: false },
+        { name: "NO_COLOR", value: "1", sensitive: false },
+      ],
+    });
+    // A poisoned document received from a peer is ignored on apply, and
+    // machine-local variables survive untouched.
+    const applied = applyProviderSettings(
+      {
+        driver,
+        environment: [
+          ...dangerous.map((name) => ({ name, value: "EVIL", sensitive: false as const })),
+          { name: "TZ", value: "UTC", sensitive: false as const },
+        ],
+        customModels: [],
+      },
+      {
+        driver,
+        environment: [{ name: "PATH", value: "/local/bin", sensitive: false }],
+        config: {},
+      },
+      id,
+    );
+    expect(JSON.stringify(applied?.environment)).not.toContain("EVIL");
+    expect(applied?.environment).toEqual([
+      { name: "TZ", value: "UTC", sensitive: false },
+      { name: "PATH", value: "/local/bin", sensitive: false },
+    ]);
+  });
+
   it("keeps machine-local paths and sensitive environment when applying remote edits", () => {
     const local = {
       driver,
