@@ -35,6 +35,10 @@ const redactText = (text: string, passwords: ReadonlyArray<string>) => {
   });
 };
 
+/** Whether text holds something `redactPreview` would redact; screenshot masking uses the same patterns. */
+export const containsSecret = (text: string, passwords: ReadonlyArray<string> = []) =>
+  redactText(text, passwords) !== text;
+
 /** Includes property names: DOM attributes and evaluate results can hide secrets in keys. */
 export const redactPreview = <A>(value: A, passwords: ReadonlyArray<string> = []): A => {
   const walk = (current: unknown): unknown => {
@@ -50,7 +54,8 @@ export const redactPreview = <A>(value: A, passwords: ReadonlyArray<string> = []
         ) ||
         (key === "value" && (record.type === "password" || record.inputType === "password"))
           ? SECRET_REDACTED
-          : // Images are binary artifacts, not DOM strings.
+          : // Images are binary artifacts, not DOM strings. ScreenshotMask masks
+            // credentials in the page before capture instead.
             key === "screenshot"
             ? entry
             : walk(entry),

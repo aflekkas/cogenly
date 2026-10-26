@@ -24,6 +24,13 @@ import { constVoid } from "effect/Function";
 import type { CDPSession, Locator, Page } from "playwright-core";
 import * as NodeCrypto from "node:crypto";
 import { redactPreview } from "./PreviewRedactor.ts";
+import {
+  MASK_WITHHELD_NOTE,
+  VAULT_FILLED_ATTRIBUTE,
+  rememberCredential,
+  credentialsFor,
+  withMaskedPage,
+} from "./ScreenshotMask.ts";
 import { compactElements } from "./BrowserOutput.ts";
 import { BrowserControlInterrupted } from "./SessionControl.ts";
 
@@ -164,6 +171,16 @@ export const passwordValues = async (page: Page): Promise<string[]> =>
     .evaluateAll((elements) =>
       elements.map((element) => (element as unknown as { value: string }).value).filter(Boolean),
     );
+
+/**
+ * Every credential value this page is known to hold, for redaction and
+ * screenshot masks. Password fields read before an action stay known after a
+ * "show password" toggle turns them into text.
+ */
+export const credentialValues = async (page: Page): Promise<string[]> => {
+  for (const value of await passwordValues(page)) rememberCredential(page, value);
+  return credentialsFor(page);
+};
 
 /** An element's box in viewport CSS pixels. */
 export interface PointerTargetBox {
@@ -319,11 +336,17 @@ export const screenshot = async (input: {
   const viewport = input.page.viewportSize() ?? { width: 1280, height: 800 };
   const scale = Math.min(1, MAX_SCREENSHOT_WIDTH / (viewport.width * input.renderScale));
   try {
-    const data = await captureViewport(input.page, input.cdp, {
-      format: input.save ? "png" : "jpeg",
-      ...(input.save ? {} : { quality: 70 }),
-      scale,
-    });
+    const data = await withMaskedPage(
+      input.page,
+      () => credentialValues(input.page),
+      () =>
+        captureViewport(input.page, input.cdp, {
+          format: input.save ? "png" : "jpeg",
+          ...(input.save ? {} : { quality: 70 }),
+          scale,
+        }),
+    );
+    if (data === null) return { screenshotError: MASK_WITHHELD_NOTE };
     return {
       screenshot: {
         mimeType: input.save ? "image/png" : "image/jpeg",
@@ -512,8 +535,10 @@ export const type = async (
   if (locator !== null) await pointer(await targetPoint(page, locator, {}, timeout), "move");
   if (input.expectedOrigin !== undefined) {
     const target = locator ?? page.locator("*:focus").last();
+    // Remembered before typing: a fill that times out may still have typed.
+    rememberCredential(page, input.text);
     const delivered = await target.evaluate(
-      (element, { origin, text }) => {
+      (element, { origin, text, filledAttribute }) => {
         const view = element.ownerDocument.defaultView;
         try {
           if (!view || view.location.origin !== origin || view.top?.location.origin !== origin)
@@ -538,13 +563,15 @@ export const type = async (
         const setter = prototype && Object.getOwnPropertyDescriptor(prototype, "value")?.set;
         if (!setter && !control.isContentEditable) return "target";
         control.focus?.();
+        // Screenshots keep this field masked even after the page reveals it.
+        element.setAttribute(filledAttribute, "");
         if (setter) setter.call(element, text);
         else control.textContent = text;
         element.dispatchEvent(new view.Event("input", { bubbles: true }));
         element.dispatchEvent(new view.Event("change", { bubbles: true }));
         return "filled";
       },
-      { origin: input.expectedOrigin, text: input.text },
+      { origin: input.expectedOrigin, text: input.text, filledAttribute: VAULT_FILLED_ATTRIBUTE },
       { timeout },
     );
     if (delivered !== "filled")

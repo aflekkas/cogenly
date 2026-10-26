@@ -81,6 +81,7 @@ import type {
 
 import { PENDING_ATTACHMENT_THREAD_SEGMENT } from "../attachmentStore.ts";
 import * as Vault from "../vault/Vault.ts";
+import * as ScreenshotMask from "./ScreenshotMask.ts";
 import { redactPreview } from "./PreviewRedactor.ts";
 import * as ServerConfig from "../config.ts";
 import { resolveRootCliCommand } from "../cli/invocation.ts";
@@ -341,6 +342,13 @@ interface Recording {
   readonly startedAt: string;
   /** Frames still being handed to the encoder; stopping waits for them. */
   readonly framesInFlight: Set<Promise<void>>;
+  /**
+   * Credential masks held for the whole recording, so viewers also see them
+   * masked meanwhile. Removed when the recording stops.
+   */
+  readonly mask: ScreenshotMask.PageMask;
+  /** Frames dropped because their masks were unconfirmed or had just changed. */
+  readonly withheld: { count: number };
 }
 
 interface ServerTab {
@@ -1840,33 +1848,53 @@ const make = Effect.gen(function* () {
       if (tab.recording) return tab.recording;
       const encoder = await contexts.scratchPage();
       let session: CDPSession | null = null;
+      const mask = ScreenshotMask.maskPage(tab.page, () =>
+        ServerBrowserPage.credentialValues(tab.page),
+      );
+      const withheld = { count: 0 };
+      const unconfirmed = { confirmed: false, added: 0 };
       try {
         await encoder.evaluate(ServerBrowserPage.RECORDING_ENCODER_SCRIPT);
         // Seed idle pages before returning so an immediate stop has a frame to encode.
-        const firstFrame = await ServerBrowserPage.captureViewport(tab.page, tab.cdp, {
-          format: "jpeg",
-          quality: RECORDING_SCREENCAST.quality,
-          scale: 1,
-        });
-        await encoder.evaluate(
-          ([data, width]) =>
-            (globalThis as unknown as EncoderWindow).__t3Recorder.frame(data, width),
-          [firstFrame, tab.page.viewportSize()?.width ?? UNATTACHED_FILL_VIEWPORT.width] as const,
-        );
+        if ((await mask.refresh().catch(() => unconfirmed)).confirmed) {
+          const firstFrame = await ServerBrowserPage.captureViewport(tab.page, tab.cdp, {
+            format: "jpeg",
+            quality: RECORDING_SCREENCAST.quality,
+            scale: 1,
+          });
+          await encoder.evaluate(
+            ([data, width]) =>
+              (globalThis as unknown as EncoderWindow).__t3Recorder.frame(data, width),
+            [firstFrame, tab.page.viewportSize()?.width ?? UNATTACHED_FILL_VIEWPORT.width] as const,
+          );
+        } else withheld.count += 1;
         const opened = await tab.page.context().newCDPSession(tab.page);
         session = opened;
         const framesInFlight = new Set<Promise<void>>();
+        let refreshing = false;
         opened.on("Page.screencastFrame", (frame) => {
           const cssWidth = tab.page.viewportSize()?.width ?? frame.metadata.deviceWidth;
-          const delivered: Promise<void> = encoder
-            .evaluate(
+          // Chromium sends the next frame only after this one's ack, so a frame
+          // shows the masks of the refresh before it. A frame that predates a
+          // newly added mask, or arrives mid-refresh, is dropped.
+          const deliver = async () => {
+            if (refreshing) return void (withheld.count += 1);
+            refreshing = true;
+            const masked = await mask
+              .refresh()
+              .catch(() => unconfirmed)
+              .finally(() => {
+                refreshing = false;
+              });
+            if (!masked.confirmed || masked.added > 0) return void (withheld.count += 1);
+            const accepted = await encoder.evaluate(
               ([data, width]) =>
                 (globalThis as unknown as EncoderWindow).__t3Recorder.frame(data, width),
               [frame.data, cssWidth] as const,
-            )
-            .then(async (accepted) => {
-              if (!accepted) await opened.send("Page.stopScreencast");
-            })
+            );
+            if (!accepted) await opened.send("Page.stopScreencast");
+          };
+          const delivered: Promise<void> = deliver()
             .catch(constVoid)
             .finally(() => {
               framesInFlight.delete(delivered);
@@ -1883,13 +1911,16 @@ const make = Effect.gen(function* () {
           session: opened,
           startedAt: new Date().toISOString(),
           framesInFlight,
+          mask,
+          withheld,
         };
         tab.recording = recording;
         return recording;
       } catch (cause) {
-        // A start that fails partway must not leave its encoder page behind.
+        // A start that fails partway must not leave its encoder page or masks behind.
         await encoder.close().catch(constVoid);
         await session?.detach().catch(constVoid);
+        await mask.restore();
         throw cause;
       }
     }).finally(() => {
@@ -1909,6 +1940,9 @@ const make = Effect.gen(function* () {
           ...[...tab.viewers].map((viewer) => viewer.pause()),
           recording?.session.send("Page.stopScreencast").catch(constVoid),
         ]);
+        // A recording frame still refreshing its masks would record this
+        // capture's temporary masks as the page's own styles.
+        await Promise.all(recording?.framesInFlight ?? []);
         return await capture();
       } finally {
         tab.capturing -= 1;
@@ -1958,13 +1992,16 @@ const make = Effect.gen(function* () {
         }
       } finally {
         await recording.encoder.close().catch(constVoid);
+        await recording.mask.restore();
         tab.recording = null;
       }
       const data = Buffer.concat(chunks);
       if (!mimeType || data.byteLength === 0) {
         throw new ServerBrowserPage.ServerBrowserOperationError(
           "PreviewAutomationExecutionError",
-          "The recording captured no frames.",
+          recording.withheld.count > 0
+            ? `The recording captured no frames. ${ScreenshotMask.MASK_WITHHELD_NOTE}`
+            : "The recording captured no frames.",
         );
       }
       // Use the desktop upload location so the MCP handler can claim the recording.
@@ -2441,11 +2478,12 @@ const make = Effect.gen(function* () {
     return { ...view, ...(errors.length ? { errors } : {}) };
   };
   const executeWithOutput = async (tab: ServerTab, request: PreviewAutomationRequest) => {
-    const passwords = await ServerBrowserPage.passwordValues(tab.page);
+    // Includes vault-filled values, which stay secret after a page reveals them.
+    const passwords = await ServerBrowserPage.credentialValues(tab.page);
     const result = await executeRawWithOutput(tab, request);
     return redactPreview(result, [
       ...passwords,
-      ...(await ServerBrowserPage.passwordValues(tab.page)),
+      ...(await ServerBrowserPage.credentialValues(tab.page)),
     ]);
   };
   const executeRawWithOutput = async (tab: ServerTab, request: PreviewAutomationRequest) => {

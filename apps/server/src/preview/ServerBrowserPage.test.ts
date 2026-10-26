@@ -2,10 +2,11 @@ import { describe, expect, it, vi } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import type { Page } from "playwright-core";
 import * as BrowserPage from "./ServerBrowserPage.ts";
+import { VAULT_FILLED_ATTRIBUTE, credentialsFor } from "./ScreenshotMask.ts";
 
 /** A fill target whose document can change during Playwright's locator wait. */
 const fillPage = (origin: string, navigateWhileWaiting = false) => {
-  const fields = { value: "", events: [] as string[] };
+  const fields = { value: "", events: [] as string[], attributes: [] as string[] };
   const view = {
     location: { origin },
     get top() {
@@ -35,6 +36,9 @@ const fillPage = (origin: string, navigateWhileWaiting = false) => {
     readOnly: false,
     ownerDocument: { defaultView: view },
     focus: vi.fn(),
+    setAttribute: (name: string) => {
+      fields.attributes.push(name);
+    },
     dispatchEvent: (event: { type: string }) => {
       fields.events.push(event.type);
     },
@@ -83,6 +87,9 @@ describe("origin-bound vault typing", () => {
     });
     expect(fields.value).toBe("vault-password");
     expect(fields.events).toEqual(["input", "change"]);
+    // Tracked so screenshots keep the field masked after "show password".
+    expect(fields.attributes).toEqual([VAULT_FILLED_ATTRIBUTE]);
+    expect(credentialsFor(page)).toEqual(["vault-password"]);
   });
 });
 
@@ -101,6 +108,16 @@ describe("optional browser screenshots", () => {
       ariaSnapshot: async () => '- button "Save" [ref=e1] [box=0,0,100,30]',
       title: async () => "Form",
       url: () => "https://example.com",
+      locator: () => ({ evaluateAll: async () => [] }),
+      // A page with nothing to mask: the scan confirms and capture proceeds.
+      frames: () => [
+        {
+          evaluate: async (_mask: unknown, command: { op: string }) =>
+            command.op === "collect" ? { texts: [], flagged: [], frames: 0 } : { restored: true },
+          childFrames: () => [],
+          isDetached: () => false,
+        },
+      ],
     }) as unknown as Page;
 
   it("returns structured data even if screenshot capture fails", async () => {
