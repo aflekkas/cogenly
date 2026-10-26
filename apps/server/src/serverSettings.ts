@@ -621,12 +621,21 @@ const make = Effect.gen(function* () {
     ),
   );
 
+  // Keep legacy actions on every settings rewrite until their sidecar is durable.
+  let pendingLegacyProjectActions: LegacyProjectActions | null = null;
   const writeSettingsAtomically = Effect.fnUntraced(
     function* (settings: ServerSettings) {
-      const sparseSettingsJson = yield* encodeServerSettingsJson(
-        stripDefaultServerSettings(settings, DEFAULT_SERVER_SETTINGS) ?? {},
-      );
-
+      const sparse = stripDefaultServerSettings(settings, DEFAULT_SERVER_SETTINGS) ?? {};
+      const sparseSettingsJson =
+        pendingLegacyProjectActions === null
+          ? yield* encodeServerSettingsJson(sparse)
+          : yield* Schema.encodeUnknownEffect(
+              fromJsonStringPretty(Schema.Record(Schema.String, Schema.Unknown)),
+            )({
+              ...sparse,
+              projectSettingsFolded: pendingLegacyProjectActions.folded,
+              projectScriptOverrides: pendingLegacyProjectActions.scripts,
+            });
       return yield* writeFileStringAtomically({
         filePath: settingsPath,
         contents: `${sparseSettingsJson}\n`,
@@ -773,6 +782,7 @@ const make = Effect.gen(function* () {
     // Repository actions saved as pre-0.3.2 project settings go to a sidecar
     // for LegacyProjectActionsMigration before the rewrite below drops them.
     const legacyActions = settingsFileTrusted ? readLegacyProjectActions(storedSettings) : null;
+    pendingLegacyProjectActions = legacyActions;
     const legacyActionsSaved =
       legacyActions !== null &&
       (yield* saveLegacyProjectActions(legacyActions).pipe(
@@ -783,6 +793,7 @@ const make = Effect.gen(function* () {
           }).pipe(Effect.as(false)),
         ),
       ));
+    if (legacyActionsSaved) pendingLegacyProjectActions = null;
     // Copied, not moved: the old entry is removed only after the new file is written. A token
     // that cannot be read or copied leaves the retired keys in place, so the migration runs again
     // on the next load instead of dropping it.

@@ -212,7 +212,7 @@ export function ComposerSourcesPicker(props: {
             />
           }
         >
-          <ComposerControlIcon icon={PlugIcon} size={props.size} />
+          <ComposerControlIcon icon={PlugIcon} opticalWidth="narrow" size={props.size} />
           <span data-composer-control-label>Sources</span>
           <ComposerControlChevron size={props.size} />
         </TooltipTrigger>

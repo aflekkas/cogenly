@@ -3564,7 +3564,8 @@ const OrchestrationV2InternalCommand = Schema.Union([
     reason: Schema.optional(Schema.String),
   }),
   /**
-   * Machine health's Fix for stuck runs: ends the listed subagent records that no live work
+   * Machine health's Fix for stuck runs: interrupts only the listed turns still in flight,
+   * and ends the listed subagent records that no live work
    * will ever end, as interrupted. A native subagent is dead when its provider session is
    * gone; a delegated task when its child thread is missing or has no live run. Live ones
    * are skipped and left to `thread.stop`. Nothing to end is an accepted no-op.
@@ -3574,6 +3575,8 @@ const OrchestrationV2InternalCommand = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     subagentIds: Schema.Array(NodeId),
+    /** Only these stale turns may be interrupted; completed or replaced turns are skipped. */
+    runIds: Schema.optional(Schema.Array(RunId)),
     reason: Schema.String,
     /**
      * Child threads another machine runs whose Stop could not reach that machine. Their

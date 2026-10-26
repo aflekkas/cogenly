@@ -4861,13 +4861,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           composerControlsCollapsed
             ? cn(
                 "min-w-13 shrink text-xs!",
+                // Icon-only: the frame's negative margin cancels the gap the empty label
+                // would leave, and the floor drops to icon plus chevron so the row doesn't
+                // stretch them apart, keeping the icon → chevron gap the other controls have.
                 !showInlineRestingControls &&
-                  "@max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:w-0 @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:flex-none",
+                  "@max-[640px]/composer-surface:min-w-10 @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label-frame]]:-ms-1 @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:w-0 @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:flex-none",
               )
             : // A narrow composer shows the provider icon alone rather than a clipped
               // name (the tooltip and aria-label keep the full name); the chevron
               // stays until even that does not fit.
-              "min-w-13 @max-xs/composer-surface:[&_[data-chat-provider-model-picker-label-frame]]:-ms-1.5 @max-xs/composer-surface:[&_[data-chat-provider-model-picker-label-frame]]:grid-cols-[0fr] @max-xs/composer-surface:[&_[data-chat-provider-model-picker-label-frame]]:opacity-0 @max-[12rem]/composer-surface:min-w-0 @max-[12rem]/composer-surface:[&_[data-chat-provider-model-picker-chevron]]:-ms-1.5 @max-[12rem]/composer-surface:[&_[data-chat-provider-model-picker-chevron]]:grid-cols-[0fr] @max-[12rem]/composer-surface:[&_[data-chat-provider-model-picker-chevron]]:opacity-0"
+              "min-w-13 @max-xs/composer-surface:[&_[data-chat-provider-model-picker-label-frame]]:-ms-1.5 @max-xs/composer-surface:[&_[data-chat-provider-model-picker-label-frame]]:grid-cols-[0fr] @max-xs/composer-surface:[&_[data-chat-provider-model-picker-label-frame]]:opacity-0 @max-[12rem]/composer-surface:min-w-0 @max-[12rem]/composer-surface:[&_[data-chat-provider-model-picker-chevron]]:-ms-1.5 @max-[12rem]/composer-surface:[&_[data-chat-provider-model-picker-chevron]]:me-0 @max-[12rem]/composer-surface:[&_[data-chat-provider-model-picker-chevron]]:grid-cols-[0fr] @max-[12rem]/composer-surface:[&_[data-chat-provider-model-picker-chevron]]:opacity-0"
         }
         open={isComposerModelPickerOpen}
         instanceIndicatorBackground={
