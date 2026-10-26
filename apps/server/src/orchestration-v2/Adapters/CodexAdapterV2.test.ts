@@ -1464,28 +1464,24 @@ describe("Codex provider connector duplicates", () => {
     assert.equal(config["apps._default.default_tools_approval_mode"], "approve");
   });
 
-  it.each([false, true])(
-    "disables untrusted repo commands even with native connectors enabled=%s",
-    (useProviderConnectors) => {
-      const params = CodexAdapterV2.codexThreadRuntimeParams({
-        mcpSession: undefined,
-        runtimePolicy: {
-          runtimeMode: "full-access",
-          interactionMode: "default",
-          cwd: "/repo",
-          useProviderConnectors,
-        },
-        providerDuplicates: {
-          appIds: [],
-          mcpServerNames: ["untrusted-local"],
-          blockedRepoServerNames: ["untrusted-local"],
-          repoServerNames: ["web"],
-        },
-      });
-      assert.deepInclude(params.config.mcp_servers, { "untrusted-local": { enabled: false } });
-      assert.notProperty(params.config.mcp_servers, "web");
-    },
-  );
+  it("disables untrusted repo commands", () => {
+    const params = CodexAdapterV2.codexThreadRuntimeParams({
+      mcpSession: undefined,
+      runtimePolicy: {
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        cwd: "/repo",
+      },
+      providerDuplicates: {
+        appIds: [],
+        mcpServerNames: ["untrusted-local"],
+        blockedRepoServerNames: ["untrusted-local"],
+        repoServerNames: ["web"],
+      },
+    });
+    assert.deepInclude(params.config.mcp_servers, { "untrusted-local": { enabled: false } });
+    assert.notProperty(params.config.mcp_servers, "web");
+  });
 
   it("keeps repo transport ownership when a higher layer only overrides environment or arguments", () => {
     const found = CodexAdapterV2.codexProviderDuplicates({
@@ -1614,23 +1610,6 @@ describe("Codex provider connector duplicates", () => {
       );
     }),
   );
-
-  it("keeps every provider connector when the user opts in", () => {
-    const { config } = CodexAdapterV2.codexThreadRuntimeParams({
-      mcpSession: undefined,
-      runtimePolicy: {
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        cwd: "/workspace",
-        useProviderConnectors: true,
-      },
-      providerDuplicates: duplicates,
-    });
-    assert.deepEqual(
-      Object.keys(config).filter((key) => key.endsWith(".enabled") && !key.startsWith("tools.")),
-      [],
-    );
-  });
 });
 
 describe("Codex runtime approval transport", () => {

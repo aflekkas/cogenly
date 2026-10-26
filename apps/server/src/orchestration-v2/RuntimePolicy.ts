@@ -22,7 +22,6 @@ import * as HealthAlertsState from "../health/HealthAlertsState.ts";
 import { availableToConnect } from "../integrations/IntegrationCatalog.ts";
 import * as Integrations from "../integrations/Integrations.ts";
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
-import * as ServerSettings from "../serverSettings.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 
 /**
@@ -139,15 +138,6 @@ export const layerFromProjectStore: Layer.Layer<
     // Required, not optional: as an optional service the production runtime
     // silently never received it and turns lost the integrations line.
     const integrationsService = yield* Integrations.Integrations;
-    const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
-    // Unreadable settings keep the default: native servers stay off. The import
-    // offer is only a prompt; leaving it unreviewed does not restore them.
-    const useProviderConnectors = Option.isNone(serverSettings)
-      ? Effect.succeed(false)
-      : serverSettings.value.getSettings.pipe(
-          Effect.map((settings) => settings.useProviderConnectors),
-          Effect.orElseSucceed(() => false),
-        );
     // The integrations line is best-effort turn context too: any failure
     // resolves to no line rather than failing the turn.
     const noIntegrations = { integrations: [], available: [] };
@@ -179,7 +169,6 @@ export const layerFromProjectStore: Layer.Layer<
     // any failure resolves to no folder rather than failing the turn.
     const projectFor = (
       thread: OrchestrationV2AppThread,
-      providerConnectorsHidden: boolean,
     ): Effect.Effect<
       | { readonly dir: string; readonly manifest: string; readonly labelId: ProjectLabelId }
       | undefined,
@@ -204,7 +193,8 @@ export const layerFromProjectStore: Layer.Layer<
                 projectChat: folder.projectChatThreadId === thread.id,
                 integrations,
                 availableIntegrations: available,
-                providerConnectorsHidden,
+                // Provider-native MCP servers and connectors are always off.
+                providerConnectorsHidden: true,
               }),
             };
           }).pipe(
@@ -217,8 +207,7 @@ export const layerFromProjectStore: Layer.Layer<
           );
     return RuntimePolicyV2.of({
       resolve: Effect.fn("RuntimePolicyV2.resolve")(function* (input) {
-        const providerConnectors = yield* useProviderConnectors;
-        const project = yield* projectFor(input.thread, !providerConnectors);
+        const project = yield* projectFor(input.thread);
         // A chat or an agent's conversation filed in a project runs with the
         // project dir as its working directory, even when the thread keeps a
         // scratch worktree path from before it was filed. Unfiled ones keep
@@ -256,7 +245,7 @@ export const layerFromProjectStore: Layer.Layer<
         const standaloneLine = buildIntegrationsContextLine(
           standalone.integrations,
           standalone.available,
-          !providerConnectors,
+          true,
         );
         const manifest =
           project !== undefined
@@ -276,7 +265,6 @@ export const layerFromProjectStore: Layer.Layer<
           interactionMode: input.thread.interactionMode,
           cwd,
           ...conversationModeFor(input.thread),
-          ...(providerConnectors ? { useProviderConnectors: true } : {}),
           ...(projectManifest === undefined ? {} : { projectManifest }),
         });
       }),

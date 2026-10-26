@@ -388,7 +388,6 @@ const smokeCases = [
     toolkit: "integrations",
     names: [
       "integrations_list",
-      "integration_native_preview",
       "integration_install_runtime",
       "integration_setup_guide",
       "integration_test",

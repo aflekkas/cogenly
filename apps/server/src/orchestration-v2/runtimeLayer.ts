@@ -2,7 +2,6 @@ import * as StaleRunRecoveryWorker from "../health/StaleRunRecoveryWorker.ts";
 import * as WorktreeLifecycle from "../workspace/WorktreeLifecycle.ts";
 import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
 import * as GoogleTokenStore from "../integrations/local/GoogleTokenStore.ts";
-import * as NativeIntegrationImport from "../integrations/NativeIntegrationImport.ts";
 import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
 import * as AccountConnections from "../accounts/AccountConnections.ts";
 import * as AccountAccess from "../accounts/AccountAccess.ts";
@@ -139,7 +138,6 @@ export const layerIntegrationSyncPeers = IntegrationSyncPeers.layer.pipe(
 );
 export const layerIntegrationsProvided = Integrations.layer.pipe(
   Layer.provide(layerIntegrationSyncPeers),
-  Layer.provide(NativeIntegrationImport.layer),
   Layer.provide(layerIntegrationCredentials),
   Layer.provide(IntegrationTokens.layer.pipe(Layer.provide(layerVaultProvided))),
   Layer.provide(layerLocalIntegrationsProvided),

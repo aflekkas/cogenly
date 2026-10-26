@@ -1,13 +1,10 @@
 import { isPublicIntegrationPath } from "./publicEndpoint.ts";
-import * as NativeImport from "./NativeIntegrationImport.ts";
 import {
   Integration,
   IntegrationError,
   IntegrationId,
   integrationCatalogEntry,
   integrationCatalogEntryFor,
-  type IntegrationNativeImportPreview,
-  type IntegrationNativeImportResult,
   type IntegrationCallResult,
   type IntegrationAddInput,
   type IntegrationCatalogConnectInput,
@@ -396,8 +393,6 @@ export function tokenRefreshAt(expiresAt: number | null, issuedAtMs: number | nu
 export class Integrations extends Context.Service<
   Integrations,
   {
-    readonly previewNative: () => Effect.Effect<IntegrationNativeImportPreview, IntegrationError>;
-    readonly importNative: () => Effect.Effect<IntegrationNativeImportResult, IntegrationError>;
     readonly setupGuide: (
       service: string,
     ) => Effect.Effect<ReturnType<typeof integrationSetupGuide>>;
@@ -699,7 +694,6 @@ const make = (options: IntegrationsOptions = {}) =>
     const tokenStore = yield* Tokens.IntegrationTokens;
     const peers = yield* IntegrationSyncPeers;
     const protocol = yield* OAuth.make;
-    const nativeImport = yield* Effect.serviceOption(NativeImport.NativeIntegrationImport);
     const local = yield* Effect.serviceOption(Local.LocalIntegrations);
     // Settings' secret forms and the uv installer; absent in suites that do not use them.
     const secretWriter = yield* Effect.serviceOption(Credentials.IntegrationSecrets);
@@ -2214,33 +2208,6 @@ const make = (options: IntegrationsOptions = {}) =>
           );
 
     const service: Integrations["Service"] = Integrations.of({
-      previewNative: () =>
-        Option.isSome(nativeImport)
-          ? nativeImport.value.preview
-          : Effect.fail(
-              new IntegrationError({
-                operation: "preview native integrations",
-                reason: "upstream_unreachable",
-              }),
-            ),
-      importNative: () =>
-        Effect.gen(function* () {
-          const preview = yield* service.previewNative();
-          const existing = (yield* service.list()).integrations.map((row) => row.integration);
-          const imported: string[] = [];
-          for (const definition of preview.definitions) {
-            if (existing.some((item) => item.deletedAt === null && item.name === definition.name))
-              continue;
-            yield* service.create(definition);
-            imported.push(definition.name);
-          }
-          return {
-            imported,
-            reconnect: preview.reconnect,
-            warnings: preview.warnings,
-            incomplete: preview.incomplete,
-          };
-        }),
       setupGuide: (service) => Effect.succeed(integrationSetupGuide(service)),
       list: (options) =>
         rows().pipe(

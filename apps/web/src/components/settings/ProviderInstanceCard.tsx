@@ -54,6 +54,7 @@ import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { ProviderAccentColorPicker } from "./ProviderAccentColorPicker";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingsMasterDetailRow } from "./SettingsMasterDetail";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
 import { readCodexSetupMode } from "./CodexSetupSection.logic";
 import {
@@ -894,73 +895,57 @@ export function ProviderInstanceCard({
 
   if (mode === "list") {
     return (
-      <div
-        data-slot="settings-row"
-        className={cn(
-          "group flex min-h-18 items-center gap-3 px-3 py-3 transition-colors sm:px-4",
-          selected ? "bg-muted/45" : "hover:bg-muted/25",
-        )}
-      >
-        <div
-          className={cn(
-            "pointer-events-none relative flex min-w-0 flex-1 items-start gap-3 rounded-md text-left transition-opacity",
-            !enabled && !selected && "opacity-60 group-hover:opacity-100",
-          )}
-        >
-          <button
-            type="button"
-            className="pointer-events-auto absolute inset-0 cursor-pointer rounded-md outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-            onClick={onSelect}
-            aria-label={`Select ${displayName}`}
-            aria-pressed={selected}
-          />
-          {titleIconNode}
-          <span className="min-w-0 flex-1">
-            <span className="flex min-w-0 items-center gap-2">
-              {/* The name keeps its width; a long version string truncates first. */}
-              <span className="max-w-full shrink-0 truncate text-sm font-medium text-foreground">
-                {displayName}
+      <SettingsMasterDetailRow
+        selected={selected}
+        dimmed={!enabled}
+        onSelect={onSelect}
+        selectLabel={`Select ${displayName}`}
+        icon={titleIconNode}
+        title={
+          <>
+            {/* The name keeps its width; a long version string truncates first. */}
+            <span className="max-w-full shrink-0 truncate text-sm font-medium text-foreground">
+              {displayName}
+            </span>
+            {versionLabel ? (
+              <code className="min-w-0 truncate text-xs text-muted-foreground">{versionLabel}</code>
+            ) : null}
+            {versionAdvisoryNode}
+          </>
+        }
+        description={
+          <>
+            {/* The dot describes provider health, not the update in progress. */}
+            {statusDotNode && !updateProgress ? (
+              <span className="flex h-[1.45em] shrink-0 items-center">{statusDotNode}</span>
+            ) : null}
+            <ProviderStatusDiagnostic detail={statusDiagnostic}>
+              <span
+                tabIndex={statusDiagnostic ? 0 : undefined}
+                aria-live="polite"
+                className="pointer-events-auto line-clamp-2 [overflow-wrap:anywhere]"
+              >
+                {updateProgress ? (
+                  `Updating · ${updateProgress}`
+                ) : (
+                  <>
+                    {summary.headline}
+                    {needsAttention && inlineStatusDetail ? ` · ${inlineStatusDetail}` : null}
+                  </>
+                )}
               </span>
-              {versionLabel ? (
-                <code className="min-w-0 truncate text-xs text-muted-foreground">
-                  {versionLabel}
-                </code>
-              ) : null}
-              {versionAdvisoryNode}
-            </span>
-            <span className="mt-0.5 flex items-start gap-1.5 text-xs leading-normal text-muted-foreground/80">
-              {/* The dot describes provider health, not the update in progress. */}
-              {statusDotNode && !updateProgress ? (
-                <span className="flex h-[1.45em] shrink-0 items-center">{statusDotNode}</span>
-              ) : null}
-              <ProviderStatusDiagnostic detail={statusDiagnostic}>
-                <span
-                  tabIndex={statusDiagnostic ? 0 : undefined}
-                  aria-live="polite"
-                  className="pointer-events-auto line-clamp-2 [overflow-wrap:anywhere]"
-                >
-                  {updateProgress ? (
-                    `Updating · ${updateProgress}`
-                  ) : (
-                    <>
-                      {summary.headline}
-                      {needsAttention && inlineStatusDetail ? ` · ${inlineStatusDetail}` : null}
-                    </>
-                  )}
-                </span>
-              </ProviderStatusDiagnostic>
-            </span>
-          </span>
-        </div>
-        <span className="flex h-5 shrink-0 items-center gap-1">
+            </ProviderStatusDiagnostic>
+          </>
+        }
+        trailing={
           <Switch
             checked={enabled}
             disabled={readOnly}
             onCheckedChange={(checked) => updateEnabled(Boolean(checked))}
             aria-label={`Enable ${displayName}`}
           />
-        </span>
-      </div>
+        }
+      />
     );
   }
 

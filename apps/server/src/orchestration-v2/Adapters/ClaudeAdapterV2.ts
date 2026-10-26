@@ -1183,8 +1183,6 @@ export function makeClaudeQueryOptions(input: {
   readonly onUserDialog?: ClaudeQueryOptions["onUserDialog"];
   readonly supportedDialogKinds?: ClaudeQueryOptions["supportedDialogKinds"];
   readonly allowDangerouslySkipPermissions?: boolean;
-  /** True restores Claude's native MCP configuration. */
-  readonly useProviderConnectors?: boolean;
   readonly managedMcpConfig?: boolean;
   /** Servers an administrator's `managed-mcp.json` defines, named in the prompt. */
   readonly managedMcpServerNames?: ReadonlyArray<string>;
@@ -1202,10 +1200,9 @@ export function makeClaudeQueryOptions(input: {
     "dangerously-skip-permissions": _launchArgSkipPermissions,
     ...extraArgs
   } = input.settings === undefined ? {} : parseCliArgs(input.settings.launchArgs).flags;
-  if (input.useProviderConnectors !== true) {
-    delete extraArgs["mcp-config"];
-    delete extraArgs["strict-mcp-config"];
-  }
+  // Native MCP configuration stays off: only Cogenly's and the repo's servers load.
+  delete extraArgs["mcp-config"];
+  delete extraArgs["strict-mcp-config"];
   const requestThinkingSummaries =
     compiledSelection.settings.alwaysThinkingEnabled !== false &&
     extraArgs["thinking-display"] !== "omitted";
@@ -1302,14 +1299,8 @@ export function makeClaudeQueryOptions(input: {
     ...(input.settings?.binaryPath
       ? { pathToClaudeCodeExecutable: input.settings.binaryPath }
       : {}),
-    ...(input.useProviderConnectors === true
-      ? input.environment === undefined
-        ? {}
-        : { env: input.environment }
-      : {
-          ...(input.managedMcpConfig ? {} : { strictMcpConfig: true }),
-          env: { ...input.environment, ENABLE_CLAUDEAI_MCP_SERVERS: "false" },
-        }),
+    ...(input.managedMcpConfig ? {} : { strictMcpConfig: true }),
+    env: { ...input.environment, ENABLE_CLAUDEAI_MCP_SERVERS: "false" },
     ...(sessionMcpServers === undefined ? {} : { mcpServers: sessionMcpServers }),
     systemPrompt: {
       type: "preset" as const,
@@ -8814,9 +8805,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             canUseTool,
             onUserDialog,
             supportedDialogKinds: ["resume_return"],
-            ...(turnInput.runtimePolicy.useProviderConnectors === true
-              ? { useProviderConnectors: true }
-              : {}),
           });
           const querySession = yield* queryRunner
             .open({

@@ -9,10 +9,10 @@ import type {
   IntegrationSource,
   ProjectLabelId,
 } from "@cogenly/contracts";
-import { useNavigate } from "@tanstack/react-router";
 import { PlugIcon, PlusIcon } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
+import { integrationSetupRequest, useConnectIntegration } from "~/hooks/useConnectIntegration";
 import { integrationsRpc } from "~/rpc/integrations";
 import { useEnvironmentQuery } from "~/state/query";
 import { INTEGRATION_LOGOS } from "../IntegrationLogos";
@@ -116,8 +116,8 @@ function optionText(option: SourceOption): string {
 /**
  * The composer toolbar's Sources control: a searchable list of the
  * integrations this thread's agent can use. Picking one hands it to
- * `onPick`, which inserts its chip at the caret; the last row opens Settings
- * → Integrations to connect more.
+ * `onPick`, which inserts its chip at the caret; the last row starts an agent
+ * chat that connects another service.
  *
  * `open` and `anchor` let the toolbar's overflow menu open it when the
  * button itself has folded away.
@@ -133,7 +133,7 @@ export function ComposerSourcesPicker(props: {
   readonly anchor?: Element | null;
   readonly onPick: (source: IntegrationSource) => void;
 }) {
-  const navigate = useNavigate();
+  const connect = useConnectIntegration(props.environmentId);
   const menuProps = useComposerMenuProps();
   const [query, setQuery] = useState("");
   // A pick puts the caret after its new chip; only a dismissal hands focus back here.
@@ -166,8 +166,9 @@ export function ComposerSourcesPicker(props: {
     pickedRef.current = true;
     close();
     if (option.kind === "connect") {
-      // Settings opens on this composer's environment, where the integrations live.
-      void navigate({ to: "/settings/integrations", search: { machine: props.environmentId } });
+      // Its own chat on this composer's environment, where the integrations live;
+      // this thread and its draft stay as they are.
+      void connect.start(integrationSetupRequest(null));
       return;
     }
     props.onPick(option.source);

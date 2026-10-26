@@ -6,7 +6,7 @@ import { Atom } from "effect/reactivity";
 import { useCallback } from "react";
 
 import { toastManager } from "../components/ui/toast";
-import { useOpenAgentChat } from "../hooks/useOpenAgentChat";
+import { useStartAgentChat } from "../hooks/useStartAgentChat";
 import { machinesRpc } from "../rpc/machines";
 import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -114,12 +114,12 @@ function useRunLegacyHealthCommand(): (command: MachineHealthLegacyCommand) => P
 /**
  * Runs a health Fix or opens its target. A direct fix reports its outcome in
  * a toast, then Fix opens the first sign-in or hands what it couldn't fix to
- * an agent chat, which opens with the problem filled in. Resolves true when
- * the action went through.
+ * a new agent chat, which opens already working on the problem. Resolves true
+ * when the action went through.
  */
 export function useRunMachineHealthAction(): (action: MachineHealthAction) => Promise<boolean> {
   const open = useOpenMachineHealthLink();
-  const openAgentChat = useOpenAgentChat();
+  const startAgentChat = useStartAgentChat();
   const healthFix = useAtomCommand(machinesRpc.healthFix, { reportFailure: false });
   const runLegacy = useRunLegacyHealthCommand();
   return useCallback(
@@ -129,7 +129,7 @@ export function useRunMachineHealthAction(): (action: MachineHealthAction) => Pr
           open(action.link);
           return true;
         case "agent":
-          return openAgentChat(action.request.environmentId, action.request.prompt);
+          return startAgentChat(action.request.environmentId, { prompt: action.request.prompt });
         case "fix": {
           let failed = false;
           let manual: ReadonlyArray<string> = [];
@@ -176,14 +176,13 @@ export function useRunMachineHealthAction(): (action: MachineHealthAction) => Pr
           const next = healthFixFollowUp(action, manual);
           if (next.signIn !== null) open(next.signIn);
           if (next.agent.length > 0 && action.agentEnvironmentId !== null) {
-            await openAgentChat(
-              action.agentEnvironmentId,
-              machineHealthAgentPrompt(next.agent, {
+            await startAgentChat(action.agentEnvironmentId, {
+              prompt: machineHealthAgentPrompt(next.agent, {
                 environmentId: action.originEnvironmentId,
                 name: action.originMachineName,
                 local: action.agentEnvironmentId === action.originEnvironmentId,
               }),
-            );
+            });
           }
           if (next.remaining > 0) {
             toastManager.add({
@@ -200,6 +199,6 @@ export function useRunMachineHealthAction(): (action: MachineHealthAction) => Pr
         }
       }
     },
-    [healthFix, open, openAgentChat, runLegacy],
+    [healthFix, open, runLegacy, startAgentChat],
   );
 }

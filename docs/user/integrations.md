@@ -15,15 +15,18 @@ making another. The agent also records what it set up and where in the
 account's **Setup notes** in Settings → Integrations, so a later agent can find
 and fix it.
 
-Settings → Integrations shows connected accounts, live connection status and
-which projects can use each account. **Connect with an agent** opens a new chat
-that starts “Connect” for you to finish with the service's name; a suggested
-service such as Slack or Notion fills it in. An account that needs attention
-offers **Reconnect**, which renews its sign-in; a working one offers **Test**.
-The account's menu also has **Turn off**, which stops access until you
-reconnect, and **Remove**, which deletes the connection.
-Ask an agent to rename an account or change its project scope. Connect a service
-again to add another account, such as personal Gmail and work Gmail.
+Settings → Integrations lists your connected accounts, like Settings →
+Providers lists agents. Each row shows the service, its account and its status:
+Connected, Needs sign-in or Off. Select one to see its status and which projects
+can use it. An account that needs attention offers **Reconnect**, which renews
+its sign-in; a working one offers **Test**. Turning an account off stops access
+until you turn it back on; removing it deletes the connection.
+
+**Add integration** starts a new chat where an agent sets up a service with you;
+say which one, or it asks. **Connect sources** in the composer's Sources menu
+does the same, and leaves your current chat and draft as they are. Ask an agent
+to rename an account or change its project scope. Connect a service again to add
+another account, such as personal Gmail and work Gmail.
 
 ## Gmail and Google Workspace
 
@@ -64,16 +67,14 @@ availability; the agent also verifies that the required data can be read.
 
 ## Provider configuration
 
-**Use only Cogenly integrations** is on by default in Settings → Integrations →
-Agent access.
-Agents then use only the integrations connected in Cogenly, not the MCP
-servers, claude.ai connectors and Codex plugins set up in Claude or Codex. This
-keeps integrations in one place and avoids duplicate tools. The setting follows
-you to every paired machine. Turn it off to let agents use both; the change
-applies to new agent sessions. Claude and Codex configuration files are never
-modified.
+Agents use only the integrations connected in Cogenly. The MCP servers,
+claude.ai connectors and Codex plugins and apps set up in Claude or Codex are
+off in Cogenly's agent sessions, which keeps integrations in one place and
+avoids duplicate tools. Claude and Codex configuration files are never
+modified, so those servers keep working when you use Claude or Codex directly.
+To use one of them in Cogenly, ask an agent to connect it.
 
-Some servers stay on either way:
+Some servers stay on:
 
 - **Servers checked into a repo.** A repo's `.mcp.json` (and Codex's
   `.codex/config.toml` in the repo) supplies its web servers automatically.
@@ -85,17 +86,6 @@ Some servers stay on either way:
 - **Servers your organization manages for Claude.** Cogenly can't turn these
   off; agents are told they are outside Cogenly.
 - **Muse's own servers.** Muse can't hide them.
-
-To keep using a server you set up in Claude or Codex, bring it over with
-**Import from Claude and Codex** at the top of Settings → Integrations. **Review** lists what was
-found and what each server still needs. **Import** brings the definitions over,
-turned off; an agent then collects secrets into the vault and checks each
-connection with you. claude.ai connectors need a new sign-in through Cogenly
-because their authorization can't be imported. Repo servers aren't imported;
-they already load from the repo. Imported web integrations share their
-definitions between paired machines; sign in once to share their portable
-sign-in through the vault. Integrations that run a command stay on the machine
-that imported them.
 
 ## Sign-ins on paired machines
 

@@ -7,22 +7,20 @@ and `integration_call`. Setup knowledge is repository data exposed by
 `integration_setup_guide`; Settings manages accounts rather than reproducing
 vendor setup flows. Add service knowledge there without adding a client wizard.
 
-Native CLI servers, plugins and hosted connectors otherwise bypass Cogenly's
-scope, status and credential handling and duplicate its tools. They are suppressed
-by default, whether or not the native-definition import offer was reviewed. The
-single universal preference `useProviderConnectors` restores native
-configuration for new sessions. The shared runtime policy carries it to all turn
-paths. Native configuration is never rewritten.
+Native CLI servers, plugins and hosted connectors would bypass Cogenly's scope,
+status and credential handling and duplicate its tools, so every Claude and
+Codex session turns them off. There is no setting to restore them and no import:
+an agent connects the service as a Cogenly integration instead. Native
+configuration is never rewritten.
 
 Repo MCP definitions stay in the checkout rather than being imported or synced.
-`RepoMcpTrust` gates local command execution for both Claude and Codex, independently
-of `useProviderConnectors`. URL servers always load. Local consent is keyed by
+`RepoMcpTrust` gates local command execution for both Claude and Codex. URL servers always load. Local consent is keyed by
 remote and a canonical hash of the full definitions; keeping it outside the repo
 prevents a checkout from granting its own consent. Own GitHub identities, linked
 project owners and repositories with no remote are trusted automatically. Provider
 adapters recheck before the next turn so edited definitions cannot reuse old trust.
-Claude passes reviewed repo servers explicitly; when native configuration is
-restored, its project-server settings still exclude commands waiting on trust.
+Claude passes reviewed repo servers explicitly, and its project-server settings
+exclude commands waiting on trust.
 Administrator-managed `managed-mcp.json` rejects the strict flag; Cogenly omits
 that flag, and the managed servers remain and are named to agents. Codex has no
 strict flag: before launching each session, Cogenly lists enabled servers from
@@ -34,13 +32,6 @@ configuration propagates to native children. A failed server enumeration fails s
 silently restoring bypass access. Muse SDK 1.4.6 only admits additive session
 MCP configuration and ignores unknown keys; native suppression is unsupported
 and its turns carry that notice.
-
-Imports are disconnected definitions. Header and environment values become vault
-references; potentially secret command arguments are withheld for agent review.
-This prevents import from turning existing credentials into plain settings or
-starting arbitrary imported processes. claude.ai authorization is account-hosted
-and cannot be migrated; connector names discovered with the CLI or present in local definitions are listed for renewed
-consent, with an explicit warning when account-hosted discovery is unavailable.
 
 Project scope and destination approvals live in the service. Every gateway entry
 point takes the caller's project label; inaccessible accounts look absent.
