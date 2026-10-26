@@ -12,7 +12,7 @@ import {
   type T3ImportSourceProject,
   type T3ImportStatus,
 } from "@cogenly/contracts";
-import { CircleCheckIcon, CircleAlertIcon, InfoIcon } from "lucide-react";
+import { CircleCheckIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { formatBytes } from "../../lib/formatBytes";
@@ -21,7 +21,6 @@ import { t3ImportRpc } from "../../rpc/t3Import";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { WorkLogDisclosure } from "../chat/WorkLog";
 import { useSelectSidebarMode } from "../sidebar/modes/useSelectSidebarMode";
-import { Alert, AlertDescription } from "../ui/alert";
 import { useAnimatedPanelHeight } from "../ui/animated-panel-height";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -41,7 +40,7 @@ import {
   type T3ImportSourceWithBackup,
   type T3ImportView,
 } from "./T3ImportSettings.logic";
-import { SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingsEmpty, SettingsNote, SettingsRow, SettingsSection } from "./settingsLayout";
 
 /**
  * Settings → Import. Brings T3 Code's projects, threads and a few settings
@@ -65,7 +64,7 @@ function T3ImportGate({ environmentId }: { environmentId: EnvironmentId | null }
             title={
               environmentId === null
                 ? "Choose a machine to import into."
-                : "This connection needs permission to change settings to import."
+                : "This connection can't import. Reconnect with permission to change settings."
             }
           />
         </SettingsSection>
@@ -263,7 +262,11 @@ export function T3ImportFlowView({
     <SettingsSection id="t3-import" title="Import from T3 Code">
       <SettingsRow
         title="T3 Code wasn't found"
-        description={view.message}
+        description={
+          <>
+            {view.message} <T3ImportLearnMoreLink />
+          </>
+        }
         control={
           <Button size="sm" variant="outline" onClick={refreshStatus}>
             Check again
@@ -273,17 +276,9 @@ export function T3ImportFlowView({
     </SettingsSection>
   ) : (
     <>
-      {t3Open ? (
-        <div className="swap-motion">
-          <Alert variant="info" controlAlignment="first-line">
-            <InfoIcon />
-            <AlertDescription>{T3_IMPORT_RUNNING_NOTE}</AlertDescription>
-          </Alert>
-        </div>
-      ) : null}
-
       <IntroSection
         source={status!.source}
+        t3Open={t3Open}
         hideTitle={presentation === "onboarding"}
         selection={selection}
         selectable={selectable}
@@ -343,6 +338,7 @@ export function T3ImportFlowView({
 
 function IntroSection({
   source,
+  t3Open,
   hideTitle,
   selection,
   selectable,
@@ -353,6 +349,7 @@ function IntroSection({
   error,
 }: {
   source: T3ImportSourceWithBackup;
+  t3Open: boolean;
   hideTitle: boolean;
   selection: ReadonlySet<string>;
   selectable: boolean;
@@ -368,17 +365,27 @@ function IntroSection({
         title="What comes over"
         description={
           <>
-            Each project's full history, subagent threads included, as chats you can continue here.
-            Keybindings, default models and favorite models come too; the models also reach your
-            paired machines. Sign-ins and tokens are never copied, so providers ask you to sign in
-            again. <T3ImportLearnMoreLink />
+            Every thread in the projects you pick, subagents included, as chats you can continue
+            here. Keybindings, default models and favorites come too, and the models reach your
+            paired machines. Sign-ins never come over, so providers ask you to sign in again.{" "}
+            <T3ImportLearnMoreLink />
           </>
         }
       />
+      {t3Open ? (
+        <SettingsNote className="swap-motion">{T3_IMPORT_RUNNING_NOTE}</SettingsNote>
+      ) : null}
+      {selectable && source.projects.length === 0 ? (
+        <SettingsEmpty
+          size="sm"
+          title="No projects in T3 Code"
+          description="Add a project in T3 Code, then check again here."
+        />
+      ) : null}
       {selectable && source.projects.length > 0 ? (
         <SettingsRow
           title="Projects"
-          description="Each comes over as a repository. A folder that is already a repository in Cogenly gets the threads, not a duplicate."
+          description="Each becomes a repository. A folder that's already a repository here gets the threads instead of a duplicate."
         >
           <ul className="flex flex-col gap-0.5 pt-1 pb-2" aria-label="T3 Code projects">
             {source.projects.map((project) => (
@@ -395,9 +402,9 @@ function IntroSection({
       ) : null}
       {checkAction !== null || error !== null ? (
         <SettingsRow
-          title={error ? "That didn't work" : "Dry run"}
+          title={error ? "That didn't work" : "Check first"}
           description={
-            error ?? "Reads T3 Code's data and lists what would change. Nothing is written."
+            error ?? "Reads T3 Code's data and lists what would come over. Nothing is written yet."
           }
           status={
             scanPercent != null ? <ProgressBar percent={scanPercent} label="Checking" /> : null
@@ -491,7 +498,7 @@ function StageSection({
             <SettingsSection id="t3-import-settings" title="Settings">
               <SettingsRow
                 title="Import keybindings, default models and favorites"
-                description="Untick to leave this machine's settings as they are."
+                description="Clear this to keep this machine's settings as they are."
                 control={
                   <Checkbox
                     aria-label="Import keybindings, default models and favorites"
@@ -617,12 +624,7 @@ function StageSection({
         <div key="failed" className="swap-motion">
           <SettingsSection id="t3-import-failed" title="Import">
             <SettingsRow
-              title={
-                <span className="flex items-center gap-1.5">
-                  <CircleAlertIcon className="size-3.5 text-destructive" />
-                  The import stopped
-                </span>
-              }
+              title="The import stopped"
               description={
                 <>
                   <span className="block">{view.message}</span>
