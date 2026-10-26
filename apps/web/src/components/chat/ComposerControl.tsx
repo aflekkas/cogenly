@@ -36,18 +36,31 @@ function composerControlClassName(size: ComposerControlSize, className?: string)
   );
 }
 
+/**
+ * A control that gives way first in a narrow composer: it takes nearly all of the
+ * row's shrink, its label truncating away, so it reaches its icon and chevron before
+ * the model and effort pickers start truncating theirs. The aria-label keeps the
+ * full name. The label is a one-column grid whose track can reach zero, so a nowrap
+ * label no longer holds the control at its full width: its floor is the icon and
+ * chevron. Its text goes in a child, which truncates.
+ */
+const COLLAPSIBLE_CLASS_NAME =
+  "shrink-[100] [&_[data-composer-control-label]]:grid [&_[data-composer-control-label]]:grid-cols-[minmax(0,max-content)] [&_[data-composer-control-label]>*]:truncate";
+
 type ComposerControlProps = useRender.ComponentProps<"button"> & {
   size?: ComposerControlSize;
+  collapsible?: boolean;
 };
 
 export function ComposerControl({
   className,
   size = "sm",
+  collapsible = false,
   render,
   ...props
 }: ComposerControlProps) {
   const defaultProps = {
-    className: composerControlClassName(size, className),
+    className: composerControlClassName(size, cn(collapsible && COLLAPSIBLE_CLASS_NAME, className)),
     type: render ? undefined : ("button" as const),
   };
   return useRender({
