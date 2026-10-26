@@ -6,6 +6,7 @@ import {
   type OrchestrationV2DomainEvent,
   ThreadId,
   ThreadReplicationApply,
+  CommandId,
 } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -31,6 +32,44 @@ const forThread = (id: ThreadId, event: OrchestrationV2DomainEvent): Orchestrati
     threadId: id,
     payload: { ...event.payload, ...(event.type === "thread.created" ? { id } : { threadId: id }) },
   }) as OrchestrationV2DomainEvent;
+
+it.live(
+  "targeted pages bypass bulk history, relay ownership, and deduplicate when bulk catches up",
+  () =>
+    Effect.gen(function* () {
+      const hub = yield* start("priority-hub", "cloud-server");
+      const laptop = yield* start("priority-laptop", "computer");
+      const caller = yield* start("priority-caller", "computer");
+      yield* pair(hub, laptop);
+      yield* pair(hub, caller);
+      const at = yield* DateTime.now;
+      const events = [
+        thread("event:priority", at),
+        ...Array.from({ length: 300 }, (_, i) =>
+          message(`event:priority:${i}`, at, `Message ${i}`),
+        ),
+      ];
+      yield* laptop.sink.write({ events });
+      const before = yield* caller.replication.cursors(hub.environmentId);
+      yield* caller.routing.refreshDelegated(laptop.environmentId, threadId);
+      expect((yield* caller.projections.getThreadProjection(threadId)).messages).toHaveLength(300);
+      expect(yield* caller.replication.cursors(hub.environmentId)).toEqual(before);
+      expect((yield* hub.replication.owner(threadId))?.owner).toBe(laptop.environmentId);
+      // The hub can route a stop even though its child history is still absent.
+      expect(
+        yield* caller.remoteCommands.forward({
+          type: "thread.stop",
+          threadId,
+          commandId: CommandId.make("priority-stop"),
+        }),
+      ).toMatchObject({ _tag: "Some" });
+      yield* laptop.sync.sync(hub.environmentId);
+      yield* hub.sync.sync(caller.environmentId);
+      expect(yield* caller.replication.eventCount(threadId)).toBe(events.length);
+      yield* caller.routing.refreshDelegated(laptop.environmentId, threadId);
+      expect((yield* caller.projections.getThreadProjection(threadId)).messages).toHaveLength(300);
+    }),
+);
 
 describe("thread replication across builds", () => {
   it.live("delayed owner metadata keeps a replica filed in the merged project", () =>

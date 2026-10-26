@@ -56,7 +56,9 @@ updating a schedule). Names and environment IDs work; `this` means the machine
 the agent runs on and `auto` means the hub. Isolated delegated work carries the
 parent's committed code to the target. Its committed result branch can come
 back when the parent reads the task result, without a push; uncommitted changes
-stay on their original machine.
+stay on their original machine. Cloud subagents need Cogenly 0.3.3 or later on
+both machines; their progress and results stay available while history sync
+catches up.
 
 ## Fork a thread to another machine
 

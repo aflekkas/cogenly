@@ -19,6 +19,8 @@ import {
   ThreadAttachmentRead,
   type ThreadAttachmentFile,
   ThreadCommandForward,
+  ThreadDelegatedRead,
+  type ThreadReplicationCursor,
   ThreadFolderMove,
   type ThreadId,
   ThreadRemoteError,
@@ -33,6 +35,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
@@ -153,6 +156,10 @@ export class ThreadRouting extends Context.Service<
      * Returns the local file path; none when the thread runs here or the
      * owner has no such file.
      */
+    readonly refreshDelegated: (
+      machine: EnvironmentId,
+      threadId: ThreadId,
+    ) => Effect.Effect<void, ThreadRemoteError>;
     readonly fetchAttachment: (
       attachmentId: string,
     ) => Effect.Effect<Option.Option<string>, ThreadRemoteError>;
@@ -250,6 +257,16 @@ const make = Effect.gen(function* () {
     <A>(effect: Effect.Effect<A, PeerCallError | Cause.TimeoutError>) =>
       effect.pipe(
         Effect.mapError((error) => {
+          if (
+            error._tag === "PeerCallError" &&
+            error.reason === "unknown-channel" &&
+            error.channel === ThreadDelegatedRead.name
+          )
+            return new ThreadRemoteError({
+              reason: "rejected",
+              detail:
+                "This peer cannot track cloud subagents independently of sync. Update both machines to Cogenly 0.3.3 or later.",
+            });
           const remote =
             error._tag === "PeerCallError" && error.reason === "handler-failed"
               ? decodeRemoteError(error.error)
@@ -260,6 +277,78 @@ const make = Effect.gen(function* () {
           return new ThreadRemoteError({ reason: "offline", detail: `${name} did not answer.` });
         }),
       );
+
+  // These cursors belong only to targeted reads, never the bulk sync stream.
+  // After restart, replay from zero is safe because replica writes deduplicate events.
+  const priorityCursors = new Map<string, ThreadReplicationCursor>();
+  const priorityPermits = new Map<string, { permit: Semaphore.Semaphore; users: number }>();
+  const refreshDelegated: ThreadRouting["Service"]["refreshDelegated"] = (machine, threadId) =>
+    Effect.suspend(() => {
+      const key = `${machine}:${threadId}`;
+      const entry = priorityPermits.get(key) ?? { permit: Semaphore.makeUnsafe(1), users: 0 };
+      entry.users++;
+      priorityPermits.set(key, entry);
+      return Effect.gen(function* () {
+        const hop = yield* nextHop(machine);
+        for (let page = 0; page < 64; page++) {
+          const after = priorityCursors.get(key) ?? { events: 0, meta: 0 };
+          const batch = yield* machines
+            .call(hop, ThreadDelegatedRead, {
+              target: machine,
+              threadId,
+              after,
+            })
+            .pipe(Effect.timeout("30 seconds"), fromPeer(undefined, machine));
+          if (batch.cursor.events < after.events || batch.cursor.meta < after.meta)
+            return yield* new ThreadRemoteError({ reason: "behind" });
+          const view = yield* topology;
+          yield* replication
+            .receivePriority(
+              threadId,
+              batch,
+              hop,
+              view.link._tag === "spoke" && view.link.hubEnvironmentId === hop,
+            )
+            .pipe(Effect.mapError(() => new ThreadRemoteError({ reason: "behind" })));
+          priorityCursors.set(key, batch.cursor);
+          if (priorityCursors.size > 2048)
+            priorityCursors.delete(priorityCursors.keys().next().value!);
+          if (batch.events.length === 0 && batch.meta.length === 0) return;
+        }
+      }).pipe(
+        entry.permit.withPermits(1),
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (--entry.users === 0) priorityPermits.delete(key);
+          }),
+        ),
+      );
+    });
+
+  yield* channels.register(ThreadDelegatedRead, (payload, caller) =>
+    Effect.gen(function* () {
+      if (payload.target !== replication.environmentId) {
+        const view = yield* topology;
+        if (view.link._tag !== "hub" || payload.target === caller.environmentId)
+          return yield* new ThreadRemoteError({ reason: "not-owner" });
+        const batch = yield* callMachine(
+          payload.target,
+          ThreadDelegatedRead,
+          payload,
+          "30 seconds",
+        );
+        // Remember ownership even when the hub's bulk replica is behind, so a
+        // subsequent stop can be relayed without mistaking this for a local thread.
+        yield* replication
+          .receivePriority(payload.threadId, { ...batch, events: [] }, payload.target, false)
+          .pipe(Effect.mapError(() => new ThreadRemoteError({ reason: "behind" })));
+        return batch;
+      }
+      return yield* replication
+        .readBatch(payload.after, caller.environmentId, true, payload.threadId)
+        .pipe(Effect.mapError(() => new ThreadRemoteError({ reason: "behind" })));
+    }),
+  );
 
   /** The local copies of events the owner committed, once they have replicated here. */
   const localResult = Effect.fn("ThreadRouting.localResult")(function* (
@@ -307,8 +396,21 @@ const make = Effect.gen(function* () {
         const files = yield* readFiles(commandAttachments(command));
         const view = yield* topology;
         const result = yield* machines
-          .call(hop, ThreadCommandForward, { command, files })
+          .call(hop, ThreadCommandForward, {
+            command,
+            files,
+            priority:
+              command.type === "thread.stop" ||
+              command.type === "run.interrupt" ||
+              command.type === "subagent.stop",
+          })
           .pipe(Effect.timeout("2 minutes"), fromPeer(view, owner.owner));
+        if (
+          command.type === "thread.stop" ||
+          command.type === "run.interrupt" ||
+          command.type === "subagent.stop"
+        )
+          yield* refreshDelegated(owner.owner, threadId).pipe(Effect.ignore);
         return yield* localResult(threadId, result.eventIds).pipe(
           Effect.mapError(() => new ThreadRemoteError({ reason: "rejected" })),
         );
@@ -332,7 +434,7 @@ const make = Effect.gen(function* () {
     }),
   );
 
-  yield* channels.register(ThreadCommandForward, ({ command, files }, caller) =>
+  yield* channels.register(ThreadCommandForward, ({ command, files, priority }, caller) =>
     Effect.gen(function* () {
       // A peer never speaks for this machine's own workers.
       if (!validatePortableCommand(command))
@@ -359,7 +461,7 @@ const make = Effect.gen(function* () {
             ),
           );
         // The caller's projection shows the result by the time it hears back.
-        yield* threadSync.sync(caller.environmentId).pipe(Effect.ignore);
+        if (priority !== true) yield* threadSync.sync(caller.environmentId).pipe(Effect.ignore);
         return { eventIds: result.storedEvents.map((stored) => stored.event.id) };
       }
       if (owner.local) return yield* new ThreadRemoteError({ reason: "moving" });
@@ -368,9 +470,13 @@ const make = Effect.gen(function* () {
       if (view.link._tag !== "hub" || owner.owner === caller.environmentId)
         return yield* new ThreadRemoteError({ reason: "not-owner" });
       const relayed = yield* machines
-        .call(owner.owner, ThreadCommandForward, { command, files })
+        .call(owner.owner, ThreadCommandForward, {
+          command,
+          files,
+          ...(priority === undefined ? {} : { priority }),
+        })
         .pipe(Effect.timeout("2 minutes"), fromPeer(view, owner.owner));
-      yield* threadSync.sync(caller.environmentId).pipe(Effect.ignore);
+      if (priority !== true) yield* threadSync.sync(caller.environmentId).pipe(Effect.ignore);
       return relayed;
     }),
   );
@@ -505,7 +611,11 @@ const make = Effect.gen(function* () {
         .pipe(Effect.timeout(timeout), fromPeer(view, machine));
     });
 
-  return ThreadRouting.of({ fetchAttachment, callMachine });
+  return ThreadRouting.of({
+    refreshDelegated,
+    fetchAttachment,
+    callMachine,
+  });
 });
 
 export const layer = Layer.effect(ThreadRouting, make);

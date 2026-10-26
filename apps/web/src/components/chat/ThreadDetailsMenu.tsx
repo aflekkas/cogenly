@@ -1,3 +1,6 @@
+import { useEnvironmentMachineList } from "../../machines/useMachines";
+import { threadOwnerMachine } from "../../machines/machines.logic";
+import { Badge } from "../ui/badge";
 import { scopedThreadKey, scopeThreadRef } from "@cogenly/client-runtime/environment";
 import {
   NodeId,
@@ -573,6 +576,7 @@ function useThreadAgentRowRenderer(props: {
 
   return (row: ThreadAgentRow) => (
     <ThreadAgentListRow
+      environmentId={props.environmentId}
       key={row.key}
       row={row}
       providers={providers}
@@ -737,6 +741,7 @@ function ThreadAgentsGroup(props: {
  * stop button. A workflow row expands to its own agents.
  */
 function ThreadAgentListRow(props: {
+  readonly environmentId: EnvironmentId;
   readonly row: ThreadAgentRow;
   readonly providers: ReadonlyArray<ServerProvider> | undefined;
   readonly accentColor: string | undefined;
@@ -746,6 +751,13 @@ function ThreadAgentListRow(props: {
   readonly onOpenThread: (threadId: string) => void;
 }) {
   const { row } = props;
+  const child = useThreadShell(
+    row.threadId === null ? null : scopeThreadRef(props.environmentId, ThreadId.make(row.threadId)),
+  );
+  const machines = useEnvironmentMachineList(
+    child?.source.ownerMachine == null ? null : props.environmentId,
+  );
+  const machine = threadOwnerMachine(machines, child?.source.ownerMachine);
   const [workflowOpen, setWorkflowOpen] = useState(false);
   const provider = props.providers?.find((entry) => entry.instanceId === row.providerInstanceId);
   const driver = (row.driver ?? provider?.driver ?? null) as ProviderDriverKind | null;
@@ -798,7 +810,16 @@ function ThreadAgentListRow(props: {
         tone={threadAgentDotTone(row)}
       />
     ),
-    label: row.title,
+    label: (
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="truncate">{row.title}</span>
+        {machine === null ? null : (
+          <Badge variant="outline" size="sm">
+            <span className="max-w-32 truncate">{machine.name}</span>
+          </Badge>
+        )}
+      </span>
+    ),
     trailing,
     "aria-description": row.statusLabel,
   };
@@ -830,7 +851,9 @@ function ThreadAgentListRow(props: {
             )
           }
         />
-        <TooltipPopup side="left">{when}</TooltipPopup>
+        <TooltipPopup side="left">
+          {machine === null ? when : `${when} · Runs on ${machine.name}`}
+        </TooltipPopup>
       </Tooltip>
       {stopTarget !== null ? (
         <div className={ROW_STOP_REVEAL_CLASS}>
@@ -861,6 +884,7 @@ function ThreadAgentListRow(props: {
           <ul aria-label={`${row.title} agents`} className="m-0 list-none p-0 ps-4">
             {row.members.map((member) => (
               <ThreadAgentListRow
+                environmentId={props.environmentId}
                 key={member.key}
                 row={member}
                 providers={props.providers}

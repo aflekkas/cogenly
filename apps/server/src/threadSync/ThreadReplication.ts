@@ -70,6 +70,7 @@ export class ThreadReplication extends Context.Service<
       after: ThreadReplicationCursor,
       target: EnvironmentId,
       localOnly: boolean,
+      threadId?: ThreadId,
     ) => Effect.Effect<ThreadReplicationBatch, ThreadReplicationError>;
     /**
      * trustedRelay is true only for this spoke's pinned hub. Ownership claims
@@ -80,6 +81,13 @@ export class ThreadReplication extends Context.Service<
       source: EnvironmentId,
       trustedRelay: boolean,
     ) => Effect.Effect<{ readonly acknowledged: ThreadReplicationCursor }, ThreadReplicationError>;
+    /** Apply a targeted page; bulk replication cursors remain untouched. */
+    readonly receivePriority: (
+      threadId: ThreadId,
+      batch: ThreadReplicationBatch,
+      source: EnvironmentId,
+      trustedRelay: boolean,
+    ) => Effect.Effect<void, ThreadReplicationError>;
     readonly cursors: (peer: EnvironmentId) => Effect.Effect<
       {
         readonly received: ThreadReplicationCursor;
@@ -431,7 +439,7 @@ const make = Effect.gen(function* () {
 
   const readBatch: ThreadReplication["Service"]["readBatch"] = Effect.fn(
     "ThreadReplication.readBatch",
-  )(function* (after, target, localOnly) {
+  )(function* (after, target, localOnly, threadId) {
     const latest = (yield* sql<{
       readonly events: number;
       readonly meta: number;
@@ -454,6 +462,7 @@ const make = Effect.gen(function* () {
       WHERE e.sequence > ${after.events} AND e.sequence <= ${latest.events}
         AND e.aggregate_kind = 'thread' AND e.application_event_version = 2
         AND ${ownerFilter}
+        AND ${threadId === undefined ? sql`TRUE` : sql`e.stream_id = ${threadId}`}
       ORDER BY e.sequence LIMIT ${THREAD_REPLICATION_BATCH_EVENTS}`;
     // Fewer candidates than the limit: everything up to `latest` was examined.
     let eventsCursor =
@@ -548,7 +557,7 @@ const make = Effect.gen(function* () {
     const metaRows = yield* sql<{
       readonly seq: number;
       readonly thread_id: string;
-    }>`SELECT seq, thread_id FROM thread_replication_meta_log WHERE seq > ${after.meta} AND seq <= ${latest.meta} ORDER BY seq LIMIT ${THREAD_REPLICATION_BATCH_EVENTS}`;
+    }>`SELECT seq, thread_id FROM thread_replication_meta_log WHERE seq > ${after.meta} AND seq <= ${latest.meta} AND ${threadId === undefined ? sql`TRUE` : sql`thread_id = ${threadId}`} ORDER BY seq LIMIT ${THREAD_REPLICATION_BATCH_EVENTS}`;
     let metaCursor =
       metaRows.length < THREAD_REPLICATION_BATCH_EVENTS ? latest.meta : metaRows.at(-1)!.seq;
     const threadIds = [...new Set([...eventThreads, ...metaRows.map((row) => row.thread_id)])];
@@ -968,6 +977,24 @@ const make = Effect.gen(function* () {
   });
 
   const replayPermit = yield* Semaphore.make(1);
+
+  const receivePriority: ThreadReplication["Service"]["receivePriority"] = Effect.fn(
+    "ThreadReplication.receivePriority",
+  )(function* (threadId, batch, source, trustedRelay) {
+    if ([...batch.events, ...batch.meta].some((raw) => rawThreadId(raw) !== threadId))
+      return yield* new ThreadReplicationError({ reason: "invalid-batch" });
+    const split = yield* splitBatch(batch, source, trustedRelay);
+    if (split.deferred.length > 0)
+      return yield* new ThreadReplicationError({ reason: "invalid-batch" });
+    yield* applyItems(
+      split.metas,
+      split.events,
+      source,
+      `priority:${encodeURIComponent(threadId)}:${batch.cursor.events}`,
+      trustedRelay,
+    );
+  }, Effect.mapError(storage));
+
   const receive: ThreadReplication["Service"]["receive"] = Effect.fn("ThreadReplication.receive")(
     function* (batch, source, trustedRelay) {
       const previous = (yield* cursors(source)).received;
@@ -1450,6 +1477,7 @@ const make = Effect.gen(function* () {
     owner,
     remoteOwners,
     readBatch,
+    receivePriority,
     receive,
     cursors,
     acknowledge,

@@ -130,6 +130,14 @@ Shared provider session ids include their machine identity, since provider insta
 
 A delegated child and its parent may have different owners. The child owns its
 conversation; task bookkeeping and completion wakes belong to the parent.
+Delegation fetches the child's bounded event pages over a separate peer channel,
+before attaching it and while its result is pending. These pages never advance
+the bulk replication cursors: a backlog on an unrelated thread must not block
+task handles, reads, cancellation, or parent wakes. Parent-side launch intents
+remain durable until attachment commits; failed creation and restart recovery
+cancel unadopted children directly on their owner. Older peers without this
+channel refuse delegation before a child starts.
+
 Replicated terminal events settle that local parent without promoting the
 replicated child's queue. Before publishing a result the parent checks the
 child owner's recovery state, since restart continuations and pending effects
