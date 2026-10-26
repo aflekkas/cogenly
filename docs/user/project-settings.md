@@ -31,7 +31,7 @@ New worktree branches are named when the worktree is created: a short slug
 from your first message under a `c/` prefix, such as `c/fix-login-redirect`.
 The worktree folder is named by that slug and never moves.
 
-In **Settings → Source control → Worktree branch naming**, choose a static prefix,
+In **Settings → Source control → Branch names**, choose a static prefix,
 a model-selected semantic prefix such as `feat/` or `fix/`, or custom instructions
 for the complete name. The static prefix defaults to `c/`; a trailing slash is
 optional, and an empty prefix adds nothing. Invalid characters in a static prefix

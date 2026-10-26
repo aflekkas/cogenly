@@ -315,6 +315,9 @@ describe("searchSettings", () => {
     ["private access", "machines", "/settings/machines"],
     ["orphan folders", "project-folders", "/settings/project-tags"],
     ["automatically pull", "automatic-pull", "/settings/source-control"],
+    ["background fetch", "git-fetch-interval", "/settings/source-control"],
+    ["pull request templates", "follow-change-request-templates", "/settings/source-control"],
+    ["branch naming", "worktree-branch-naming", "/settings/source-control"],
     ["actions", "project-actions", "/settings/new-threads"],
     ["project overview", "project-overview", "/settings/projects"],
   ])("routes %s to its owning category", (query, id, to) => {
