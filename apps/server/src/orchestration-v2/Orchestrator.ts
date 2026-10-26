@@ -628,6 +628,23 @@ function nativeSubagentWorkActive(
  * agent output. A run parked at "waiting" is post-terminal drain, so its agent
  * turn is over and a wake is still needed.
  */
+/**
+ * A new thread's read watermark. A thread the user will see in Chats or Work
+ * starts read at its creation, so its first finished turn shows as unread when
+ * they are elsewhere; clients treat a null watermark as "never tracked" and
+ * keep it quiet. Subagent children, imported history and agent conversations
+ * (which keep their own read watermark) stay null.
+ */
+function initialThreadLastVisitedAt(
+  command: Extract<OrchestrationV2Command, { readonly type: "thread.create" }>,
+  now: DateTime.Utc,
+): DateTime.Utc | null {
+  if (command.subagent !== undefined) return null;
+  if (command.importedNativeThread !== undefined) return null;
+  if (command.agent?.role === "conversation") return null;
+  return now;
+}
+
 function isForegroundRun(run: OrchestrationV2Run): boolean {
   return run.status === "preparing" || run.status === "starting" || run.status === "running";
 }
@@ -2429,7 +2446,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       settledAt: null,
       snoozedUntil: null,
       snoozedAt: null,
-      lastVisitedAt: null,
+      lastVisitedAt: initialThreadLastVisitedAt(command, now),
       deletedAt: null,
     };
 
