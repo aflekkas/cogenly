@@ -18,6 +18,12 @@ import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as ProjectEnrichmentService from "./ProjectEnrichmentService.ts";
 import * as ProjectService from "./ProjectService.ts";
 
+const noEnrichment: ProjectEnrichmentService.ProjectEnrichment = {
+  repositoryIdentity: null,
+  faviconPath: null,
+  repositoryIdentityResolved: true,
+};
+
 // The real service over a memory database; repository enrichment and thread
 // commands are beyond what a lookup touches.
 const layer = RuntimeLayer.layerProjectService.pipe(
@@ -25,8 +31,8 @@ const layer = RuntimeLayer.layerProjectService.pipe(
     Layer.mergeAll(
       WorkspacePaths.layer,
       Layer.mock(ProjectEnrichmentService.ProjectEnrichmentService)({
-        getAvailable: () => Effect.succeed(null),
-        peek: () => Effect.succeed(null),
+        getAvailable: () => Effect.succeed(noEnrichment),
+        peek: () => Effect.succeed(noEnrichment),
         invalidate: () => Effect.void,
       }),
       Layer.mock(ThreadCommandExecutor.ThreadCommandExecutor)({}),

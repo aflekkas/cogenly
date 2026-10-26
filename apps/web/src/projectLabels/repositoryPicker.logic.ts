@@ -7,6 +7,7 @@
  * same everywhere and a count always matches its list.
  */
 import {
+  cloneFailureKind,
   isRemoteRepositoryPlaceholder,
   PROJECT_REPOSITORIES_SEGMENT,
   REMOTE_REPOSITORY_ID_PREFIX,
@@ -422,11 +423,17 @@ export type RepositoryRowWork = "removing" | "moving" | "unlinking";
 /** How a row shows its state on the selected machine. */
 export type RepositoryRowView =
   | { readonly kind: "ready" }
-  /** Not cloned here; `cloneable` when picking it here would clone it. */
-  | { readonly kind: "needs-clone"; readonly cloneable: boolean }
+  /**
+   * Not cloned here; `cloneable` when picking it here would clone it,
+   * `onSend` when the machine it runs on clones it once the draft is sent.
+   */
+  | { readonly kind: "needs-clone"; readonly cloneable: boolean; readonly onSend?: true }
   | { readonly kind: "starting" }
-  /** `progress` is git's own stage and percent; null while none is reported. */
-  | { readonly kind: "cloning"; readonly progress: string | null }
+  /**
+   * `progress` is git's own stage and percent, `percent` the stage's share
+   * done; both null while none is reported.
+   */
+  | { readonly kind: "cloning"; readonly progress: string | null; readonly percent: number | null }
   | { readonly kind: "failed"; readonly message: string | null; readonly cloneable: boolean }
   | { readonly kind: "working"; readonly work: RepositoryRowWork };
 
@@ -473,6 +480,7 @@ export function repositoryRowView(
     return {
       kind: "cloning",
       progress: running === null ? null : projectCloneProgressSummary(running),
+      percent: running?.percent ?? null,
     };
   }
   if (live?.phase === "starting") return { kind: "starting" };
@@ -613,26 +621,63 @@ export interface CloneFailureText {
 export function describeCloneFailure(message: string, repository: string): CloneFailureText {
   const detail = message.replace(SERVER_ERROR_PREFIX, "").trim();
   const summary = (() => {
-    if (/already exists and is not (?:empty|a directory)/i.test(detail)) {
-      return `A folder named ${repository} is already in this project's folder. Move or rename it, then retry.`;
+    switch (cloneFailureKind(detail)) {
+      case "folder_taken":
+        return `A folder named ${repository} is already in this project's folder. Move or rename it, then retry.`;
+      case "sign_in":
+        return `This machine isn't signed in to GitHub with access to ${repository}.`;
+      case "not_found":
+        return `GitHub couldn't find ${repository}, or this machine's GitHub account can't access it.`;
+      case "network":
+        return "Couldn't reach GitHub. Check the connection, then retry.";
+      case "other": {
+        const firstLine = detail
+          .split("\n")
+          .find((line) => line.trim().length > 0)
+          ?.trim();
+        return firstLine && firstLine.length > 0 ? firstLine : "The clone failed.";
+      }
     }
-    // Before "not found": an SSH key failure also says it could not read from the remote.
-    if (
-      /permission denied|authentication failed|could not read username|publickey|403/i.test(detail)
-    ) {
-      return `This machine isn't signed in to GitHub with access to ${repository}.`;
-    }
-    if (/not found|could not read from remote/i.test(detail)) {
-      return `GitHub couldn't find ${repository}, or this machine's GitHub account can't access it.`;
-    }
-    if (/could not resolve host|timed out|network|connection (?:refused|reset)/i.test(detail)) {
-      return "Couldn't reach GitHub. Check the connection, then retry.";
-    }
-    const firstLine = detail
-      .split("\n")
-      .find((line) => line.trim().length > 0)
-      ?.trim();
-    return firstLine && firstLine.length > 0 ? firstLine : "The clone failed.";
   })();
   return { summary, detail: detail.length > 0 && detail !== summary ? detail : null };
+}
+
+/**
+ * A failed clone as its row reads it, on one line: a short reason, the one
+ * thing to do about it, and the full account for its tooltip. A login this
+ * machine lacks (or a GitHub repository it cannot see, which GitHub reports
+ * as not found) is fixed by signing in to GitHub there; anything else retries.
+ */
+export interface CloneFailureLine {
+  readonly reason: string;
+  readonly action: "sign-in" | "retry";
+  readonly summary: string;
+  readonly detail: string | null;
+}
+
+export function cloneFailureLine(
+  message: string | null,
+  repository: string,
+  remote: string | null,
+): CloneFailureLine {
+  const described =
+    message === null
+      ? { summary: "The clone failed.", detail: null }
+      : describeCloneFailure(message, repository);
+  const onGitHub = remote?.toLowerCase().startsWith(GITHUB_PREFIX) ?? false;
+  const kind = message === null ? "other" : cloneFailureKind(message);
+  switch (kind) {
+    case "sign_in":
+      return { ...described, reason: "No GitHub access", action: "sign-in" };
+    case "not_found":
+      return onGitHub
+        ? { ...described, reason: "No GitHub access", action: "sign-in" }
+        : { ...described, reason: "Not found", action: "retry" };
+    case "folder_taken":
+      return { ...described, reason: "Folder in the way", action: "retry" };
+    case "network":
+      return { ...described, reason: "Offline", action: "retry" };
+    case "other":
+      return { ...described, reason: "Clone failed", action: "retry" };
+  }
 }

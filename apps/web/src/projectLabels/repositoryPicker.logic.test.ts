@@ -16,6 +16,7 @@ import {
   canMoveIntoProjectFolder,
   canRemoveCheckout,
   cloneableRepositoryRows,
+  cloneFailureLine,
   describeCloneFailure,
   gitHubRepositoryKeys,
   gitHubRepositoryOf,
@@ -466,9 +467,11 @@ describe("repositoryRowView", () => {
     const running = repositoryRowView({ checkout: "cloning" }, null, clone("running", 1));
     expect(running.kind).toBe("cloning");
     expect(running.kind === "cloning" ? running.progress : null).toContain("42%");
+    expect(running.kind === "cloning" ? running.percent : null).toBe(42);
     expect(repositoryRowView({ checkout: "cloning" }, null, null)).toEqual({
       kind: "cloning",
       progress: null,
+      percent: null,
     });
   });
 
@@ -614,6 +617,52 @@ describe("describeCloneFailure", () => {
     expect(describeCloneFailure("", "spawn/x")).toEqual({
       summary: "The clone failed.",
       detail: null,
+    });
+  });
+});
+
+describe("cloneFailureLine", () => {
+  const github = "github.com/spawn-partners/platform";
+
+  it("offers GitHub sign-in for a login the machine lacks", () => {
+    const line = cloneFailureLine(
+      "platform could not be cloned: this machine is not signed in to GitHub with access to it. Sign in on this machine under Settings → Source control → GitHub (save a token, or run `gh auth login` there), then retry.",
+      "platform",
+      github,
+    );
+    expect(line).toMatchObject({ reason: "No GitHub access", action: "sign-in" });
+    expect(line.summary).toBe("This machine isn't signed in to GitHub with access to platform.");
+  });
+
+  it("reads git's refused login and a private repository it cannot see as sign-in", () => {
+    const login =
+      "The host asked for a login this machine does not have. Git said: fatal: could not read Username for 'https://github.com': terminal prompts disabled";
+    expect(cloneFailureLine(login, "platform", github).action).toBe("sign-in");
+    const hidden = "remote: Repository not found. fatal: repository not found";
+    expect(cloneFailureLine(hidden, "platform", github).action).toBe("sign-in");
+    // Off GitHub, signing in to GitHub would not help.
+    expect(cloneFailureLine(hidden, "platform", "gitlab.com/spawn/platform")).toMatchObject({
+      reason: "Not found",
+      action: "retry",
+    });
+  });
+
+  it("retries anything else with a short reason, keeping the full words for the tooltip", () => {
+    const storage =
+      "Cogenly could not read or prepare platform's folder on this machine: Workspace root does not exist: /home/dev/.cogenly/projects/Spawn Partners/repos/platform. Retry; if it keeps failing, the server log has the cause.";
+    const line = cloneFailureLine(storage, "platform", github);
+    expect(line).toMatchObject({ reason: "Clone failed", action: "retry" });
+    expect(line.summary).toContain("could not read or prepare platform's folder");
+    expect(
+      cloneFailureLine("Destination path already exists and is not empty.", "platform", github),
+    ).toMatchObject({ reason: "Folder in the way", action: "retry" });
+    expect(
+      cloneFailureLine("fatal: unable to access: Could not resolve host", "p", github),
+    ).toMatchObject({ reason: "Offline", action: "retry" });
+    expect(cloneFailureLine(null, "platform", github)).toMatchObject({
+      reason: "Clone failed",
+      action: "retry",
+      summary: "The clone failed.",
     });
   });
 });
