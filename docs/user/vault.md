@@ -10,7 +10,7 @@ tokens are readable by the agent and the terminal commands it runs.
 Each item has a name, a type (login, API key, card, or note), the domains it
 may be used on, and its secret fields, such as a username, password, or
 one-time-code secret. A card stores its number, expiry, CVC, and the name on
-the card as secret fields; only its label and the last 4 digits of the number
+the card as secret fields; only its description and the last 4 digits of the number
 are shown in lists. Items can belong to one project or work everywhere. Agents can list and use
 only items for their thread’s project, plus items that work everywhere.
 
@@ -19,7 +19,8 @@ only items for their thread’s project, plus items that work everywhere.
 Open **Settings → Vault** and choose **Add item**. Pick a type, give the item
 a name agents can ask for, and fill in its fields. For a login, list the
 sites it may be used on. Choose whether agents ask you first (the default)
-or which agents may use it without asking, optionally only on certain sites.
+or which agents may use it without asking, optionally only on certain sites,
+under **Access**.
 
 Saved secrets cannot be viewed again, even by you. When you edit an item,
 leave a secret field blank to keep it, or type a new value to replace it.
@@ -52,8 +53,9 @@ items. CLI process exposure always needs its own approval.
 ## Usage log
 
 Every use is recorded: which item, which agent or chat, which site, and
-whether it was allowed, denied, or waited on approval. Settings → Vault
-shows each item's uses and all activity across the vault.
+whether it was allowed, denied, or waited on approval. In Settings → Vault,
+the history button on an item shows its uses, and **Recent activity** lists
+uses across the vault, including items you have since deleted.
 
 ## Vault on several machines
 
