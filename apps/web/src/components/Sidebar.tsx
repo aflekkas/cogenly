@@ -473,7 +473,7 @@ function SidebarProviderStack(props: {
       displayName={currentEntry.displayName}
       accentColor={currentEntry.accentColor}
       showBadge={showInstanceBadge}
-      iconClassName="size-3.5"
+      size="sm"
       indicatorBackground="var(--provider-stack-ring)"
     />
   );
@@ -495,7 +495,7 @@ function SidebarProviderStack(props: {
           <ProviderInstanceIcon
             driverKind={entry.driverKind}
             displayName={entry.displayName}
-            iconClassName="size-3"
+            size="xs"
           />
         ),
       },
@@ -2301,19 +2301,22 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               </span>
             ) : null}
             {/* The environment the thread runs in, always named (even with
-                  one machine), then the provider glyph, which names the model. */}
-            <span className="ml-auto inline-flex min-w-0 items-center gap-1.5">
-              {props.environmentLabel ? (
-                <span className="inline-flex min-w-0 max-w-24 items-center gap-1">
-                  <EnvironmentMachineIcon
-                    aria-hidden
-                    kind={props.environmentMachine}
-                    className="size-3 shrink-0"
-                  />
-                  <span className="truncate">{props.environmentLabel}</span>
-                </span>
-              ) : null}
+                  one machine), then the provider glyph, which names the model.
+                  Both sit in the shortcut slot so they read as one group: left
+                  outside it, the slot's minimum width opened a gap before a
+                  lone glyph. */}
+            <span className="ml-auto inline-flex min-w-0 items-center">
               <SidebarShortcutSlot label={props.jumpLabel}>
+                {props.environmentLabel ? (
+                  <span className="inline-flex min-w-0 max-w-24 items-center gap-1">
+                    <EnvironmentMachineIcon
+                      aria-hidden
+                      kind={props.environmentMachine}
+                      className="size-3 shrink-0"
+                    />
+                    <span className="truncate">{props.environmentLabel}</span>
+                  </span>
+                ) : null}
                 <Tooltip>
                   <TooltipTrigger
                     render={

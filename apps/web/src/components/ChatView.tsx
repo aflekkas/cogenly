@@ -5612,7 +5612,7 @@ export default function ChatView(props: ChatViewProps) {
           accentColor={selectedProviderEntry.accentColor}
           showBadge={shouldShowInstanceBadge(selectedProviderEntry, providerInstanceEntries)}
           className="size-3"
-          iconClassName="size-3"
+          size="xs"
         />
       ) : null,
       title: (

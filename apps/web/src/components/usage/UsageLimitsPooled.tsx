@@ -91,7 +91,8 @@ function AccountAvatar({
         showBadge={Boolean(account.accentColor)}
         indicatorBackground="var(--popover)"
         className={cn("size-5", className)}
-        iconClassName="size-4 text-foreground/80"
+        size="md"
+        iconClassName="text-foreground/80"
       />
     );
   }
@@ -573,7 +574,8 @@ function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: nu
           displayName={label}
           indicatorBackground="var(--background)"
           className="size-5"
-          iconClassName="size-4 text-foreground/80"
+          size="md"
+          iconClassName="text-foreground/80"
         />
         {label}
       </h2>

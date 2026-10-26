@@ -836,7 +836,7 @@ function AgentRow({
                         displayName={providerEntry.displayName}
                         accentColor={providerEntry.accentColor}
                         showBadge={providerEntry.accentColor !== undefined}
-                        iconClassName="size-3.5"
+                        size="sm"
                       />
                     </TooltipTrigger>
                     <TooltipPopup side="top">{modelLabel}</TooltipPopup>
