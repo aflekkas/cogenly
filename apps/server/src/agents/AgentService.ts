@@ -28,6 +28,7 @@ import {
   type AgentSendInput,
   type AgentWorkRun,
   type ScheduledTask,
+  type ScheduledTaskRunStatus,
 } from "@cogenly/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Schema from "effect/Schema";
@@ -113,7 +114,10 @@ export class AgentService extends Context.Service<
       fireKey: string,
       prompt: string,
       context?: AgentEventContext,
-    ) => Effect.Effect<boolean, AgentError>;
+    ) => Effect.Effect<
+      "started" | Extract<ScheduledTaskRunStatus, `skipped_${string}`>,
+      AgentError
+    >;
     /** Also called on startup; terminal runs with undelivered postbacks survive restarts. */
     readonly reconcile: (options?: {
       readonly afterRestart?: boolean;
@@ -332,7 +336,7 @@ const make = Effect.gen(function* () {
               : "This job was interrupted before its first turn started.";
             yield* sql.withTransaction(
               Effect.gen(function* () {
-                yield* store.outcome(agent.id, false);
+                if (!options?.afterRestart) yield* store.outcome(agent.id, false);
                 yield* store.finishRun(record.id, "failed", summary);
               }),
             );
@@ -385,7 +389,13 @@ const make = Effect.gen(function* () {
               : null;
           const updated = yield* sql.withTransaction(
             Effect.gen(function* () {
-              yield* store.outcome(agent.id, succeeded);
+              const restarted = projection.turnItems.some(
+                (item) =>
+                  item.runId === run.id &&
+                  item.type === "error" &&
+                  item.failure.code === "server_restarted",
+              );
+              if (!restarted) yield* store.outcome(agent.id, succeeded);
               if (advance !== null)
                 yield* store.setFallback(agent.id, {
                   index: advance.index,
@@ -765,7 +775,7 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.mapError(failure)),
     trigger: (task, fireKey, prompt, context) =>
       Effect.gen(function* () {
-        if (task.agentId == null) return false;
+        if (task.agentId == null) return "skipped_ineligible" as const;
         if (task.schedule.type === "event" && context === undefined)
           return yield* new AgentError({
             message: "Event triggers require a source event and cannot be run manually.",
@@ -775,7 +785,7 @@ const make = Effect.gen(function* () {
           (agent.ownerMachine !== undefined && agent.ownerMachine !== shared.environmentId) ||
           (task.ownerMachine !== undefined && task.ownerMachine !== shared.environmentId)
         )
-          return false;
+          return "skipped_not_owner" as const;
         yield* ensureConversation(agent);
         const id = `agent-work:${fireKey}`;
         const workThreadId = ThreadId.make(id);
@@ -788,14 +798,31 @@ const make = Effect.gen(function* () {
               const scheduleJson = yield* encodeEventSchedule(task.schedule);
               const current =
                 yield* sql`SELECT 1 FROM scheduled_tasks WHERE task_id = ${task.id} AND enabled = 1 AND agent_id = ${agent.id} AND project_id = ${task.projectId} AND created_at = ${task.createdAt} AND schedule_json = ${scheduleJson}`;
-              if (current.length === 0) return false;
+              if (current.length === 0) return "skipped_ineligible" as const;
               if (!canReceiveAgentEvent(yield* access.resolve(agent.id), task, context))
-                return false;
+                return "skipped_ineligible" as const;
               const prior =
                 yield* sql`SELECT 1 FROM agent_event_deliveries WHERE agent_id = ${agent.id} AND event_key = ${context.dedupKey}`;
-              if (prior.length) return false;
+              if (prior.length) return "skipped_ineligible" as const;
             }
-            if (!(yield* store.reserve(agent.id))) return false;
+            if (!(yield* store.reserve(agent.id))) {
+              const [state] = yield* sql<{
+                enabled: number;
+                backoff_until: string | null;
+                run_day: string | null;
+                daily_runs: number;
+                daily_run_cap: number;
+              }>`SELECT * FROM agents WHERE agent_id = ${agent.id}`;
+              const now = DateTime.formatIso(yield* DateTime.now);
+              if (!state?.enabled) return "skipped_disabled" as const;
+              if (state.backoff_until !== null && state.backoff_until > now)
+                return "skipped_backoff" as const;
+              if (state.run_day === now.slice(0, 10) && state.daily_runs >= state.daily_run_cap)
+                return "skipped_daily_cap" as const;
+              const busy =
+                yield* sql`SELECT 1 FROM agent_work_runs WHERE agent_id = ${agent.id} AND status IN ('starting', 'running')`;
+              return busy.length > 0 ? ("skipped_busy" as const) : ("skipped_not_owner" as const);
+            }
             const decision = decideFallback(agent, DateTime.toEpochMillis(yield* DateTime.now));
             if (decision.restored)
               yield* store.setFallback(agent.id, { index: 0, reason: null, until: null });
@@ -826,10 +853,10 @@ const make = Effect.gen(function* () {
               modelSelection: usedSelection,
               ...(usedFallbackReason === null ? {} : { fallbackReason: usedFallbackReason }),
             });
-            return true;
+            return "started" as const;
           }),
         );
-        if (!accepted) return false;
+        if (accepted !== "started") return accepted;
         const conversation = yield* projections.getThreadRecords(agent.conversationThreadId, [
           "messages",
         ]);
@@ -874,9 +901,14 @@ const make = Effect.gen(function* () {
             yield* changed;
             return yield* result.failure;
           }
+          yield* changed;
+          return yield* new AgentError({
+            message: "Could not start this agent run.",
+            cause: result.failure,
+          });
         }
         yield* changed;
-        return true;
+        return "started" as const;
       }).pipe(Effect.mapError(failure)),
     reconcile,
   });

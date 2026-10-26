@@ -158,5 +158,11 @@ export const ScheduledTaskRunStatus = Schema.Literals([
   "succeeded",
   "failed",
   "skipped_already_queued",
+  "skipped_busy",
+  "skipped_backoff",
+  "skipped_daily_cap",
+  "skipped_not_owner",
+  "skipped_disabled",
+  "skipped_ineligible",
 ]);
 export type ScheduledTaskRunStatus = typeof ScheduledTaskRunStatus.Type;

@@ -70,7 +70,9 @@ const encodeUnknown = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))
 const makeHarness = Effect.sync(() => {
   const projections = new Map<ThreadId, OrchestrationV2ThreadProjection>();
   const launches: Launch.ThreadLaunchInput[] = [];
-  const launchFailure: { current: ProjectRepositoryMismatchError | null } = { current: null };
+  const launchFailure: {
+    current: ProjectRepositoryMismatchError | Launch.ThreadLaunchError | null;
+  } = { current: null };
   const posts: Parameters<Events.EventSinkV2["Service"]["commitCommand"]>[0][] = [];
   const jobs = new Map<string, Effect.Effect<void>>();
   const receipts = new Set<string>();
@@ -301,6 +303,48 @@ const makeHarness = Effect.sync(() => {
   };
 });
 
+it.effect("drains a deferred webhook fire without a next scheduled time", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const store = yield* Store.AgentStore;
+      const schedules = yield* Schedules.ScheduledTaskService;
+      const sql = yield* SqlClient.SqlClient;
+      yield* store.save(h.fixture);
+      const { task } = yield* schedules.upsert({
+        ...h.triggerInput,
+        schedule: { type: "webhook" },
+      });
+      expect(task.nextRunAt).toBeNull();
+      yield* sql`INSERT INTO deferred_agent_fires(fire_key, task_id, task_created_at, prompt, manual, created_at) VALUES ('webhook:held', ${task.id}, ${task.createdAt}, 'Rendered webhook prompt', 0, ${task.createdAt})`;
+      yield* h.jobs.get("scheduled-tasks")!;
+      expect(h.launches).toHaveLength(1);
+      expect(h.launches[0]?.initialMessage?.text).toContain("Rendered webhook prompt");
+      expect(yield* sql`SELECT * FROM deferred_agent_fires`).toEqual([]);
+    }).pipe(Effect.provide(h.layer));
+  }),
+);
+
+it.effect("records a provider launch refusal as failed rather than succeeded", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      yield* (yield* Store.AgentStore).save(h.fixture);
+      const schedules = yield* Schedules.ScheduledTaskService;
+      const { task } = yield* schedules.upsert(h.triggerInput);
+      h.launchFailure.current = new Launch.ThreadLaunchError({
+        operation: "dispatch-message",
+        commandId: CommandId.make("refused"),
+        projectId: h.fixture.projectId!,
+        cause: new Error("refused"),
+      });
+      const result = yield* schedules.runNow({ id: task.id });
+      expect(result.task.lastRunStatus).toBe("failed");
+      expect(result.task.lastRunError).not.toBeNull();
+    }).pipe(Effect.provide(h.layer));
+  }),
+);
+
 describe("agent execution", () => {
   it.effect(
     "records a refused agent launch as a failed schedule and run with the membership error",
@@ -439,8 +483,9 @@ describe("agent execution", () => {
           const record = (yield* store.runs(h.fixture.id))[0]!;
           expect(record).toMatchObject({ status: "failed", posted: true });
           expect(record.completedAt).not.toBeNull();
+          expect((yield* store.get(h.fixture.id)).backoffUntil).toBeNull();
           expect(record.summary).toContain("Cogenly restarted during this run");
-          expect((yield* store.get(h.fixture.id)).consecutiveFailures).toBe(1);
+          expect((yield* store.get(h.fixture.id)).consecutiveFailures).toBe(0);
           expect(h.posts).toHaveLength(1);
           expect(h.posts[0]?.effects).toEqual([]);
           expect(h.calls).toEqual([]);
@@ -496,11 +541,12 @@ describe("agent execution", () => {
         yield* agents.reconcile();
         const record = (yield* store.runs(h.fixture.id))[0]!;
         expect(record).toMatchObject({ status: "failed", posted: true });
+        expect((yield* store.get(h.fixture.id)).backoffUntil).toBeNull();
         expect(record.summary).toContain("Cogenly restarted during this run");
         const posted = h.posts[0]?.events[0];
         expect(posted?.type === "message.updated" && posted.payload.text).toBe(record.summary);
         expect(h.posts).toHaveLength(1);
-        expect((yield* store.get(h.fixture.id)).consecutiveFailures).toBe(1);
+        expect((yield* store.get(h.fixture.id)).consecutiveFailures).toBe(0);
       }).pipe(Effect.provide(h.layer));
     }),
   );
@@ -515,7 +561,7 @@ describe("agent execution", () => {
         const sql = yield* SqlClient.SqlClient;
         yield* store.save(h.fixture);
         const { task } = yield* schedules.upsert(h.triggerInput);
-        expect(yield* agents.trigger(task, "delete-running", task.prompt)).toBe(true);
+        expect(yield* agents.trigger(task, "delete-running", task.prompt)).toBe("started");
         const context = yield* Layer.build(
           SharedState.layer.pipe(Layer.provide(layerSharedIdentity)),
         );
@@ -569,7 +615,7 @@ describe("agent execution", () => {
         yield* sql`UPDATE scheduled_tasks SET owner_machine=${ownerMachine}, next_run_at='1969-01-01T00:00:00.000Z' WHERE task_id=${task.id}`;
         expect(yield* store.reserve(h.fixture.id)).toBe(false);
         expect(yield* agents.trigger({ ...task, ownerMachine }, "off-owner", task.prompt)).toBe(
-          false,
+          "skipped_not_owner",
         );
         yield* h.jobs.get("scheduled-tasks")!;
         yield* agents.reconcile();
@@ -664,7 +710,7 @@ describe("agent execution", () => {
         });
         expect(h.calls).toHaveLength(1);
         expect(h.calls[0]?.threadId).toBe(backingOff.conversationThreadId);
-        expect(yield* agents.trigger(task, "backoff:trigger", task.prompt)).toBe(false);
+        expect(yield* agents.trigger(task, "backoff:trigger", task.prompt)).toBe("skipped_backoff");
         expect(h.launches).toEqual([]);
       }).pipe(Effect.provide(h.layer));
     }),
@@ -800,7 +846,7 @@ it.effect("keeps running jobs after repeated provider failures once each backoff
       for (let attempt = 0; attempt < 5; attempt++) {
         yield* sql`UPDATE agents SET backoff_until = NULL WHERE agent_id = ${h.fixture.id}`;
         const started = yield* agents.trigger(task, `failure:${attempt}`, task.prompt);
-        expect(started).toBe(true);
+        expect(started).toBe("started");
         const launch = h.launches.at(-1)!;
         const projection = h.projections.get(launch.threadId!)!;
         h.projections.set(launch.threadId!, {
@@ -811,9 +857,9 @@ it.effect("keeps running jobs after repeated provider failures once each backoff
         yield* agents.reconcile();
       }
       expect((yield* store.get(h.fixture.id)).consecutiveFailures).toBe(5);
-      expect(yield* agents.trigger(task, "during-backoff", task.prompt)).toBe(false);
+      expect(yield* agents.trigger(task, "during-backoff", task.prompt)).toBe("skipped_backoff");
       yield* sql`UPDATE agents SET backoff_until = NULL WHERE agent_id = ${h.fixture.id}`;
-      expect(yield* agents.trigger(task, "after-backoff", task.prompt)).toBe(true);
+      expect(yield* agents.trigger(task, "after-backoff", task.prompt)).toBe("started");
       expect(h.launches).toHaveLength(6);
     }).pipe(Effect.provide(h.layer));
   }),
@@ -830,7 +876,7 @@ it.effect("a usage-limited run makes the next run use the next fallback entry", 
       const fallback = { instanceId: ProviderInstanceId.make("claude-backup"), model: "opus" };
       yield* store.save({ ...h.fixture, dailyRunCap: 100, fallbackChain: [fallback] });
       const { task } = yield* schedules.upsert(h.triggerInput);
-      expect(yield* agents.trigger(task, "fallback:first", task.prompt)).toBe(true);
+      expect(yield* agents.trigger(task, "fallback:first", task.prompt)).toBe("started");
       expect(h.launches.at(-1)?.modelSelection).toEqual(h.fixture.modelSelection);
       const first = h.launches.at(-1)!;
       const projection = h.projections.get(first.threadId!)!;
@@ -876,7 +922,7 @@ it.effect("a usage-limited run makes the next run use the next fallback entry", 
       expect(runs[0]?.fallbackReason).toBe("usage_limit");
       expect(runs[0]?.fallbackResetAt).toBe("2099-01-01T00:00:00.000Z");
       yield* sql`UPDATE agents SET backoff_until = NULL WHERE agent_id = ${h.fixture.id}`;
-      expect(yield* agents.trigger(task, "fallback:second", task.prompt)).toBe(true);
+      expect(yield* agents.trigger(task, "fallback:second", task.prompt)).toBe("started");
       expect(h.launches.at(-1)?.modelSelection).toEqual(fallback);
       const secondRuns = yield* store.runs(h.fixture.id);
       const secondRun = secondRuns.find((run) => run.id === "agent-work:fallback:second");
@@ -1592,7 +1638,6 @@ it.effect(
           "merge_pull_request",
           "deploy",
           "delete_project",
-          "terminal_run",
           "preview_click",
           "preview_type",
           "create_threads",
@@ -2289,3 +2334,37 @@ describe("event-driven agent triggers", () => {
       }),
   );
 });
+
+it.effect.each([true, false])(
+  "durably defers a busy manual fire (enabled=%s) without counting it",
+  (enabled) =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const agents = yield* Agents.AgentService;
+        const schedules = yield* Schedules.ScheduledTaskService;
+        yield* store.save({ ...h.fixture, dailyRunCap: 100 });
+        const sql = yield* SqlClient.SqlClient;
+        const { task } = yield* schedules.upsert({ ...h.triggerInput, enabled });
+        expect(yield* agents.trigger(task, "busy:first", task.prompt)).toBe("started");
+        const { task: deferred } = yield* schedules.runNow({ id: task.id });
+        expect(deferred.lastRunStatus).toBe("skipped_busy");
+        expect(deferred.runCount).toBe(0);
+        expect(yield* sql`SELECT prompt FROM deferred_agent_fires`).toEqual([
+          { prompt: task.prompt },
+        ]);
+        const threadId = h.launches[0]!.threadId!;
+        const projection = h.projections.get(threadId)!;
+        h.projections.set(threadId, {
+          ...projection,
+          runs: projection.runs.map((run) => ({ ...run, status: "completed" })),
+        });
+        yield* agents.reconcile();
+        yield* h.jobs.get("scheduled-tasks")!;
+        expect(h.launches).toHaveLength(2);
+        expect(yield* sql`SELECT * FROM deferred_agent_fires`).toEqual([]);
+        expect((yield* schedules.list()).tasks[0]?.lastRunStatus).toBe("succeeded");
+      }).pipe(Effect.provide(h.layer));
+    }),
+);
