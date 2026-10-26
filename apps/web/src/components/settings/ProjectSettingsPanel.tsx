@@ -427,19 +427,21 @@ function ProjectDetail({
     if (members) members.push(member);
     else checkoutsByEnvironment.set(member.environmentId, [member]);
   }
-  const checkoutRemoveButton = (member: SidebarProjectGroupMember) => (
-    <Button
-      size="sm"
-      variant="destructive-outline"
-      disabled={!editableIds.has(member.environmentId)}
-      onClick={() => void removeMembers([member])}
-      aria-label={`Remove checkout ${member.workspaceRoot}`}
-    >
-      Remove
-    </Button>
-  );
+  // A lone checkout is the repository itself; removing it is the row below.
+  const checkoutRemoveButton = (member: SidebarProjectGroupMember) =>
+    hasMultipleCheckouts ? (
+      <Button
+        size="sm"
+        variant="destructive-outline"
+        disabled={!editableIds.has(member.environmentId)}
+        onClick={() => void removeMembers([member])}
+        aria-label={`Remove checkout ${member.workspaceRoot}`}
+      >
+        Remove
+      </Button>
+    ) : undefined;
   const checkoutChoices = (
-    <SettingsSection title="Checkouts">
+    <SettingsSection title={hasMultipleCheckouts ? "Checkouts" : "Checkout"}>
       {Array.from(checkoutsByEnvironment, ([environmentId, members]) => {
         if (checkoutsByEnvironment.size === 1) {
           return members.map((member) => (
@@ -519,7 +521,7 @@ function ProjectDetail({
           ) : null}
           <SettingsRow
             title="Name"
-            description="The shared name for this repository group in the sidebar and thread lists."
+            description="Shown in the sidebar and thread lists on every machine."
             control={
               <Input
                 key={`${group.projectKey}:${group.displayName}`}
@@ -543,7 +545,7 @@ function ProjectDetail({
             }
           />
           <SettingsRow
-            title="Repository icon"
+            title="Icon"
             description={
               projectIcon?.kind === "lucide"
                 ? `${projectIcon.name} · ${projectIcon.color}`
@@ -551,7 +553,7 @@ function ProjectDetail({
                   ? `Folder · ${projectIcon.color}`
                   : projectIcon?.kind === "emoji"
                     ? "Folder"
-                    : (faviconPath ?? "Automatic: the repository's favicon, else a folder icon")
+                    : (faviconPath ?? "Automatic: the repository's favicon when it has one")
             }
             resetAction={
               group.memberProjects.some(
@@ -585,14 +587,14 @@ function ProjectDetail({
                   disabled={isSavingFavicon || !canEditGroup}
                   onClick={() => setFaviconPickerOpen(true)}
                 >
-                  Choose file
+                  Choose image
                 </Button>
               </div>
             }
           />
         </SettingsSection>
-        {hasMultipleCheckouts ? checkoutChoices : null}
-        <SettingsSection title="Danger">
+        {checkoutChoices}
+        <SettingsSection title="Remove" hideTitle>
           <SettingsRow
             title={
               hasOtherMembers
@@ -603,10 +605,10 @@ function ProjectDetail({
             }
             description={
               hasOtherMembers
-                ? "Deletes the selected machine's checkout entries and their threads. Other machines and files on disk are not touched."
+                ? "Removes this machine's checkouts from Cogenly and deletes their threads. Other machines and the files on disk stay."
                 : group.memberProjects.length > 1
-                  ? `Deletes all ${group.memberProjects.length} checkout entries and their threads on every machine. Files on disk are not touched.`
-                  : "Deletes the repository entry and its threads. Files on disk are not touched."
+                  ? `Removes all ${group.memberProjects.length} checkouts from Cogenly and deletes their threads on every machine. The files on disk stay.`
+                  : "Removes it from Cogenly and deletes its threads. The files on disk stay."
             }
             control={
               <Button
@@ -619,8 +621,8 @@ function ProjectDetail({
                 {hasOtherMembers
                   ? "Remove checkout"
                   : group.memberProjects.length > 1
-                    ? "Remove all entries"
-                    : "Remove repository"}
+                    ? "Remove everywhere"
+                    : "Remove"}
               </Button>
             }
           />
