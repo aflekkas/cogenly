@@ -39,6 +39,9 @@ import {
 import { openSignInPage } from "./openIntegrationSignIn";
 import { useStatusFade } from "./integrationStatusMotion";
 import { useEnvironmentMachineList } from "../../machines/useMachines";
+import { useOpenMachineHealthAlerts } from "../../machines/machineHealthAlertsStore";
+import { integrationAttentionTone } from "./settingsAttention.logic";
+import { SettingsAttentionTitle } from "./SettingsAttentionTitle";
 import { Switch } from "../ui/switch";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
@@ -383,6 +386,11 @@ function AccountRow({
   const status = integrationStatus(summary, undefined);
   const statusRef = useStatusFade<HTMLSpanElement>(status.label);
   const entry = integrationCatalogEntryFor(integration);
+  const attention = integrationAttentionTone(
+    useOpenMachineHealthAlerts(),
+    environmentId,
+    integration.name,
+  );
   const report = (result: Awaited<ReturnType<typeof update>>) => {
     if (result._tag === "Success") return true;
     if (!isAtomCommandInterrupted(result))
@@ -439,7 +447,9 @@ function AccountRow({
       title={
         <span className="flex items-center gap-2">
           <IntegrationSourceIcon icon={entry?.icon ?? null} />
-          <span>{integrationTitle(integration)}</span>
+          <SettingsAttentionTitle tone={attention}>
+            <span>{integrationTitle(integration)}</span>
+          </SettingsAttentionTitle>
         </span>
       }
       description={

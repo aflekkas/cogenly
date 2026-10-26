@@ -60,7 +60,14 @@ import { DraftInput } from "../ui/draft-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
+import { useOpenMachineHealthAlerts } from "../../machines/machineHealthAlertsStore";
 import { createIntegrationStatusFade } from "./integrationStatusMotion";
+import { SettingsAttentionTitle } from "./SettingsAttentionTitle";
+import {
+  machineCheckAttention,
+  worstTone,
+  type SettingsAttentionTone,
+} from "./settingsAttention.logic";
 import {
   alertChannelIntegrations,
   canaryIntervalOptions,
@@ -293,6 +300,10 @@ function HealthReportRows({
     unreachable === "unanswered" ? [] : report.checks,
   );
   const arrived = useArrivedKeys(problems.map((check) => check.id));
+  // The checks behind the rail's Settings dot, on this machine.
+  const openAlerts = useOpenMachineHealthAlerts();
+  const attention = machineCheckAttention(openAlerts, machine.environmentId);
+  const othersAttention = worstTone(others.map((check) => attention.get(check.id)));
   return (
     <>
       <HealthSummaryRow
@@ -305,7 +316,11 @@ function HealthReportRows({
         <SettingsRow
           key={check.id}
           className={arrived(check.id) ? ARRIVAL_FADE : undefined}
-          title={HEALTH_CHECK_LABELS[check.id]}
+          title={
+            <SettingsAttentionTitle tone={attention.get(check.id) ?? null}>
+              {HEALTH_CHECK_LABELS[check.id]}
+            </SettingsAttentionTitle>
+          }
           description={check.summary}
           control={<StatusBadge status={check.status} />}
         >
@@ -320,7 +335,9 @@ function HealthReportRows({
           </AnimatedHeight>
         </SettingsRow>
       ))}
-      {others.length > 0 ? <OtherChecksRow checks={others} context={context} /> : null}
+      {others.length > 0 ? (
+        <OtherChecksRow checks={others} context={context} attention={othersAttention} />
+      ) : null}
     </>
   );
 }
@@ -370,9 +387,12 @@ function HealthSummaryRow({
 function OtherChecksRow({
   checks,
   context,
+  attention,
 }: {
   readonly checks: ReadonlyArray<MachineHealthCheck>;
   readonly context: MachineHealthActionContext;
+  /** An open alert on a check folded in here. */
+  readonly attention: SettingsAttentionTone | null;
 }) {
   const [open, setOpen] = useState(false);
   const unknown = checks.filter((check) => check.status === "unknown").length;
@@ -384,7 +404,7 @@ function OtherChecksRow({
       : `${checks.length - unknown} passing, ${unknown} couldn't run`;
   return (
     <SettingsRow
-      title="Other checks"
+      title={<SettingsAttentionTitle tone={attention}>Other checks</SettingsAttentionTitle>}
       description={summary}
       control={
         <DisclosureTrigger

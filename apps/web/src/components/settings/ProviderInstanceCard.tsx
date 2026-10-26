@@ -36,6 +36,7 @@ import {
 import { cn } from "../../lib/utils";
 import { normalizeProviderAccentColor } from "../../providerInstances";
 import { Badge } from "../ui/badge";
+import { BadgeDot } from "../ui/badge-dot";
 import { Button } from "../ui/button";
 import { MorphIcon } from "~/components/MorphIcon";
 import { DraftInput } from "../ui/draft-input";
@@ -58,7 +59,6 @@ import { FoldedSettingsSection } from "./FoldedSettingsSection";
 import { readCodexSetupMode } from "./CodexSetupSection.logic";
 import {
   getProviderVersionAdvisoryPresentation,
-  PROVIDER_STATUS_STYLES,
   getProviderSummary,
   getProviderVersionLabel,
   type ProviderStatusKey,
@@ -595,7 +595,6 @@ export function ProviderInstanceCard({
   const statusKey: ProviderStatusKey = enabled
     ? ((liveProvider?.status as ProviderStatusKey | undefined) ?? "warning")
     : "disabled";
-  const statusStyle = PROVIDER_STATUS_STYLES[statusKey];
   // Settings decide `enabled` before the provider's last probe catches up.
   const summary = enabled
     ? getProviderSummary(liveProvider && { ...liveProvider, enabled: true })
@@ -749,9 +748,11 @@ export function ProviderInstanceCard({
   ) : null;
 
   // Healthy and disabled rows read fine from their text; only trouble gets a dot.
+  // The provider's own attention dot, the same primitive as the Settings dot
+  // that points here when a machine-health alert names this provider.
   const statusDotNode =
     statusKey === "warning" || statusKey === "error" ? (
-      <span className={cn("size-1.5 shrink-0 rounded-full", statusStyle.dot)} aria-hidden />
+      <BadgeDot tone={statusKey === "error" ? "destructive" : "warning"} className="shrink-0" />
     ) : null;
   const needsAttention = statusKey === "warning" || statusKey === "error";
   const statusDiagnostic = hasCompatibilityWarning && needsAttention ? summary.detail : null;

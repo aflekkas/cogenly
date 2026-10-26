@@ -59,8 +59,19 @@ import { useProjects } from "../state/entities";
 import { resolveThreadSidebarMinimumWidth } from "./threadSidebarWidth";
 import { useThreadSidebarWidth } from "../hooks/useThreadSidebarWidth";
 import { EdgeResizeHandle } from "./EdgeResizeHandle";
-import { Sidebar, SidebarProvider, SidebarTrigger, useSidebar } from "./ui/sidebar";
+import {
+  Sidebar,
+  SidebarProvider,
+  SidebarTrigger,
+  useSidebar,
+  useSidebarVisibility,
+} from "./ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import { BadgeDot } from "./ui/badge-dot";
+import {
+  MACHINE_NEEDS_ATTENTION_LABEL,
+  useMachineHealthAttentionTone,
+} from "../machines/machineHealthAlertsStore";
 
 function subscribeToViewportWidth(onChange: () => void): () => void {
   window.addEventListener("resize", onChange);
@@ -82,6 +93,13 @@ function SidebarControl({
   const usagePageOpen = useLocation({ select: (location) => location.pathname === "/usage" });
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { toggleSidebar, isMobile, mobileSheetMounted } = useSidebar();
+  const sidebarVisible = useSidebarVisibility();
+  const onSettings = useLocation({
+    select: (location) =>
+      location.pathname === "/settings" || location.pathname.startsWith("/settings/"),
+  });
+  const machineAttention = useMachineHealthAttentionTone();
+  const settingsNavDot = onSettings && !sidebarVisible && !disabled ? machineAttention : null;
   const shortcutLabel = shortcutLabelForCommand(keybindings, "sidebar.toggle", {
     context: { usagePageOpen },
   });
@@ -143,29 +161,37 @@ function SidebarControl({
       )}
       data-sidebar-control=""
     >
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <SidebarTrigger
-              className="pointer-events-auto"
-              aria-label="Toggle main sidebar"
-              aria-disabled={disabled || undefined}
-              // Hovering floats the collapsed column out; a click docks it.
-              {...listColumnPeekToggleHandlers}
-              onClick={(event) => {
-                if (disabled) return;
-                event.preventDefault();
-                toggleListColumn(toggleSidebar);
-              }}
-            />
-          }
-        />
-        <TooltipPopup side="bottom">
-          {disabled
-            ? SIDEBAR_TOGGLE_DISABLED_LABEL
-            : `Toggle main sidebar${shortcutLabel ? ` (${shortcutLabel})` : ""}`}
-        </TooltipPopup>
-      </Tooltip>
+      <span className="relative flex">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <SidebarTrigger
+                className="pointer-events-auto"
+                aria-label={
+                  settingsNavDot === null
+                    ? "Toggle main sidebar"
+                    : `Toggle main sidebar, ${MACHINE_NEEDS_ATTENTION_LABEL}`
+                }
+                aria-disabled={disabled || undefined}
+                // Hovering floats the collapsed column out; a click docks it.
+                {...listColumnPeekToggleHandlers}
+                onClick={(event) => {
+                  if (disabled) return;
+                  event.preventDefault();
+                  toggleListColumn(toggleSidebar);
+                }}
+              />
+            }
+          />
+          <TooltipPopup side="bottom">
+            {disabled
+              ? SIDEBAR_TOGGLE_DISABLED_LABEL
+              : `Toggle main sidebar${shortcutLabel ? ` (${shortcutLabel})` : ""}`}
+          </TooltipPopup>
+        </Tooltip>
+        {/* The settings nav is folded away here, so its dot shows on the toggle. */}
+        <BadgeDot tone={settingsNavDot} size="md" className="absolute top-1 right-1" />
+      </span>
       <NavigationHistoryButtons />
       <TitlebarPageTitle />
     </div>

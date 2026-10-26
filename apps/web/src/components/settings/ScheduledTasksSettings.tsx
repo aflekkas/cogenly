@@ -9,6 +9,9 @@ import {
   SettingsListEmpty,
 } from "./SettingsList";
 import { useEnvironmentMachineList } from "~/machines/useMachines";
+import { useOpenMachineHealthAlerts } from "~/machines/machineHealthAlertsStore";
+import { scheduledTaskAttentionTone } from "./settingsAttention.logic";
+import { SettingsAttentionTitle } from "./SettingsAttentionTitle";
 import { mergeRunOnOptions } from "~/machines/launchMachine.logic";
 import { EnvironmentOptionContent } from "../BranchToolbarEnvironmentSelector";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
@@ -679,6 +682,11 @@ function ScheduledTaskRow({
         ?.title,
   };
   const repositoryName = filterNames.repositoryName(task.projectId);
+  const attention = scheduledTaskAttentionTone(
+    useOpenMachineHealthAlerts(),
+    environmentId,
+    task.id,
+  );
   const toggle = useAtomCommand(serverEnvironment.setScheduledTaskEnabled, {
     label: "scheduled task enabled",
   });
@@ -724,7 +732,7 @@ function ScheduledTaskRow({
   );
   return (
     <SettingsListItem
-      title={task.title}
+      title={<SettingsAttentionTitle tone={attention}>{task.title}</SettingsAttentionTitle>}
       description={<span className="line-clamp-2">{task.prompt}</span>}
       status={
         <>
