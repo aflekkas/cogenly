@@ -185,6 +185,13 @@ const make = Effect.gen(function* () {
           return yield* denied(
             "Persistent agents cannot start agent builders; only the owner creates agents.",
           );
+        if (
+          name === "update_agent" &&
+          (params.permissions !== undefined || params.runtimeMode !== undefined)
+        )
+          return yield* denied(
+            "Only the owner can change agent authority. Use request_agent_approval for your own permissions.",
+          );
         if (name === "update_agent_project" && params.id !== agent.id)
           return yield* denied(
             "An agent can only move its own conversation between projects. Ask the owner to move other agents.",

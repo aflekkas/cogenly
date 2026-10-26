@@ -61,6 +61,16 @@ const organizer = (access: "read-only" | "full-access", moves: Array<unknown>) =
         }),
     }),
     Layer.mock(Service.AgentService)({
+      update: (input) =>
+        Effect.sync(() => {
+          moves.push(input);
+          return { agent: { ...filed, instructions: input.instructions ?? filed.instructions } };
+        }),
+      delete: (id) =>
+        Effect.sync(() => {
+          moves.push(id);
+          return { deleted: true };
+        }),
       list: () => Effect.succeed({ agents: [listItem(filed), listItem(agentFixture("loose"))] }),
       setProject: (input) =>
         Effect.sync(() => {
@@ -71,7 +81,7 @@ const organizer = (access: "read-only" | "full-access", moves: Array<unknown>) =
   );
 const run = (
   dependencies: ReturnType<typeof organizer>,
-  name: "list_agents" | "update_agent_project",
+  name: "list_agents" | "update_agent_project" | "update_agent" | "delete_agent",
   args: object,
 ) =>
   Effect.gen(function* () {
@@ -174,4 +184,27 @@ it.effect.each([
         expect(started).toEqual(["Watch my pull requests"]);
       }
     }),
+);
+
+it.effect("owner management tools edit and delete through the agent service", () =>
+  Effect.gen(function* () {
+    const writes: unknown[] = [];
+    const layer = organizer("full-access", writes);
+    expect(
+      yield* run(layer, "update_agent", { id: filed.id, instructions: "Watch CI" }),
+    ).toMatchObject({ agent: { instructions: "Watch CI" } });
+    expect(yield* run(layer, "delete_agent", { id: filed.id })).toEqual({ deleted: true });
+    expect(writes).toEqual([{ id: filed.id, instructions: "Watch CI" }, filed.id]);
+  }),
+);
+it.effect("read-only management clients cannot mutate agents", () =>
+  Effect.gen(function* () {
+    const writes: unknown[] = [];
+    const layer = organizer("read-only", writes);
+    for (const name of ["update_agent", "delete_agent"] as const) {
+      const result = yield* run(layer, name, { id: filed.id });
+      expect(result).toMatchObject({ code: "capability_denied" });
+    }
+    expect(writes).toEqual([]);
+  }),
 );

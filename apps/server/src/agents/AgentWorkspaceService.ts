@@ -1,3 +1,5 @@
+import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
+import { MessageId } from "@cogenly/contracts";
 import { decideFallback } from "./providerFallback.ts";
 import * as AccountAccess from "../accounts/AccountAccess.ts";
 import * as Access from "./AgentAccessScope.ts";
@@ -380,6 +382,34 @@ const make = Effect.gen(function* () {
         yield* notifyApprovals;
         return { approval: yield* getApproval(id) };
       }).pipe(Effect.mapError(wrap));
+  const threadManagement = yield* Effect.serviceOption(Threads.ThreadManagementService);
+  const notifyDecision = ({ approval }: { approval: AgentApproval }) =>
+    Effect.gen(function* () {
+      if (approval.agentId === null || threadManagement._tag === "None") return;
+      const agent = yield* store.get(approval.agentId);
+      if (agent.projectId === null) return;
+      const key = `agent-approval-decision:${approval.id}`;
+      yield* threadManagement.value.sendToThread({
+        projectId: agent.projectId,
+        threadId: agent.conversationThreadId,
+        commandId: CommandId.make(key),
+        messageId: MessageId.make(key),
+        text: `The owner ${approval.status} your ${approval.action.actionKind} request (${approval.id}).${approval.resultThreadId ? ` Work thread: ${approval.resultThreadId}.` : ""} Continue within the decided permissions; a rejection does not authorize the action.`,
+        attachments: [],
+        modelSelection: decideFallback(agent, DateTime.toEpochMillis(yield* DateTime.now))
+          .selection,
+        mode: "queue",
+        createdBy: "agent",
+        creationSource: "server",
+      });
+    }).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("Could not deliver an agent approval decision", {
+          approvalId: approval.id,
+          cause,
+        }),
+      ),
+    );
   const executeWork = (
     input: AgentStartWorkInput,
     key: string,
@@ -717,6 +747,7 @@ const make = Effect.gen(function* () {
         )
         .pipe(
           Effect.tap(() => notifyApprovals),
+          Effect.tap(notifyDecision),
           Effect.mapError(wrap),
         ),
     reject: (id) =>
@@ -732,6 +763,7 @@ const make = Effect.gen(function* () {
         )
         .pipe(
           Effect.tap(() => notifyApprovals),
+          Effect.tap(notifyDecision),
           Effect.mapError(wrap),
         ),
     activity: (agentId) =>

@@ -772,3 +772,31 @@ it.effect("starts the builder in a repository when Scratch is unavailable", () =
     }).pipe(Effect.provide(h.layer));
   }),
 );
+
+it.effect("routes replica deletion to its owner and refuses an offline owner", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness();
+    yield* Effect.gen(function* () {
+      const store = yield* Store.AgentStore;
+      const remote = yield* RemoteLaunch.RemoteThreadLaunch;
+      const agents = yield* Agents.AgentService;
+      const machine = EnvironmentId.make("machine:owner");
+      const existing = yield* store.save({
+        ...agentFixture("delete-remote"),
+        ownerMachine: machine,
+      });
+      const refused = yield* agents.delete(existing.id).pipe(Effect.flip);
+      expect(refused.message).toContain("offline");
+      const calls: string[] = [];
+      yield* remote.registerAgentDelete((target, id) =>
+        Effect.sync(() => {
+          calls.push(`${target}:${id}`);
+          return { deleted: true };
+        }),
+      );
+      expect(yield* agents.delete(existing.id)).toEqual({ deleted: true });
+      expect(calls).toEqual([`${machine}:${existing.id}`]);
+      expect((yield* store.get(existing.id)).name).toBe(existing.name);
+    }).pipe(Effect.provide(h.layer));
+  }).pipe(Effect.scoped),
+);

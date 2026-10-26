@@ -1538,6 +1538,7 @@ describe("agent scope, approvals and shared commitments", () => {
             sourceRefs: [],
             evidenceRefs: [],
           });
+          yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id, thread_id, ordinal, provider, status, requested_at, payload_json) VALUES ('kickoff-run', ${agent.conversationThreadId}, 99, 'codex', 'completed', ${agent.createdAt}, ${yield* encodeUnknown({ ...run, userMessageId: `agent-kickoff:${agent.id}` })})`;
           const activity = yield* workspace.activity(agent.id);
           expect(activity.runs).toHaveLength(1);
           expect(activity.runs[0]).toMatchObject({
@@ -2523,6 +2524,57 @@ it.effect.each(["conversation", "work"] as const)(
         const count = h.calls.length;
         yield* agents.reconcile();
         expect(h.calls).toHaveLength(count);
+      }).pipe(Effect.provide(h.layer));
+    }),
+);
+
+it.effect(
+  "partial agent edits retain omitted settings and approval decisions reach the conversation",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const agents = yield* Agents.AgentService;
+        const workspace = yield* Workspace.AgentWorkspaceService;
+        const agent = yield* store.save(h.fixture);
+        const updated = yield* agents.update({ id: agent.id, instructions: "Watch CI carefully" });
+        expect(updated.agent.instructions).toBe("Watch CI carefully");
+        expect(updated.agent.modelSelection).toEqual(agent.modelSelection);
+        const { approval } = yield* workspace.requestApproval(agent.id, {
+          actionKind: "change_permissions",
+          payload: { permissions: defaultAgentPermissions },
+        });
+        yield* workspace.approve(approval.id);
+        expect(h.calls.at(-1)?.text).toContain("owner approved");
+        expect(h.calls.at(-1)?.mode).toBe("queue");
+        const next = yield* workspace.requestApproval(agent.id, {
+          actionKind: "change_permissions",
+          payload: { permissions: defaultAgentPermissions },
+        });
+        yield* workspace.reject(next.approval.id);
+        expect(h.calls.at(-1)?.text).toContain("owner rejected");
+        const policy = yield* Policy.AgentMcpPolicy;
+        expect(
+          yield* policy
+            .beforeTool(
+              scopeFor(agent.conversationThreadId),
+              "update_agent",
+              { id: agent.id, permissions: h.fixture.permissions },
+              false,
+            )
+            .pipe(Effect.result),
+        ).toMatchObject({ _tag: "Failure" });
+        expect(
+          yield* policy
+            .beforeTool(
+              scopeFor(agent.conversationThreadId),
+              "delete_agent",
+              { id: agent.id },
+              false,
+            )
+            .pipe(Effect.result),
+        ).toMatchObject({ _tag: "Failure" });
       }).pipe(Effect.provide(h.layer));
     }),
 );
