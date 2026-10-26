@@ -18,6 +18,7 @@
  * @module ChromiumKeys
  */
 import * as NodeCrypto from "node:crypto";
+import * as NodeModule from "node:module";
 
 import * as HostProcess from "@cogenly/shared/HostProcess";
 
@@ -30,6 +31,8 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { LinuxBrowserSecretPath } from "./LinuxBrowserSecret.ts";
 
 const KEY_SALT = "saltysalt";
+// Native bindings must resolve from disk when bundled into the server executable.
+const requireKeyring = NodeModule.createRequire(import.meta.url);
 const KEY_LENGTH = 16;
 /** macOS stretches the keychain secret; Linux uses a single iteration. */
 const MAC_KEY_ITERATIONS = 1003;
@@ -103,8 +106,8 @@ const readKeychainSecret = Effect.fn("ChromiumKeys.readKeychainSecret")(function
 ) {
   // Only macOS cookie imports need this binding; loading it at startup can
   // prevent the desktop from opening on platforms that never use it.
-  const Keyring = yield* Effect.tryPromise({
-    try: () => import("@napi-rs/keyring"),
+  const Keyring = yield* Effect.try({
+    try: () => requireKeyring("@napi-rs/keyring") as typeof import("@napi-rs/keyring"),
     catch: (cause) => new ChromiumKeyError({ reason: "keychainUnavailable", cause }),
   });
   const secret = yield* Effect.try({
