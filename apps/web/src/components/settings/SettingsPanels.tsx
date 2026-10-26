@@ -1044,7 +1044,7 @@ export function AppearanceSettingsPanel() {
         <ChatWidthSettingRow />
         <SettingsRow
           {...searchableSetting("sidebar-layout")}
-          description="Bottom docks search at the foot of the sidebar, Top puts it under the titlebar. Set per device."
+          description="Bottom docks search at the foot of the sidebar, Top puts it under the titlebar. Only on this device."
           resetAction={
             preferences.sidebarLayout !== DEFAULT_APPEARANCE_PREFERENCES.sidebarLayout ? (
               <SettingResetButton

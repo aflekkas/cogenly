@@ -1102,7 +1102,7 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
         />
         <DialogPopup className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Create pairing link</DialogTitle>
+            <DialogTitle>Pair a device</DialogTitle>
             <DialogDescription>
               Make a one-time link that another device opens to get access to this machine.
             </DialogDescription>

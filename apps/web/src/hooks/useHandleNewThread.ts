@@ -173,7 +173,7 @@ export function useNewThreadHandler() {
       // after that belongs to a project that no longer exists.
       const abandonedSinceRequest = () =>
         routeChangedSinceRequest() || (project !== undefined && readProject(projectRef) === null);
-      // A chat is a quick conversation: it starts supervised whatever the project defaults say.
+      // Every new thread, chat or work, starts in full access whatever the project defaults say.
       const defaultRuntimeMode = "full-access";
       const projectDefaultModelSelection = targetServerSettings.defaultModelSelection;
       const resolveModelSelectionOverride = (destinationDraftId: DraftId) =>

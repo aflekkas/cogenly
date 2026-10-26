@@ -124,30 +124,30 @@ const PROVIDER_SETTINGS = providerClients.definitions.map((definition) => ({
 }));
 
 function providerEnvironmentDetail(environment: EnvironmentPresentation): string {
-  if (environment.entry.target._tag === "PrimaryConnectionTarget") return "Primary device";
+  if (environment.entry.target._tag === "PrimaryConnectionTarget") return "Primary machine";
   if (environment.relayManaged) return "Cogenly Connect";
   if (environment.entry.target._tag === "SshConnectionTarget") return "SSH";
-  if (isDesktopLocalConnectionTarget(environment.entry.target)) return "Local device";
-  return environment.displayUrl ?? "Remote device";
+  if (isDesktopLocalConnectionTarget(environment.entry.target)) return "Local machine";
+  return environment.displayUrl ?? "Remote machine";
 }
 
-// Shared by the editor grid and the placeholder states so switching devices
+// Shared by the editor grid and the placeholder states so switching machines
 // never changes the card's footprint.
 const providerCardHeightClassName =
   "@min-[48rem]/settings-page:h-[min(44rem,calc(100dvh-11rem))] @min-[48rem]/settings-page:min-h-[32rem]";
 
 /**
- * Same chrome as the provider editor (section heading, floating device tabs,
+ * Same chrome as the provider editor (section heading, floating machine tabs,
  * tall card) for states that cannot render provider settings yet.
  */
 function ProviderSettingsPlaceholder({
-  deviceTabs,
+  machineTabs,
   icon,
   title,
   description,
   children,
 }: {
-  readonly deviceTabs?: ReactNode;
+  readonly machineTabs?: ReactNode;
   readonly icon: ReactNode;
   readonly title: string;
   readonly description: string;
@@ -155,8 +155,8 @@ function ProviderSettingsPlaceholder({
 }) {
   return (
     <SettingsSection {...searchableSetting("providers")} variant="plain">
-      {deviceTabs ? (
-        <div className="flex min-h-11 min-w-0 items-center px-3 sm:px-4">{deviceTabs}</div>
+      {machineTabs ? (
+        <div className="flex min-h-11 min-w-0 items-center px-3 sm:px-4">{machineTabs}</div>
       ) : null}
       <SettingsGroup
         divided={false}
@@ -181,17 +181,17 @@ function ProviderSettingsPlaceholder({
 function EnvironmentUnavailablePlaceholder({
   environment,
   access,
-  deviceTabs,
+  machineTabs,
 }: {
   readonly environment: EnvironmentPresentation;
   readonly access: Exclude<ProviderEnvironmentAccess, { kind: "editable" | "read-only" }>;
-  readonly deviceTabs?: ReactNode;
+  readonly machineTabs?: ReactNode;
 }) {
   const isLoading = access.kind === "loading";
   const title = isLoading
     ? "Loading provider settings"
     : access.kind === "error"
-      ? "Could not connect to this device"
+      ? "Could not connect to this machine"
       : "Provider settings are unavailable";
   // Keep the description to a short status; the raw failure can be a
   // multi-paragraph CLI dump, so it goes below, clamped and expandable.
@@ -201,11 +201,11 @@ function EnvironmentUnavailablePlaceholder({
       : `Waiting for ${environment.label}'s configuration.`
     : connectionStatusTitle(environment.connection);
   const error = isLoading ? null : environment.connection.error;
-  // No spinner: this state can persist indefinitely for a wedged device, and a
+  // No spinner: this state can persist indefinitely for a wedged machine, and a
   // continuously repainting animation would run the whole time.
   return (
     <ProviderSettingsPlaceholder
-      deviceTabs={deviceTabs}
+      machineTabs={machineTabs}
       icon={
         <EnvironmentMachineIcon kind={resolveEnvironmentMachineKind(environment.serverConfig)} />
       }
@@ -251,7 +251,7 @@ function ProviderSettingsPanelContent(target: ProviderSettingsTarget) {
     [environments, primaryEnvironmentId, target.environmentIds],
   );
   // Raw user intent; the effective selection is re-derived every render so a
-  // device that drops out of the catalog falls back without erasing the pick —
+  // machine that drops out of the catalog falls back without erasing the pick —
   // if it reappears (e.g. after a reconnect) the selection is restored.
   const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<EnvironmentId | null>(
     target.environmentId ?? primaryEnvironmentId,
@@ -294,13 +294,13 @@ function ProviderSettingsPanelContent(target: ProviderSettingsTarget) {
     selectedEnvironmentCanRenderSettings,
     target.scoped,
   ]);
-  const onlyPrimaryDevice =
+  const onlyPrimaryMachine =
     options.length === 1 && options[0]?.entry.target._tag === "PrimaryConnectionTarget";
-  const deviceTabs =
-    !target.scoped && !onlyPrimaryDevice && options.length > 0 ? (
+  const machineTabs =
+    !target.scoped && !onlyPrimaryMachine && options.length > 0 ? (
       <ScrollArea radius="none" hideScrollbars scrollFade className="h-11 min-w-0 flex-1">
         <ToggleGroup
-          aria-label="Devices"
+          aria-label="Machines"
           variant="segmented"
           className="my-2"
           value={effectiveEnvironmentId ? [effectiveEnvironmentId] : []}
@@ -350,16 +350,16 @@ function ProviderSettingsPanelContent(target: ProviderSettingsTarget) {
     <>
       {targetEnvironmentMissing ? (
         <ProviderSettingsPlaceholder
-          deviceTabs={deviceTabs}
+          machineTabs={machineTabs}
           icon={<EnvironmentMachineIcon kind={resolveEnvironmentMachineKind(null)} />}
-          title="Device unavailable"
-          description="Reconnect this device to set up its provider, or select another device."
+          title="Machine unavailable"
+          description="Reconnect this machine to set up its provider, or select another machine."
         />
       ) : null}
       {options.length === 0 && !targetEnvironmentMissing ? (
         <ProviderSettingsPlaceholder
           icon={<EnvironmentMachineIcon kind={resolveEnvironmentMachineKind(null)} />}
-          title={isReady ? "No connected devices" : "Loading devices"}
+          title={isReady ? "No connected machines" : "Loading machines"}
           description={
             isReady
               ? "Connect a machine before configuring providers."
@@ -372,7 +372,7 @@ function ProviderSettingsPanelContent(target: ProviderSettingsTarget) {
         <SelectedEnvironmentProviderSettings
           key={selectedEnvironment.environmentId}
           environment={selectedEnvironment}
-          deviceTabs={deviceTabs}
+          machineTabs={machineTabs}
           targetInstanceId={
             target.environmentId === undefined ||
             selectedEnvironment.environmentId === target.environmentId
@@ -387,17 +387,17 @@ function ProviderSettingsPanelContent(target: ProviderSettingsTarget) {
 
 function SelectedEnvironmentProviderSettings({
   environment,
-  deviceTabs,
+  machineTabs,
   targetInstanceId,
 }: {
   readonly environment: EnvironmentPresentation;
-  readonly deviceTabs?: ReactNode;
+  readonly machineTabs?: ReactNode;
   readonly targetInstanceId?: ProviderInstanceId | undefined;
 }) {
   return (
     <RemoteSessionGatedProviderSettings
       environment={environment}
-      deviceTabs={deviceTabs}
+      machineTabs={machineTabs}
       targetInstanceId={targetInstanceId}
     />
   );
@@ -405,11 +405,11 @@ function SelectedEnvironmentProviderSettings({
 
 function RemoteSessionGatedProviderSettings({
   environment,
-  deviceTabs,
+  machineTabs,
   targetInstanceId,
 }: {
   readonly environment: EnvironmentPresentation;
-  readonly deviceTabs?: ReactNode;
+  readonly machineTabs?: ReactNode;
   readonly targetInstanceId?: ProviderInstanceId | undefined;
 }) {
   const sessionState = useEnvironmentSessionState(environment.environmentId);
@@ -422,7 +422,7 @@ function RemoteSessionGatedProviderSettings({
     <AccessGatedProviderSettings
       environment={environment}
       operateAccess={operateAccess}
-      deviceTabs={deviceTabs}
+      machineTabs={machineTabs}
       targetInstanceId={targetInstanceId}
     />
   );
@@ -431,12 +431,12 @@ function RemoteSessionGatedProviderSettings({
 function AccessGatedProviderSettings({
   environment,
   operateAccess,
-  deviceTabs,
+  machineTabs,
   targetInstanceId,
 }: {
   readonly environment: EnvironmentPresentation;
   readonly operateAccess: ProviderOperateAccess;
-  readonly deviceTabs?: ReactNode;
+  readonly machineTabs?: ReactNode;
   readonly targetInstanceId?: ProviderInstanceId | undefined;
 }) {
   const access = classifyProviderEnvironmentAccess({
@@ -449,7 +449,7 @@ function AccessGatedProviderSettings({
       <EnvironmentUnavailablePlaceholder
         environment={environment}
         access={access}
-        deviceTabs={deviceTabs}
+        machineTabs={machineTabs}
       />
     );
   }
@@ -458,7 +458,7 @@ function AccessGatedProviderSettings({
       environmentId={environment.environmentId}
       environmentLabel={environment.label}
       readOnly={access.kind === "read-only"}
-      deviceTabs={deviceTabs}
+      machineTabs={machineTabs}
       targetInstanceId={targetInstanceId}
     />
   );
@@ -468,12 +468,12 @@ export function EnvironmentProviderSettings({
   environmentId,
   environmentLabel,
   readOnly = false,
-  deviceTabs,
+  machineTabs,
   targetInstanceId,
 }: {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;
-  readonly deviceTabs?: ReactNode;
+  readonly machineTabs?: ReactNode;
   readonly targetInstanceId?: ProviderInstanceId | undefined;
   /**
    * Grey out and freeze every write control when this session's credential
@@ -931,8 +931,8 @@ export function EnvironmentProviderSettings({
           </>
         }
       >
-        {deviceTabs ? (
-          <div className="flex min-h-11 min-w-0 items-center gap-2 px-3 sm:px-4">{deviceTabs}</div>
+        {machineTabs ? (
+          <div className="flex min-h-11 min-w-0 items-center gap-2 px-3 sm:px-4">{machineTabs}</div>
         ) : null}
         {readOnly ? (
           <SettingsGroup divided={false} className="overflow-hidden">

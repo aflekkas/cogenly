@@ -50,7 +50,12 @@ export function SettingsScopeSentence() {
   const pathname = useLocation({ select: (location) => location.pathname });
   if (pathname === "/settings/appearance" || pathname === "/settings/keybindings")
     return (
-      <p className="px-3 text-sm text-muted-foreground sm:px-4">Shared across your machines</p>
+      <p className="px-3 text-sm text-muted-foreground sm:px-4">
+        {/* Sidebar layout stays on the device that set it (appearancePreferences.ts). */}
+        {pathname === "/settings/appearance"
+          ? "Shared across your machines, except Sidebar layout"
+          : "Shared across your machines"}
+      </p>
     );
   if (scope === null || !scope.machinePage || SETTINGS_SCOPELESS_PATHS.has(pathname)) return null;
   return (
