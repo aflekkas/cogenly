@@ -5,9 +5,11 @@ import {
   type PreviewAutomationStatus,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as AgentStore from "../../../agents/AgentStore.ts";
+import * as ProjectFiles from "../../../projectLabels/ProjectFiles.ts";
 import * as Vault from "../../../vault/Vault.ts";
 import { normalizeHost } from "../../../vault/VaultPolicy.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -26,11 +28,26 @@ const toFailure = (cause: unknown) =>
       )
     : failure("Vault operation failed.", "orchestration_error");
 
+/**
+ * The calling thread's project, which limits the items it can list, fill or
+ * delete. A thread whose project cannot be read reaches only all-project items.
+ */
+const callerAccess = Effect.gen(function* () {
+  const scope = yield* McpInvocationContext.McpInvocationContext;
+  const files = yield* Effect.serviceOption(ProjectFiles.ProjectFiles);
+  if (scope.thread === undefined || Option.isNone(files)) return { projectId: null };
+  const folder = yield* files.value
+    .folderForThread(scope.thread.threadId)
+    .pipe(Effect.catch(() => Effect.succeed(null)));
+  return { projectId: folder?.labelId ?? null } satisfies Vault.VaultAccess;
+});
+
 export const layer = McpToolAccess.toLayer(VaultToolkit, {
-  vault_list: McpToolAccess.readsAsCaller((input) =>
+  // The listing scope is the caller's own project, whatever the input names.
+  vault_list: McpToolAccess.readsAsCaller(() =>
     Effect.gen(function* () {
       const vault = yield* Vault.Vault;
-      return yield* vault.list(input ?? {}).pipe(Effect.mapError(toFailure));
+      return yield* vault.list({}, yield* callerAccess).pipe(Effect.mapError(toFailure));
     }),
   ),
   vault_save: McpToolAccess.actsAsCaller((input) =>
@@ -79,6 +96,7 @@ export const layer = McpToolAccess.toLayer(VaultToolkit, {
           ...(rest.name ? { name: rest.name } : {}),
           field: rest.field,
           caller: agent ? { kind: "agent", agentId: agent.id } : { kind: "human" },
+          access: yield* callerAccess,
           threadId: scope.thread.threadId,
           domain,
           action: "fill",
@@ -130,7 +148,7 @@ export const layer = McpToolAccess.toLayer(VaultToolkit, {
   vault_delete: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
       const vault = yield* Vault.Vault;
-      return yield* vault.delete(input).pipe(Effect.mapError(toFailure));
+      return yield* vault.delete(input, yield* callerAccess).pipe(Effect.mapError(toFailure));
     }),
   ),
 });

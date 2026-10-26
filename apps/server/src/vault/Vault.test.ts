@@ -1,6 +1,7 @@
 import {
   AgentId,
   EnvironmentId,
+  ProjectLabelId,
   ThreadId,
   VaultItemMetadata,
   VaultSecretFields,
@@ -210,6 +211,53 @@ describe("Vault service", () => {
         caller: { kind: "agent", agentId: AgentId.make("agent:2") },
       });
       expect(other.status).toBe("approval_required");
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("keeps a project's items out of reach of callers in other projects", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const labelA = ProjectLabelId.make("label:a");
+      const labelB = ProjectLabelId.make("label:b");
+      const { item: secretOfB } = yield* vault.create({
+        name: "B token",
+        type: "api_key",
+        scopeProjectId: labelB,
+        secretFields: { value: "b-token-value-123" },
+      });
+      yield* vault.create({
+        name: "Shared",
+        type: "api_key",
+        secretFields: { value: "shared-value-123" },
+      });
+      const inA = { projectId: labelA };
+      const fill = (input: { readonly itemId?: typeof secretOfB.id; readonly name?: string }) =>
+        vault.use({ ...input, field: "value", caller: { kind: "human" }, access: inA }).pipe(
+          Effect.flip,
+          Effect.map((error) => error.reason),
+        );
+
+      expect((yield* vault.list({}, inA)).items.map((item) => item.name)).toEqual(["Shared"]);
+      expect((yield* vault.list({ scopeProjectId: labelB }, inA)).items.map((i) => i.name)).toEqual(
+        ["Shared"],
+      );
+      expect((yield* vault.list({}, { projectId: null })).items.map((i) => i.name)).toEqual([
+        "Shared",
+      ]);
+      expect(yield* fill({ itemId: secretOfB.id })).toBe("not_found");
+      expect(yield* fill({ name: "B token" })).toBe("not_found");
+      expect((yield* vault.delete({ id: secretOfB.id }, inA)).deleted).toBe(false);
+
+      // Its own project, and the owner, still reach it.
+      expect(
+        yield* vault.use({
+          itemId: secretOfB.id,
+          field: "value",
+          caller: { kind: "human" },
+          access: { projectId: labelB },
+        }),
+      ).toMatchObject({ status: "allowed" });
+      expect((yield* vault.list({})).items).toHaveLength(2);
     }).pipe(Effect.provide(layer)),
   );
 

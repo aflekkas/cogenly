@@ -52,6 +52,21 @@ import {
 } from "./VaultRedactor.ts";
 import { totp } from "./VaultTotp.ts";
 
+/**
+ * A caller limited to its project: it sees items scoped to `projectId` and
+ * all-project items, and nothing else, by list, id or name. `null` is a caller
+ * with no project, which sees only all-project items. Leaving access out is
+ * the owner's unrestricted view.
+ */
+export interface VaultAccess {
+  readonly projectId: string | null;
+}
+
+const accessible = (row: Pick<VaultRow, "scope_project_id">, access: VaultAccess | undefined) =>
+  access === undefined ||
+  row.scope_project_id === null ||
+  row.scope_project_id === access.projectId;
+
 export interface VaultUseInput {
   readonly itemId?: VaultItemId | undefined;
   readonly name?: string | undefined;
@@ -68,6 +83,8 @@ export interface VaultUseInput {
   readonly expectedRevision?: number | undefined;
   /** Browser fill refuses domains outside the item's allowedDomains. */
   readonly enforceAllowedDomains?: boolean | undefined;
+  /** The caller's project, which limits the items it can reach. */
+  readonly access?: VaultAccess | undefined;
 }
 
 export type VaultUseResult =
@@ -238,6 +255,7 @@ export class Vault extends Context.Service<
   {
     readonly list: (
       input: VaultListInput,
+      access?: VaultAccess,
     ) => Effect.Effect<{ items: ReadonlyArray<VaultItemMetadata> }, VaultError>;
     readonly getMetadata: (itemId: VaultItemId) => Effect.Effect<VaultItemMetadata, VaultError>;
     readonly create: (
@@ -248,6 +266,7 @@ export class Vault extends Context.Service<
     ) => Effect.Effect<{ item: VaultItemMetadata }, VaultError>;
     readonly delete: (
       input: VaultDeleteInput,
+      access?: VaultAccess,
     ) => Effect.Effect<{ id: VaultItemId; deleted: boolean }, VaultError>;
     readonly listUsage: (
       input: VaultUsageListInput,
@@ -411,17 +430,24 @@ const make = Effect.gen(function* () {
     itemId?: VaultItemId | undefined;
     name?: string | undefined;
     scopeProjectId?: string | null | undefined;
+    access?: VaultAccess | undefined;
   }) =>
     Effect.gen(function* () {
-      if (input.itemId) return yield* loadRow(input.itemId);
+      if (input.itemId) {
+        const row = yield* loadRow(input.itemId);
+        // Out of the caller's project reads as missing, like a name it cannot see.
+        if (!accessible(row, input.access)) return yield* new VaultError({ reason: "not_found" });
+        return row;
+      }
       if (!input.name) return yield* new VaultError({ reason: "invalid_input" });
-      const rows =
+      const named =
         yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE name = ${input.name} AND deleted_at IS NULL ORDER BY updated_at DESC`;
+      const rows = named.filter((row) => accessible(row, input.access));
       if (rows.length === 0) return yield* new VaultError({ reason: "not_found" });
       if (rows.length === 1) return rows[0]!;
+      const preferred = input.scopeProjectId ?? input.access?.projectId ?? null;
       const scoped = rows.filter(
-        (row) =>
-          row.scope_project_id === (input.scopeProjectId ?? null) || row.scope_project_id === null,
+        (row) => row.scope_project_id === preferred || row.scope_project_id === null,
       );
       if (scoped.length === 1) return scoped[0]!;
       return yield* new VaultError({ reason: "ambiguous_name" });
@@ -613,13 +639,15 @@ const make = Effect.gen(function* () {
       return { item: metadataOf(row, stored) };
     }).pipe(Effect.mapError(wrap));
 
-  const list: Vault["Service"]["list"] = (input) =>
+  const list: Vault["Service"]["list"] = (input, access) =>
     Effect.gen(function* () {
       const rows =
         yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE deleted_at IS NULL AND (${input.scopeProjectId ?? null} IS NULL OR scope_project_id IS NULL OR scope_project_id = ${input.scopeProjectId ?? null}) ORDER BY name`.pipe(
           Effect.mapError(wrap),
         );
-      return { items: rows.map((row) => metadataOf(row)) };
+      return {
+        items: rows.filter((row) => accessible(row, access)).map((row) => metadataOf(row)),
+      };
     });
 
   const update: Vault["Service"]["update"] = (input) =>
@@ -668,6 +696,7 @@ const make = Effect.gen(function* () {
         itemId: input.itemId,
         name: input.name,
         scopeProjectId: input.scopeProjectId,
+        access: input.access,
       });
       if (
         input.expectedRevision !== undefined &&
@@ -772,10 +801,12 @@ const make = Effect.gen(function* () {
       ),
     create,
     update,
-    delete: (input) =>
+    delete: (input, access) =>
       Effect.gen(function* () {
+        const scoped = access !== undefined;
+        const projectId = access?.projectId ?? null;
         const rows =
-          yield* sql`UPDATE vault_items SET deleted_at = ${yield* now}, ciphertext = '', wrapped_keys_json = '[]', updated_at = ${yield* now} WHERE id = ${input.id} AND deleted_at IS NULL RETURNING id`.pipe(
+          yield* sql`UPDATE vault_items SET deleted_at = ${yield* now}, ciphertext = '', wrapped_keys_json = '[]', updated_at = ${yield* now} WHERE id = ${input.id} AND deleted_at IS NULL AND (${scoped ? 1 : 0} = 0 OR scope_project_id IS NULL OR scope_project_id = ${projectId}) RETURNING id`.pipe(
             Effect.mapError(wrap),
           );
         yield* invalidateScrubCache;

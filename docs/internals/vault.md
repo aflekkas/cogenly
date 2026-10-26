@@ -46,6 +46,10 @@ for one field, and every outcome is appended to `vault_usage`. Process delivery
 adds the credential revision, machine, project, provider instance, terminal id
 and delivery method. This records delivery, not every downstream API action.
 
+MCP callers pass the calling thread's project as `VaultAccess`: list, id and
+name lookups and deletes reach only that project's items and all-project ones,
+and an item out of reach reads as missing. Owner RPCs have no access limit.
+
 For browser fill, humans (owner-initiated turns) and server-internal callers
 are allowed.
 Agents default to `ask`: the first use inserts a pending row in the existing

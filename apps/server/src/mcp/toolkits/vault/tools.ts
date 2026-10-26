@@ -41,7 +41,7 @@ const VaultFillResult = Schema.Struct({
 
 const VaultListTool = Tool.make("vault_list", {
   description:
-    "List vault items (logins, API keys, cards, notes) as metadata only: name, type, allowed domains, policy and which secret fields exist. Never returns secret values or usernames.",
+    "List vault items (logins, API keys, cards, notes) your project can use, as metadata only: name, type, allowed domains, policy and which secret fields exist. Never returns secret values or usernames.",
   parameters: VaultListInput,
   success: VaultListResult,
   failure: OrchestratorMcpFailure,
