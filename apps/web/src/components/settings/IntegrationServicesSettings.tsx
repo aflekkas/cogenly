@@ -203,7 +203,7 @@ function IntegrationListRow({
       selectLabel={`Select ${integrationTitle(integration)}`}
       icon={
         <span className="flex size-5 shrink-0 items-center justify-center">
-          <IntegrationSourceIcon {...icon} className="size-4" />
+          <IntegrationSourceIcon {...icon} environmentId={environmentId} className="size-4" />
         </span>
       }
       title={
@@ -339,7 +339,7 @@ function IntegrationDetail({
   return (
     <SettingsSection
       title={integrationTitle(integration)}
-      icon={<IntegrationSourceIcon {...icon} className="size-4" />}
+      icon={<IntegrationSourceIcon {...icon} environmentId={environmentId} className="size-4" />}
       headerAction={
         <Button
           size="icon-xs"

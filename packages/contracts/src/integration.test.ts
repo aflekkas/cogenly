@@ -121,15 +121,13 @@ describe("integration icons", () => {
     }
   });
 
-  it("uses custom marks or images, then the server favicon without copying private URL parts", () => {
+  it("uses custom marks or images, then the cached site icon by host without private URL parts", () => {
     const custom = {
       transport: "http" as const,
       url: "https://example.com/mcp/private?token=secret",
     };
-    expect(integrationIcon(custom)).toEqual({
-      icon: null,
-      iconUrl: "https://example.com/favicon.ico",
-    });
+    expect(integrationIcon(custom)).toEqual({ icon: null, faviconHost: "example.com" });
+    expect(integrationIcon({ ...custom, url: "http://example.com/mcp" })).toEqual({ icon: null });
     expect(integrationIcon({ ...custom, iconUrl: "https://example.com/brand.png" })).toEqual({
       icon: null,
       iconUrl: "https://example.com/brand.png",

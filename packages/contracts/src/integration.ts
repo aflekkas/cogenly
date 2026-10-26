@@ -478,6 +478,8 @@ export const IntegrationSource = Schema.Struct({
   displayName: Schema.String,
   icon: Schema.NullOr(IntegrationCatalogId),
   iconUrl: integrationFields.iconUrl,
+  /** A custom HTTPS server's host, whose cached site icon stands in for a logo. */
+  faviconHost: Schema.optional(Schema.String),
   /** The catalog service's name, or the display name of a custom server. */
   serviceName: Schema.String,
   accountLabel: Schema.NullOr(Schema.String),

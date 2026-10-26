@@ -16,6 +16,7 @@ import { integrationSetupRequest, useConnectIntegration } from "~/hooks/useConne
 import { integrationsRpc } from "~/rpc/integrations";
 import { useEnvironmentQuery } from "~/state/query";
 import { INTEGRATION_LOGOS } from "../IntegrationLogos";
+import { SiteFavicon } from "../SiteFavicon";
 import {
   Combobox,
   ComboboxItem,
@@ -65,16 +66,25 @@ export function useComposerSources(
   return { all, sources, isLoaded: query.data !== null, error: query.error };
 }
 
-/** Shared icon source for Settings and Sources, including custom server favicons. */
+/**
+ * Shared icon source for Settings and Sources: the catalog mark, the agent's
+ * chosen image, then a custom server's site icon from `environmentId`'s cache.
+ */
 export function IntegrationSourceIcon(props: {
   icon: IntegrationCatalogId | null;
   iconUrl?: string | undefined;
+  faviconHost?: string | undefined;
+  environmentId?: EnvironmentId | null | undefined;
   className?: string;
 }) {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const Logo = props.icon === null ? null : INTEGRATION_LOGOS[props.icon];
   return Logo ? (
     <Logo className={props.className} />
+  ) : props.faviconHost && !props.iconUrl ? (
+    <span className={props.className}>
+      <SiteFavicon host={props.faviconHost} environmentId={props.environmentId ?? null} />
+    </span>
   ) : props.iconUrl && props.iconUrl !== failedUrl ? (
     <img
       src={props.iconUrl}
@@ -94,7 +104,10 @@ export function IntegrationSourceIcon(props: {
  * One source as a search-list row: brand mark, service, account, and a badge
  * when it needs attention. The Sources picker and the `@` menu both render it.
  */
-export function IntegrationSourceRowContent(props: { source: IntegrationSource }) {
+export function IntegrationSourceRowContent(props: {
+  source: IntegrationSource;
+  environmentId?: EnvironmentId | null;
+}) {
   const { label, description } = integrationSourceRowText(props.source);
   const notice = integrationSourceNotice(props.source);
   return (
@@ -103,6 +116,8 @@ export function IntegrationSourceRowContent(props: { source: IntegrationSource }
         <IntegrationSourceIcon
           icon={props.source.icon}
           iconUrl={props.source.iconUrl}
+          faviconHost={props.source.faviconHost}
+          environmentId={props.environmentId}
           className="size-4"
         />
       </SearchListRowIcon>
@@ -277,7 +292,10 @@ export function ComposerSourcesPicker(props: {
                   </SearchListRowText>
                 </>
               ) : (
-                <IntegrationSourceRowContent source={option.source} />
+                <IntegrationSourceRowContent
+                  source={option.source}
+                  environmentId={props.environmentId}
+                />
               )}
             </ComboboxItem>
           )}

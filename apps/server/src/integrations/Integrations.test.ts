@@ -1349,7 +1349,7 @@ describe("Services the catalog dropped", () => {
             name: "atlassian",
             displayName: "Atlassian",
             icon: null,
-            iconUrl: "https://mcp.atlassian.com/favicon.ico",
+            faviconHost: "mcp.atlassian.com",
             serviceName: "Atlassian",
             accountLabel: null,
             status: "connected",
