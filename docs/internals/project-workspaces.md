@@ -30,9 +30,9 @@ it does not own a copy.
   remote's repository name for the project's home owner, `<owner>/<repo>` for
   any other owner, so same-named repositories from two owners never collide;
   a repository with no remote keeps its folder name. The home owner is the
-  project's linked GitHub owner. A project that links none records the
-  connected GitHub account as that link the first time a GitHub repository is
-  added, because the folders must come out the same on every machine. The
+  project's explicitly linked GitHub owner. A connected account is only a
+  suggestion until accepted. Folder names use accepted shared links, so
+  machine-local GitHub credentials cannot change the layout. The
   project schema derives the names on decode and refuses to encode one that
   disagrees; the service corrects stored names on read.
 - Everything at the top level except the id file, `repos/` and the worktree

@@ -36,6 +36,71 @@ import {
 import { reportProjectFolderFailure } from "./useMoveThreadToFolder";
 import { useEnvironmentProjectLabels } from "./useProjectLabels";
 
+/** The connected account stays a suggestion until the user accepts it. */
+export function ProjectOwnerSuggestion({
+  environmentId,
+  label,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly label: ProjectLabelWithRepositories;
+}) {
+  const canLink = useAtomValue(
+    serverEnvironment.linkProjectLabelSource.permissionAtom(environmentId),
+  );
+  const canDismiss = useAtomValue(
+    serverEnvironment.updateProjectLabel.permissionAtom(environmentId),
+  );
+  const link = useAtomCommand(serverEnvironment.linkProjectLabelSource, {
+    label: "link project owner",
+    reportFailure: false,
+  });
+  const update = useAtomCommand(serverEnvironment.updateProjectLabel, {
+    label: "dismiss project owner suggestion",
+    reportFailure: false,
+  });
+  const [pending, setPending] = useState(false);
+  const owner = label.suggestedHomeOwner;
+  const respond = async (accept: boolean) => {
+    if (owner === undefined) return;
+    setPending(true);
+    const result = accept
+      ? await link({
+          environmentId,
+          input: { id: label.id, link: { kind: "github-owner", owner } },
+        })
+      : await update({ environmentId, input: { id: label.id, dismissHomeOwnerSuggestion: owner } });
+    setPending(false);
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result))
+      reportProjectFolderFailure("Could not update project owner", result);
+  };
+  return (
+    <AnimatedHeight>
+      {owner === undefined ? null : (
+        <div className="flex flex-wrap items-center gap-2 py-1 text-xs text-muted-foreground reveal-motion">
+          <GitHubIcon aria-hidden />
+          <span>Link to {owner}?</span>
+          <Button
+            size="xs"
+            variant="ghost"
+            disabled={!canLink || pending}
+            onClick={() => void respond(true)}
+          >
+            Accept
+          </Button>
+          <Button
+            size="xs"
+            variant="ghost-muted"
+            disabled={!canDismiss || pending}
+            onClick={() => void respond(false)}
+          >
+            Dismiss
+          </Button>
+        </div>
+      )}
+    </AnimatedHeight>
+  );
+}
+
 /** Chips for a project's linked sources, each removable; nothing when none are linked. */
 export function ProjectSourceLinkChips(props: {
   readonly environmentId: EnvironmentId;
@@ -199,6 +264,7 @@ export function ProjectSourceLinks(props: {
 }) {
   return (
     <div className="space-y-2">
+      <ProjectOwnerSuggestion environmentId={props.environmentId} label={props.label} />
       <AnimatedHeight>
         <ProjectSourceLinkChips environmentId={props.environmentId} label={props.label} />
       </AnimatedHeight>

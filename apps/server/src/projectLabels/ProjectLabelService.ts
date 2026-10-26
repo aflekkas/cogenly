@@ -148,15 +148,6 @@ export class ProjectLabelService extends Context.Service<
      * synced project data does not change, since it names repositories by
      * remote and directory name.
      */
-    /**
-     * The project's home owner (its linked GitHub owner), recording the
-     * connected account's login as that link when the project has none, so
-     * the folders it derives are the same on every machine. Null when there
-     * is neither.
-     */
-    readonly ensureHomeOwner: (
-      id: ProjectLabelId,
-    ) => Effect.Effect<string | null, ProjectLabelError>;
     readonly bindRepositoryCheckout: (input: {
       readonly labelId: ProjectLabelId;
       readonly remote: string;
@@ -331,7 +322,11 @@ const make = Effect.gen(function* () {
       Effect.map((labels) => ({ labels })),
       Effect.mapError(failure("list")),
     );
-  const list = () => readLabels();
+  const list = () =>
+    readLabels().pipe(
+      Effect.flatMap(({ labels }) => Effect.forEach(labels, suggestHomeOwner)),
+      Effect.map((labels) => ({ labels })),
+    );
   const get = (id: ProjectLabelId) =>
     readLabels(id).pipe(
       Effect.flatMap(({ labels }) => {
@@ -670,8 +665,7 @@ const make = Effect.gen(function* () {
       yield* sql`INSERT INTO label_source_links(label_id, kind, owner, repo, created_at) VALUES (${labelId}, ${link.kind}, ${link.owner}, ${link.repo}, ${yield* now}) ON CONFLICT(label_id, kind, owner, repo) DO NOTHING`;
     },
   );
-  // The connected GitHub account's login, read once: the home owner of a
-  // project that links no owner. Optional like the resolver; null when
+  // The connected GitHub account's login, read once as a suggestion. Optional like the resolver; null when
   // GitHub is not connected or cannot be reached.
   const github = yield* Effect.serviceOption(GitHubRest.GitHubRest);
   const viewer = yield* Ref.make<string | null>(null);
@@ -688,19 +682,26 @@ const make = Effect.gen(function* () {
     if (login !== null) yield* Ref.set(viewer, login);
     return login;
   }).pipe(Effect.orElseSucceed(() => null));
-  const ensureHomeOwner = (id: ProjectLabelId) =>
+  const suggestHomeOwner = (label: ProjectLabelWithRepositories) =>
     Effect.gen(function* () {
-      const { label } = yield* get(id);
-      const current = projectHomeOwner(label.sourceLinks);
-      if (current !== null || label.archivedAt !== undefined) return current;
+      if (
+        projectHomeOwner(label.sourceLinks) !== null ||
+        label.archivedAt !== undefined ||
+        !label.repositories?.some(
+          (repo) =>
+            repo.remote !== null && repositoryRemoteParts(repo.remote)?.host === "github.com",
+        )
+      )
+        return label;
       const login = yield* viewerLogin;
-      const link =
-        login === null
-          ? undefined
-          : Option.getOrUndefined(decodeSourceLink({ kind: "github-owner", owner: login }));
-      if (link === undefined) return null;
-      yield* sourceLink({ id, link }, true);
-      return login;
+      if (login === null || Option.isNone(decodeSourceLink({ kind: "github-owner", owner: login })))
+        return label;
+      const document = yield* shared
+        .get("project", label.id)
+        .pipe(Effect.mapError(failure("read")));
+      return document?.fields.dismissedHomeOwnerSuggestion === login
+        ? label
+        : { ...label, suggestedHomeOwner: login };
     });
   const repository = (
     input: ProjectLabelRepository & { readonly remote?: string | null | undefined },
@@ -885,7 +886,11 @@ const make = Effect.gen(function* () {
       ),
     ),
     list,
-    read: get,
+    read: (id) =>
+      get(id).pipe(
+        Effect.flatMap(({ label }) => suggestHomeOwner(label)),
+        Effect.map((label) => ({ label })),
+      ),
     readActive,
     subscribe: () => subscribe(list, membershipLifecycle, clonePhaseChanges),
     getThreadLabels,
@@ -944,6 +949,10 @@ const make = Effect.gen(function* () {
           input,
           Effect.gen(function* () {
             const { label } = yield* get(input.id);
+            if (input.dismissHomeOwnerSuggestion !== undefined)
+              yield* shared.write("project", input.id, {
+                dismissedHomeOwnerSuggestion: input.dismissHomeOwnerSuggestion,
+              });
             yield* sql`UPDATE project_labels SET name = ${input.name ?? label.name}, color = ${input.color === undefined ? (label.color ?? null) : input.color}, description = ${input.description === undefined ? (label.description ?? null) : input.description}, instructions = ${input.instructions ?? label.instructions}, updated_at = ${yield* now} WHERE label_id = ${input.id}`;
             return yield* get(input.id);
           }),
@@ -1145,29 +1154,7 @@ const make = Effect.gen(function* () {
           return yield* get(id);
         }),
       ),
-    linkRepository: (input) =>
-      Effect.gen(function* () {
-        // The first GitHub repository of a project with no linked owner
-        // makes the connected account its home owner, so its folder is
-        // `repos/<repo>` on every machine rather than `repos/<owner>/<repo>`.
-        const rows = yield* sql<{
-          workspace_root: string;
-        }>`SELECT workspace_root FROM projection_projects WHERE project_id = ${input.repositoryId} AND deleted_at IS NULL`.pipe(
-          Effect.mapError(failure("linkRepository")),
-        );
-        const workspaceRoot = rows[0]?.workspace_root;
-        const identity =
-          Option.isNone(identities) || typeof workspaceRoot !== "string"
-            ? null
-            : yield* identities.value.resolve(workspaceRoot);
-        const remote =
-          normalizeRepositoryRemote(input.remote) ??
-          (identity === null ? null : normalizeRepositoryRemote(identity.locator.remoteUrl));
-        if (remote !== null && repositoryRemoteParts(remote)?.host === "github.com")
-          yield* ensureHomeOwner(input.labelId).pipe(Effect.ignore);
-        return yield* repository(input, true);
-      }),
-    ensureHomeOwner,
+    linkRepository: (input) => repository(input, true),
     unlinkRepository: (input) => repository(input, false),
     bindRepositoryCheckout: (input) =>
       mutate(

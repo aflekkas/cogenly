@@ -189,6 +189,8 @@ export type ProjectLabelRepositoryLink = typeof ProjectLabelRepositoryLink.Type;
 const projectLabelWithRepositoriesFields = {
   ...ProjectLabel.fields,
   possibleDuplicateIds: Schema.optionalKey(Schema.Array(ProjectLabelId)),
+  /** An unaccepted account suggestion; never grants access or changes folder names. */
+  suggestedHomeOwner: Schema.optionalKey(TrimmedNonEmptyString),
   repositoryIds: Schema.Array(ProjectId),
   // Older servers (and caches written by them) predate portable repo identity.
   repositories: Schema.optionalKey(Schema.Array(ProjectLabelRepositoryLink)),
@@ -538,6 +540,7 @@ export const ProjectLabelUpdateInput = Schema.Struct({
   color: Schema.optional(Schema.NullOr(ProjectLabelColor)),
   description: Schema.optional(Schema.NullOr(description)),
   instructions: Schema.optional(instructions),
+  dismissHomeOwnerSuggestion: Schema.optional(TrimmedNonEmptyString),
 });
 export type ProjectLabelUpdateInput = typeof ProjectLabelUpdateInput.Type;
 export const ProjectLabelKey = Schema.Struct({ id: ProjectLabelId });

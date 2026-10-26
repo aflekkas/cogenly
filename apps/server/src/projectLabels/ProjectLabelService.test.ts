@@ -789,15 +789,37 @@ describe("project labels", () => {
       }).pipe(Effect.provide(naming(null))),
     );
 
-    it.effect("makes the connected account the home owner of a project that links none", () =>
+    it.effect("suggests the connected account without linking until explicitly accepted", () =>
       Effect.gen(function* () {
         yield* seedCheckouts;
         const service = yield* Labels.ProjectLabelService;
         const { label } = yield* service.create({ name: "Personal" });
         yield* service.linkRepository({ labelId: label.id, repositoryId: repos.bartr });
         const read = (yield* service.read(label.id)).label;
-        expect(read.sourceLinks).toContainEqual({ kind: "github-owner", owner: "bartr-app" });
-        expect(folders(read)).toEqual({ "bartr-platform": "platform" });
+        expect(read.sourceLinks).not.toContainEqual({ kind: "github-owner", owner: "bartr-app" });
+        expect(read.suggestedHomeOwner).toBe("bartr-app");
+        expect(folders(read)).toEqual({ "bartr-platform": "bartr-app/platform" });
+        yield* service.linkSource({
+          id: label.id,
+          link: { kind: "github-owner", owner: "bartr-app" },
+        });
+        const accepted = (yield* service.read(label.id)).label;
+        expect(accepted.sourceLinks).toContainEqual({ kind: "github-owner", owner: "bartr-app" });
+        expect(accepted.suggestedHomeOwner).toBeUndefined();
+        expect(folders(accepted)).toEqual({ "bartr-platform": "platform" });
+        yield* service.unlinkSource({
+          id: label.id,
+          link: { kind: "github-owner", owner: "bartr-app" },
+        });
+        expect((yield* service.read(label.id)).label.suggestedHomeOwner).toBe("bartr-app");
+        yield* service.update({ id: label.id, dismissHomeOwnerSuggestion: "bartr-app" });
+        yield* service.update({ id: label.id, name: "Renamed" });
+        expect((yield* service.read(label.id)).label.suggestedHomeOwner).toBeUndefined();
+        expect((yield* service.list()).labels[0]?.suggestedHomeOwner).toBeUndefined();
+        expect((yield* service.read(label.id)).label.sourceLinks).not.toContainEqual({
+          kind: "github-owner",
+          owner: "bartr-app",
+        });
       }).pipe(Effect.provide(naming("bartr-app"))),
     );
   });
