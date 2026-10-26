@@ -27,6 +27,7 @@ export const makeSweep = Effect.gen(function* () {
           subagentIds: stale
             .filter((run) => run.kind === "subagent")
             .map((run) => NodeId.make(run.id)),
+          keepLiveSessions: true,
           reason: "Automatically settled stale work whose provider session is no longer live.",
         });
         const after = yield* threads.getThreadRecords(threadId, ["runs", "subagents"]);

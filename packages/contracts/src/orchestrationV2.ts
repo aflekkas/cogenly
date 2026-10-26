@@ -3613,6 +3613,11 @@ const OrchestrationV2InternalCommand = Schema.Union([
     subagentIds: Schema.Array(NodeId),
     /** Only these stale turns may be interrupted; completed or replaced turns are skipped. */
     runIds: Schema.optional(Schema.Array(RunId)),
+    /**
+     * Automatic sweeps leave runs whose provider session is still live alone. The
+     * user's Fix omits it, so it can stop a turn that is live but wedged.
+     */
+    keepLiveSessions: Schema.optional(Schema.Boolean),
     reason: Schema.String,
     /**
      * Child threads another machine runs whose Stop could not reach that machine. Their

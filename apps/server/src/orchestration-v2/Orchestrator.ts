@@ -10357,7 +10357,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const run = projection.runs.find((candidate) => candidate.id === runId);
         if (run === undefined || !["preparing", "starting", "running"].includes(run.status))
           continue;
-        if (yield* hasLiveSession(run.providerThreadId)) continue;
+        if (command.keepLiveSessions === true && (yield* hasLiveSession(run.providerThreadId)))
+          continue;
         const cancellation = yield* dispatchRunInterrupt(
           {
             type: "run.interrupt",
