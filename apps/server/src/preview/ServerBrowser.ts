@@ -159,6 +159,15 @@ export class ServerBrowserTabNotFoundError extends Schema.TaggedError<ServerBrow
 }
 
 const isTabNotFound = Schema.is(ServerBrowserTabNotFoundError);
+const isBrowserSetupError = Schema.is(
+  Schema.Union([
+    PreviewBrowser.PreviewBrowserInstallError,
+    PreviewBrowser.PreviewBrowserInstallingError,
+    PreviewBrowser.PreviewBrowserUnsupportedError,
+    PreviewBrowserHost.PreviewBrowserSandboxError,
+    PreviewBrowserHost.PreviewBrowserLibrariesError,
+  ]),
+);
 const isHostSetupError = Schema.is(
   Schema.Union([
     PreviewBrowserHost.PreviewBrowserSandboxError,
@@ -171,9 +180,13 @@ export class ServerBrowserLaunchError extends Schema.TaggedError<ServerBrowserLa
   { cause: Schema.Defect() },
 ) {
   override get message(): string {
-    return "The server preview browser could not start.";
+    return isBrowserSetupError(this.cause)
+      ? this.cause.message
+      : "The server preview browser could not start. Open machine health to check browser setup.";
   }
 }
+
+const isLaunchError = Schema.is(ServerBrowserLaunchError);
 
 export type ServerBrowserViewerOutput =
   | {
@@ -610,7 +623,7 @@ const make = Effect.gen(function* () {
         PreviewBrowserHost.diagnoseLaunchFailure({
           executable,
           setupCommand,
-          output: /sandboxing failed/i.test(String(cause))
+          output: /sandboxing failed|No usable sandbox/i.test(String(cause))
             ? PreviewBrowserHost.NO_SANDBOX_SIGNATURE
             : "",
         }),
@@ -1565,7 +1578,10 @@ const make = Effect.gen(function* () {
       if (!snapshot) return yield* new ServerBrowserTabNotFoundError({ threadId, tabId });
       return yield* Effect.tryPromise({
         try: () => ensureTab(snapshot),
-        catch: (cause) => (isTabNotFound(cause) ? cause : new ServerBrowserLaunchError({ cause })),
+        catch: (cause) =>
+          isTabNotFound(cause) || isLaunchError(cause)
+            ? cause
+            : new ServerBrowserLaunchError({ cause }),
       });
     });
 

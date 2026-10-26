@@ -105,6 +105,7 @@ describe("settingsPagesForAlert", () => {
       "canary",
       "chat-terminal-sandbox",
       "agent-processes",
+      "preview-browser",
     ] as const) {
       expect(settingsPagesForAlert(alert({ checkId }))).toEqual(["/settings/machines"]);
     }

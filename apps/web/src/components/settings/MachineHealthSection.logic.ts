@@ -44,6 +44,7 @@ export const HEALTH_CHECK_LABELS = {
   "computer-use": "Computer use",
   "chat-terminal-sandbox": "Chat command sandbox",
   "agent-processes": "Agent processes",
+  "preview-browser": "Preview browser",
 } as const satisfies Record<MachineHealthCheckId, string>;
 
 /**

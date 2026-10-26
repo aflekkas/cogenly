@@ -127,6 +127,11 @@ export class PreviewBrowserUnsupportedError extends Schema.TaggedError<PreviewBr
   }
 }
 
+export interface PreviewBrowserStatus {
+  readonly state: "ready" | "missing" | "installing" | "failed" | "unsupported";
+  readonly detail: string;
+}
+
 export class PreviewBrowser extends Context.Service<
   PreviewBrowser,
   {
@@ -141,6 +146,8 @@ export class PreviewBrowser extends Context.Service<
     >;
     /** The installed headless shell, if any. Never starts or waits on an install. */
     readonly installed: Effect.Effect<Option.Option<string>>;
+    /** Installation state without starting a download, for machine health. */
+    readonly status: Effect.Effect<PreviewBrowserStatus>;
   }
 >()("cogenly-server/preview/PreviewBrowser") {}
 
@@ -190,6 +197,7 @@ export const makePreviewBrowser = Effect.fn("PreviewBrowser.make")(function* (
     platform === "win32" ? "chrome-headless-shell.exe" : "chrome-headless-shell";
   const gate = yield* Semaphore.make(1);
   let state: InstallState = { _tag: "idle" };
+  let lastFailure: PreviewBrowserInstallError | undefined;
   const progress = { downloadedBytes: 0, unpacking: false };
 
   // The version directory appears by one rename of a fully unpacked tree, so a
@@ -384,6 +392,7 @@ export const makePreviewBrowser = Effect.fn("PreviewBrowser.make")(function* (
           return state;
         }
         const done = yield* Deferred.make<string, PreviewBrowserInstallError>();
+        lastFailure = undefined;
         progress.downloadedBytes = 0;
         progress.unpacking = false;
         const installing: InstallState = { _tag: "installing", done };
@@ -402,6 +411,7 @@ export const makePreviewBrowser = Effect.fn("PreviewBrowser.make")(function* (
                           () => new PreviewBrowserInstallError({ detail: "The install stopped." }),
                         ),
                       };
+                  lastFailure = state._tag === "failed" ? state.error : undefined;
                 }),
               )
               .pipe(Effect.andThen(Deferred.done(done, exit))),
@@ -453,7 +463,27 @@ export const makePreviewBrowser = Effect.fn("PreviewBrowser.make")(function* (
 
   const installed = release === null ? Effect.succeedNone : installedExecutable(release);
 
-  return PreviewBrowser.of({ executable, installed });
+  const status: PreviewBrowser["Service"]["status"] = Effect.gen(function* () {
+    if (release === null)
+      return {
+        state: "unsupported",
+        detail: new PreviewBrowserUnsupportedError({ platform, arch }).message,
+      };
+    if (Option.isSome(yield* installed))
+      return { state: "ready", detail: "The preview browser is installed." };
+    if (state._tag === "installing")
+      return {
+        state: "installing",
+        detail: new PreviewBrowserInstallingError({ ...progress, totalBytes: release.bytes })
+          .message,
+      };
+    if (lastFailure !== undefined) return { state: "failed", detail: lastFailure.message };
+    return {
+      state: "missing",
+      detail: "Cogenly downloads its browser on first use. Choose Fix to install it now.",
+    };
+  });
+  return PreviewBrowser.of({ executable, installed, status });
 });
 
 export const layer = Layer.effect(

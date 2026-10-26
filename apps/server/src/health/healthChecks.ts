@@ -5,6 +5,7 @@
  * never credentials, prompts, error output or file contents: reports cross
  * the peer link and feed external alerts.
  */
+import type { PreviewBrowserStatus } from "../preview/PreviewBrowser.ts";
 import {
   MACHINE_HEALTH_FIX_MAX_ITEMS,
   isProviderAvailable,
@@ -1047,4 +1048,31 @@ export function stuckQueuesItems(queues: ReadonlyArray<ActiveRun>): MachineHealt
     target: { _tag: "thread", threadId: queue.threadId },
     fix: "send-queue",
   }));
+}
+
+/** Installation is per Cogenly home, independent of Playwright's browser cache. */
+export function previewBrowserCheck(
+  input: PreviewBrowserStatus & {
+    readonly hostProblem?: string;
+  },
+): MachineHealthCheck {
+  if (input.state === "ready" && input.hostProblem === undefined)
+    return check("preview-browser", "The preview browser is ready", []);
+  const host = input.hostProblem !== undefined;
+  const title = host
+    ? "The preview browser needs host setup"
+    : input.state === "installing"
+      ? "Installing the preview browser"
+      : input.state === "missing"
+        ? "The preview browser is not installed yet"
+        : "The preview browser needs attention";
+  return check("preview-browser", title, [
+    item({
+      key: host ? "preview-browser:host" : "preview-browser:install",
+      status: input.state === "missing" || input.state === "installing" ? "warn" : "fail",
+      title,
+      detail: input.hostProblem ?? input.detail,
+      fix: input.state === "unsupported" ? null : "setup-browser",
+    }),
+  ]);
 }
