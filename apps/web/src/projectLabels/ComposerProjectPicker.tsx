@@ -18,7 +18,6 @@ import {
   ComboboxSearchInput,
   ComboboxTrigger,
 } from "../components/ui/combobox";
-import { InlineButton } from "../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import type { DraftId } from "../composerDraftStore";
 import { cn } from "../lib/utils";
@@ -35,12 +34,13 @@ import {
   threadForksIntoProjects,
   threadProjectFolderId,
 } from "./projectLabels.logic";
-import { HeroProjectSuffixText } from "./HeroProjectSuffix";
+import { HeroProjectSuffix } from "./HeroProjectSuffix";
 import { HERO_INLINE_ICON_STYLE, ProjectFolderIcon } from "./ProjectFolderMark";
 import { ProjectPickerRow } from "./ProjectPickerRow";
 import { useComposerProjectFolder } from "./useComposerProjectFolder";
 import { useMoveThreadToFolder } from "./useMoveThreadToFolder";
 import { pickNoProjectForWork } from "./workNoProjectPicks";
+import { HeroName, HeroPickerButton } from "../components/chat/HeroHeadline";
 import { WorkHeroCrumbText } from "../components/chat/WorkHeroSentence";
 
 type ProjectOption =
@@ -281,46 +281,27 @@ export function ComposerProjectPicker(props: {
       {isHeadline ? (
         // Named mid-sentence: the visible project name is the accessible name.
         // It shrinks (truncating) before the breadcrumb outgrows its line.
-        <ComboboxTrigger
-          disabled={props.disabled}
-          data-hero-project-picker=""
-          render={
-            <InlineButton
-              tone="picker"
-              weight="normal"
-              className="pointer-events-auto min-w-0 max-w-64 shrink align-baseline"
-            />
-          }
-        >
-          <span className={cn("block truncate", current === null && "text-muted-foreground")}>
-            {current ? headlineIcon : null}
-            {current?.label.name ?? "No project"}
-          </span>
-        </ComboboxTrigger>
-      ) : isHero ? (
-        // The headline owns the fade; the suffix only renders its reserved name slot.
-        <ComboboxTrigger
-          disabled={props.disabled}
-          aria-label={current ? `In ${current.label.name}. Move to project` : undefined}
-          aria-hidden={current === null || undefined}
-          tabIndex={current === null ? -1 : undefined}
-          data-hero-project-suffix=""
-          render={
-            <button
-              type="button"
-              className={cn(
-                "group/hero-suffix pointer-events-auto inline-block max-w-full cursor-pointer rounded-sm align-baseline text-foreground outline-none focus-visible:outline-2 focus-visible:outline-ring",
-                current === null && "pointer-events-none",
-              )}
-            />
-          }
-        >
-          <HeroProjectSuffixText
-            name={current?.label.name ?? null}
-            project={current ?? null}
-            open={open}
+        <ComboboxTrigger disabled={props.disabled} render={<HeroPickerButton />}>
+          <HeroName
+            text={current?.label.name ?? "No project"}
+            placeholder={current === null}
+            icon={headlineIcon}
+            chevron
           />
         </ComboboxTrigger>
+      ) : isHero ? (
+        current === null ? null : (
+          // " · in <project>" after the greeting; the headline owns the fade.
+          <HeroProjectSuffix>
+            <ComboboxTrigger
+              disabled={props.disabled}
+              aria-label={`In ${current.label.name}. Move to project`}
+              render={<HeroPickerButton />}
+            >
+              <HeroName text={current.label.name} icon={headlineIcon} chevron />
+            </ComboboxTrigger>
+          </HeroProjectSuffix>
+        )
       ) : (
         <Tooltip>
           <TooltipTrigger
