@@ -72,7 +72,7 @@ export function connectionStatusText(connection: EnvironmentConnectionPresentati
     case "connected":
       return "Connected";
     case "unsupported":
-      return "Client not supported";
+      return "Not compatible with this app";
     case "error":
       return connection.error
         ? `Connection failed. Reason: ${connection.error}`

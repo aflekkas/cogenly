@@ -79,6 +79,7 @@ import {
 } from "./ConnectionsSettings.logic";
 import {
   SettingsDisclosure,
+  SettingsEmpty,
   SettingsNote,
   SettingsRow,
   SettingsSection,
@@ -141,7 +142,6 @@ import { Alert, AlertDescription } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { DisclosureChevron } from "../ui/disclosure";
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { AnimatedHeight } from "../AnimatedHeight";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { Textarea } from "../ui/textarea";
@@ -1078,7 +1078,7 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
         disabled={isRevokingOtherClients || !canRevokeOtherClients(clientSessions)}
         onClick={() => void onRevokeOtherClients()}
       >
-        {isRevokingOtherClients ? "Revoking…" : "Revoke others"}
+        {isRevokingOtherClients ? "Revoking…" : "Revoke all others"}
       </Button>
       <Dialog
         open={dialogOpen}
@@ -1096,7 +1096,7 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
           render={
             <Button size="xs" variant="default">
               <PlusIcon className="size-3" />
-              Create link
+              Pair a device
             </Button>
           }
         />
@@ -1104,8 +1104,7 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
           <DialogHeader>
             <DialogTitle>Create pairing link</DialogTitle>
             <DialogDescription>
-              Generate a one-time link that another device can use to pair with this backend as an
-              authorized client.
+              Make a one-time link that another device opens to get access to this machine.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>
@@ -1420,7 +1419,7 @@ function savedBackendStatus(environment: EnvironmentPresentation): {
       };
     // Not a failure: the machine is fine, this build just cannot talk to it.
     case "unsupported":
-      return { text: "Client not supported", tone: "muted" };
+      return { text: "Not compatible with this app", tone: "muted" };
     case "error":
       return {
         text: connection.error ? `Connection failed: ${connection.error}` : "Connection failed",
@@ -1689,7 +1688,7 @@ function SavedBackendListRow({
           }
         />
         <TooltipPopup side="top">
-          {unsupported ? "Client not supported" : enabled ? "Switch off" : "Switch on"}
+          {unsupported ? "Not compatible with this app" : enabled ? "Switch off" : "Switch on"}
         </TooltipPopup>
       </Tooltip>
       <Menu>
@@ -1949,39 +1948,48 @@ function CloudLinkRow({
   return <ConfiguredCloudLinkRow canManageRelay={canManageRelay} />;
 }
 
-function EmptyRemoteEnvironments({ cloudEnabled = true }: { readonly cloudEnabled?: boolean }) {
+function EmptyRemoteEnvironments({
+  cloudEnabled = true,
+  onConnect,
+}: {
+  readonly cloudEnabled?: boolean;
+  readonly onConnect: () => void;
+}) {
   return (
-    <Empty className="min-h-52">
-      <EmptyMedia>
-        <ChevronsLeftRightEllipsisIcon />
-      </EmptyMedia>
-      <EmptyHeader>
-        <EmptyTitle>No other machines connected</EmptyTitle>
-        <EmptyDescription>
-          {cloudEnabled
-            ? "Choose “Connect a machine” to use another machine running Cogenly from this app, or connect one from Cogenly Connect."
-            : "Choose “Connect a machine” to use another machine running Cogenly from this app."}
-        </EmptyDescription>
-      </EmptyHeader>
-    </Empty>
+    <SettingsEmpty
+      icon={<ChevronsLeftRightEllipsisIcon />}
+      title="No other machines connected"
+      description={
+        cloudEnabled
+          ? "Use another machine running Cogenly from this app, by its address, over SSH, or through Cogenly Connect."
+          : "Use another machine running Cogenly from this app, by its address or over SSH."
+      }
+      action={
+        <Button size="sm" variant="outline" onClick={onConnect}>
+          Connect a machine
+        </Button>
+      }
+    />
   );
 }
 
 function CloudRemoteEnvironmentRows({
   primaryEnvironmentId,
   savedEnvironments,
+  onConnect,
 }: {
   readonly primaryEnvironmentId: EnvironmentId | null;
   readonly savedEnvironments: ReadonlyArray<EnvironmentPresentation>;
+  readonly onConnect: () => void;
 }) {
   return hasCloudPublicConfig() ? (
     <CloudEnvironmentConnectRows
       primaryEnvironmentId={primaryEnvironmentId}
       savedEnvironments={savedEnvironments}
-      empty={<EmptyRemoteEnvironments />}
+      empty={<EmptyRemoteEnvironments onConnect={onConnect} />}
     />
   ) : savedEnvironments.length === 0 ? (
-    <EmptyRemoteEnvironments cloudEnabled={false} />
+    <EmptyRemoteEnvironments cloudEnabled={false} onConnect={onConnect} />
   ) : null;
 }
 
@@ -3390,7 +3398,7 @@ export function ConnectionsSettings() {
             }
           />
         ) : desktopServerExposureState ? (
-          "Limited to this machine."
+          "Only this machine can connect."
         ) : (
           "Loading…"
         )
@@ -3408,12 +3416,12 @@ export function ConnectionsSettings() {
       title={searchableSetting("network-access").title}
       description={
         desktopBridge
-          ? "This connection cannot view or change network exposure."
+          ? "This connection can't view or change network access."
           : currentAuthPolicy === "remote-reachable"
-            ? "Remote access is already configured. Change network exposure where the server starts."
+            ? "Other devices can already connect. Change this where the server starts."
             : currentAuthPolicy === "loopback-browser"
-              ? "Only this machine can connect. Restart with a non-loopback host for remote pairing."
-              : "Network exposure information is unavailable."
+              ? "Only this machine can connect. To let other devices in, start the server with a network address."
+              : "Network access details aren't available."
       }
       control={
         !desktopBridge &&
@@ -3431,8 +3439,7 @@ export function ConnectionsSettings() {
               }
             />
             <TooltipPopup side="top">
-              Network exposure changes restart the backend and must be controlled where the server
-              process is launched.
+              Changing network access restarts the server, so change it where the server starts.
             </TooltipPopup>
           </Tooltip>
         ) : undefined
@@ -3529,24 +3536,7 @@ export function ConnectionsSettings() {
                 }
               />
             ) : null}
-            {canManageLocalBackend && desktopBridge ? (
-              <>
-                {renderNetworkAccessRow()}
-                {renderEndpointRows("endpoint-rail")}
-                {renderTailscaleRow()}
-                {renderWslRow()}
-                {canReadRelay || canManageRelay ? (
-                  <CloudLinkRow canReadRelay={canReadRelay} canManageRelay={canManageRelay} />
-                ) : null}
-              </>
-            ) : canManageLocalBackend ? (
-              <>
-                {renderDisabledNetworkAccessRow()}
-                {canReadRelay || canManageRelay ? (
-                  <CloudLinkRow canReadRelay={canReadRelay} canManageRelay={canManageRelay} />
-                ) : null}
-              </>
-            ) : null}
+            {canManageLocalBackend && desktopBridge ? renderWslRow() : null}
             {primaryEnvironment ? (
               <SettingsDisclosure title="Permissions">
                 <div className="px-3 sm:px-4">
@@ -3559,10 +3549,28 @@ export function ConnectionsSettings() {
             ) : null}
           </SettingsSection>
 
+          {/* How other devices reach this machine, apart from what the machine itself runs. */}
+          {canManageLocalBackend ? (
+            <SettingsSection id="connections-remote-access" title="Remote access">
+              {desktopBridge ? (
+                <>
+                  {renderNetworkAccessRow()}
+                  {renderEndpointRows("endpoint-rail")}
+                  {renderTailscaleRow()}
+                </>
+              ) : (
+                renderDisabledNetworkAccessRow()
+              )}
+              {canReadRelay || canManageRelay ? (
+                <CloudLinkRow canReadRelay={canReadRelay} canManageRelay={canManageRelay} />
+              ) : null}
+            </SettingsSection>
+          ) : null}
+
           {canReadAccess || canWriteAccess ? (
             <FoldedSettingsSection
               id="authorized-clients"
-              title="Authorized clients"
+              title="Devices with access"
               summary={summarizeAuthorizedClients(
                 desktopClientSessions,
                 visibleDesktopPairingLinks,
@@ -3595,7 +3603,7 @@ export function ConnectionsSettings() {
                   renderAuthorizedClients("current")
                 ) : (
                   <SettingsNote>
-                    This connection can create access links but cannot view authorized clients.
+                    This connection can make pairing links but can't see which devices have access.
                   </SettingsNote>
                 )}
               </ScrollArea>
@@ -3859,6 +3867,11 @@ export function ConnectionsSettings() {
         <CloudRemoteEnvironmentRows
           primaryEnvironmentId={primaryEnvironmentId}
           savedEnvironments={savedEnvironments}
+          onConnect={() => {
+            setRouteTarget(null);
+            setSavedBackendError(null);
+            setAddBackendDialogOpen(true);
+          }}
         />
       </SettingsSection>
       <RenameEnvironmentDialog
