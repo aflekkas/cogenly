@@ -41,7 +41,22 @@ describe("persistent agents", () => {
       yield* sql`INSERT INTO agent_approvals(id, agent_id, action_json, status, requested_at) VALUES ('approval:delete', ${agent.id}, '{}', 'pending', ${agent.createdAt})`;
       yield* sql`INSERT INTO agent_run_actions(id, agent_id, kind, at) VALUES ('action:delete', ${agent.id}, 'read', ${agent.createdAt})`;
       yield* sql`INSERT INTO agent_run_threads(thread_id, agent_id, trigger_kind) VALUES ('run:delete', ${agent.id}, 'owner')`;
+      for (const status of ["proposed", "open"]) {
+        yield* sql`INSERT INTO commitments(id, agent_id, status, payload_json, created_at, updated_at) VALUES (${`commitment:${status}`}, ${agent.id}, ${status}, ${JSON.stringify({ agentId: agent.id, owner: { kind: "agent", agentId: agent.id } })}, ${agent.createdAt}, ${agent.createdAt})`;
+      }
       expect(yield* store.delete(agent.id)).toBe(true);
+      const commitments = yield* sql<{
+        id: string;
+        agent_id: string | null;
+        payload_json: string;
+      }>`SELECT * FROM commitments`;
+      expect(commitments).toHaveLength(1);
+      expect(commitments[0]?.id).toBe("commitment:open");
+      expect(commitments[0]?.agent_id).toBeNull();
+      expect(JSON.parse(commitments[0]!.payload_json)).toMatchObject({
+        agentId: null,
+        owner: { kind: "user" },
+      });
       expect(yield* sql`SELECT * FROM agent_approvals`).toEqual([]);
       expect(yield* sql`SELECT * FROM agent_run_actions`).toEqual([]);
       expect(yield* sql`SELECT * FROM agent_run_threads`).toEqual([]);
@@ -275,3 +290,11 @@ it.effect("job reservations stop at the conversation handoff fence and after own
     expect(yield* store.reserve(agent.id)).toBe(true);
   }).pipe(Effect.provide(layer)),
 );
+
+it("excludes internal kickoff text from background context", () => {
+  const result = conversationCarryOver("", [
+    { id: "agent-kickoff:one", role: "user", text: "hidden setup" },
+    { id: "owner:one", role: "user", text: "Watch CI" },
+  ]);
+  expect(result.recent).toBe("user: Watch CI");
+});

@@ -706,6 +706,7 @@ function AgentRow({
               }
             >
               <PopoverTrigger
+                nativeButton={false}
                 render={
                   <span className="flex size-8 shrink-0 items-center justify-center" aria-hidden />
                 }
@@ -781,17 +782,17 @@ function AgentRow({
                   >
                     <Tooltip>
                       <TooltipTrigger
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          void openMenu({ x: rect.right, y: rect.bottom });
+                        }}
+                        onPointerDown={(event) => event.stopPropagation()}
                         render={
                           <button
                             type="button"
                             aria-label={`More for ${agent.name}`}
                             aria-haspopup="menu"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              const rect = event.currentTarget.getBoundingClientRect();
-                              void openMenu({ x: rect.right, y: rect.bottom });
-                            }}
-                            onPointerDown={(event) => event.stopPropagation()}
                             className="inline-flex cursor-pointer items-center rounded-md bg-transparent px-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
                           />
                         }

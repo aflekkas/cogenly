@@ -249,3 +249,7 @@ export class AgentError extends Schema.TaggedError<AgentError>()("AgentError", {
   message: Schema.String,
   cause: Schema.optional(Schema.Defect()),
 }) {}
+
+/** App-authored setup and retry inputs are never owner-authored conversation content. */
+export const isAgentInternalMessage = (id: string | undefined): boolean =>
+  id?.startsWith("agent-kickoff:") === true || id?.startsWith("agent-fallback:") === true;

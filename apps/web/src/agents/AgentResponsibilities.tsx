@@ -1,3 +1,4 @@
+import { scheduledTaskLastRun } from "~/components/settings/scheduledTasksSettings.logic";
 import { DisclosureChevron } from "~/components/ui/disclosure";
 import {
   BellIcon,
@@ -294,7 +295,13 @@ export function AgentResponsibilities({
                   ? describeSchedule(trigger.schedule, filterNames)
                   : scheduleInWords(trigger.schedule)
               }
-              detail={`${trigger.title}${trigger.enabled ? "" : " · Paused"}`}
+              detail={[
+                trigger.title,
+                trigger.enabled ? null : "Paused",
+                scheduledTaskLastRun(trigger.lastRunStatus ?? "never", null)?.text,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
               className="flex-1"
               disabled={!canWrite}
               onClick={() => setEditing({ kind: "trigger", id: trigger.id })}

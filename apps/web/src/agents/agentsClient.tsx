@@ -1,3 +1,4 @@
+import { threadRuntimeIsActive } from "@cogenly/client-runtime/state/models";
 import { useContext, useSyncExternalStore, useCallback, useRef, type ComponentType } from "react";
 import type {
   AgentApproval,
@@ -27,6 +28,7 @@ import type {
   CommitmentHistoryView,
 } from "./agents.types";
 import {
+  agentConversationState,
   agentAttachmentIdentity,
   agentAttachmentSupport,
   agentContactKey,
@@ -424,6 +426,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
                 title: task.title,
                 prompt: task.prompt,
                 schedule: task.schedule,
+                lastRunStatus: task.lastRunStatus,
                 enabled: task.enabled,
               }));
             const workThreads = threads.filter((thread) => {
@@ -447,8 +450,8 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
             const state =
               approvals.length || waitingInRun || cached?.requests.length
                 ? "blocked"
-                : shell?.runtime?.activeRunId ||
-                    workThreads.some((thread) => thread.runtime?.activeRunId)
+                : threadRuntimeIsActive(shell?.runtime) ||
+                    workThreads.some((thread) => threadRuntimeIsActive(thread.runtime))
                   ? "thinking"
                   : "idle";
             return {
@@ -460,7 +463,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
               ownerOnline:
                 machines?.find(
                   (machine) => machine.environmentId === (record.ownerMachine ?? environmentId),
-                )?.online ?? environmentIds.includes(record.ownerMachine ?? environmentId),
+                )?.online ?? idsKey.split("\0").includes(record.ownerMachine ?? environmentId),
               state,
               updatedAt: shell?.updatedAt ?? record.updatedAt,
               // A text that only carried files has no words to preview.
@@ -913,6 +916,13 @@ function useLiveAgentWorkspace(agent: AgentContact): AgentWorkspaceView {
   );
   const refreshCommitments = commitments.refresh;
   const refreshActivity = activity.refresh;
+  const activityRevision = `${agent.updatedAt}:${agent.state}`;
+  const lastActivityRevision = useRef(activityRevision);
+  useEffect(() => {
+    if (lastActivityRevision.current === activityRevision) return;
+    lastActivityRevision.current = activityRevision;
+    refreshActivity();
+  }, [activityRevision, refreshActivity]);
   const refresh = useCallback(() => {
     refreshCommitments();
     refreshActivity();
@@ -984,6 +994,14 @@ export function useAgentConversation(agent: AgentContact | null): AgentContact |
       ? agentsRpc.activity({ environmentId: agent.environmentId, input: { id: agent.id } })
       : null,
   );
+  const refreshRuns = activity.refresh;
+  const runsRevision = agent === null ? null : `${agent.id}:${agent.updatedAt}:${agent.state}`;
+  const lastRunsRevision = useRef(runsRevision);
+  useEffect(() => {
+    if (lastRunsRevision.current === runsRevision) return;
+    lastRunsRevision.current = runsRevision;
+    if (runsRevision !== null) refreshRuns();
+  }, [runsRevision, refreshRuns]);
   const activeWork = activity.data?.runs.find(
     (run) => run.status === "running" || run.status === "starting",
   );
@@ -1093,14 +1111,14 @@ export function useAgentConversation(agent: AgentContact | null): AgentContact |
         loadingEarlierMessages: state.history.loading,
         historyError: state.history.error,
         conversationError: Option.getOrNull(state.error),
-        state: content.requests.length
-          ? "blocked"
-          : projection?.runs.some((run) =>
-                ["preparing", "starting", "running"].includes(run.status),
-              ) ||
-              content.activity.some((run) => run.status === "running" || run.status === "starting")
-            ? "thinking"
-            : agent.state,
+        state: agentConversationState({
+          needsInput: content.requests.length > 0 || agent.approvals.length > 0,
+          runStatuses: [
+            ...(projection?.runs ?? []).map((run) => run.status),
+            ...(workProjection?.runs ?? []).map((run) => run.status),
+          ],
+          prior: agent.state,
+        }),
       }
     : agent;
 }

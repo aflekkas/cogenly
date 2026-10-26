@@ -748,7 +748,7 @@ const make = Effect.gen(function* () {
         }>`SELECT r.*, CASE WHEN r.ordinal = 1 THEN w.trigger_context_json END AS trigger_context_json, CASE WHEN r.ordinal = 1 THEN COALESCE(t.trigger_kind, CASE WHEN w.run_id IS NOT NULL THEN 'trigger' ELSE 'owner_message' END) ELSE 'owner_message' END AS trigger_kind,
         (SELECT substr(json_extract(m.payload_json, '$.text'), 1, 1200) FROM orchestration_v2_projection_messages m WHERE m.thread_id = r.thread_id AND m.run_id = r.run_id AND m.role = 'assistant' AND m.streaming = 0 ORDER BY m.created_at DESC LIMIT 1) AS summary
         FROM orchestration_v2_projection_runs r LEFT JOIN agent_run_threads t ON t.thread_id = r.thread_id LEFT JOIN agent_work_runs w ON w.work_thread_id = r.thread_id
-        WHERE r.thread_id = ${agent.conversationThreadId} OR t.agent_id = ${agentId} OR w.agent_id = ${agentId} ORDER BY r.requested_at DESC, r.run_id LIMIT 100`;
+        WHERE (r.thread_id = ${agent.conversationThreadId} OR t.agent_id = ${agentId} OR w.agent_id = ${agentId}) AND COALESCE(json_extract(r.payload_json, '$.userMessageId'), '') NOT LIKE 'agent-kickoff:%' ORDER BY r.requested_at DESC, r.run_id LIMIT 100`;
         const runs = yield* Effect.forEach(rows, (r) =>
           Effect.gen(function* () {
             const data = yield* decodeJsonRecord(r.payload_json);

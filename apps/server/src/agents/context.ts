@@ -1,12 +1,13 @@
-import type { ModelSelection } from "@cogenly/contracts";
+import { isAgentInternalMessage, type ModelSelection } from "@cogenly/contracts";
 
 export const CONVERSATION_RECENT_MESSAGES = 20;
 export const CONVERSATION_SESSION_RUNS = 40;
 
 export function conversationCarryOver(
   previous: string,
-  messages: ReadonlyArray<{ role: string; text: string }>,
+  messages: ReadonlyArray<{ id?: string; role: string; text: string }>,
 ) {
+  messages = messages.filter((message) => !isAgentInternalMessage(message.id));
   const older = messages
     .slice(0, -CONVERSATION_RECENT_MESSAGES)
     .map((m) => `${m.role}: ${m.text.slice(0, 500)}`)
