@@ -88,7 +88,7 @@ it.effect("explains a disabled provider when sending attachments", () =>
       .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
     expect(result.at(-1)?.result).toMatchObject({
       code: "invalid_request",
-      message: expect.stringContaining('Provider instance "codex" is disabled'),
+      message: expect.stringContaining('Provider instance "codex" is turned off'),
     });
   }).pipe(
     Effect.provide(
