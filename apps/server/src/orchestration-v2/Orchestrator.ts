@@ -9550,11 +9550,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           const live =
             sessionId !== null &&
             sessionId !== undefined &&
-            Option.isSome(
-              yield* providerSessions
-                .get(sessionId)
-                .pipe(Effect.orElseSucceed(() => Option.none())),
-            );
+            (yield* providerSessions.isLive(sessionId));
           liveness.set(providerThreadId, live);
           return live;
         });
@@ -10203,6 +10199,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const dispatchStaleWorkSettle = (
     command: Extract<OrchestrationV2InternalCommand, { readonly type: "thread.stale-work.settle" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
   ) =>
     Effect.gen(function* () {
       const projection = yield* projectionStore
@@ -10217,6 +10214,26 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ),
         );
       if (projection.thread.deletedAt !== null) return;
+      // Dispatch holds the thread lock. A report or service read can be stale:
+      // only the exact turns it named, still in flight here, may be interrupted.
+      let cancelledStart = false;
+      for (const runId of new Set(command.runIds ?? [])) {
+        const run = projection.runs.find((candidate) => candidate.id === runId);
+        if (run === undefined || !["preparing", "starting", "running"].includes(run.status))
+          continue;
+        const cancellation = yield* dispatchRunInterrupt(
+          {
+            type: "run.interrupt",
+            commandId: command.commandId,
+            threadId: command.threadId,
+            runId,
+            reason: command.reason,
+          },
+          events,
+          effects,
+        );
+        cancelledStart ||= cancellation !== undefined;
+      }
       const hasLiveSession = (
         providerThreadId: OrchestrationV2ProviderThread["id"] | null | undefined,
       ) =>
@@ -10225,9 +10242,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             (candidate) => candidate.id === providerThreadId,
           )?.providerSessionId;
           if (sessionId === null || sessionId === undefined) return false;
-          return Option.isSome(
-            yield* providerSessions.get(sessionId).pipe(Effect.orElseSucceed(() => Option.none())),
-          );
+          return yield* providerSessions.isLive(sessionId);
         });
       const unreachable = new Set(command.unreachableChildThreadIds ?? []);
       const childIsLive = (childThreadId: ThreadId | null) =>
@@ -10273,6 +10288,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }).pipe(mapDispatchError(command));
         yield* Ref.update(events, (current) => [...current, ...ended]);
       }
+      return cancelledStart
+        ? {
+            effectTypes: ["provider-turn.start", "provider-turn.restart"] as const,
+            reason: command.reason,
+          }
+        : undefined;
     });
 
   const dispatchSubagentStop = (
@@ -10370,6 +10391,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           "runs",
           "nodes",
           "providerThreads",
+          "providerSessions",
           "providerTurns",
           "messages",
           "attempts",
@@ -10518,10 +10540,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             (candidate) => candidate.id === turn.providerThreadId,
           );
           if (owner === undefined || owner.providerSessionId === null) continue;
-          const ownerSession = yield* providerSessions
-            .get(owner.providerSessionId)
-            .pipe(Effect.orElseSucceed(() => Option.none()));
-          if (Option.isNone(ownerSession)) continue;
+          if (!(yield* providerSessions.isLive(owner.providerSessionId))) continue;
           otherProviderInterrupts.push({
             id: `effect:${command.commandId}:provider-turn.interrupt:${turn.id}`,
             commandId: command.commandId,
@@ -10666,20 +10685,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
       // A dead session cannot report a terminal event for either a running
       // turn or a settled turn's background work. Stop ends both locally.
-      const sessionOption =
-        providerThread.providerSessionId === null
-          ? Option.none()
-          : yield* providerSessions.get(providerThread.providerSessionId).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new OrchestratorProviderAdapterError({
-                    commandId: command.commandId,
-                    providerInstanceId: run.providerInstanceId,
-                    cause,
-                  }),
-              ),
-            );
-      if (Option.isNone(sessionOption)) {
+      const sessionIsLive =
+        providerThread.providerSessionId !== null &&
+        (yield* providerSessions.isLive(providerThread.providerSessionId));
+      if (!sessionIsLive) {
         yield* emitEvent({
           type: "turn-item.updated",
           threadId: command.threadId,
@@ -10710,12 +10719,21 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         });
       }
       const providerSessionId = providerThread.providerSessionId;
+      const session = projection.providerSessions.find(
+        (candidate) => candidate.id === providerSessionId,
+      );
+      if (session === undefined)
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Provider session ${providerSessionId} is missing.`,
+        });
       yield* enforceCommandPolicy(command)(
         commandPolicy.ensureInterrupt({
           commandId: command.commandId,
           threadId: command.threadId,
           providerInstanceId: run.providerInstanceId,
-          capabilities: sessionOption.value.providerSession.capabilities,
+          capabilities: session.capabilities,
         }),
       );
 
@@ -12335,7 +12353,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         yield* dispatchBackgroundWorkSettle(command, events, effects);
         break;
       case "thread.stale-work.settle":
-        yield* dispatchStaleWorkSettle(command, events);
+        cancelUnsettledEffects = yield* dispatchStaleWorkSettle(command, events, effects);
         break;
       case "thread.fork":
         yield* dispatchThreadFork(command, events);

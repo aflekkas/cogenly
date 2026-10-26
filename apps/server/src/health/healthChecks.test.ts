@@ -3,7 +3,10 @@ import {
   EnvironmentId,
   IntegrationId,
   type IntegrationSummary,
-  type MachineHealthCheck,
+  MachineHealthCheck,
+  MachineHealthItem,
+  MachineHealthReport,
+  MachineHealthAlert,
   type MachineInfo,
   ProjectId,
   ProviderDriverKind,
@@ -15,6 +18,7 @@ import {
 } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
+import * as Schema from "effect/Schema";
 
 import {
   DISK_FAIL_FREE_BYTES,
@@ -587,6 +591,70 @@ describe("stuckRunsCheck", () => {
     age: number,
   ) => ({ kind, id, threadId: ThreadId.make(thread), threadTitle, startedAt: ago(age) });
 
+  // 0.3.1 has the same report/alert structure, but only these Fix literals.
+  const legacyFix = Schema.NullOr(
+    Schema.Literals(["sign-in", "run-now", "resume", "retry-sync", "setup-sandbox"]),
+  );
+  const legacyItem = Schema.Struct({ ...MachineHealthItem.fields, fix: legacyFix });
+  const legacyReport = Schema.Struct({
+    ...MachineHealthReport.fields,
+    checks: Schema.Array(
+      Schema.Struct({ ...MachineHealthCheck.fields, items: Schema.Array(legacyItem) }),
+    ),
+  });
+  const legacyAlert = Schema.Struct({ ...MachineHealthAlert.fields, fix: legacyFix });
+
+  const encodeReport = Schema.encodeSync(Schema.toCodecJson(MachineHealthReport));
+  const encodeAlert = Schema.encodeSync(Schema.toCodecJson(MachineHealthAlert));
+  const decoders = {
+    "0.3.2 to 0.3.1": {
+      report: Schema.decodeUnknownSync(Schema.toCodecJson(legacyReport)),
+      alert: Schema.decodeUnknownSync(Schema.toCodecJson(legacyAlert)),
+    },
+    "0.3.1 to 0.3.2": {
+      report: Schema.decodeUnknownSync(Schema.toCodecJson(MachineHealthReport)),
+      alert: Schema.decodeUnknownSync(Schema.toCodecJson(MachineHealthAlert)),
+    },
+  };
+  it.each(["0.3.2 to 0.3.1", "0.3.1 to 0.3.2"] as const)(
+    "decodes stuck-run reports and alerts from %s",
+    (direction) => {
+      const check = stuckRunsCheck({
+        active: [active("run", "old", "thread", "Old", STUCK_RUN_AFTER_MS + 1)],
+        now,
+      });
+      const report = {
+        environmentId: self,
+        machineName: "MacBook",
+        status: check.status,
+        observedAt: now,
+        serverVersion: direction.startsWith("0.3.2") ? "0.3.2" : "0.3.1",
+        uptimeSeconds: 1,
+        reachable: true,
+        checks: [check],
+      };
+      const alert = {
+        id: "alert:old",
+        originEnvironmentId: self,
+        originMachineName: "MacBook",
+        itemKey: check.items[0]!.key,
+        checkId: "stuck-runs" as const,
+        state: "open" as const,
+        status: check.status,
+        title: "Stuck",
+        detail: "",
+        openedAt: now,
+        resolvedAt: null,
+        target: check.items[0]!.target,
+        fix: check.items[0]!.fix,
+      };
+      const reportJson = encodeReport(report);
+      const alertJson = encodeAlert(alert);
+      expect(decoders[direction].report(reportJson).checks[0]!.items[0]!.fix).toBe("resume");
+      expect(decoders[direction].alert(alertJson).fix).toBe("resume");
+    },
+  );
+
   it("one item per thread, past the limit, with a Fix that stops them", () => {
     const result = stuckRunsCheck({
       active: [
@@ -603,7 +671,7 @@ describe("stuckRunsCheck", () => {
       [
         [
           "stuck-runs:thread:thread-1",
-          "stop-runs",
+          "resume",
           { _tag: "thread", threadId: ThreadId.make("thread-1") },
           `"Fix login" and 1 subagent stuck for 6 hours`,
         ],

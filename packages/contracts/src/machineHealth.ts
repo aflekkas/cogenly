@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 
-import { AuthSyncReplicateScope } from "./auth.ts";
+import { AuthPeerDelegateScope, AuthSyncReplicateScope } from "./auth.ts";
 import { EnvironmentId, ScheduledTaskId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { makePeerChannel } from "./machine.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
@@ -51,8 +51,8 @@ export type MachineHealthTarget = typeof MachineHealthTarget.Type;
  * `run-now` runs the scheduled task, `stop-runs` stops the thread's stale runs
  * and subagents, `retry-sync` retries sync with the target machine,
  * `setup-sandbox` installs the chat sandbox. `sign-in` needs the owner, so
- * clients open the provider or integration sign-in instead. `resume` is what
- * servers before 0.3.2 sent for stuck runs; it is handled as `stop-runs`.
+ * clients open the provider or integration sign-in instead. Stuck-run reports
+ * emit `resume` for 0.3.1 wire compatibility; 0.3.2 handles it as `stop-runs`.
  * An item without a fix gets an agent: clients start a chat to investigate it.
  */
 export const MachineHealthFix = Schema.Literals([
@@ -228,7 +228,7 @@ export const MachineHealthRead = makePeerChannel({
 /** Runs Fix on the machine the items are on, from a paired machine. */
 export const MachineHealthFixRun = makePeerChannel({
   name: "health.fix.v1",
-  scope: AuthSyncReplicateScope,
+  scope: AuthPeerDelegateScope,
   payload: Schema.Struct({ itemKeys: MachineHealthFixItemKeys }),
   success: MachineHealthFixResult,
   error: MachineHealthError,

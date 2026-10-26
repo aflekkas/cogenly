@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import {
+  AuthPeerDelegateScope,
   AuthSyncReplicateScope,
   EnvironmentId,
   MachineHealthFixRun,
@@ -167,13 +168,28 @@ describe("MachineHealthFixes", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("rejects Fix from a replication-only peer", () =>
+    Effect.gen(function* () {
+      const { channels, ran } = yield* harness;
+      const error = yield* channels
+        .dispatch({
+          channel: MachineHealthFixRun.name,
+          payload: { itemKeys: ["scheduled-tasks:nightly"] },
+          caller: { environmentId: vps, scopes: [AuthSyncReplicateScope] },
+        })
+        .pipe(Effect.flip);
+      expect(error.reason).toBe("forbidden");
+      expect(ran).toEqual([]);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("serves a paired machine's Fix from this machine's own report", () =>
     Effect.gen(function* () {
       const { channels, ran } = yield* harness;
       const served = yield* channels.dispatch({
         channel: MachineHealthFixRun.name,
         payload: { itemKeys: ["scheduled-tasks:nightly"] },
-        caller: { environmentId: vps, scopes: [AuthSyncReplicateScope] },
+        caller: { environmentId: vps, scopes: [AuthPeerDelegateScope] },
       });
       expect(served).toMatchObject({
         environmentId: laptop,

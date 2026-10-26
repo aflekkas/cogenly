@@ -807,6 +807,9 @@ describe("machines", () => {
           yield* hub.machines.call(spoke.environmentId, Echo, { text: "down" }),
           { text: "down", by: "laptop" },
         );
+        assert.deepStrictEqual(yield* spoke.machines.call(hub.environmentId, Delegate, {}), {
+          ok: true,
+        });
         assert.deepStrictEqual(yield* hub.machines.call(spoke.environmentId, Delegate, {}), {
           ok: true,
         });
