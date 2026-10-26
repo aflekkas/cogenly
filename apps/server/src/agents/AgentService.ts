@@ -1,6 +1,7 @@
 import { ProjectRepositoryMismatchError } from "@cogenly/contracts";
 import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
 import { isReplayedCommandId } from "../orchestration-v2/ReplayedCommandIds.ts";
+import * as Machines from "../machines/Machines.ts";
 import * as Access from "./AgentAccessScope.ts";
 import { canReceiveAgentEvent } from "./agentEventPolicy.ts";
 import { agentKickoffText } from "./builderPrompt.ts";
@@ -128,6 +129,7 @@ export class AgentService extends Context.Service<
 const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const shared = yield* SharedState.SharedState;
+  const machines = yield* Effect.serviceOption(Machines.Machines);
   const remoteLaunch = yield* Effect.serviceOption(RemoteLaunch.RemoteThreadLaunch);
   const store = yield* Store.AgentStore;
   const launch = yield* ThreadLaunch.ThreadLaunchService;
@@ -512,16 +514,32 @@ const make = Effect.gen(function* () {
         const ownsAgent = ownerMachine === shared.environmentId;
         const id =
           existing?.id ?? creationId ?? AgentId.make(`agent:${yield* crypto.randomUUIDv4()}`);
-        if (existing === null && !ownsAgent) {
+        if (!ownsAgent) {
           if (Option.isNone(remoteLaunch))
             return yield* new AgentError({
               message: "That machine is unavailable. Create the agent on this machine instead.",
             });
-          yield* remoteLaunch.value
-            .createAgent(ownerMachine, input, id)
-            .pipe(Effect.mapError((cause) => new AgentError({ message: cause.message, cause })));
+          const ownerName = Option.isSome(machines)
+            ? ((yield* machines.value.list.pipe(Effect.orElseSucceed(() => null)))?.machines.find(
+                (machine) => machine.environmentId === ownerMachine,
+              )?.name ?? ownerMachine)
+            : ownerMachine;
+          const result = yield* remoteLaunch.value
+            .createAgent(ownerMachine, { ...input, ownerMachine }, id)
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new AgentError({
+                    message:
+                      cause.reason === "offline"
+                        ? `Edit on ${ownerName} (offline). Reconnect that machine to save changes.`
+                        : cause.message,
+                    cause,
+                  }),
+              ),
+            );
           yield* changed;
-          return { agent: yield* store.get(id) };
+          return result;
         }
         const conversationThreadId =
           existing?.conversationThreadId ?? ThreadId.make(`agent-conversation:${id}`);

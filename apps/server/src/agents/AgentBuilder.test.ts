@@ -11,6 +11,7 @@ import {
   ProviderInstanceId,
   RunId,
   ThreadId,
+  ThreadRemoteError,
   defaultAgentPermissions,
   type AgentApprovalAction,
   type AgentBuilderProposal,
@@ -719,4 +720,36 @@ it.effect(
         expect(harness.sends).toEqual([]);
       }).pipe(Effect.provide(harness.layer));
     }).pipe(Effect.scoped),
+);
+
+it.effect("forwards edits of a replica to its owner and returns the owner result", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const store = yield* Store.AgentStore;
+      const remote = yield* RemoteLaunch.RemoteThreadLaunch;
+      const agents = yield* Agents.AgentService;
+      const machine = EnvironmentId.make("machine:owner");
+      const existing = yield* store.save({ ...agentFixture("edit-remote"), ownerMachine: machine });
+      const calls: AgentUpsertInput[] = [];
+      yield* remote.registerAgentCreate((target, input, id) => {
+        expect(target).toBe(machine);
+        expect(id).toBe(existing.id);
+        calls.push(input);
+        return Effect.succeed({ agent: { ...existing, instructions: input.instructions } });
+      });
+      const { agent } = yield* agents.upsert(
+        createInput({ id: existing.id, instructions: "Watch CI carefully." }),
+      );
+      expect(agent.instructions).toBe("Watch CI carefully.");
+      expect(calls).toHaveLength(1);
+      expect((yield* store.get(existing.id)).instructions).toBe(existing.instructions);
+      expect(h.launches).toEqual([]);
+      yield* remote.registerAgentCreate(() =>
+        Effect.fail(new ThreadRemoteError({ reason: "offline" })),
+      );
+      const refused = yield* agents.upsert(createInput({ id: existing.id })).pipe(Effect.flip);
+      expect(refused.message).toContain(`Edit on ${machine} (offline)`);
+    }).pipe(Effect.provide(h.layer));
+  }).pipe(Effect.scoped),
 );
