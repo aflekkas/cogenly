@@ -54,6 +54,7 @@ export const MachineSelfReport = Schema.Struct({
 export type MachineSelfReport = typeof MachineSelfReport.Type;
 
 export const MachineInfo = Schema.Struct({
+  serverVersion: Schema.optional(TrimmedNonEmptyString),
   environmentId: EnvironmentId,
   name: TrimmedNonEmptyString,
   kind: MachineKind,

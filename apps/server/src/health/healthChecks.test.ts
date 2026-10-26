@@ -414,6 +414,25 @@ describe("sync tracking", () => {
     ...overrides,
   });
 
+  it("reports quarantined history as a failure with a retry Fix", () => {
+    const peer = sample({ heldChanges: 3, heldThreads: 1, quarantined: 3, backlog: 0 });
+    const result = syncCheck({
+      peers: [{ sample: peer, progress: trackSyncProgress(undefined, peer, NOW_MS) }],
+      nowMs: NOW_MS,
+    });
+    expect(result).toMatchObject({
+      status: "fail",
+      items: [
+        {
+          key: `sync:quarantined:${vps}`,
+          status: "fail",
+          fix: "retry-sync",
+          target: { _tag: "machine", environmentId: vps },
+        },
+      ],
+    });
+  });
+
   it("flags a backlog whose acknowledgements don't move for five minutes", () => {
     const first = trackSyncProgress(undefined, sample(), NOW_MS);
     const later = NOW_MS + SYNC_STUCK_AFTER_MS;

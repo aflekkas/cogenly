@@ -9,6 +9,9 @@ import {
 } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as TestClock from "effect/testing/TestClock";
+import { vi } from "vite-plus/test";
+import { LockTimeoutError, SqlError } from "effect/sql/SqlError";
 
 import { pair } from "../machines/testkit.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
@@ -227,7 +230,10 @@ describe("thread replication over the machine link", () => {
             meta: [{ threadId, owner: hub.environmentId, epoch: 0, folderId: null, source: null }],
           }),
         );
-        expect(forged._tag).toBe("Failure");
+        expect(forged._tag).toBe("Success");
+        expect((yield* hub.sql`SELECT reason FROM thread_replication_deferred`)[0]?.reason).toBe(
+          "wrong-owner",
+        );
         // Claiming its own authorship for the hub's thread is skipped, not applied.
         yield* laptop.machines.call(hub.environmentId, ThreadReplicationApply, {
           after: { events: 0, meta: 0 },
@@ -311,11 +317,14 @@ describe("replication safety regressions", () => {
             false,
           ),
         );
-        expect(rejected._tag).toBe("Failure");
+        expect(rejected._tag).toBe("Success");
+        expect(
+          (yield* hub.sql`SELECT DISTINCT reason FROM thread_replication_deferred`)[0]?.reason,
+        ).toBe("projection");
         expect(
           (yield* hub.projections.getThreadProjection(threadId)).messages.map((x) => x.text),
         ).toEqual(["keep me"]);
-        expect((yield* hub.replication.cursors(peer.environmentId)).received.events).toBe(0);
+        expect((yield* hub.replication.cursors(peer.environmentId)).received.events).toBe(2);
       }).pipe(Effect.scoped),
     30000,
   );
@@ -379,20 +388,33 @@ describe("replication safety regressions", () => {
   );
 
   it.live(
-    "a failed projection does not acknowledge or lose an event on retry",
+    "a deterministic projection failure is quarantined and replayed without resending",
     () =>
       Effect.gen(function* () {
         const hub = yield* start("retry-hub", "cloud-server");
         const peer = yield* start("retry-peer", "computer");
         yield* pair(hub, peer);
         const at = yield* DateTime.now;
+        const good = ThreadId.make("thread:projection-good");
         yield* peer.sink.write({
-          events: [thread("event:retry-thread", at), message("event:retry-message", at, "once")],
+          events: [
+            thread("event:retry-thread", at),
+            message("event:retry-message", at, "once"),
+            forThread(good, thread("event:projection-good", at)),
+            forThread(good, message("event:projection-good-message", at, "unblocked")),
+          ],
         });
-        yield* hub.sql`CREATE TRIGGER reject_message BEFORE INSERT ON orchestration_v2_projection_messages BEGIN SELECT RAISE(FAIL, 'test failure'); END`;
-        expect((yield* Effect.result(peer.sync.sync(hub.environmentId)))._tag).toBe("Failure");
-        expect((yield* hub.replication.cursors(peer.environmentId)).received.events).toBe(0);
+        yield* hub.sql`CREATE TRIGGER reject_message BEFORE INSERT ON orchestration_v2_projection_messages WHEN NEW.thread_id = 'thread:on-laptop' BEGIN SELECT RAISE(FAIL, 'test failure'); END`;
+        yield* peer.sync.sync(hub.environmentId);
+        expect((yield* hub.replication.cursors(peer.environmentId)).received.events).toBe(4);
+        expect(
+          (yield* hub.projections.getThreadProjection(good)).messages.map((row) => row.text),
+        ).toEqual(["unblocked"]);
+        expect(
+          (yield* hub.sql`SELECT DISTINCT reason FROM thread_replication_deferred`)[0]?.reason,
+        ).toBe("projection");
         yield* hub.sql`DROP TRIGGER reject_message`;
+        yield* hub.replication.replayHeld;
         yield* peer.sync.sync(hub.environmentId);
         yield* peer.sync.sync(hub.environmentId);
         expect(
@@ -589,4 +611,108 @@ it.live(
       ).toEqual(Array.from({ length: 300 }, (_, i) => `${i}`));
     }).pipe(Effect.scoped),
   30000,
+);
+
+it.live.each(["payload", "missing-meta", "missing-thread", "wrong-owner"])(
+  "quarantines %s poison without blocking another thread's cursor",
+  (kind) =>
+    Effect.gen(function* () {
+      const hub = yield* start(`poison-${kind}-hub`, "cloud-server");
+      const peer = yield* start(`poison-${kind}-peer`, "computer");
+      yield* pair(hub, peer);
+      const at = yield* DateTime.now;
+      const good = ThreadId.make("thread:good");
+      yield* peer.sink.write({
+        events: [thread("event:bad", at), forThread(good, thread("event:good", at))],
+      });
+      const batch = yield* peer.replication.readBatch(
+        { events: 0, meta: 0 },
+        hub.environmentId,
+        true,
+      );
+      const poisoned = {
+        ...batch,
+        meta:
+          kind === "missing-meta"
+            ? batch.meta.filter((raw) => (raw as { threadId?: string }).threadId !== threadId)
+            : batch.meta.map((raw) =>
+                (raw as { threadId?: string }).threadId === threadId && kind === "wrong-owner"
+                  ? { ...(raw as object), owner: hub.environmentId }
+                  : raw,
+              ),
+        events: batch.events.map((raw) => {
+          if ((raw as { threadId?: string }).threadId !== threadId) return raw;
+          if (kind === "missing-thread") return { ...(raw as object), threadId: null };
+          if (kind === "payload")
+            return {
+              ...(raw as object),
+              payload: { ...(raw as { payload: object }).payload, id: good },
+            };
+          return raw;
+        }),
+      };
+      yield* hub.replication.receive(poisoned, peer.environmentId, false);
+      expect((yield* hub.projections.getThreadProjection(good)).thread.title).toBe("On the laptop");
+      expect((yield* hub.replication.cursors(peer.environmentId)).received).toEqual(batch.cursor);
+      expect(
+        (yield* hub.sql`SELECT reason FROM thread_replication_deferred WHERE reason IS NOT NULL`)
+          .length,
+      ).toBeGreaterThan(0);
+      yield* hub.replication.replayHeld;
+      expect((yield* hub.projections.getThreadProjection(good)).thread.title).toBe("On the laptop");
+    }).pipe(Effect.scoped),
+);
+
+it.live("retries a transient lock without quarantining or advancing the cursor", () =>
+  Effect.gen(function* () {
+    const hub = yield* start("locked-hub", "cloud-server");
+    const peer = yield* start("locked-peer", "computer");
+    yield* pair(hub, peer);
+    const at = yield* DateTime.now;
+    yield* peer.sink.write({ events: [thread("event:lock", at)] });
+    const lock = new EventSink.EventSinkWriteError({
+      eventCount: 1,
+      cause: new SqlError({ reason: new LockTimeoutError({ cause: { code: "SQLITE_BUSY" } }) }),
+    });
+    const write = vi.spyOn(hub.sink, "writeReplica").mockReturnValueOnce(Effect.fail(lock));
+    try {
+      const batch = yield* peer.replication.readBatch(
+        { events: 0, meta: 0 },
+        hub.environmentId,
+        true,
+      );
+      expect(
+        yield* Effect.flip(hub.replication.receive(batch, peer.environmentId, false)),
+      ).toMatchObject({ reason: "busy" });
+      expect((yield* hub.replication.cursors(peer.environmentId)).received.events).toBe(0);
+      expect(yield* hub.sql`SELECT 1 FROM thread_replication_deferred`).toEqual([]);
+      yield* hub.replication.receive(batch, peer.environmentId, false);
+      expect(yield* hub.replication.eventCount(threadId)).toBe(1);
+    } finally {
+      write.mockRestore();
+    }
+  }).pipe(Effect.scoped),
+);
+
+it.effect("the hourly scheduler replays held history after its blocker clears", () =>
+  Effect.gen(function* () {
+    const hub = yield* start("periodic-hub", "cloud-server");
+    const peer = yield* start("periodic-peer", "computer");
+    yield* pair(hub, peer);
+    const at = yield* DateTime.now;
+    yield* peer.sink.write({
+      events: [thread("event:periodic", at), message("event:periodic-message", at, "replayed")],
+    });
+    yield* hub.sql`CREATE TRIGGER reject_periodic BEFORE INSERT ON orchestration_v2_projection_messages BEGIN SELECT RAISE(FAIL, 'blocked'); END`;
+    yield* peer.sync.sync(hub.environmentId);
+    const tick = hub.scheduled.get("thread-replication")!;
+    yield* tick;
+    yield* hub.sql`DROP TRIGGER reject_periodic`;
+    yield* TestClock.adjust("1 hour");
+    yield* tick;
+    expect(
+      (yield* hub.projections.getThreadProjection(threadId)).messages.map((row) => row.text),
+    ).toEqual(["replayed"]);
+    expect(yield* hub.sql`SELECT 1 FROM thread_replication_deferred`).toEqual([]);
+  }).pipe(Effect.scoped),
 );

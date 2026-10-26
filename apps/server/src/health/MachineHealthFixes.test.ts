@@ -67,6 +67,7 @@ const fromVps: MachineHealthFixResult = {
 
 const harness = Effect.gen(function* () {
   const ran: Array<string> = [];
+  const retried: Array<EnvironmentId> = [];
   const peerCalls: Array<{ environmentId: EnvironmentId; channel: string; payload: unknown }> = [];
   const self: MachineSelfReport = {
     environmentId: laptop,
@@ -99,7 +100,29 @@ const harness = Effect.gen(function* () {
     MachineHealthFixes.layer.pipe(
       Layer.provideMerge(
         Layer.mergeAll(
-          Layer.mock(MachineHealth.MachineHealth)({ report: Effect.succeed(report) }),
+          Layer.mock(MachineHealth.MachineHealth)({
+            report: Effect.succeed({
+              ...report,
+              checks: [
+                ...report.checks,
+                {
+                  id: "sync",
+                  status: "fail",
+                  summary: "",
+                  items: [
+                    item(`sync:quarantined:${vps}`, "retry-sync", {
+                      _tag: "machine",
+                      environmentId: vps,
+                    }),
+                  ],
+                },
+              ],
+            }),
+            retrySync: ({ environmentId }) =>
+              Effect.sync(() => {
+                retried.push(environmentId);
+              }),
+          }),
           Layer.mock(Machines.Machines)({
             list: Effect.succeed({
               machines: [machine(laptop, "this"), machine(vps, "hub")],
@@ -125,10 +148,25 @@ const harness = Effect.gen(function* () {
   );
   const fixes = yield* MachineHealthFixes.MachineHealthFixes.pipe(Effect.provideContext(context));
   const channels = yield* PeerChannels.PeerChannels.pipe(Effect.provideContext(context));
-  return { fixes, channels, ran, peerCalls };
+  return { fixes, channels, ran, peerCalls, retried };
 });
 
 describe("MachineHealthFixes", () => {
+  it.effect("retries quarantine through the peer Fix channel on the receiving machine", () =>
+    Effect.gen(function* () {
+      const { channels, retried } = yield* harness;
+      const served = yield* channels.dispatch({
+        channel: MachineHealthFixRun.name,
+        payload: { itemKeys: [`sync:quarantined:${vps}`] },
+        caller: { environmentId: vps, scopes: [AuthPeerDelegateScope] },
+      });
+      expect(retried).toEqual([vps]);
+      expect(served).toMatchObject({
+        outcomes: [{ itemKey: `sync:quarantined:${vps}`, status: "fixed" }],
+      });
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("runs direct fixes here and hands the rest to an agent", () =>
     Effect.gen(function* () {
       const { fixes, ran, peerCalls } = yield* harness;

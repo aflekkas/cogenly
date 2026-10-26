@@ -50,6 +50,7 @@ import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTasks from "../scheduledTasks/ScheduledTaskService.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import { forkParked } from "../serverActivation.ts";
+import * as ThreadReplication from "../threadSync/ThreadReplication.ts";
 import * as SharedSync from "../sync/SharedSync.ts";
 import * as MachineSetup from "../tailscale/MachineSetup.ts";
 import * as TailscaleServeMode from "../tailscale/TailscaleServeMode.ts";
@@ -305,6 +306,7 @@ const make = Effect.gen(function* () {
   );
 
   /** Sync progress per peer, remembered between samples; in memory since this start. */
+  const replication = yield* ThreadReplication.ThreadReplication;
   const syncProgress = new Map<EnvironmentId, SyncPeerProgress>();
 
   const sampleSync = (peers: ReadonlyArray<MachineInfo>, nowMs: number) =>
@@ -326,13 +328,15 @@ const make = Effect.gen(function* () {
             readonly meta_ack: number | null;
             readonly held_changes: number;
             readonly held_threads: number;
+            readonly quarantined: number;
           }>`SELECT
               (SELECT acknowledged FROM shared_peer_cursors WHERE environment_id = ${id}) AS shared_ack,
               (SELECT acknowledged_events FROM thread_replication_cursors WHERE environment_id = ${id}) AS events_ack,
               (SELECT acknowledged_meta FROM thread_replication_cursors WHERE environment_id = ${id}) AS meta_ack,
               (SELECT COUNT(*) FROM shared_deferred_changes WHERE source_env = ${id})
                 + (SELECT COUNT(*) FROM thread_replication_deferred WHERE source_env = ${id}) AS held_changes,
-              (SELECT COUNT(DISTINCT thread_id) FROM thread_replication_deferred WHERE source_env = ${id}) AS held_threads`)[0];
+              (SELECT COUNT(DISTINCT thread_id) FROM thread_replication_deferred WHERE source_env = ${id}) AS held_threads,
+              (SELECT COUNT(*) FROM thread_replication_deferred WHERE source_env = ${id} AND reason IS NOT NULL) AS quarantined`)[0];
           const sharedAck = row?.shared_ack ?? 0;
           const eventsAck = row?.events_ack ?? 0;
           const metaAck = row?.meta_ack ?? 0;
@@ -347,6 +351,7 @@ const make = Effect.gen(function* () {
             acknowledged: `${sharedAck}:${eventsAck}:${metaAck}`,
             heldChanges: row?.held_changes ?? 0,
             heldThreads: row?.held_threads ?? 0,
+            quarantined: row?.quarantined ?? 0,
           };
           const progress = trackSyncProgress(syncProgress.get(id), sample, nowMs);
           syncProgress.set(id, progress);
@@ -486,6 +491,7 @@ const make = Effect.gen(function* () {
         (machine) => machine.environmentId === input.environmentId,
       );
       if (peer === undefined) return yield* new MachineHealthError({ reason: "not-paired" });
+      yield* replication.replayHeld;
       if (!peer.online) return yield* unavailable();
       yield* Effect.all(
         [sharedSync.sync(peer.environmentId), threadSync.sync(peer.environmentId)],

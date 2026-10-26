@@ -95,7 +95,7 @@ export type ThreadReplicationBatch = typeof ThreadReplicationBatch.Type;
 export class ThreadReplicationError extends Schema.TaggedError<ThreadReplicationError>()(
   "ThreadReplicationError",
   {
-    reason: Schema.Literals(["storage", "invalid-cursor", "invalid-batch"]),
+    reason: Schema.Literals(["storage", "busy", "invalid-cursor", "invalid-batch"]),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {

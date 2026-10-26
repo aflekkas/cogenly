@@ -392,6 +392,7 @@ export function machineLinksCheck(input: {
 
 /** What one sample of the sync tables says about a direct peer. */
 export interface SyncPeerSample {
+  readonly quarantined?: number;
   readonly environmentId: EnvironmentId;
   readonly name: string;
   readonly online: boolean;
@@ -448,7 +449,20 @@ export function syncCheck(input: {
   const items: MachineHealthItem[] = [];
   for (const { sample, progress } of input.peers) {
     const target = { _tag: "machine", environmentId: sample.environmentId } as const;
-    if (sample.heldChanges > 0) {
+    if ((sample.quarantined ?? 0) > 0) {
+      items.push(
+        item({
+          key: `sync:quarantined:${sample.environmentId}`,
+          status: "fail",
+          title: `${plural(sample.quarantined!, "change")} from ${sample.name} quarantined`,
+          detail:
+            "Invalid thread history could not be applied. Fix retries it; other threads continue syncing.",
+          target,
+          fix: "retry-sync",
+        }),
+      );
+    }
+    if (sample.heldChanges > (sample.quarantined ?? 0)) {
       items.push(
         item({
           key: `sync:held:${sample.environmentId}`,
