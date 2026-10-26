@@ -604,7 +604,7 @@ function isBlockingRun(run: OrchestrationV2Run): boolean {
   );
 }
 
-/** A successful later turn proves an inherited failure/restart hold is obsolete. */
+/** A later turn reaching waiting ends foreground work, before its checkpoint completes. */
 function queueIsHeld(runs: ReadonlyArray<OrchestrationV2Run>): boolean {
   const healthyOrdinal = Math.max(
     0,

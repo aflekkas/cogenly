@@ -339,6 +339,72 @@ it.effect.each([false, true])(
   },
 );
 
+it.effect.each([false, true])(
+  "releases inherited failure holds as the run ahead waits for its checkpoint (explicit Stop=%s)",
+  (stopped) => {
+    const provider = makeControllableProvider(CodexProviderCapabilitiesV2);
+    return Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const worker = yield* Worker.OrchestrationEffectWorkerV2;
+      const sink = yield* EventSink.EventSinkV2;
+      const ended = yield* failIntoHeldQueue(provider);
+      const now = yield* DateTime.now;
+      const projection = yield* orchestrator.getThreadProjection(threadId);
+      // The recovery turn has ended, but its checkpoint has not completed.
+      // The persisted waiting event must release the queue without waiting for completed.
+      yield* sink.write({
+        commandId: CommandId.make("command:review:waiting-queue"),
+        events: [
+          ...projection.runs
+            .filter((run) => run.status === "queued")
+            .map((run, index) => ({
+              id: EventId.make(`legacy-held:${index}`),
+              type: "run.updated" as const,
+              threadId,
+              runId: run.id,
+              occurredAt: now,
+              payload: {
+                ...run,
+                queueHeld: true,
+                ...(stopped ? { queueHoldReason: "stopped" as const } : {}),
+              },
+            })),
+          {
+            id: EventId.make("legacy-waiting"),
+            type: "run.updated",
+            threadId,
+            occurredAt: now,
+            payload: {
+              ...ended,
+              id: RunId.make("run:later-waiting"),
+              ordinal: 5,
+              status: "waiting",
+              completedAt: null,
+            },
+          },
+        ],
+      });
+      if (!stopped)
+        yield* awaitEvent(
+          (event) =>
+            event.type === "run.updated" &&
+            event.payload.userMessageId === MessageId.make("message:one") &&
+            event.payload.status === "starting",
+        );
+      else yield* orchestrator.resumeQueuedRuns;
+      yield* worker.drain();
+      expect(provider.turns).toHaveLength(stopped ? 1 : 2);
+      if (!stopped) {
+        expect((yield* queuedRunFor("one")).status).not.toBe("queued");
+        // Re-running the sweep cannot deliver the same message a second time.
+        yield* orchestrator.resumeQueuedRuns;
+        yield* worker.drain();
+        expect(provider.turns).toHaveLength(2);
+      }
+    }).pipe(Effect.provide(runtime(provider)));
+  },
+);
+
 it.effect.each([
   { name: "Codex", capabilities: CodexProviderCapabilitiesV2, idle: false },
   { name: "Claude", capabilities: ClaudeProviderCapabilitiesV2, idle: false },

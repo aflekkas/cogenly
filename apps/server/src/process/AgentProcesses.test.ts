@@ -10,6 +10,7 @@ import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import { TestClock } from "effect/testing";
 
 import * as ProcessRunner from "../processRunner.ts";
@@ -157,6 +158,113 @@ it.effect("a reused PID or group is never signalled, nor an untracked process", 
   ),
 );
 
+it.effect("a surviving descendant cannot authorize a reused group leader or unrecorded child", () =>
+  provide(
+    Effect.gen(function* () {
+      const world = makeWorld([
+        SERVER,
+        { pid: 100, ppid: 10, pgid: 100, startTime: "root" },
+        { pid: 101, ppid: 100, pgid: 100, startTime: "child" },
+      ]);
+      const { service } = yield* AgentProcesses.make({
+        ...world.options,
+        statePath: yield* tempStatePath,
+      });
+      yield* service.register({
+        threadId: "T",
+        terminalId: "agent-1",
+        command: "sleep",
+        pid: 100,
+        keepRunning: false,
+      });
+      yield* service.observe({ threadId: "T", terminalId: "agent-1", pids: [101] });
+      world.alive.set(100, { pid: 100, ppid: 1, pgid: 100, startTime: "reused leader" });
+      world.alive.set(101, { pid: 101, ppid: 1, pgid: 100, startTime: "child" });
+      world.alive.set(102, { pid: 102, ppid: 101, pgid: 200, startTime: "unrecorded" });
+      const killed = yield* pastGrace(service.terminate({ threadId: "T", terminalId: "agent-1" }));
+      expect(killed).toEqual([101]);
+      expect(world.signals).toEqual([[101, "SIGTERM"]]);
+      expect([...world.alive.keys()].toSorted()).toEqual([10, 100, 102]);
+    }),
+  ),
+);
+
+it.effect("re-verifies a group leader immediately before signalling it", () =>
+  provide(
+    Effect.gen(function* () {
+      const world = makeWorld([SERVER, { pid: 100, ppid: 10, pgid: 100, startTime: "root" }]);
+      let killing = false;
+      let reads = 0;
+      const { service } = yield* AgentProcesses.make({
+        ...world.options,
+        readTable: Effect.sync(() => {
+          if (killing && ++reads === 2)
+            world.alive.set(100, {
+              pid: 100,
+              ppid: 1,
+              pgid: 100,
+              startTime: "reused before signal",
+            });
+          return [...world.alive.values()];
+        }),
+        statePath: yield* tempStatePath,
+      });
+      yield* service.register({
+        threadId: "T",
+        terminalId: "agent-1",
+        command: "sleep",
+        pid: 100,
+        keepRunning: false,
+      });
+      killing = true;
+      yield* pastGrace(service.terminate({ threadId: "T", terminalId: "agent-1" }));
+      expect(world.signals).toEqual([]);
+      expect(world.alive.get(100)?.startTime).toBe("reused before signal");
+    }),
+  ),
+);
+
+it.effect.each(["owned", "changed", "missing", "reused-pid", "reused-during-check"] as const)(
+  "kills a scope only with its recorded cgroup and a verified member (%s)",
+  (condition) =>
+    provide(
+      Effect.gen(function* () {
+        const world = makeWorld([SERVER, { pid: 100, ppid: 10, pgid: 100, startTime: "root" }]);
+        const scopes: string[] = [];
+        let cgroup: string | null = "/user.slice/cogenly-test.scope";
+        let inspections = 0;
+        const { service } = yield* AgentProcesses.make({
+          ...world.options,
+          scopeCgroup: () =>
+            Effect.sync(() => {
+              if (++inspections > 1 && condition === "reused-during-check")
+                world.alive.set(100, { pid: 100, ppid: 1, pgid: 100, startTime: "reused" });
+              return cgroup;
+            }),
+          killScope: (unit) =>
+            Effect.sync(() => {
+              scopes.push(unit);
+            }),
+          statePath: yield* tempStatePath,
+        });
+        yield* service.register({
+          threadId: "T",
+          terminalId: "agent-1",
+          command: "sleep",
+          pid: 100,
+          scopeUnit: "cogenly-test.scope",
+          keepRunning: false,
+        });
+        if (condition === "changed") cgroup = "/other.slice/cogenly-test.scope";
+        if (condition === "missing") cgroup = null;
+        if (condition === "reused-pid")
+          world.alive.set(100, { pid: 100, ppid: 1, pgid: 100, startTime: "reused" });
+        yield* pastGrace(service.terminate({ threadId: "T", terminalId: "agent-1" }));
+        expect(scopes).toEqual(condition === "owned" ? ["cogenly-test.scope"] : []);
+      }),
+    ),
+);
+
 it.effect("restart cleanup kills only tracked trees and keeps kept ones as orphans", () =>
   provide(
     Effect.gen(function* () {
@@ -201,7 +309,7 @@ it.effect("restart cleanup kills only tracked trees and keeps kept ones as orpha
 
       const killed = yield* pastGrace(built.cleanupPreviousRun);
 
-      expect([...killed].toSorted()).toEqual([400, 401]);
+      expect([...killed].toSorted()).toEqual([400]);
       expect([...world.alive.keys()].toSorted()).toEqual([10, 500, 600, 700]);
       const snapshot = yield* built.service.snapshot;
       expect(snapshot.processes.map((entry) => [entry.root.pid, entry.orphaned])).toEqual([
@@ -335,3 +443,43 @@ it("parses ps lstart rows", () => {
     { pid: 102, ppid: 101, pgid: 101, startTime: "Sun Oct 5 09:00:02 2026" },
   ]);
 });
+
+it.effect.each(["owned", "unloaded", "wrong-unit", "wrong-member", "foreign-unit"] as const)(
+  "verifies a loaded Linux scope against the member's cgroup (%s)",
+  (condition) =>
+    Effect.gen(function* () {
+      const live = yield* AgentProcesses.liveOptions;
+      const result = yield* live.scopeCgroup(
+        condition === "foreign-unit" ? "foreign.scope" : "cogenly-test.scope",
+        [100],
+      );
+      expect(result).toBe(condition === "owned" ? "/user.slice/cogenly-test.scope" : null);
+    }).pipe(
+      Effect.provideService(HostProcess.Platform, "linux"),
+      Effect.provide(
+        Layer.merge(
+          FileSystem.layerNoop({
+            readFileString: () =>
+              Effect.succeed(
+                condition === "wrong-member"
+                  ? "0::/other.slice\n"
+                  : "0::/user.slice/cogenly-test.scope\n",
+              ),
+          }),
+          Layer.mock(ProcessRunner.ProcessRunner)({
+            run: () =>
+              Effect.succeed({
+                code: ChildProcessSpawner.ExitCode(0),
+                stderr: "",
+                timedOut: false,
+                stdoutTruncated: false,
+                stderrTruncated: false,
+                stdoutInvalidUtf8: false,
+                stderrInvalidUtf8: false,
+                stdout: `LoadState=${condition === "unloaded" ? "not-found" : "loaded"}\nControlGroup=/user.slice/${condition === "wrong-unit" ? "other.scope" : "cogenly-test.scope"}\n`,
+              }),
+          }),
+        ),
+      ),
+    ),
+);
