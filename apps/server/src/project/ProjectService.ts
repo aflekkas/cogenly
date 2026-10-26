@@ -324,9 +324,9 @@ export const make = Effect.gen(function* () {
     // destination) or not any more (a removed checkout) is looked up by the
     // path it resolves to, never refused.
     const normalized = yield* workspacePaths.normalizeWorkspaceRoot(workspaceRoot).pipe(
-      Effect.catchTag("WorkspaceRootNotExistsError", (missing) =>
-        Effect.succeed(missing.normalizedWorkspaceRoot),
-      ),
+      Effect.catchTags({
+        WorkspaceRootNotExistsError: (missing) => Effect.succeed(missing.normalizedWorkspaceRoot),
+      }),
       Effect.mapError(
         (cause) =>
           new ProjectOperationError({ operation: "normalize-workspace", workspaceRoot, cause }),
