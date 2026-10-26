@@ -146,6 +146,15 @@ it.live(
         Stream.take(1),
         Stream.runDrain,
       );
+      // Provider completion precedes the command that enqueues its checkpoint.
+      // Wait for that committed command before draining the effect worker.
+      yield* childEngine.streamStoredEventsFrom({ afterSequence: 0, threadId: childId }).pipe(
+        Stream.filter(
+          (row) => row.event.type === "run.updated" && row.event.payload.status === "waiting",
+        ),
+        Stream.take(1),
+        Stream.runDrain,
+      );
       yield* worker.drain();
       yield* childEngine.streamStoredEventsFrom({ afterSequence: 0, threadId: childId }).pipe(
         Stream.filter(
