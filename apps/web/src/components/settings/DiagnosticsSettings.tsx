@@ -52,6 +52,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { TelemetryExportSettings } from "./TelemetryExportSettings";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
+import { searchableSetting } from "./settingsSearch";
 
 const NUMBER_FORMAT = new Intl.NumberFormat();
 
@@ -1029,7 +1030,9 @@ export function DiagnosticsSettingsPanel() {
 
   return (
     <>
+      {/* The page's first section, so a Diagnostics result lands at the top. */}
       <SettingsSection
+        id={searchableSetting("diagnostics").id}
         title="Traces"
         headerAction={
           <>

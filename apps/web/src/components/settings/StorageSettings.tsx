@@ -750,7 +750,7 @@ export function StorageSettingsPanel() {
           }
         />
         <SettingsRow
-          {...searchableSetting("storage-backups")}
+          {...searchableSetting("storage-backup-retention")}
           title="Backups to keep"
           description="The newest copies stay. Older ones are removed when cleanup runs."
           serverScoped

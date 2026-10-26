@@ -262,8 +262,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
-    id: "storage-backups",
-    targetId: "storage-backups",
+    id: "storage-backup-retention",
     title: "Backups to keep",
     to: "/settings/storage",
     searchTerms: ["nightly backup snapshots retention database disk space cleanup"],
@@ -677,6 +676,8 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "integration-add",
+    // Its row waits for the account list; the section is always there.
+    targetId: "integration-services",
     title: "Connect a service",
     to: "/settings/integrations",
     searchTerms: [
@@ -717,14 +718,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "agent-device-access",
     title: "Agent device access",
     to: "/settings/integrations",
-    targetId: "devices",
     searchTerms: ["allow simulator emulator ios android drive tools sessions"],
   },
   {
     id: "device-hub",
     title: "Device hub",
     to: "/settings/integrations",
-    targetId: "devices",
     searchTerms: ["simulator emulator ios android install start"],
   },
   {
@@ -745,7 +744,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "browser-profiles",
     title: "Browser profiles",
     to: "/settings/integrations",
-    targetId: "browser",
   },
   {
     id: "browser-default-profile",

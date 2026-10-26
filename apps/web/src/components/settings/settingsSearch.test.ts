@@ -178,15 +178,17 @@ describe("searchSettings", () => {
       "network-access",
       "publish-agent-activity",
       "provider-health-check-interval",
-      "cursor-keychain-usage",
       "source-control-writer-model",
-      "review-guide-model",
-      "review-guide-instructions",
       "source-control-writing-style",
+      "worktree-branch-naming",
+      "github-accounts",
       "t3-connect",
       "hold-webhooks-while-offline",
       "wsl-backend",
     ]);
+    // A renamed or removed id would make the check below pass vacuously.
+    const catalogIds = new Set<string>(SETTINGS_SEARCH_ITEMS.map((item) => item.id));
+    expect([...gatedIds].filter((id) => !catalogIds.has(id))).toEqual([]);
     expect(available.map((item) => item.id).filter((id) => gatedIds.has(id))).toEqual([]);
   });
 

@@ -616,7 +616,15 @@ export function SourceControlSettingsPanel() {
         headerAction={scanButton}
         footer={scanScopeNote}
       >
-        {hostingRows}
+        {isInitialScanPending ||
+        result.sourceControlProviders.some((item) => item.kind === "github") ? (
+          hostingRows
+        ) : (
+          // GitHub accounts live in the GitHub row; until a scan lists it, their search lands here.
+          <SettingsSearchTarget id={searchableSetting("github-accounts").id}>
+            {hostingRows}
+          </SettingsSearchTarget>
+        )}
       </SettingsSection>
       <PullRequestSettingsSection />
       <SourceControlWritingSettingsSection />
