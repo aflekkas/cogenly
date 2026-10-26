@@ -1,52 +1,54 @@
 # Cogenly
 
-One workspace for everything you do with AI: everyday chats, long-running coding tasks, and always-on agents. Bring your own Claude and Codex subscriptions, run it on your Mac or a VPS, and keep both in sync.
-
-> [!WARNING]
-> Cogenly is early and changing fast. There are no releases yet; run it from source.
+One workspace for chats, coding tasks and always-on agents. Cogenly runs the Claude Code and Codex CLIs with your own subscriptions, and you use it from the desktop app or a browser. Run it on your Mac, on a Linux server, or both: paired machines share one set of conversations, projects and settings.
 
 ## What's in it
 
-- **Chats**: a plain list of conversations, grouped into folders and projects.
-- **Work**: coding work against GitHub repos, including work your agents start, with settle and snooze to keep the list clean.
-- **Agents**: bots you message or schedule. Each has a little face and a plain status: enabled, running, paused, or needs you.
-- **Projects**: group chats, tasks, and agents together. Projects come from GitHub repos.
-- **One set of tools**: a single MCP server that every agent shares.
-- **Claude and Codex**: both run with full access, and follow-ups steer the running agent by default.
+- **Chats, Work and Agents.** Chats are conversations. Work is coding in a repository, with a worktree, diffs and pull requests. Agents are persistent assistants with their own conversation, triggers and schedules. See [Agents](./docs/user/agents.md).
+- **Memory.** Agents propose facts you confirm, keep a core memory that goes with every turn, and carry a handoff brief across model and session changes. Agents can fall back to another provider when one hits its usage limit. See [Memory](./docs/user/memory-and-export.md).
+- **Vault.** Logins, API keys, cards and notes, encrypted on your machine. Agents fill them into pages without seeing the values, and ask for a missing login with a sign-in card in the thread. See [Vault](./docs/user/vault.md).
+- **Integrations.** Ask an agent to connect Gmail, Wispr Flow or another service or MCP server, and it does the setup for you. See [Integrations](./docs/user/integrations.md).
+- **Collaborative browser.** You and your agents share the same browser tabs, and you can take control at any time. You can import sign-ins from another browser. See [Browser](./docs/user/remote-access.md#browser-on-a-remote-environment) and [Importing sign-ins](./docs/user/browser-import.md).
+- **Computer use.** On a Mac, agents can operate your other apps. See [Computer use](./docs/user/computer-use.md).
+- **Paired machines.** Pick one always-on machine as the hub and pair the others with it. Conversations, projects, memory, settings and agents sync across them. A thread runs on one machine, and you can follow it from any of them. See [Machines](./docs/user/machines.md).
+- **Cloud subagents.** An agent can delegate work to another paired machine, then get the result back. See [Machines](./docs/user/machines.md).
+- **Providers.** Claude and Codex, plus Muse Code and Grok. See [Install](./docs/user/install.md#providers).
 
-## Requirements
+## Install
 
-Install and sign in to at least one provider:
+Sign in to at least one provider on the machine that runs your agents, such as `claude auth login` or `codex login`.
 
-- Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
-- Codex: install the [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
+**Mac.** Download the `.dmg` from [the latest release](https://github.com/alexandros-lekkas/cogenly/releases/latest). It is built for Apple Silicon, runs its own server and updates itself. To install the `cogenly` command, open **Settings → General → About**.
 
-## Run from source
-
-Cogenly uses [Vite+](https://viteplus.dev), so install the `vp` CLI first:
-
-```bash
-curl -fsSL https://vite.plus | bash
-```
-
-Then:
+**Linux server** (x64 or arm64):
 
 ```bash
-vp i          # install dependencies
-vp run dev    # start the server and web app
+curl -fsSL https://raw.githubusercontent.com/alexandros-lekkas/cogenly/main/scripts/install.sh | sh
+cogenly service install   # keep it running in the background
 ```
 
-App data lives in `~/.cogenly`. Pass `--home-dir <dir>` to `vp run dev` to keep a separate dev profile.
+Connect to the server from the desktop app with **Settings → Connections → Connect a machine**. See [Run Cogenly on a VPS](./docs/user/install.md#run-cogenly-on-a-vps).
 
-Useful checks: `vp run typecheck`, `vp run lint`, `vp run test`.
+Useful commands:
+
+| Command                                           | What it does                                    |
+| ------------------------------------------------- | ----------------------------------------------- |
+| `cogenly update`                                  | Move to the newest release                      |
+| `cogenly machines pair` / `cogenly machines join` | Pair a machine with a hub from the terminal     |
+| `cogenly health`                                  | Check this machine; `--fix` repairs what it can |
+| `cogenly browser import-cookies`                  | Copy sign-ins from a local browser into Cogenly |
+| `cogenly --help`                                  | Everything else                                 |
+
+## Update
+
+Open **Updates** at the bottom left of the app and choose **Update all**. This updates providers, every connected server and the desktop app in one step. On a Linux server you can also run `cogenly update`. See [Updating](./docs/user/updating.md).
 
 ## Docs
 
-- [Architecture overview](./docs/internals/overview.md)
-- [Development](./docs/operations/development.md)
-- [Run it always-on (Mac service or VPS)](./docs/operations/always-on.md)
-- Agent and contributor guidelines: [AGENTS.md](./AGENTS.md)
+User guides are in [docs/user](./docs/user). Start with [Install](./docs/user/install.md), [Machines](./docs/user/machines.md) and [Agents](./docs/user/agents.md).
+
+Contributing or running from source: [Development](./docs/operations/development.md).
 
 ## Credits
 
-Cogenly started as a fork of [T3 Code](https://github.com/pingdotgg/t3code) (MIT) and is now developed independently. The agent faces use [bloub](https://github.com/jeremy-prt/bloub) (MIT). The sidebar and navigation-rail design is inspired by [Dominik Scholz](https://x.com/dom_scholz)'s T3 Code redesign. See [LICENSE](./LICENSE) and the third-party notices for details.
+Cogenly started as a fork of [T3 Code](https://github.com/pingdotgg/t3code) and is now developed independently. The agent faces use [bloub](https://github.com/jeremy-prt/bloub). The sidebar and navigation rail were inspired by [Dominik Scholz](https://x.com/dom_scholz)'s T3 Code redesign. MIT licensed; see [LICENSE](./LICENSE).

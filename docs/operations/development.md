@@ -2,10 +2,11 @@
 
 ## First checkout
 
-Install `vp` using the [root README](../../README.md#install-vp). The checkout requires Node 24;
-Bun is optional. From the repository root:
+The checkout requires Node 24; Bun is optional. Install the [Vite+](https://viteplus.dev) `vp`
+CLI, then run from the repository root:
 
 ```sh
+curl -fsSL https://vite.plus | bash
 vp i
 vp run dev
 ```
