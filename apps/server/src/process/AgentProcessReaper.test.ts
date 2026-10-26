@@ -36,6 +36,12 @@ describe("reapReason", () => {
     expect(reapReason(kept, null, NOW)).toBeNull();
   });
 
+  it("keeps a live turn's processes even when its thread is settled or archived", () => {
+    const active = { ...idleShell, activeRunId: "run-live" as never };
+    expect(reapReason(record, { ...active, settledOverride: "settled" }, NOW)).toBeNull();
+    expect(reapReason(record, { ...active, archivedAt: at(NOW) }, NOW)).toBeNull();
+  });
+
   it("reaps commands of settled, archived and deleted threads at once", () => {
     const fresh = { ...record, startedAt: iso(NOW) };
     expect(reapReason(fresh, { ...idleShell, settledOverride: "settled" }, NOW)).toBe("stopped");

@@ -17,8 +17,8 @@ import * as ProcessRunner from "../processRunner.ts";
  *
  * Every kill goes through {@link killTargets}: a process is signalled only when
  * its PID still carries the start time recorded when it was tracked, and a
- * process group only when a verified member still leads or belongs to it. A
- * process the ledger never recorded is never touched, whatever its name.
+ * process group only when its leader is a verified ledger identity. Group
+ * members are reached only through that verified leader, never by name.
  *
  * The ledger is written to the state directory, so the next server can clean
  * up what this one left behind after a crash or an update.
@@ -51,6 +51,8 @@ const AgentProcessRecord = Schema.Struct({
   pgid: Schema.Number,
   /** The systemd scope the tree runs in on Linux; killing it reaches every descendant. */
   scopeUnit: Schema.NullOr(Schema.String),
+  /** Captured from the unit and a verified member when registered. */
+  scopeCgroup: Schema.optional(Schema.NullOr(Schema.String)),
   descendants: Schema.Array(ProcessIdentity),
 });
 export type AgentProcessRecord = typeof AgentProcessRecord.Type;
@@ -158,9 +160,8 @@ const DEFAULT_GRACE_MS = 2_000;
 
 /**
  * What a kill may signal right now: the record's processes whose PID still has
- * the recorded start time, their live descendants, and the groups those
- * processes lead or that the recorded group still holds. The server, its own
- * group, init, and anything unrecorded are excluded.
+ * the recorded start time, and the groups those verified processes lead. The
+ * server, its own group and init are excluded. No extra PID is inferred here.
  */
 export function killTargets(
   record: Pick<AgentProcessRecord, "root" | "pgid" | "descendants">,
@@ -168,35 +169,18 @@ export function killTargets(
   selfPid: number,
 ): { readonly pids: ReadonlyArray<number>; readonly groups: ReadonlyArray<number> } {
   const byPid = new Map(table.map((row) => [row.pid, row]));
-  const childrenByParent = new Map<number, Array<ProcessRow>>();
-  for (const row of table) {
-    const children = childrenByParent.get(row.ppid) ?? [];
-    children.push(row);
-    childrenByParent.set(row.ppid, children);
-  }
   const selfGroup = byPid.get(selfPid)?.pgid;
   const unsafe = (pid: number) => pid <= 1 || pid === selfPid || pid === selfGroup;
   const verified = new Map<number, ProcessRow>();
-  const pending: Array<ProcessRow> = [];
   for (const identity of [record.root, ...record.descendants]) {
     const row = byPid.get(identity.pid);
     if (row === undefined || row.startTime !== identity.startTime || unsafe(row.pid)) continue;
     if (verified.has(row.pid)) continue;
     verified.set(row.pid, row);
-    pending.push(row);
-  }
-  // Children of a verified process are in the tree now, recorded or not.
-  while (pending.length > 0) {
-    const parent = pending.pop()!;
-    for (const child of childrenByParent.get(parent.pid) ?? []) {
-      if (verified.has(child.pid) || unsafe(child.pid)) continue;
-      verified.set(child.pid, child);
-      pending.push(child);
-    }
   }
   const groups = new Set<number>();
   for (const row of verified.values()) {
-    if (row.pgid === record.pgid || row.pgid === row.pid) groups.add(row.pgid);
+    if (row.pgid === row.pid) groups.add(row.pgid);
   }
   for (const group of groups) if (unsafe(group)) groups.delete(group);
   return { pids: [...verified.keys()], groups: [...groups] };
@@ -227,6 +211,11 @@ export interface AgentProcessesOptions {
   readonly readTable: Effect.Effect<ReadonlyArray<ProcessRow>>;
   /** Sends a signal; a negative target is a process group. Missing targets are ignored. */
   readonly signal: (target: number, signal: "SIGTERM" | "SIGKILL") => void;
+  /** Returns the loaded unit's cgroup only when a verified PID belongs to it. */
+  readonly scopeCgroup?: (
+    unit: string,
+    pids: ReadonlyArray<number>,
+  ) => Effect.Effect<string | null>;
   readonly killScope: (unit: string, signal: "SIGTERM" | "SIGKILL") => Effect.Effect<void>;
 }
 
@@ -278,23 +267,42 @@ export const make = Effect.fn("AgentProcesses.make")(function* (options: AgentPr
     ),
   );
 
-  const signalAll = (targets: ReturnType<typeof killTargets>, signal: "SIGTERM" | "SIGKILL") =>
-    Effect.sync(() => {
-      for (const group of targets.groups) options.signal(-group, signal);
-      for (const pid of targets.pids) options.signal(pid, signal);
+  const signalAll = (
+    record: AgentProcessRecord,
+    targets: ReturnType<typeof killTargets>,
+    signal: "SIGTERM" | "SIGKILL",
+  ) =>
+    Effect.gen(function* () {
+      // A group can be reused while scope inspection or another signal runs.
+      for (const group of targets.groups) {
+        const current = killTargets(record, yield* options.readTable, options.selfPid);
+        if (current.groups.includes(group)) options.signal(-group, signal);
+      }
+      const current = killTargets(record, yield* options.readTable, options.selfPid);
+      for (const pid of targets.pids) if (current.pids.includes(pid)) options.signal(pid, signal);
+    });
+
+  const signalScope = (record: AgentProcessRecord, signal: "SIGTERM" | "SIGKILL") =>
+    Effect.gen(function* () {
+      if (!record.scopeUnit || !record.scopeCgroup || !options.scopeCgroup) return;
+      const current = killTargets(record, yield* options.readTable, options.selfPid);
+      if (current.pids.length === 0) return;
+      const cgroup = yield* options.scopeCgroup(record.scopeUnit, current.pids);
+      if (cgroup !== record.scopeCgroup) return;
+      const refreshed = killTargets(record, yield* options.readTable, options.selfPid);
+      if (current.pids.some((pid) => refreshed.pids.includes(pid)))
+        yield* options.killScope(record.scopeUnit, signal);
     });
 
   const killRecord = Effect.fn("AgentProcesses.killRecord")(function* (record: AgentProcessRecord) {
     const first = killTargets(record, yield* options.readTable, options.selfPid);
-    const hasTargets = first.pids.length > 0 || first.groups.length > 0;
-    if (record.scopeUnit !== null) yield* options.killScope(record.scopeUnit, "SIGTERM");
-    if (!hasTargets && record.scopeUnit === null) return [];
-    yield* signalAll(first, "SIGTERM");
+    if (first.pids.length === 0) return [];
+    yield* signalScope(record, "SIGTERM");
+    yield* signalAll(record, first, "SIGTERM");
     yield* Effect.sleep(graceMs);
-    // Re-verify: a PID that exited during the grace may already be reused.
     const second = killTargets(record, yield* options.readTable, options.selfPid);
-    yield* signalAll(second, "SIGKILL");
-    if (record.scopeUnit !== null) yield* options.killScope(record.scopeUnit, "SIGKILL");
+    yield* signalScope(record, "SIGKILL");
+    yield* signalAll(record, second, "SIGKILL");
     return first.pids;
   });
 
@@ -336,6 +344,10 @@ export const make = Effect.fn("AgentProcesses.make")(function* (options: AgentPr
       // A root that is gone before it was read has nothing left to track.
       if (row === undefined) return;
       const startedAt = DateTime.formatIso(yield* DateTime.now);
+      const scopeCgroup =
+        input.scopeUnit && options.scopeCgroup
+          ? yield* options.scopeCgroup(input.scopeUnit, [row.pid])
+          : null;
       records.set(keyOf(input.threadId, input.terminalId), {
         threadId: input.threadId,
         terminalId: input.terminalId,
@@ -346,6 +358,7 @@ export const make = Effect.fn("AgentProcesses.make")(function* (options: AgentPr
         root: { pid: row.pid, startTime: row.startTime },
         pgid: row.pgid,
         scopeUnit: input.scopeUnit ?? null,
+        scopeCgroup,
         descendants: [],
       });
       yield* persist;
@@ -497,6 +510,7 @@ const isMissingProcess = (error: unknown) =>
 export const liveOptions = Effect.gen(function* () {
   const runner = yield* ProcessRunner.ProcessRunner;
   const platform = yield* HostProcess.Platform;
+  const fileSystem = yield* FileSystem.FileSystem;
   const readTable = runner
     .run({
       command: "ps",
@@ -522,6 +536,34 @@ export const liveOptions = Effect.gen(function* () {
         if (!isMissingProcess(error)) throw error;
       }
     },
+    scopeCgroup: (unit: string, pids: ReadonlyArray<number>) =>
+      Effect.gen(function* () {
+        if (platform !== "linux" || !/^cogenly-[a-zA-Z0-9_-]+\.scope$/.test(unit)) return null;
+        const shown = yield* runner.run({
+          command: "systemctl",
+          args: ["--user", "show", "--property=LoadState,ControlGroup", unit],
+          timeout: "5 seconds",
+        });
+        if (shown.code !== 0) return null;
+        const values = new Map(
+          shown.stdout
+            .trim()
+            .split("\n")
+            .map((line) => {
+              const index = line.indexOf("=");
+              return [line.slice(0, index), line.slice(index + 1)] as const;
+            }),
+        );
+        const cgroup = values.get("ControlGroup");
+        if (values.get("LoadState") !== "loaded" || !cgroup?.endsWith(`/${unit}`)) return null;
+        for (const pid of pids) {
+          const membership = yield* fileSystem
+            .readFileString(`/proc/${pid}/cgroup`)
+            .pipe(Effect.orElseSucceed(() => ""));
+          if (membership.split("\n").some((line) => line === `0::${cgroup}`)) return cgroup;
+        }
+        return null;
+      }).pipe(Effect.orElseSucceed(() => null)),
     killScope: (unit: string, signal: "SIGTERM" | "SIGKILL") =>
       platform === "linux"
         ? runner

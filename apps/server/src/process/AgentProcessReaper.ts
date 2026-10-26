@@ -41,10 +41,10 @@ export function reapReason(
 ): "stopped" | "idle" | null {
   // Provider CLIs belong to their session manager, which releases idle ones itself.
   if (record.keepRunning || record.orphaned || record.kind !== "terminal") return null;
+  if (shell !== null && shell.activeRunId !== null) return null;
   if (shell === null || shell.archivedAt !== null || shell.settledOverride === "settled") {
     return "stopped";
   }
-  if (shell.activeRunId !== null) return null;
   const lastActivity = Math.max(
     Option.match(DateTime.make(record.startedAt), {
       onNone: () => 0,
