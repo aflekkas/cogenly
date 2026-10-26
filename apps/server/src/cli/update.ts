@@ -563,7 +563,6 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
                   ),
                   Effect.flatMap((result) => {
                     let preflight;
-                    // @effect-diagnostics-next-line preferSchemaOverJson:off -- The shared launcher decoder validates this protocol.
                     try {
                       preflight = decodeServicePreflightResult(JSON.parse(result.stdout.trim()));
                     } catch {
