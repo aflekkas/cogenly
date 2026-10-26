@@ -83,7 +83,11 @@ export const ScheduledTask = Schema.Struct({
         lastRunSkip === undefined ? task : { ...task, lastRunStatus: lastRunSkip },
       encode: (task) =>
         isSkipStatus(task.lastRunStatus)
-          ? { ...task, lastRunStatus: "skipped_already_queued" as const, lastRunSkip: task.lastRunStatus }
+          ? {
+              ...task,
+              lastRunStatus: "skipped_already_queued" as const,
+              lastRunSkip: task.lastRunStatus,
+            }
           : task,
     }),
   ),

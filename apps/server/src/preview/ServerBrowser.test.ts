@@ -289,9 +289,9 @@ it.effect("reconnects a native tab without replacing it and reports a detached d
       r.reconnect();
       const reconnected = yield* r.invoke<PreviewAutomationStatus>("status", r.tabId);
       expect(reconnected.automation).toEqual({ connected: true, state: "ready" });
-      expect((yield* r.invoke<PreviewAutomationSnapshot>("snapshot", r.tabId, FULL)).visibleText).toBe(
-        "Signed in",
-      );
+      expect(
+        (yield* r.invoke<PreviewAutomationSnapshot>("snapshot", r.tabId, FULL)).visibleText,
+      ).toBe("Signed in");
       expect(yield* r.invoke("evaluate", r.tabId, { expression: "sessionStorage.login" })).toBe(
         "signed-in-session",
       );
@@ -322,9 +322,9 @@ it.effect(
         expect(result._tag).toBe("Failure");
         if (result._tag === "Failure") expect(result.failure.message).toContain("rendering=panel");
         expect((yield* r.invoke<PreviewAutomationStatus>("status", r.tabId)).available).toBe(true);
-        expect((yield* r.invoke<PreviewAutomationSnapshot>("snapshot", r.tabId, FULL)).visibleText).toBe(
-          "Signed in",
-        );
+        expect(
+          (yield* r.invoke<PreviewAutomationSnapshot>("snapshot", r.tabId, FULL)).visibleText,
+        ).toBe("Signed in");
         expect(r.connectDesktop).toHaveBeenCalledTimes(2);
         expect(r.page.close).not.toHaveBeenCalled();
       }),
@@ -445,9 +445,9 @@ it.effect("caller interruption leaves panel automation and its signed-in page al
       yield* Effect.promise(() => started.promise);
       yield* Fiber.interrupt(pending);
       snapshot.resolve('- document "Signed in"');
-      expect((yield* r.invoke<PreviewAutomationSnapshot>("snapshot", r.tabId, FULL)).visibleText).toBe(
-        "Signed in",
-      );
+      expect(
+        (yield* r.invoke<PreviewAutomationSnapshot>("snapshot", r.tabId, FULL)).visibleText,
+      ).toBe("Signed in");
       expect(yield* r.invoke("evaluate", r.tabId, { expression: "sessionStorage.login" })).toBe(
         "signed-in-session",
       );
