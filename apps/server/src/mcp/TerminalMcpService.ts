@@ -14,6 +14,7 @@ import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecuto
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
+import * as Vault from "../vault/Vault.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import { assertFullAccess, assertLiveCaller, loadCaller, unavailable } from "./threadAccess.ts";
 
@@ -62,6 +63,7 @@ export class TerminalMcpService extends Context.Service<
 const make = Effect.gen(function* () {
   const manager = yield* TerminalManager.TerminalManager;
   const credentials = yield* CliCredentials.CliCredentials;
+  const vault = yield* Vault.Vault;
   const settings = yield* ServerSettings.ServerSettingsService;
   const projects = yield* ProjectService.ProjectService;
   const executor = yield* ThreadCommandExecutor.ThreadCommandExecutor;
@@ -133,6 +135,8 @@ const make = Effect.gen(function* () {
                     { threadId, providerInstanceId: scope.thread.providerInstanceId },
                     terminalId,
                   ),
+                // Vault values are redacted as output arrives, before it is stored or shown.
+                redactOutput: yield* vault.outputRedactor,
               })
               .pipe(
                 Effect.mapError((cause) =>

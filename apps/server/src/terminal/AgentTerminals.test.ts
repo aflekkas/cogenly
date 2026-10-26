@@ -14,6 +14,7 @@ import * as ProcessRunner from "../processRunner.ts";
 import * as Manager from "./Manager.ts";
 import * as NodePtyAdapter from "./NodePtyAdapter.ts";
 import * as PtyAdapter from "@t3tools/shared/PtyAdapter";
+import { streamRedactor } from "../vault/VaultRedactor.ts";
 
 class FakePty implements PtyProcess {
   readonly pid = 12345;
@@ -321,6 +322,47 @@ it.effect("an evicted finished run replays its persisted log on attach without s
           .attachStream({ threadId: "A", terminalId: "agent-silent" }, () => Effect.void)
           .pipe(Effect.flip))._tag,
       ).toBe("TerminalSessionLookupError");
+    }),
+  ),
+);
+
+it.effect("a vault value split across output chunks never reaches events, output or the log", () =>
+  provide(
+    Effect.gen(function* () {
+      const { cwd, process, manager } = yield* make;
+      const fs = yield* FileSystem.FileSystem;
+      const secret = "vault-token-value-123";
+      const events: Array<string> = [];
+      const exited = yield* Deferred.make<void>();
+      yield* manager.subscribe((event) =>
+        event.type === "output"
+          ? Effect.sync(() => void events.push(event.data))
+          : event.type === "exited"
+            ? Deferred.succeed(exited, undefined).pipe(Effect.asVoid)
+            : Effect.void,
+      );
+      const run = yield* manager.runAgent({
+        threadId: "A",
+        command: "print-token",
+        cwd,
+        background: true,
+        redactOutput: streamRedactor(() => ({ version: 0, secrets: [secret], shortSecrets: [] })),
+      });
+      process.output(`token=${secret.slice(0, 9)}`);
+      process.output(`${secret.slice(9)}\r\nend ${secret.slice(0, 4)}`);
+      process.finish(0);
+      yield* Deferred.await(exited);
+      // Lets the debounced history write land.
+      yield* TestClock.adjust(1_000);
+      const output = (yield* manager.readAgent({ threadId: "A", terminalId: run.terminalId }))
+        .output;
+      expect(output).toBe("token=[redacted vault secret]\r\nend vaul");
+      expect(events.join("")).toBe(output);
+      for (const file of yield* fs.readDirectory(cwd)) {
+        const path = `${cwd}/${file}`;
+        if ((yield* fs.stat(path)).type !== "File") continue;
+        expect(yield* fs.readFileString(path)).not.toContain(secret);
+      }
     }),
   ),
 );

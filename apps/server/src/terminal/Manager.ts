@@ -83,6 +83,7 @@ import * as ProcessRunner from "../processRunner.ts";
 import * as PortScanner from "../preview/PortScanner.ts";
 import * as NativeTelemetryClient from "../resourceTelemetry/NativeTelemetryClient.ts";
 import * as PtyAdapter from "@t3tools/shared/PtyAdapter";
+import { composeRedactors } from "../vault/VaultRedactor.ts";
 
 export {
   TerminalCwdError,
@@ -165,6 +166,11 @@ export class TerminalManager extends Context.Service<
         readonly prepareCredentials?: (
           terminalId: string,
         ) => Effect.Effect<CredentialDelivery, AccountError>;
+        /**
+         * Applied to output as it arrives, before history, disk logs, events
+         * and the agent see it, after any delivered credential's own redactor.
+         */
+        readonly redactOutput?: (chunk: string, final?: boolean) => string;
       },
     ) => Effect.Effect<AgentTerminalResult, TerminalError | AccountError>;
     readonly waitAgent: (input: {
@@ -2403,11 +2409,17 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
                 if (eventsActivated) runFork(drainProcessEvents(session, processPid));
               });
               session.unsubscribeExit = spawnResult.process.onExit((event) => {
+                // The redactor's held-back tail goes out before the exit. Either
+                // enqueue may be the one that claims the drain, so start it if so.
                 const tail = session.agent?.redactOutput?.("", true);
-                if (tail) enqueueProcessEvent(session, processPid, { type: "output", data: tail });
-                if (!enqueueProcessEvent(session, processPid, { type: "exit", event })) {
-                  return;
-                }
+                const tailClaimed = tail
+                  ? enqueueProcessEvent(session, processPid, { type: "output", data: tail })
+                  : false;
+                const exitClaimed = enqueueProcessEvent(session, processPid, {
+                  type: "exit",
+                  event,
+                });
+                if (!tailClaimed && !exitClaimed) return;
                 if (eventsActivated) runFork(drainProcessEvents(session, processPid));
               });
               eventStamp = advanceEventSequence(session);
@@ -3400,10 +3412,14 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         const delivery = input.prepareCredentials
           ? yield* input.prepareCredentials(terminalId)
           : undefined;
+        const redactOutput =
+          delivery?.redactOutput || input.redactOutput
+            ? composeRedactors(delivery?.redactOutput, input.redactOutput)
+            : undefined;
         const opened = yield* openLocked({
           ...resolved,
           env: { ...resolved.env, ...delivery?.env },
-          ...(delivery?.redactOutput ? { redactOutput: delivery.redactOutput } : {}),
+          ...(redactOutput ? { redactOutput } : {}),
           agentCommand: input.command,
         }).pipe(
           Effect.onError(() =>

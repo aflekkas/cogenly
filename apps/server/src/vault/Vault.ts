@@ -44,6 +44,8 @@ import { evaluateVaultPolicy, hostMatchesAnyDomain, type VaultUseCaller } from "
 import {
   VAULT_WITHHELD,
   isWholeTokenSecret,
+  streamRedactor,
+  type StreamSecrets,
   redactShortSecrets,
   redactShortValue,
   redactText,
@@ -303,6 +305,11 @@ export class Vault extends Context.Service<
     /** Retained through server lifetime: descendants and retained output may outlive a PTY. */
     readonly registerProcessSecrets: (values: ReadonlyArray<string>) => Effect.Effect<void>;
     readonly scrubText: (text: string) => Effect.Effect<string>;
+    /**
+     * A redactor for one terminal's output stream, chunk-safe, that keeps up
+     * with vault writes and deliveries while the terminal runs.
+     */
+    readonly outputRedactor: Effect.Effect<(chunk: string, final?: boolean) => string>;
     readonly scrubValue: <A>(value: A) => Effect.Effect<A>;
   }
 >()("cogenly-server/vault/Vault") {}
@@ -521,7 +528,7 @@ const make = Effect.gen(function* () {
     secrets: new Set<string>(),
     shortSecrets: new Set<string>(),
     totpSecrets: [],
-  }));
+  })).pipe(Effect.andThen(Effect.suspend(() => refreshTerminalSecrets)));
 
   const loadScrubSecrets = Effect.gen(function* () {
     const rows =
@@ -596,6 +603,33 @@ const make = Effect.gen(function* () {
     }
     return { secrets, shortSecrets };
   });
+
+  /**
+   * What terminal redactors read on every chunk. A PTY callback cannot wait on
+   * a load, so writes and deliveries refresh it as they happen, once any
+   * terminal has asked for it.
+   */
+  const terminalSecrets = {
+    requested: false,
+    refreshes: 0,
+    current: { version: 0, secrets: [], shortSecrets: [] } as StreamSecrets,
+  };
+  const refreshTerminalSecrets = Effect.gen(function* () {
+    if (!terminalSecrets.requested) return;
+    const refresh = ++terminalSecrets.refreshes;
+    const { secrets, shortSecrets } = yield* scrubSets;
+    // An older refresh that finishes late never replaces a newer one.
+    if (refresh > terminalSecrets.current.version)
+      terminalSecrets.current = {
+        version: refresh,
+        secrets: [...secrets],
+        shortSecrets: [...shortSecrets],
+      };
+  }).pipe(
+    Effect.catch((error: VaultError) =>
+      Effect.logError("Vault secrets could not be loaded for terminal output.", error),
+    ),
+  );
 
   /** Unscrubbed text never leaves: a scrub set that cannot load withholds the result. */
   const withheldOnFailure = <A>(withheld: () => A) =>
@@ -789,6 +823,7 @@ const make = Effect.gen(function* () {
       }
       yield* record("allowed");
       yield* registerDelivered([value, jsonEscaped(value)]);
+      yield* refreshTerminalSecrets;
       return { status: "allowed", item, field: input.field, value } as const;
     }).pipe(Effect.mapError(wrap));
 
@@ -888,7 +923,12 @@ const make = Effect.gen(function* () {
           encodeURIComponent(value),
           jsonEscaped(value),
         ]),
-      ),
+      ).pipe(Effect.andThen(refreshTerminalSecrets)),
+    outputRedactor: Effect.gen(function* () {
+      terminalSecrets.requested = true;
+      yield* refreshTerminalSecrets;
+      return streamRedactor(() => terminalSecrets.current);
+    }),
     scrubText: (text) =>
       scrubSets.pipe(
         Effect.map(({ secrets, shortSecrets }) =>

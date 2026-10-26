@@ -491,6 +491,25 @@ describe("Vault service", () => {
     );
   });
 
+  it.effect("a terminal's output redactor follows vault writes while it runs", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      yield* vault.create({
+        name: "A",
+        type: "api_key",
+        secretFields: { value: "alpha-value-123" },
+      });
+      const redact = yield* vault.outputRedactor;
+      expect(redact("x alpha-val") + redact("ue-123 y")).toBe("x [redacted vault secret] y");
+      yield* vault.create({
+        name: "B",
+        type: "api_key",
+        secretFields: { value: "bravo-value-123" },
+      });
+      expect(redact("bravo-value-123 ") + redact("", true)).toBe("[redacted vault secret] ");
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("withholds tool output when the secrets to scrub cannot be loaded", () =>
     Effect.gen(function* () {
       const vault = yield* Vault.Vault;

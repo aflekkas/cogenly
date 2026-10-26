@@ -115,8 +115,12 @@ Every value the vault hands out (filled, resolved for an integration, or
 delivered to a process, with base64, URL-encoded and JSON-escaped forms for the
 last) stays registered for the server lifetime, up to a bound of the newest
 10,000, including old revisions after replacement/deletion. This deliberately
-outlives a PTY and the item: pages, descendants and retained output keep copies. Account terminals also redact across PTY chunk boundaries
-before output enters events or persisted history. Tokens are resolved after
+outlives a PTY and the item: pages, descendants and retained output keep copies.
+Agent terminals redact every vault value as output arrives, before it enters
+events, history or logs: `Vault.outputRedactor` scans with one automaton and
+holds back only a tail that could still begin a secret, so a value split
+across PTY chunks is caught. A PTY callback cannot wait on a load, so vault
+writes and deliveries refresh the set those redactors read. Tokens are resolved after
 provider environment configuration and overlay only the selected terminal's
 environment; they never enter settings or launch arguments. Provider-native
 shell delivery is separate work because provider sessions can share threads.

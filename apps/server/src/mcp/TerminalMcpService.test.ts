@@ -7,6 +7,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as TerminalMcpService from "./TerminalMcpService.ts";
+import * as Vault from "../vault/Vault.ts";
 import * as Invocation from "./McpInvocationContext.ts";
 import * as Manager from "../terminal/Manager.ts";
 import * as ProcessRunner from "../processRunner.ts";
@@ -80,6 +81,7 @@ it.effect(
         Layer.mock(CliCredentials.CliCredentials)({
           launch: () => Effect.succeed({ env: {}, complete: () => Effect.void }),
         }),
+        Layer.mock(Vault.Vault)({ outputRedactor: Effect.succeed((chunk: string) => chunk) }),
         Layer.succeed(Manager.TerminalManager, manager),
         Layer.mock(ThreadManagement.ThreadManagementService)({
           getThreadShell: (id) =>
