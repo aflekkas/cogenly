@@ -302,7 +302,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Workspace",
     to: "/settings/new-threads",
     searchTerms: [
-      "defaults workspace worktree submodules start from origin repositories cogenly.json",
+      "new threads defaults workspace worktree submodules start from origin repositories cogenly.json",
     ],
   },
   {
