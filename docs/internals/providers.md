@@ -108,3 +108,13 @@ The logger filters those notifications before traversal when an older provider s
 
 Model classification has its own [manifest constraints](./model-manifest.md). Assistant-reference
 handling is documented under [citations](./assistant-citations.md).
+
+## Paired-machine sign-ins
+
+Provider configuration follows the existing settings document; credentials do not. A remote login runs the official CLI on the destination and returns only browser instructions over the authenticated peer channel. Provider requests continue directly from that CLI. The grant belongs to the destination's CLI home; cancellation and sign-out target the same home. Native output is never a terminal transcript in the auth state.
+
+Do not turn vault sharing into refresh-token replication. [Codex's auth manager](https://github.com/openai/codex/blob/main/codex-rs/login/src/auth/manager.rs) replaces refresh credentials and handles reused/invalidated refresh tokens. An [OpenAI maintainer explains the limited reuse grace window](https://github.com/openai/codex/issues/10332); it does not make independently refreshed offline copies safe. A refresh-owner scheme would also need to control official CLI processes launched outside Cogenly. Independent remote sign-ins avoid that ownership problem, using the documented [Codex device flow](https://learn.chatgpt.com/docs/auth#login-on-headless-devices) and [Claude SSH browser-code flow](https://code.claude.com/docs/en/authentication#log-in-to-claude-code).
+
+The CLI still owns credential storage. Claude uses macOS Keychain, and its Linux CLI uses a `0600` credentials file; Codex supports file and keyring storage. Cogenly does not add a plaintext credential copy to its settings or sync database. Strict encryption at rest on Linux requires encrypted storage for the official CLI home. Vault encryption alone cannot encrypt a file an unmodified CLI must read.
+
+Initial account alignment compares a digest of the driver, account and workspace metadata. A matching login can keep its existing home under a canonical ID without copying credentials. A reused ID naming a different account gets an isolated home. Unknown identities are kept separate; matching a driver or display name alone is insufficient evidence to combine accounts. Legacy threads still identify providers by their original ID; inspect those selections before continuing a thread whose ID acquired a different account during alignment.

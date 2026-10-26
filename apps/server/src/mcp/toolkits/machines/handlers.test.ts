@@ -1,3 +1,4 @@
+import * as ProviderAuthService from "../../../provider/ProviderAuthService.ts";
 import { expect, it } from "@effect/vitest";
 import {
   EnvironmentId,
@@ -82,6 +83,7 @@ const hubList: MachineListResult = {
 };
 
 const makeServer = (options: {
+  readonly manageSignIn?: ProviderAuthService.ProviderAuthService["Service"]["manageSignIn"];
   readonly pairMachines?: DesktopAppControl.DesktopAppControl["Service"]["pairMachines"];
   readonly unpaired?: Array<EnvironmentId>;
   readonly disableServe?: MachineSetup.MachineSetup["Service"]["disableServe"];
@@ -90,6 +92,9 @@ const makeServer = (options: {
     Layer.provideMerge(McpServer.McpServer.layer),
     Layer.provideMerge(
       Layer.mergeAll(
+        Layer.mock(ProviderAuthService.ProviderAuthService)({
+          manageSignIn: options.manageSignIn ?? (() => Effect.die("unused")),
+        }),
         Layer.mock(ThreadManagement.ThreadManagementService)({
           getThreadShell: (threadId) => Effect.succeed(shells.get(threadId) ?? null),
         }),
@@ -258,4 +263,41 @@ it.effect.each([
     });
     expect(unpaired).toEqual([]);
   }),
+);
+
+it.effect(
+  "provider_sign_in reaches the auth service on the requested machine without approval",
+  () => {
+    let target: string | undefined;
+    let caller: string | undefined;
+    return Effect.gen(function* () {
+      const result = yield* call(threadCaller(fullAccessThreadId), "provider_sign_in", {
+        request: {
+          operation: "start",
+          input: { instanceId: "claude-personal", targetEnvironmentId: "contabo" },
+        },
+      });
+      expect(result).toContain("starting");
+      expect(target).toBe("contabo");
+      expect(caller).toBe(`provider:${fullAccessThreadId}`);
+    }).pipe(
+      Effect.provide(
+        makeServer({
+          manageSignIn: (request, owner) => {
+            target = request.input.targetEnvironmentId;
+            caller = owner;
+            return Effect.succeed({
+              instanceId: request.input.instanceId,
+              phase: "starting",
+              flowId: "flow",
+              authorizationUrl: null,
+              expiresAt: null,
+              message: null,
+              interaction: null,
+            });
+          },
+        }),
+      ),
+    );
+  },
 );

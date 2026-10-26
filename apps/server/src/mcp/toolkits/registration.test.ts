@@ -1,3 +1,4 @@
+import * as ProviderAuthService from "../../provider/ProviderAuthService.ts";
 import * as ServerBrowser from "../../preview/ServerBrowser.ts";
 import * as StorageCleanup from "../../storageCleanup.ts";
 import * as Accounts from "../../accounts/Accounts.ts";
@@ -408,6 +409,7 @@ const smokeCases = [
       "machines_list",
       "machines_move_threads",
       "project_move_to_machine",
+      "provider_sign_in",
     ],
     tool: "machines_list",
     args: {},
@@ -888,6 +890,7 @@ it.effect.each(smokeCases)(
           disableLogger: true,
         }).pipe(
           Layer.provide(Layer.succeed(HttpClient.HttpClient, smokeHttpClient)),
+          Layer.provide(Layer.mock(ProviderAuthService.ProviderAuthService)({})),
           Layer.provide(
             Layer.mock(ServerEnvironment.ServerEnvironment)({
               getEnvironmentId: Effect.succeed(EnvironmentId.make("environment-scratch")),

@@ -129,8 +129,7 @@ shares with, and project outside the merge transaction; see
 checkout resolution only fills a missing binding. Existing-worktree references travel only relative to a
 repository; a worktree outside that repository is represented as root intent.
 A remote-only repository link has no local checkout. Configuration sync never
-clones it. Provider instances referenced by model selections still need to be
-configured and signed in on the owner.
+clones it. Provider identities follow the user through settings sync; each owner still needs its own official CLI sign-in.
 
 Settings documents are the exception to the shared transaction: settings.json
 is the store, so [SettingsSync](../../apps/server/src/sync/SettingsSync.ts)
@@ -138,7 +137,7 @@ reconciles the file with the documents after the fact. It keeps the last agreed
 value per key, so a changed local value is an edit to publish and a changed
 shared value is a peer edit to apply. Before the first agreement, a key still at
 its default adopts the peer's value instead of publishing the default. Only
-`UNIVERSAL_SERVER_SETTING_KEYS` travel. Paths, provider instances, resource
+`UNIVERSAL_SERVER_SETTING_KEYS` and portable provider fields travel. Provider fields are keyed by instance ID, so the initial exchange merges lists instead of replacing one. Opaque driver config, paths, sensitive environment values, resource
 limits, machine identity and credentials stay local by omission. Adding a key to
 the universal list follows the rule for any new synced field: an older machine
 keeps it unread until it updates. Builds before 0.3.2 also synced per-project

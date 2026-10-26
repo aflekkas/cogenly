@@ -6,8 +6,8 @@ join one hub. Paired machines sync project names, instructions, archive state,
 repository remotes and source links, agent profiles, fallback chains and
 scheduled-task configuration, and every conversation. They also sync your
 settings, including appearance, keybindings,
-notification preferences and composer behavior. Settings that describe one machine
-stay on it: provider setup and sign-ins, folders such as the projects root,
+notification preferences, composer behavior and provider configuration. Provider IDs, names, colours, enabled state, order, custom models and non-secret environment variables follow you too. Settings that describe one machine
+stay on it: CLI paths and sign-in credentials, folders such as the projects root,
 storage and backups, background activity, and devices. Changes made while a
 machine is offline catch up when it reconnects. A machine on an older version
 keeps syncing and picks up anything newer once it updates.

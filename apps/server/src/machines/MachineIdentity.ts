@@ -59,6 +59,8 @@ const make = Effect.gen(function* () {
         displayName: provider.displayName ?? provider.instanceId,
         enabled: provider.enabled,
         auth: provider.auth.status,
+        installed: provider.installed,
+        canAuthenticate: provider.setup?.canAuthenticate ?? false,
       })),
     ),
   );

@@ -7,6 +7,8 @@ import {
 import * as Effect from "effect/Effect";
 
 import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
+import * as ProviderAuthService from "../../../provider/ProviderAuthService.ts";
+import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as Machines from "../../../machines/Machines.ts";
 import * as ProjectMove from "../../../threadSync/ProjectMove.ts";
 import * as ThreadTransfer from "../../../threadSync/ThreadTransfer.ts";
@@ -82,6 +84,22 @@ export const withoutSignInLink = (status: MachineSetupStatus): MachineSetupStatu
 });
 
 export const layer = McpToolAccess.toLayer(MachinesToolkit, {
+  provider_sign_in: McpToolAccess.writesEnvironment((input) =>
+    Effect.gen(function* () {
+      const auth = yield* ProviderAuthService.ProviderAuthService;
+      const invocation = yield* McpInvocationContext.McpInvocationContext;
+      return yield* auth.manageSignIn(input.request, invocation.requestNamespace).pipe(
+        Effect.mapError(
+          () =>
+            new OrchestratorMcpFailure({
+              code: "orchestration_error",
+              message:
+                "Provider sign-in could not complete. Check the machine connection and try again.",
+            }),
+        ),
+      );
+    }),
+  ),
   machines_list: McpToolAccess.reads(() =>
     Machines.Machines.pipe(
       Effect.flatMap((machines) => machines.list),
