@@ -348,7 +348,7 @@ export function ComposerProjectPicker(props: {
             <ComboboxTrigger
               disabled={props.disabled}
               aria-label={`In ${current.label.name}. Move to project`}
-              render={<HeroPickerButton />}
+              render={<HeroPickerButton weight="medium" />}
             >
               <HeroName text={current.label.name} icon={headlineIcon} chevron />
             </ComboboxTrigger>

@@ -2,6 +2,7 @@ import type { ClientSettings } from "@cogenly/contracts/settings";
 
 import completionUrl from "./assets/notification-completion.mp3";
 import inputUrl from "./assets/notification-input.mp3";
+import { createSoundCoalescer } from "./threadNotifications.logic";
 
 type NotificationMode = ClientSettings["notificationMode"];
 export const NOTIFICATION_MODE_LABELS = {
@@ -107,6 +108,8 @@ export function setNotificationBadge(count: number) {
 
 let audioContext: AudioContext | undefined;
 const buffers = new Map<string, Promise<AudioBuffer>>();
+// Shared by every caller, so threads finishing together sound once.
+const coalesceSound = createSoundCoalescer();
 
 /** Called from a gesture so browsers allow later background playback. */
 export function unlockNotificationAudio() {
@@ -118,7 +121,7 @@ export async function playNotificationSound(
   kind: "completion" | "input",
   shouldPlay: () => boolean,
 ) {
-  if (!audioContext || audioContext.state !== "running") return;
+  if (!audioContext || audioContext.state !== "running" || !coalesceSound(Date.now())) return;
   const context = audioContext;
   const url = kind === "completion" ? completionUrl : inputUrl;
   try {

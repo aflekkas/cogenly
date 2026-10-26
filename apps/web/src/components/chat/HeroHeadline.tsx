@@ -61,13 +61,15 @@ export function HeroPhrase(props: { readonly children: ReactNode }) {
 }
 
 /**
- * A name in the sentence that opens a picker. Pass it as a trigger's `render`;
- * the visible name is its accessible name, so the sentence reads naturally.
+ * A name in the sentence that opens a picker, underlined so it reads as a
+ * choice. Pass it as a trigger's `render`; the visible name is its accessible
+ * name, so the sentence reads naturally. Work's names are normal weight; the
+ * chat greeting's project passes `weight="medium"`.
  */
 export function HeroPickerButton({ className, ...props }: ComponentProps<typeof InlineButton>) {
   return (
     <InlineButton
-      tone="sentence"
+      tone="picker"
       weight="normal"
       {...props}
       className={cn("pointer-events-auto min-w-0 max-w-full shrink align-baseline", className)}

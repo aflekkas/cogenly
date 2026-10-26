@@ -22,6 +22,11 @@ import {
   showBackgroundNotification,
   unlockNotificationAudio,
 } from "../threadNotifications";
+import {
+  completionWantsSound,
+  threadNotificationKind,
+  type ThreadNotificationMark,
+} from "../threadNotifications.logic";
 import { resolveSidebarThreadStatus } from "./Sidebar.logic";
 import { toastManager } from "./ui/toast";
 
@@ -70,6 +75,9 @@ export function ThreadNotificationCoordinator() {
 
   useEffect(() => {
     if (!hasNotificationSound(mode)) return;
+    // The desktop app may play without a gesture, so it sounds even if the
+    // window has stayed in the background since launch.
+    if (window.desktopBridge) unlockNotificationAudio();
     document.addEventListener("pointerdown", unlockNotificationAudio);
     document.addEventListener("keydown", unlockNotificationAudio);
     return () => {
@@ -89,15 +97,10 @@ export function ThreadNotificationCoordinator() {
   ));
 }
 
-/** Clock skew between server and client should not swallow a real completion. */
-const HISTORY_GRACE_MS = 60_000;
-
-interface NotificationState {
+interface NotificationState extends ThreadNotificationMark {
   readonly raw: OrchestrationV2ThreadShell;
   readonly subagentRequest: PendingSubagentRequest | null;
   readonly ownerApproval: boolean;
-  readonly attention: string | null;
-  readonly completion: number | null;
 }
 
 function EnvironmentNotifications({
@@ -173,15 +176,19 @@ function EnvironmentNotifications({
         attention,
         completion,
       });
-      if (!prior || thread.archivedAt !== null) continue;
-      if (completedAt < since - HISTORY_GRACE_MS) continue;
-      const kind =
-        attention && attention !== prior.attention
-          ? "input"
-          : completion !== null && (prior.completion === null || completion > prior.completion)
-            ? "completion"
-            : null;
+      const kind = threadNotificationKind({
+        prior,
+        next: { attention, completion },
+        archived: thread.archivedAt !== null,
+        completedAt,
+        watchingSince: since,
+      });
       if (!kind) continue;
+      const viewing =
+        document.visibilityState === "visible" &&
+        document.hasFocus() &&
+        activeEnvironmentId === environmentId &&
+        activeThreadId === thread.id;
       const title =
         kind === "completion"
           ? "Thread completed"
@@ -192,7 +199,15 @@ function EnvironmentNotifications({
               : status === "failed"
                 ? "Thread failed"
                 : "Input needed";
-      if (hasNotificationSound(mode)) {
+      if (
+        hasNotificationSound(mode) &&
+        (kind === "input" ||
+          completionWantsSound({
+            viewing,
+            sentAt: thread.latestRun?.requestedAt ?? thread.latestRun?.startedAt ?? null,
+            completedAt,
+          }))
+      ) {
         void playNotificationSound(kind, () =>
           hasNotificationSound(getClientSettings().notificationMode),
         );
@@ -201,7 +216,7 @@ function EnvironmentNotifications({
         inAppNotificationsEnabled &&
         document.visibilityState === "visible" &&
         document.hasFocus() &&
-        (activeEnvironmentId !== environmentId || activeThreadId !== thread.id)
+        !viewing
       ) {
         const toastId = toastManager.add({
           type: kind === "completion" ? "success" : status === "failed" ? "error" : "warning",
