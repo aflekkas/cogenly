@@ -2079,8 +2079,18 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           }).pipe(
             Effect.timeout("10 seconds"),
             Effect.catch((cause) =>
-              Effect.logWarning("Failed to restore Codex additional context after compaction.", {
-                cause,
+              Effect.gen(function* () {
+                // The stored entries were not restored, so forget them:
+                // the next turn must send the full set again.
+                yield* Ref.update(additionalContextByThread, (current) => {
+                  const next = new Map(current);
+                  next.delete(threadId);
+                  return next;
+                });
+                yield* Effect.logWarning(
+                  "Failed to restore Codex additional context after compaction.",
+                  { cause },
+                );
               }),
             ),
           );
@@ -6204,13 +6214,6 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             // and gets the full set again; compaction restores from the
             // stored full set in `restoreAdditionalContext`.
             const previousContext = (yield* Ref.get(additionalContextByThread)).get(threadId);
-            yield* Ref.update(additionalContextByThread, (current) => {
-              const next = new Map(current);
-              if (turnStartParams.additionalContext)
-                next.set(threadId, turnStartParams.additionalContext);
-              else next.delete(threadId);
-              return next;
-            });
             const changedContext =
               turnStartParams.additionalContext === undefined
                 ? undefined
@@ -6226,6 +6229,15 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                       : { additionalContext: changedContext }),
                   });
             const started = yield* client.request("turn/start", wireTurnStartParams);
+            // Recorded only once the turn actually started: a failed start
+            // keeps the previous entries, so the retry sends the full set.
+            yield* Ref.update(additionalContextByThread, (current) => {
+              const next = new Map(current);
+              if (turnStartParams.additionalContext)
+                next.set(threadId, turnStartParams.additionalContext);
+              else next.delete(threadId);
+              return next;
+            });
             yield* registerRootTurn({
               turnInput,
               nativeTurnId: started.turn.id,
