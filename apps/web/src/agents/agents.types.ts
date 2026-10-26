@@ -94,6 +94,7 @@ export interface AgentContact extends AgentListItem {
   waitingInRun?: boolean;
   /** What the agent is doing right now, from its running tool call, for the typing hint. */
   workingOn?: string | null;
+  preparingHandoff?: boolean;
   /** Its slot in the user-arranged Agents list: its conversation thread's active order key. */
   orderKey?: string | null;
   /** Its conversation can take an order key (not pinned, settled or archived). */

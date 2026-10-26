@@ -65,6 +65,30 @@ const AgentPolicyFields = {
 /** Why a run left the agent's primary provider entry: its usage limit or its sign-in. */
 export const AgentFallbackReason = Schema.Literals(["usage_limit", "auth"]);
 export type AgentFallbackReason = typeof AgentFallbackReason.Type;
+export const AGENT_CORE_MEMORY_CHARS = 8000;
+export const AgentCoreMemory = Schema.String.check(Schema.isMaxLength(AGENT_CORE_MEMORY_CHARS));
+export const AgentCoreMemoryUpdateInput = Schema.Struct({ text: AgentCoreMemory });
+export const AgentCoreMemoryResult = Schema.Struct({ text: AgentCoreMemory });
+
+export const AgentHandoffNarrative = Schema.Struct({
+  entries: Schema.Array(
+    Schema.Struct({
+      text: Schema.String,
+      messageIds: Schema.Array(Schema.String),
+      runIds: Schema.Array(Schema.String),
+    }),
+  ),
+});
+export type AgentHandoffNarrative = typeof AgentHandoffNarrative.Type;
+export const AgentHandoffBrief = Schema.Struct({
+  formatVersion: Schema.Literal(1),
+  version: Schema.Int,
+  coveredRunOrdinal: Schema.Int,
+  createdAt: IsoDateTime,
+  text: Schema.String,
+});
+export type AgentHandoffBrief = typeof AgentHandoffBrief.Type;
+
 const AgentFields = {
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   avatar: AgentAvatar,
@@ -88,6 +112,7 @@ export const Agent = Schema.Struct({
   id: AgentId,
   ownerMachine: Schema.optionalKey(EnvironmentId),
   ...AgentFields,
+  coreMemory: Schema.optional(AgentCoreMemory).pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   ...AgentPolicyFields,
   conversationThreadId: ThreadId,
   /**
@@ -117,6 +142,7 @@ export const AgentUpsertInput = Schema.Struct({
   ownerMachine: Schema.optionalKey(EnvironmentId),
   ...AgentFields,
   fallbackChain: Schema.optional(Schema.Array(ModelSelection)),
+  coreMemory: Schema.optional(AgentCoreMemory),
   responsibility: Schema.optional(AgentPolicyFields.responsibility),
   permissions: Schema.optional(AgentPermissions),
   notifyPolicy: Schema.optional(AgentPolicyFields.notifyPolicy),

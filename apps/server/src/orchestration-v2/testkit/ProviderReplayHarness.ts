@@ -1,3 +1,4 @@
+import * as AgentHandoff from "../../agents/AgentHandoff.ts";
 import * as WorktreeLifecycle from "../../workspace/WorktreeLifecycle.ts";
 import * as Membership from "../../projectLabels/ProjectRepositoryMembership.ts";
 import { layerIdentity as layerSharedIdentity } from "../../sync/testkit.ts";
@@ -431,6 +432,12 @@ export function layerWithRegistry<Error>(
     ),
   );
   const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pipe(
+    Layer.provide(
+      Layer.mock(AgentHandoff.AgentHandoff)({
+        request: () => Effect.void,
+        prepare: () => Effect.succeed(null),
+      }),
+    ),
     Layer.provide(Layer.mock(WorktreeLifecycle.WorktreeLifecycle)({ prepare: () => Effect.void })),
     Layer.provide(
       Layer.mergeAll(

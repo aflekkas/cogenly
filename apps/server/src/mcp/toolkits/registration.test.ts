@@ -475,6 +475,7 @@ const smokeCases = [
   {
     toolkit: "agentMemory",
     names: [
+      "agent_core_memory_update",
       "memory_read",
       "memory_write",
       "memory_remember",

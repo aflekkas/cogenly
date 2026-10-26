@@ -15,6 +15,12 @@ Agents propose facts as they work. A proposal is never used until you choose **C
 **Reject** discards it. An agent's own facts also appear under **Memory** in its
 **Details**.
 
+For an agent's essential preferences, constraints and current priorities, edit **Details →
+Core memory**, or ask the agent to update it. This separate block has an 8,000-character
+limit and accompanies every turn, including after a model change or session rotation.
+**Details → What the agent carried over** shows recent handoff briefs so you can inspect
+what survived a session change.
+
 Memory follows you across [paired machines](./machines.md): a fact added, confirmed, corrected or
 forgotten on one machine changes on all of them, including while one was offline. If two machines
 learn the same fact, you see it once. A fact's history lists changes made on this machine and

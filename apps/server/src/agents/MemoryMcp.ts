@@ -1,6 +1,8 @@
 import * as Facts from "../context/FactService.ts";
 import {
   AgentMemoryListResult,
+  AgentCoreMemoryUpdateInput,
+  AgentCoreMemoryResult,
   FactCreateInput,
   FactSupersedeInput,
   FactListInput,
@@ -102,7 +104,23 @@ const Supersede = Tool.make("fact_supersede", {
   }),
   success: FactResult,
 });
-export const toolkit = Toolkit.make(Read, Remember, Write, Forget, Search, Propose, Supersede);
+const CoreMemoryUpdate = Tool.make("agent_core_memory_update", {
+  ...shared,
+  description:
+    "Replace your always-in-context core memory block (8000 characters maximum). Preserve important constraints and negations. The owner can inspect and edit it. Identity comes from this thread's credential.",
+  parameters: AgentCoreMemoryUpdateInput,
+  success: AgentCoreMemoryResult,
+});
+export const toolkit = Toolkit.make(
+  CoreMemoryUpdate,
+  Read,
+  Remember,
+  Write,
+  Forget,
+  Search,
+  Propose,
+  Supersede,
+);
 const unavailable = (_cause: unknown) =>
   new OrchestratorMcpFailure({
     code: "orchestration_error",
@@ -134,6 +152,12 @@ const remember = (input: typeof writeParameters.Type) =>
     return { note };
   });
 export const handlers = Access.toLayer(toolkit, {
+  agent_core_memory_update: Access.actsAsCaller((input) =>
+    callingAgent.pipe(
+      Effect.flatMap(({ agent, store }) => store.updateCoreMemory(agent.id, input.text)),
+      Effect.mapError(unavailable),
+    ),
+  ),
   fact_search: Access.readsAsCaller((input) =>
     Effect.gen(function* () {
       const { agent } = yield* callingAgent;

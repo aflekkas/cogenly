@@ -17,7 +17,7 @@ import {
   ZapIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { AgentAvatar, AgentPermissions } from "@cogenly/contracts";
+import type { AgentAvatar, AgentPermissions, AgentHandoffBrief } from "@cogenly/contracts";
 import { PopoverTrigger } from "~/components/ui/popover";
 import { ThreadDetailsControl } from "~/components/chat/ThreadDetailsControl";
 import { ThreadDetailsSection } from "~/components/chat/ThreadDetailsSection";
@@ -62,7 +62,14 @@ import type { AgentContact, AgentDraft, AgentWorkspaceView } from "./agents.type
 type ProfilePatch = Partial<Omit<AgentDraft, "id">>;
 type Editing =
   | {
-      kind: "name" | "instructions" | "responsibility" | "memory:new" | "trigger:new" | "delete";
+      kind:
+        | "name"
+        | "coreMemory"
+        | "instructions"
+        | "responsibility"
+        | "memory:new"
+        | "trigger:new"
+        | "delete";
     }
   | { kind: "memory" | "trigger"; id: string }
   | null;
@@ -160,6 +167,7 @@ export function AgentResponsibilities({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [highImpactOpen, setHighImpactOpen] = useState(false);
+  const [briefsOpen, setBriefsOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
   const grantedLabels = PERMISSION_OPTIONS.filter(
     (option) => !option.highImpact && agent.permissions[option.key],
@@ -463,6 +471,40 @@ export function AgentResponsibilities({
         />
       </CollapsibleDetails>
 
+      <CollapsibleDetails
+        id="agent-core-memory"
+        title="Core memory"
+        open={editing?.kind === "coreMemory"}
+        onOpenChange={(open) => setEditing(open ? { kind: "coreMemory" } : null)}
+      >
+        <InlineEditor
+          label="Core memory"
+          initial={agent.coreMemory ?? ""}
+          multiline
+          allowEmpty
+          maxLength={8000}
+          pending={pending}
+          onCancel={close}
+          onSave={async (coreMemory) => (await saveProfile({ coreMemory })) && close()}
+        />
+        <p className="px-2.5 pb-2 text-xs text-muted-foreground">
+          Always carried into every turn. Keep essential preferences, constraints and current
+          priorities here. 8,000 characters maximum.
+        </p>
+      </CollapsibleDetails>
+      <CollapsibleDetails
+        id="agent-handoff-briefs"
+        title="What the agent carried over"
+        open={briefsOpen}
+        onOpenChange={setBriefsOpen}
+      >
+        {(workspace.activity?.handoffBriefs ?? []).map((brief) => (
+          <HandoffBriefViewer key={brief.version} brief={brief} />
+        ))}
+        {!workspace.activity?.handoffBriefs?.length && (
+          <p className="px-2.5 py-2 text-xs text-muted-foreground">No session handoffs yet.</p>
+        )}
+      </CollapsibleDetails>
       {client.MemorySection ? (
         <CollapsibleDetails
           id="agent-memory"
@@ -696,5 +738,29 @@ function CollapsibleDetails({
     >
       {children}
     </ThreadDetailsSection>
+  );
+}
+
+function HandoffBriefViewer({ brief }: { brief: AgentHandoffBrief }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger
+        render={
+          <DetailRow
+            icon={ScrollTextIcon}
+            label={`Brief ${brief.version}`}
+            value={`Through run ${brief.coveredRunOrdinal}`}
+            detail={formatMessageTime(brief.createdAt)}
+            trailing={<DisclosureChevron />}
+          />
+        }
+      />
+      <CollapsiblePanel>
+        <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words px-2.5 py-2 text-xs font-sans">
+          {brief.text}
+        </pre>
+      </CollapsiblePanel>
+    </Collapsible>
   );
 }

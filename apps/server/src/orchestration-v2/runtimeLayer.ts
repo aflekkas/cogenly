@@ -1,4 +1,5 @@
 import * as StaleRunRecoveryWorker from "../health/StaleRunRecoveryWorker.ts";
+import * as AgentHandoff from "../agents/AgentHandoff.ts";
 import * as WorktreeLifecycle from "../workspace/WorktreeLifecycle.ts";
 import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
 import * as GoogleTokenStore from "../integrations/local/GoogleTokenStore.ts";
@@ -262,6 +263,9 @@ export const layerProjectSetupScriptRunner = ProjectSetupScriptRunner.layer.pipe
   Layer.provide(layerProjectService),
 );
 const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pipe(
+  Layer.provide(
+    AgentHandoff.layer.pipe(Layer.provide(Layer.mergeAll(AgentStore.layer, TextGeneration.layer))),
+  ),
   Layer.provide(WorktreeLifecycle.layer.pipe(Layer.provide(layerProjectSetupScriptRunner))),
   Layer.provide(AgentStore.layer),
   Layer.provide(

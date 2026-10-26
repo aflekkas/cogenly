@@ -3,28 +3,20 @@ import { isAgentInternalMessage, type ModelSelection } from "@cogenly/contracts"
 export const CONVERSATION_RECENT_MESSAGES = 20;
 export const CONVERSATION_SESSION_RUNS = 40;
 
-export function conversationCarryOver(
-  previous: string,
+/** The latest owner-visible conversation texts, for a background job's context. */
+export function recentConversation(
   messages: ReadonlyArray<{ id?: string; role: string; text: string }>,
 ) {
-  messages = messages.filter((message) => !isAgentInternalMessage(message.id));
-  const older = messages
-    .slice(0, -CONVERSATION_RECENT_MESSAGES)
-    .map((m) => `${m.role}: ${m.text.slice(0, 500)}`)
+  return messages
+    .filter((message) => !isAgentInternalMessage(message.id))
+    .slice(-CONVERSATION_RECENT_MESSAGES)
+    .map((m) => `${m.role}: ${m.text}`)
     .join("\n");
-  return {
-    summary: [previous, older].filter(Boolean).join("\n").slice(-12000),
-    recent: messages
-      .slice(-CONVERSATION_RECENT_MESSAGES)
-      .map((m) => `${m.role}: ${m.text.slice(0, 2000)}`)
-      .join("\n")
-      .slice(-16000),
-  };
 }
 
 /**
  * A persistent agent starts a fresh native session every CONVERSATION_SESSION_RUNS owner turns
- * and whenever its provider or model changes. The fresh session gets the stored summary,
+ * and whenever its provider or model changes. The fresh session gets the validated handoff brief,
  * memory and recent texts instead of resuming another model's native history.
  * Effort and other options stay on the same session.
  */

@@ -636,6 +636,8 @@ export const OrchestrationV2Run = Schema.Struct({
   queueHeld: Schema.optional(Schema.Boolean),
   /** An explicit Stop survives successful intervening turns and automatic queue recovery. */
   queueHoldReason: Schema.optional(Schema.Literal("stopped")),
+  /** A model switch is waiting for its portable agent brief. */
+  handoffPending: Schema.optional(Schema.Boolean),
   requestedAt: Schema.DateTimeUtc,
   startedAt: Schema.NullOr(Schema.DateTimeUtc),
   completedAt: Schema.NullOr(Schema.DateTimeUtc),

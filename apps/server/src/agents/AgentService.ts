@@ -1,4 +1,6 @@
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
+import * as Inbox from "./AgentInbox.ts";
+import { recentConversation } from "./context.ts";
 import { ProjectRepositoryMismatchError } from "@cogenly/contracts";
 import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
 import { isReplayedCommandId } from "../orchestration-v2/ReplayedCommandIds.ts";
@@ -11,6 +13,7 @@ import {
   defaultAgentPermissions,
   defaultAgentOwner,
   AgentError,
+  AgentHandoffBrief,
   AgentId,
   CommandId,
   EventId,
@@ -59,7 +62,6 @@ import * as FileSystem from "effect/FileSystem";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
-import { conversationCarryOver } from "./context.ts";
 import {
   advanceFallback,
   chainIndexOf,
@@ -68,6 +70,7 @@ import {
   fallbackChainOf,
 } from "./providerFallback.ts";
 
+const decodeHandoffBrief = Schema.decodeUnknownEffect(Schema.fromJsonString(AgentHandoffBrief));
 const encodeEventContext = Schema.encodeEffect(Schema.fromJsonString(AgentEventContext));
 const encodeEventSchedule = Schema.encodeEffect(Schema.fromJsonString(ScheduledTaskSchedule));
 const isAgentError = Schema.is(AgentError);
@@ -138,6 +141,7 @@ const make = Effect.gen(function* () {
   const machines = yield* Effect.serviceOption(Machines.Machines);
   const remoteLaunch = yield* Effect.serviceOption(RemoteLaunch.RemoteThreadLaunch);
   const store = yield* Store.AgentStore;
+  const inbox = yield* Inbox.AgentInbox;
   const launch = yield* ThreadLaunch.ThreadLaunchService;
   const threads = yield* Threads.ThreadManagementService;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
@@ -534,6 +538,11 @@ const make = Effect.gen(function* () {
           ),
         );
       }
+      for (const agent of yield* store.list()) {
+        if (agent.ownerMachine !== undefined && agent.ownerMachine !== shared.environmentId)
+          continue;
+        yield* inbox.sweep(agent);
+      }
     }).pipe(Effect.mapError(failure));
   const upsert: AgentService["Service"]["upsert"] = (input, creationId) =>
     Effect.gen(function* () {
@@ -644,6 +653,7 @@ const make = Effect.gen(function* () {
         ...profile,
         ownerMachine,
         fallbackChain: nextChain,
+        coreMemory: input.coreMemory ?? existing?.coreMemory ?? "",
         projectFolderId: null,
         responsibility: input.responsibility ?? existing?.responsibility ?? "",
         permissions: input.permissions ?? existing?.permissions ?? defaultAgentPermissions,
@@ -1021,7 +1031,15 @@ const make = Effect.gen(function* () {
         const conversation = yield* projections.getThreadRecords(agent.conversationThreadId, [
           "messages",
         ]);
-        const carry = conversationCarryOver("", conversation.messages);
+        const briefs = yield* sql<{
+          payload_json: string;
+        }>`SELECT payload_json FROM agent_handoff_briefs WHERE agent_id = ${agent.id} ORDER BY version DESC LIMIT 1`;
+        const carry = {
+          summary: briefs[0]
+            ? (yield* decodeHandoffBrief(briefs[0].payload_json)).text
+            : "No session handoff yet.",
+          recent: recentConversation(conversation.messages),
+        };
         const result = yield* Effect.result(
           launch.launch({
             agent: { id: agent.id, role: "work" },
@@ -1043,7 +1061,7 @@ const make = Effect.gen(function* () {
             initialMessage: {
               messageId: MessageId.make(id),
               scheduledTaskId: task.id,
-              text: `Background job for ${agent.name}. Finish with a short owner-facing result, question, or approval request. Details stay in this work thread.\n\nConversation summary:\n${carry.summary}\nRecent conversation:\n${carry.recent}\n\nTrigger:\n${prompt}${context === undefined ? "" : `\n\nEvent context:\n${yield* encodeEventContext(context)}`}`,
+              text: `Background job for ${agent.name}. Finish with a short owner-facing result, question, or approval request. Details stay in this work thread.\n\nConversation handoff brief:\n${carry.summary}\nRecent conversation:\n${carry.recent}\n\nTrigger:\n${prompt}${context === undefined ? "" : `\n\nEvent context:\n${yield* encodeEventContext(context)}`}`,
               attachments: [],
             },
           }),
@@ -1075,6 +1093,7 @@ const make = Effect.gen(function* () {
   });
 });
 export const layer = Layer.effect(AgentService, make)
+  .pipe(Layer.provide(Inbox.layer))
   .pipe(Layer.provide(Membership.layer))
   .pipe(Layer.provide(SharedState.layer))
   .pipe(Layer.provide(Access.layer));

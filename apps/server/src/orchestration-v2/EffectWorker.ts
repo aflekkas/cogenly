@@ -801,22 +801,28 @@ export const layerWithOptions = (
             }).pipe(Effect.onError((cause) => recoverPostSuccessSettlement(effect, cause)));
           }
 
+          const waitingForHandoff = ProviderTurnStartService.isAgentHandoffPendingError(
+            Cause.squash(exit.cause),
+          );
           const error = Cause.pretty(exit.cause);
           const nonRetryable = isNonRetryableProviderTurnControlFailure(effect.request.type, error);
-          yield* Effect.logWarning("Orchestration effect execution failed", {
-            effectId: effect.id,
-            effectType: effect.request.type,
-            attemptCount: effect.attemptCount,
-            nonRetryable,
-            error,
-          });
+          yield* (waitingForHandoff ? Effect.logDebug : Effect.logWarning)(
+            "Orchestration effect execution failed",
+            {
+              effectId: effect.id,
+              effectType: effect.request.type,
+              attemptCount: effect.attemptCount,
+              nonRetryable,
+              error,
+            },
+          );
           // Prefer succeed for terminal interrupt races so the outbox does not
           // keep a failed interrupt around; fail only when we must not retry.
           const updated = nonRetryable
             ? yield* outbox
                 .succeed({ effectId: effect.id, workerId })
                 .pipe(Effect.onError((cause) => terminalizeClaim(effect, cause)))
-            : effect.attemptCount >= maxAttempts
+            : effect.attemptCount >= maxAttempts && !waitingForHandoff
               ? yield* outbox
                   .fail({ effectId: effect.id, workerId, error })
                   .pipe(Effect.onError((cause) => terminalizeClaim(effect, cause)))
@@ -825,7 +831,11 @@ export const layerWithOptions = (
                     effectId: effect.id,
                     workerId,
                     error,
-                    delayMs: Math.min(30_000, 100 * 2 ** Math.max(0, effect.attemptCount - 1)),
+                    // Waiting for a background brief is a durable deferral, not
+                    // a failed provider start. It must outlive the ordinary retry budget.
+                    delayMs: waitingForHandoff
+                      ? 5000
+                      : Math.min(30_000, 100 * 2 ** Math.max(0, effect.attemptCount - 1)),
                   })
                   .pipe(Effect.onError((cause) => requeueClaim(effect, cause)));
           if (!updated) {

@@ -77,6 +77,21 @@ export const make = Effect.gen(function* () {
               );
         }),
       ),
+    generateAgentNarrative: (input) =>
+      resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((generation) => {
+          const generator: ProviderTextGeneration & Partial<WorkScopeSummaryGeneration> =
+            generation;
+          return generator.generateAgentNarrative
+            ? generator.generateAgentNarrative(input)
+            : Effect.fail(
+                new TextGenerationError({
+                  operation: "generateThreadTitle",
+                  detail: "Provider does not support agent narratives.",
+                }),
+              );
+        }),
+      ),
     generateHandoffBrief: (input) =>
       resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(
         Effect.flatMap((textGeneration) => {

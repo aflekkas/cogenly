@@ -3,6 +3,7 @@ export const agentFixture = (suffix = "one"): Agent => ({
   id: AgentId.make(`agent:${suffix}`),
   name: "Juniper",
   avatar: { seed: suffix, color: "bleu" },
+  coreMemory: "",
   instructions: "Be brief and remember preferences.",
   modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
   fallbackChain: [],
