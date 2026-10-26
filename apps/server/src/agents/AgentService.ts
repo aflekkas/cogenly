@@ -14,6 +14,7 @@ import {
   CommandId,
   EventId,
   MessageId,
+  ProjectId,
   ThreadId,
   TurnItemId,
   AgentEventContext,
@@ -678,9 +679,24 @@ const make = Effect.gen(function* () {
         const projectId =
           input.projectId ??
           (yield* folders.ensureScratchProject.pipe(
+            Effect.catchTags({
+              ScratchUnavailableError: () =>
+                Effect.gen(function* () {
+                  const [project] = yield* sql<{
+                    project_id: string;
+                  }>`SELECT project_id FROM projection_projects WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT 1`;
+                  if (!project)
+                    return yield* new AgentError({
+                      message: "Open a repository on this machine to start the agent builder.",
+                    });
+                  return { projectId: ProjectId.make(project.project_id) };
+                }),
+            }),
             Effect.mapBoth({
               onFailure: () =>
-                new AgentError({ message: "This machine can't start a conversation right now." }),
+                new AgentError({
+                  message: "Open a repository on this machine to start the agent builder.",
+                }),
               onSuccess: (scratch) => scratch.projectId,
             }),
           ));

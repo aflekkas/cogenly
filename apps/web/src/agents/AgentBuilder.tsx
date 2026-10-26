@@ -38,7 +38,7 @@ import { useScratchProject } from "~/hooks/useScratchProject";
 import { cn, newMessageId, randomUUID } from "~/lib/utils";
 import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
 import { agentsRpc } from "~/rpc/agents";
-import { useThreadShells } from "~/state/entities";
+import { useProjects, useThreadShells } from "~/state/entities";
 import { usePrimaryEnvironmentId } from "~/state/environments";
 import { threadEnvironment, useEnvironmentThread } from "~/state/threads";
 import { useOrchestrationCommand } from "~/state/use-orchestration-command";
@@ -120,7 +120,11 @@ export function AgentBuilder({
   const shells = useThreadShells();
   const primary = usePrimaryEnvironmentId();
   const { scratchEnvironmentId, openScratchProject } = useScratchProject();
-  const environmentId = scratchEnvironmentId(requested ?? primary);
+  const projects = useProjects();
+  const local = requested ?? primary;
+  const fallbackProject = projects.find((project) => project.environmentId === local);
+  const scratchEnvironment = scratchEnvironmentId(local);
+  const environmentId = scratchEnvironment ?? fallbackProject?.environmentId ?? null;
   const setSidebarMode = useUiStateStore((store) => store.setSidebarMode);
   const startTurn = useOrchestrationCommand(threadEnvironment.startTurn, { reportFailure: false });
   const builderStart = useOrchestrationCommand(agentsRpc.builderStart, {
@@ -215,7 +219,10 @@ export function AgentBuilder({
       ]);
       try {
         if (thread === null) {
-          const project = await openScratchProject(environmentId, "Could not start the builder");
+          const project =
+            scratchEnvironment === null
+              ? fallbackProject
+              : await openScratchProject(environmentId, "Could not start the builder");
           if (!project) throw new Error("This machine can't start a conversation right now.");
           const result = await builderStart({
             environmentId,
@@ -259,6 +266,8 @@ export function AgentBuilder({
       environmentId,
       modelSelection,
       openScratchProject,
+      scratchEnvironment,
+      fallbackProject,
       sending,
       startFolder,
       startTurn,
@@ -414,8 +423,10 @@ export function AgentBuilder({
             )}
             {environmentId === null ? (
               <p className="agent-conversation-empty">
-                Agents aren't available here.
-                <span>This machine can't start a conversation without a repository right now.</span>
+                Open a repository to create an agent.
+                <span>
+                  The builder uses a repository when this machine has no No project workspace.
+                </span>
               </p>
             ) : (
               <BuilderComposer
