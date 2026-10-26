@@ -98,6 +98,7 @@ function ScopeMenu({
   value,
   options,
   searchLabel,
+  quiet,
   onChange,
 }: {
   ariaLabel: string;
@@ -106,19 +107,34 @@ function ScopeMenu({
   value: string;
   options: ScopeOption[];
   searchLabel: string;
+  quiet: boolean;
   onChange: (next: string) => void;
 }) {
   const [query, setQuery] = useState("");
+  // Nothing to switch to: name the machine without offering a menu.
+  if (options.length <= 1 && options.every((option) => option.value === value)) {
+    return (
+      <span className="inline-flex min-w-0 max-w-72 items-center gap-1.5">
+        {quiet ? null : icon}
+        <span className="min-w-0 truncate">{label}</span>
+      </span>
+    );
+  }
   const Trigger = options.length > 6 ? ComboboxTrigger : MenuTrigger;
   const trigger = (
     <Trigger
       aria-label={`${ariaLabel}: ${label}`}
-      render={<InlineButton tone="picker" />}
+      render={
+        <InlineButton tone={quiet ? "muted" : "picker"} weight={quiet ? "normal" : undefined} />
+      }
       className="min-w-0 max-w-72"
     >
-      {icon}
+      {quiet ? null : icon}
       <span className="min-w-0 truncate">{label}</span>
-      <ChevronDownIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+      <ChevronDownIcon
+        aria-hidden
+        className={quiet ? "size-3 shrink-0" : "size-3.5 shrink-0 text-muted-foreground"}
+      />
     </Trigger>
   );
   const choices = options;
@@ -194,13 +210,15 @@ function ScopeMenu({
 
 /**
  * The machine a page's machine-local settings apply to. The scope sentence
- * uses it on machine pages; a machine-local row elsewhere names it inline.
+ * uses it on machine pages; a machine-local row elsewhere names it `quiet`ly
+ * after its title. It is a switcher only when there is another machine to pick.
  */
-export function MachineScopeMenu() {
+export function MachineScopeMenu({ quiet = false }: { quiet?: boolean }) {
   const { machine, search, selectScope } = useSettingsScope();
   const { environments } = useEnvironments();
   return (
     <ScopeMenu
+      quiet={quiet}
       ariaLabel="Machine"
       icon={
         machine ? (
