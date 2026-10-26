@@ -1,3 +1,4 @@
+import { decideFallback } from "./providerFallback.ts";
 import * as AccountAccess from "../accounts/AccountAccess.ts";
 import * as Access from "./AgentAccessScope.ts";
 import {
@@ -387,6 +388,9 @@ const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       const agent = yield* store.get(input.agentId);
+      const fallback = decideFallback(agent, DateTime.toEpochMillis(yield* DateTime.now));
+      if (fallback.restored)
+        yield* store.setFallback(agent.id, { index: 0, reason: null, until: null });
       const id = ThreadId.make(`agent-work:${agent.id}:${key}`);
       // Stable launch identity and the standard launch service make approval retries safe.
       yield* sql`INSERT OR IGNORE INTO agent_run_threads(thread_id, agent_id, trigger_kind, source_run_id) VALUES (${id}, ${agent.id}, ${triggerKind}, ${sourceRunId})`;
@@ -400,7 +404,7 @@ const make = Effect.gen(function* () {
             : { projectFolderId: input.projectFolderId }),
           title: input.title,
           scopeSummary: input.prompt,
-          modelSelection: agent.modelSelection,
+          modelSelection: fallback.selection,
         },
         {
           origin: "agent",
