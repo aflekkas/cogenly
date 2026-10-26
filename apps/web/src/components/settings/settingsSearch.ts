@@ -308,7 +308,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Memory",
     to: "/settings/memory",
     searchTerms: [
-      "facts remember forget correct context proposed confirm agents knowledge",
+      "facts remember something forget correct context proposed proposals confirm reject private agents knowledge",
       "sync synced syncing other machines offline",
     ],
   },
@@ -317,8 +317,17 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Vault",
     to: "/settings/vault",
     searchTerms: [
-      "secrets passwords logins credentials api keys cards notes one-time codes totp approvals usage log",
+      "secrets passwords logins credentials api keys cards notes one-time codes totp approvals access ask first usage log recent activity",
       "share vault sharing sync synced other machines this machine only keep on this machine",
+    ],
+  },
+  {
+    id: "scheduled-tasks",
+    title: "Scheduled tasks",
+    to: "/settings/scheduled-tasks",
+    searchTerms: [
+      "schedule cron recurring timer interval daily weekdays automation automate run prompt automatically paused active",
+      "webhook url trigger event github signature deliveries",
     ],
   },
   {
