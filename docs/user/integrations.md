@@ -82,15 +82,16 @@ found and what each server still needs. **Import** brings the definitions over,
 turned off; an agent then collects secrets into the vault and checks each
 connection with you. claude.ai connectors need a new sign-in through Cogenly
 because their authorization can't be imported. Repo servers aren't imported;
-they already load from the repo. On a paired machine, an imported web
-integration asks you to sign in on that machine, and integrations that run a
-command stay on the machine that imported them.
+they already load from the repo. Imported web integrations share their
+definitions between paired machines; sign in once to share their portable
+sign-in through the vault. Integrations that run a command stay on the machine
+that imported them.
 
 ## Sign-ins on paired machines
 
-When you [share the vault](vault.md#vault-on-several-machines) between paired
-machines, signing in to a web integration on one machine signs it in on the
-others too. One machine renews the sign-in for all of them: your hub when it
+With [vault sharing](vault.md#vault-on-several-machines), enabled by default
+between paired machines, signing in to a web integration on one machine signs
+it in on the others too. One machine renews the sign-in for all of them: your hub when it
 shares the vault with you, otherwise the machine you signed in on. If that
 machine is offline when the sign-in runs out, the others show that they are
 waiting for it; signing in again on any machine also works. Google and other

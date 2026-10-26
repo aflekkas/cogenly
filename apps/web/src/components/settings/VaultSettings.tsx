@@ -403,7 +403,7 @@ function VaultPeerRow(props: {
 }) {
   const { peer } = props;
   const [busy, setBusy] = useState(false);
-  const shared = peer.state !== "not_shared";
+  const shared = peer.sharingEnabled ?? peer.state !== "not_shared";
   // Turning sharing on asks the other machine for its key, so it must be online.
   // Turning it off is local, and is what to do for a lost machine.
   const blockedOffline = !shared && !peer.online;
@@ -411,7 +411,9 @@ function VaultPeerRow(props: {
     ? "This connection can't change vault sharing."
     : blockedOffline
       ? `${peer.label} is offline. You can share once it's back.`
-      : `Turn this on here and on ${peer.label}. Then ${peer.label} can read the items shared from here.`;
+      : peer.state === "shared"
+        ? `Shared with ${peer.label}`
+        : "Not shared";
   return (
     <PeerSyncRow
       machine={peer.label}

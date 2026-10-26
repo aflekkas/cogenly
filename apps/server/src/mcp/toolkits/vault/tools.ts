@@ -2,6 +2,8 @@ import {
   OrchestratorMcpFailure,
   PreviewAutomationError,
   VaultDeleteInput,
+  VaultSetPeerSharingInput,
+  VaultSharingStatus,
   VaultDeleteResult,
   VaultField,
   VaultItemMetadata,
@@ -19,6 +21,7 @@ import { Tool, Toolkit } from "effect/ai";
 import * as AgentStore from "../../../agents/AgentStore.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Vault from "../../../vault/Vault.ts";
+import * as VaultSync from "../../../vault/VaultSync.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 
@@ -105,6 +108,33 @@ const VaultDeleteTool = Tool.make("vault_delete", {
   .annotate(Tool.Destructive, true);
 
 export const VaultToolkit = Toolkit.make(
+  Tool.make("vault_sharing_status", {
+    description:
+      "Inspect vault sharing with directly paired machines. Portable vault items and web integration sign-ins share by default; machine-only credentials and item-use policies stay local. Returns sharing state without secrets.",
+    parameters: Tool.EmptyParams,
+    success: VaultSharingStatus,
+    failure: OrchestratorMcpFailure,
+    failureMode: "return",
+    dependencies: [VaultSync.VaultSync],
+  })
+    .annotate(Tool.Readonly, true)
+    .annotate(Tool.Destructive, false),
+  Tool.make("vault_sharing_update", {
+    description:
+      "Enable or disable vault sharing with a directly paired machine by environmentId. Uses the same switch as Settings → Vault. Disabling on either machine stops future sharing in both directions; copies already received remain. Requires full access; no owner approval. Enabling needs the peer online to verify its key.",
+    parameters: VaultSetPeerSharingInput,
+    success: VaultSharingStatus,
+    failure: OrchestratorMcpFailure,
+    failureMode: "return",
+    dependencies: [
+      VaultSync.VaultSync,
+      McpInvocationContext.McpInvocationContext,
+      ThreadManagementService.ThreadManagementService,
+    ],
+  })
+    .annotate(Tool.Readonly, false)
+    .annotate(Tool.Destructive, false),
+
   VaultListTool,
   VaultSaveTool,
   VaultFillTool,

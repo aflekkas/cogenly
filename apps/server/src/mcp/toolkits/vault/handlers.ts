@@ -9,6 +9,7 @@ import * as Schema from "effect/Schema";
 
 import * as AgentStore from "../../../agents/AgentStore.ts";
 import * as Vault from "../../../vault/Vault.ts";
+import * as VaultSync from "../../../vault/VaultSync.ts";
 import { normalizeHost } from "../../../vault/VaultPolicy.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
@@ -27,6 +28,18 @@ const toFailure = (cause: unknown) =>
     : failure("Vault operation failed.", "orchestration_error");
 
 export const layer = McpToolAccess.toLayer(VaultToolkit, {
+  vault_sharing_status: McpToolAccess.reads(() =>
+    VaultSync.VaultSync.pipe(
+      Effect.flatMap((sync) => sync.sharingStatus),
+      Effect.mapError(toFailure),
+    ),
+  ),
+  vault_sharing_update: McpToolAccess.writesEnvironment((input) =>
+    VaultSync.VaultSync.pipe(
+      Effect.flatMap((sync) => sync.setPeerSharing(input)),
+      Effect.mapError(toFailure),
+    ),
+  ),
   vault_list: McpToolAccess.readsAsCaller((input) =>
     Effect.gen(function* () {
       const vault = yield* Vault.Vault;

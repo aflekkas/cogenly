@@ -9,14 +9,17 @@ guide: [Vault on several machines](../user/vault.md#vault-on-several-machines).
 
 ## Who can read
 
-A **holder** is a machine that can decrypt synced items. Only an
-access-management client can authorize sharing (`vault.setPeerSharing`);
-there is no agent tool that adds a holder. Each direct peer's X25519 vault key
-is fetched over its authenticated link and pinned to that pairing. Invalid and
-low-order keys are refused. A changed key requires unpairing, pairing again,
-and enabling sharing again.
+A **holder** is a machine that can decrypt synced items. Directly paired
+machines are authorized by default; an access-management client or an agent can
+opt out or restore sharing through `VaultSync.setPeerSharing`. Each direct
+peer's X25519 vault key is fetched over its authenticated link and pinned to that pairing. Invalid and
+low-order keys are refused. A changed key requires unpairing and pairing again
+with its new key.
 
-Both sides must opt in before either releases a data key. The peer's
+Both sides default on, but either can opt out before future data keys are
+released. Missing records on upgrade mean never touched and default on;
+legacy disabled records remain disabled. A preference keyed to the pairing
+also records opt-outs made before a peer supplies its vault key. The peer's
 `VaultPeerKey.sharing` confirmation is stored locally and refreshed on enable,
 on topology changes, and on reconcile for online peers. A false confirmation
 stops future wraps. Offline peers retain their last confirmation. Every use of

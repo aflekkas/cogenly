@@ -1,13 +1,8 @@
 /**
- * Vault replication between directly paired machines. The owner shares this
- * vault with a peer explicitly (`setPeerSharing`); a peer becomes a holder
- * once it says over the direct link that it shares back. Revisions are
- * wrapped only for holders, and a machine reads a revision only through a
- * wrap made by itself or by a holder. Incoming documents project into
- * `vault_items` here, asynchronously, with this machine's own encryption; a
- * holder then forwards the current revision to its other holders. Transports
- * call these methods; agents have no tool that authorizes a new holder. See
- * docs/internals/vault-sync.md.
+ * Vault replication defaults on for directly paired machines. Each side can
+ * opt out; data keys are released only after the authenticated peer confirms
+ * sharing. Keys stay pinned to the pairing, and received items are encrypted
+ * with this machine's own key. UI and MCP use the same service.
  */
 import {
   type MachineInfo,
@@ -109,13 +104,27 @@ const make = Effect.gen(function* () {
     ),
   );
 
+  // Absence means never touched, including pairings from before sharing defaulted on.
+  // Disabled legacy rows are deliberate opt-outs and retain their pinned keys.
+  const sharingEnabled = (peer: MachineInfo) =>
+    Effect.gen(function* () {
+      const preference = (yield* sql<{
+        enabled: number;
+      }>`SELECT enabled FROM vault_peer_sharing_preferences WHERE environment_id = ${peer.environmentId} AND pairing_key = ${pairingKeyOf(peer)}`)[0];
+      if (preference) return preference.enabled === 1;
+      const recorded = (yield* capture.recordedShares).find(
+        (row) => row.environmentId === peer.environmentId && row.pairingKey === pairingKeyOf(peer),
+      );
+      return recorded?.sharingEnabled ?? true;
+    });
+
   yield* channels.register(VaultPeerKey, (_, caller) =>
     Effect.gen(function* () {
       const pair = yield* capture.keyPair;
-      const shares = yield* capture.shares;
+      const peer = (yield* directPeers).find((peer) => peer.environmentId === caller.environmentId);
       return {
         publicKey: pair.publicKey,
-        sharing: shares.some((share) => share.environmentId === caller.environmentId),
+        sharing: peer !== undefined && (yield* sharingEnabled(peer)),
       };
     }).pipe(Effect.orDie),
   );
@@ -148,7 +157,17 @@ const make = Effect.gen(function* () {
       if (Option.isNone(reply)) return;
       const keyChanged = share !== undefined && reply.value.publicKey !== share.publicKey;
       lastSeen.set(peer.environmentId, { sharing: reply.value.sharing, keyChanged });
-      if (share === undefined) return;
+      if (share === undefined) {
+        if (!(yield* sharingEnabled(peer)) || !VaultCrypto.isX25519PublicKey(reply.value.publicKey))
+          return;
+        const at = DateTime.formatIso(yield* DateTime.now);
+        // Recheck the opt-out in the insert itself: it can change while key exchange runs.
+        yield* sql`INSERT INTO vault_peer_shares(environment_id, public_key, pairing_key, authorized_at, peer_sharing)
+          SELECT ${peer.environmentId}, ${reply.value.publicKey}, ${pairingKeyOf(peer)}, ${at}, ${reply.value.sharing ? 1 : 0}
+          WHERE NOT EXISTS (SELECT 1 FROM vault_peer_sharing_preferences WHERE environment_id = ${peer.environmentId} AND pairing_key = ${pairingKeyOf(peer)} AND enabled = 0)
+          ON CONFLICT(environment_id) DO NOTHING`;
+        return;
+      }
       const peerSharing = reply.value.sharing && !keyChanged;
       if (peerSharing === share.peerSharing) return;
       yield* sql`UPDATE vault_peer_shares SET peer_sharing = ${peerSharing ? 1 : 0} WHERE environment_id = ${share.environmentId} AND pairing_key = ${share.pairingKey}`;
@@ -164,12 +183,12 @@ const make = Effect.gen(function* () {
   const refreshPeers = (everyone: boolean) =>
     Effect.gen(function* () {
       const peers = yield* directPeers;
-      const shares = yield* capture.shares;
+      const shares = yield* capture.recordedShares;
       yield* Effect.forEach(
         peers,
         (peer) => {
           const share = shares.find((row) => row.environmentId === peer.environmentId);
-          return everyone || share !== undefined ? ask(peer, share) : Effect.void;
+          return everyone || (share?.sharingEnabled ?? true) ? ask(peer, share) : Effect.void;
         },
         { concurrency: "unbounded", discard: true },
       );
@@ -338,6 +357,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const share = shares.find((row) => row.environmentId === peer.environmentId);
         const seen = lastSeen.get(peer.environmentId);
+        const enabled = yield* sharingEnabled(peer);
         // Only a wrap successfully produced here, for this pinned key, proves
         // that this machine has shared this revision. Digests alone prove nothing.
         const itemsShared = share?.peerSharing
@@ -355,7 +375,8 @@ const make = Effect.gen(function* () {
               ? "key_changed"
               : share.peerSharing
                 ? "shared"
-                : "waiting_for_peer",
+                : "not_shared",
+          sharingEnabled: enabled,
           peerSharing: share ? share.peerSharing : (seen?.sharing ?? null),
           itemsShared,
         } satisfies VaultPeerSharing;
@@ -367,14 +388,19 @@ const make = Effect.gen(function* () {
   const setPeerSharing: VaultSync["Service"]["setPeerSharing"] = (input) =>
     Effect.gen(function* () {
       yield* revokeStale;
-      if (!input.enabled) {
-        yield* sql`UPDATE vault_peer_shares SET sharing_enabled = 0, peer_sharing = 0 WHERE environment_id = ${input.environmentId}`;
-        return yield* sharingStatus;
-      }
       const peer = (yield* directPeers).find(
         (machine) => machine.environmentId === input.environmentId,
       );
-      if (!peer?.online) return yield* new VaultError({ reason: "peer_unavailable" });
+      if (!peer) return yield* new VaultError({ reason: "peer_unavailable" });
+      const savePreference = sql`INSERT INTO vault_peer_sharing_preferences(environment_id, pairing_key, enabled) VALUES (${peer.environmentId}, ${pairingKeyOf(peer)}, ${input.enabled ? 1 : 0}) ON CONFLICT(environment_id) DO UPDATE SET pairing_key = excluded.pairing_key, enabled = excluded.enabled`;
+      if (!input.enabled) {
+        yield* Effect.gen(function* () {
+          yield* savePreference;
+          yield* sql`UPDATE vault_peer_shares SET sharing_enabled = 0, peer_sharing = 0 WHERE environment_id = ${input.environmentId}`;
+        }).pipe(sql.withTransaction);
+        return yield* sharingStatus;
+      }
+      if (!peer.online) return yield* new VaultError({ reason: "peer_unavailable" });
       // The key comes from that machine itself over the authenticated link.
       const reply = yield* machines.call(peer.environmentId, VaultPeerKey, {}).pipe(
         Effect.timeout("10 seconds"),
@@ -394,13 +420,19 @@ const make = Effect.gen(function* () {
           });
           return yield* new VaultError({ reason: "peer_key_changed" });
         }
-        yield* sql`UPDATE vault_peer_shares SET sharing_enabled = 1 WHERE environment_id = ${input.environmentId}`;
+        yield* Effect.gen(function* () {
+          yield* savePreference;
+          yield* sql`UPDATE vault_peer_shares SET sharing_enabled = 1 WHERE environment_id = ${input.environmentId}`;
+        }).pipe(sql.withTransaction);
         yield* ask(peer, existing);
         yield* reconcile("full");
         return yield* sharingStatus;
       }
       const at = DateTime.formatIso(yield* DateTime.now);
-      yield* sql`INSERT INTO vault_peer_shares(environment_id, public_key, pairing_key, authorized_at, peer_sharing) VALUES (${peer.environmentId}, ${reply.publicKey}, ${pairingKeyOf(peer)}, ${at}, ${reply.sharing ? 1 : 0})`;
+      yield* Effect.gen(function* () {
+        yield* savePreference;
+        yield* sql`INSERT INTO vault_peer_shares(environment_id, public_key, pairing_key, authorized_at, peer_sharing) VALUES (${peer.environmentId}, ${reply.publicKey}, ${pairingKeyOf(peer)}, ${at}, ${reply.sharing ? 1 : 0})`;
+      }).pipe(sql.withTransaction);
       lastSeen.set(peer.environmentId, { sharing: reply.sharing, keyChanged: false });
       yield* reconcile("full");
       return yield* sharingStatus;
@@ -418,7 +450,7 @@ const make = Effect.gen(function* () {
   yield* logged(reconcile("full"));
   // A pairing, presence or session change can end a share or make a peer a holder.
   yield* machines.subscribe.pipe(
-    Stream.runForEach(() => logged(reconcile("incoming"))),
+    Stream.runForEach(() => logged(reconcile("full"))),
     Effect.catch((error) => Effect.logWarning("Vault sync stopped watching machines", { error })),
     Effect.forkScoped,
   );
