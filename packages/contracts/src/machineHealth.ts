@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 
-import { AuthSyncReplicateScope } from "./auth.ts";
+import { AuthPeerDelegateScope, AuthSyncReplicateScope } from "./auth.ts";
 import { EnvironmentId, ScheduledTaskId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { makePeerChannel } from "./machine.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
@@ -228,7 +228,7 @@ export const MachineHealthRead = makePeerChannel({
 /** Runs Fix on the machine the items are on, from a paired machine. */
 export const MachineHealthFixRun = makePeerChannel({
   name: "health.fix.v1",
-  scope: AuthSyncReplicateScope,
+  scope: AuthPeerDelegateScope,
   payload: Schema.Struct({ itemKeys: MachineHealthFixItemKeys }),
   success: MachineHealthFixResult,
   error: MachineHealthError,
