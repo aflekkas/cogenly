@@ -3,12 +3,7 @@ import { AuthSettingsWriteScope } from "@cogenly/contracts";
 import { usePrimaryEnvironmentId, usePrimaryEnvironment } from "../../state/environments";
 import { useEnvironmentScope, useEnvironmentsWithScope } from "../../state/session";
 import { InfoIcon, PlusIcon, Undo2Icon } from "lucide-react";
-import {
-  DEFAULT_SERVER_SETTINGS,
-  isUniversalServerSettingKey,
-  type ServerSettings,
-} from "@cogenly/contracts";
-import * as Equal from "effect/Equal";
+import { isUniversalServerSettingKey, type ServerSettings } from "@cogenly/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   createContext,
@@ -54,7 +49,6 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useOptionalSettingsScope } from "./SettingsScopeContext";
 import { MachineScopeMenu, SettingsScopeSentence } from "./SettingsScopeSentence";
 import { selectMachineLocalSettingsTargets } from "./scopedSettings";
-import { SettingInheritance } from "./SettingInheritance";
 
 const EMPTY_SETTING_KEYS: readonly (keyof ServerSettings)[] = [];
 
@@ -621,15 +615,14 @@ export function SettingsRow({
   const unavailable =
     serverScoped &&
     (!canWriteSettings || !(context ? rowEnvironments.length > 0 : primarySettingsAvailable));
-  // A machine-local row on a page about every machine names the machine it changes.
+  // Every setting is global unless it says otherwise: a machine-local row on a
+  // page about every machine names its machine right after the title.
   const machineLabel =
-    context !== null &&
-    serverScoped &&
-    machineLocal &&
-    !context.machinePage &&
-    context.environments.length > 1 ? (
+    context !== null && serverScoped && machineLocal && !context.machinePage ? (
       <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-        on <MachineScopeMenu />
+        <span aria-hidden>·</span>
+        <span className="sr-only">on</span>
+        <MachineScopeMenu quiet />
       </span>
     ) : null;
   const machineName = context?.environment?.label ?? "this machine";
@@ -672,35 +665,6 @@ export function SettingsRow({
               : PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE,
         )
       : control;
-  // Server rows get an indicator beside the title that opens the resolution
-  // chain; client rows keep a plain status only.
-  const key = settingKeys[0];
-  const target = context?.target ?? null;
-  const customized =
-    target !== null &&
-    settingKeys.some(
-      (settingKey) =>
-        !Equal.equals(target.settings[settingKey], DEFAULT_SERVER_SETTINGS[settingKey]),
-    );
-  const renderedInheritance =
-    context && serverScoped && key !== undefined && target !== null ? (
-      <SettingInheritance
-        state={customized ? "environment" : "default"}
-        summary={
-          customized
-            ? machineLocal
-              ? `Set on ${machineName}`
-              : "Set for all machines"
-            : "Built-in default"
-        }
-        target={target}
-        environment={context.connectedEnvironments.find(
-          (environment) => environment.environmentId === target.environmentId,
-        )}
-        settingKey={key}
-      />
-    ) : null;
-
   return (
     <SettingsRowContent
       {...rowProps}
@@ -714,15 +678,10 @@ export function SettingsRow({
       className={className}
       titleActions={
         <>
-          {renderedInheritance ? (
-            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
-              {renderedInheritance}
-            </span>
-          ) : null}
+          {machineLabel}
           <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
             {renderedReset}
           </span>
-          {machineLabel}
         </>
       }
     >

@@ -4,11 +4,12 @@ Settings are global and apply to every machine you have paired: change one on yo
 your server gets it too. Projects group your work; they don't have settings of their own. What
 belongs to one project, such as its instructions, repositories and links, is on the project's page.
 
-A layers icon beside a row's title shows whether the value is the built-in default or one you set.
+A setting you have changed shows a reset arrow beside its title that puts back the default.
 
 Some settings belong to one machine, such as where its projects folder is, its background activity,
-or its device hub. On a page with other settings these rows say which machine they change, such
-as "on MacBook", and you can switch the machine there. Pages about one machine's own state,
+or its device hub. On a page with other settings these rows name their machine after the title,
+such as "Background activity · MacBook". With more than one machine connected, pick another
+machine there to change its value. Pages about one machine's own state,
 Providers, Machines, Storage and Diagnostics, start with "Settings for" and a machine: they show
 your primary machine until you pick another.
 
