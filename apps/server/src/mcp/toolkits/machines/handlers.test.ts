@@ -1,5 +1,6 @@
 import * as SecretRequests from "../../../secrets/SecretRequests.ts";
 import * as ProviderAuthService from "../../../provider/ProviderAuthService.ts";
+import * as ProviderSignInRequests from "../../../provider/ProviderSignInRequests.ts";
 import { expect, it } from "@effect/vitest";
 import {
   EnvironmentId,
@@ -85,6 +86,7 @@ const hubList: MachineListResult = {
 
 const makeServer = (options: {
   readonly manageSignIn?: ProviderAuthService.ProviderAuthService["Service"]["manageSignIn"];
+  readonly requestSignIn?: ProviderSignInRequests.ProviderSignInRequests["Service"]["request"];
   readonly pairMachines?: DesktopAppControl.DesktopAppControl["Service"]["pairMachines"];
   readonly unpaired?: Array<EnvironmentId>;
   readonly disableServe?: MachineSetup.MachineSetup["Service"]["disableServe"];
@@ -96,6 +98,9 @@ const makeServer = (options: {
         Layer.mock(SecretRequests.SecretRequests)({}),
         Layer.mock(ProviderAuthService.ProviderAuthService)({
           manageSignIn: options.manageSignIn ?? (() => Effect.die("unused")),
+        }),
+        Layer.mock(ProviderSignInRequests.ProviderSignInRequests)({
+          request: options.requestSignIn ?? (() => Effect.die("unused")),
         }),
         Layer.mock(ThreadManagement.ThreadManagementService)({
           getThreadShell: (threadId) => Effect.succeed(shells.get(threadId) ?? null),
@@ -267,6 +272,42 @@ it.effect.each([
   }),
 );
 
+it.effect("provider_sign_in start from a thread posts the inline card, not an agent flow", () => {
+  const asked: Array<unknown> = [];
+  return Effect.gen(function* () {
+    const result = yield* call(threadCaller(fullAccessThreadId), "provider_sign_in", {
+      request: {
+        operation: "start",
+        input: { instanceId: "claude-personal", targetEnvironmentId: "contabo" },
+      },
+    });
+    expect(asked).toEqual([{ instanceId: "claude-personal", targetEnvironmentId: "contabo" }]);
+    expect(JSON.parse(result)).toMatchObject({
+      phase: "waiting",
+      flowId: null,
+      message: expect.stringContaining("Claude (UChicago) on Contabo VPS"),
+    });
+  }).pipe(
+    Effect.provide(
+      makeServer({
+        requestSignIn: (_scope, input) =>
+          Effect.sync(() => {
+            asked.push(input);
+            return {
+              _tag: "Posted" as const,
+              request: {
+                instanceId: ProviderInstanceId.make("claude-personal"),
+                targetEnvironmentId: EnvironmentId.make("contabo"),
+                providerName: "Claude (UChicago)",
+                machineName: "Contabo VPS",
+              },
+            };
+          }),
+      }),
+    ),
+  );
+});
+
 it.effect(
   "provider_sign_in reaches the auth service on the requested machine without approval",
   () => {
@@ -285,6 +326,8 @@ it.effect(
     }).pipe(
       Effect.provide(
         makeServer({
+          // A caller with no thread to post a card in runs the CLI flow itself.
+          requestSignIn: () => Effect.succeed({ _tag: "NoThread" as const }),
           manageSignIn: (request, owner) => {
             target = request.input.targetEnvironmentId;
             caller = owner;

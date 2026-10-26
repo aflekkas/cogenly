@@ -8160,6 +8160,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const secretVault =
         command.secretVault ??
         (existing?.type === "secret_request" ? existing.secretVault : undefined);
+      const providerSignIn =
+        command.providerSignIn ??
+        (existing?.type === "secret_request" ? existing.providerSignIn : undefined);
       const turnItem: OrchestrationV2TurnItem = unchanged
         ? existing
         : {
@@ -8191,6 +8194,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             secretStatus: command.secretStatus,
             ...(secretVault === undefined ? {} : { secretVault }),
             ...(login === undefined ? {} : { login }),
+            ...(providerSignIn === undefined ? {} : { providerSignIn }),
           };
       yield* emit(
         events,

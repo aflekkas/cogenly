@@ -621,6 +621,16 @@ export type OrchestrationV2ThreadLaunchWorkspaceStrategy =
 /** Failure code on the error item a failed workspace preparation leaves. */
 export const ORCHESTRATION_V2_WORKSPACE_PREPARATION_FAILURE_CODE = "workspace_preparation_failed";
 
+/** Failure code on a turn that failed because its provider is signed out on that machine. */
+export const PROVIDER_SIGNED_OUT_FAILURE_CODE = "authentication_failed";
+
+/**
+ * Whether a turn failure means its provider must sign in again. Claude's
+ * adapter writes `authentication_failed`; Codex reports its own `unauthorized`.
+ */
+export const isProviderSignedOutFailure = (failure: { readonly code: string | null }): boolean =>
+  failure.code === PROVIDER_SIGNED_OUT_FAILURE_CODE || failure.code === "unauthorized";
+
 export const OrchestrationV2Run = Schema.Struct({
   id: RunId,
   threadId: ThreadId,
@@ -1658,6 +1668,20 @@ export const OrchestrationV2LoginRequest = Schema.Struct({
 export type OrchestrationV2LoginRequest = typeof OrchestrationV2LoginRequest.Type;
 
 /**
+ * A provider sign-in an agent asked the user to finish (provider_sign_in
+ * start). The card runs the user's own sign-in flow on the named machine; it
+ * never carries a code, URL or token.
+ */
+export const OrchestrationV2ProviderSignInRequest = Schema.Struct({
+  instanceId: ProviderInstanceId,
+  /** The paired machine to sign in on; absent for the thread's own server. */
+  targetEnvironmentId: Schema.optional(EnvironmentId),
+  providerName: TrimmedNonEmptyString,
+  machineName: TrimmedNonEmptyString,
+});
+export type OrchestrationV2ProviderSignInRequest = typeof OrchestrationV2ProviderSignInRequest.Type;
+
+/**
  * A secret an agent asked the user for. The value never passes through
  * orchestration: the item carries only what was asked and how it was answered.
  * `login` marks a sign-in card (request_login) rather than a single secret.
@@ -1685,6 +1709,7 @@ const OrchestrationV2SecretRequestFields = {
   secretStatus: OrchestrationV2SecretRequestStatus,
   secretVault: Schema.optional(SecretVaultTarget),
   login: Schema.optional(OrchestrationV2LoginRequest),
+  providerSignIn: Schema.optional(OrchestrationV2ProviderSignInRequest),
 } as const;
 
 /**
@@ -3668,6 +3693,7 @@ const OrchestrationV2InternalCommand = Schema.Union([
     secretStatus: OrchestrationV2SecretRequestStatus,
     secretVault: Schema.optional(SecretVaultTarget),
     login: Schema.optional(OrchestrationV2LoginRequest),
+    providerSignIn: Schema.optional(OrchestrationV2ProviderSignInRequest),
   }),
 ]);
 export type OrchestrationV2InternalCommand = typeof OrchestrationV2InternalCommand.Type;

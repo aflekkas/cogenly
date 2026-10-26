@@ -2,6 +2,8 @@ import {
   type MachineListResult,
   type MachineSetupStatus,
   OrchestratorMcpFailure,
+  type ProviderAuthState,
+  type ProviderInstanceId,
   type ThreadRemoteError,
 } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
@@ -9,6 +11,7 @@ import * as Effect from "effect/Effect";
 import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
 import { resolveProjectId } from "../../threadAccess.ts";
 import * as ProviderAuthService from "../../../provider/ProviderAuthService.ts";
+import * as ProviderSignInRequests from "../../../provider/ProviderSignInRequests.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as Machines from "../../../machines/Machines.ts";
 import * as ProjectMove from "../../../threadSync/ProjectMove.ts";
@@ -84,11 +87,34 @@ export const withoutSignInLink = (status: MachineSetupStatus): MachineSetupStatu
   ),
 });
 
+/** What provider_sign_in start returns once the card is posted (or nothing is needed). */
+export const providerSignInCardState = (
+  input: { readonly instanceId: ProviderInstanceId },
+  result: Exclude<ProviderSignInRequests.ProviderSignInRequestResult, { _tag: "NoThread" }>,
+): ProviderAuthState => ({
+  instanceId: input.instanceId,
+  phase: result._tag === "AlreadySignedIn" ? "succeeded" : "waiting",
+  flowId: null,
+  authorizationUrl: null,
+  expiresAt: null,
+  interaction: null,
+  message:
+    result._tag === "AlreadySignedIn"
+      ? `Already signed in on ${result.machineName}.`
+      : `A sign-in card for ${result.request.providerName} on ${result.request.machineName} is in this thread. The user finishes it there; this thread is told when it is signed in. Do not ask for codes or links in chat.`,
+});
+
 export const layer = McpToolAccess.toLayer(MachinesToolkit, {
   provider_sign_in: McpToolAccess.writesEnvironment((input, check) =>
     Effect.gen(function* () {
       const auth = yield* ProviderAuthService.ProviderAuthService;
       const invocation = yield* McpInvocationContext.McpInvocationContext;
+      if (input.request.operation === "start") {
+        // From a thread, the user signs in on an inline card rather than a flow the agent owns.
+        const requests = yield* ProviderSignInRequests.ProviderSignInRequests;
+        const posted = yield* requests.request(invocation, input.request.input);
+        if (posted._tag !== "NoThread") return providerSignInCardState(input.request.input, posted);
+      }
       const code = input.codeRef
         ? { ref: input.codeRef, projectId: yield* resolveProjectId(yield* check, input.projectId) }
         : undefined;

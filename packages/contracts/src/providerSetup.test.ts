@@ -1,10 +1,25 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
+import { CLIENT_GUARDED_RPC_SCOPES } from "./clientRpcPermissions.ts";
 import { ProviderAuthResponse, ProviderAuthState } from "./providerSetup.ts";
+import { WS_METHODS } from "./rpc.ts";
 
 const decodeResponse = Schema.decodeUnknownSync(ProviderAuthResponse);
 const decodeState = Schema.decodeUnknownSync(ProviderAuthState);
+
+describe("provider sign-in permissions", () => {
+  it("guards every sign-in change with the destination's providers scope", () => {
+    for (const method of [
+      WS_METHODS.providerAuthStart,
+      WS_METHODS.providerAuthRespond,
+      WS_METHODS.providerAuthComplete,
+      WS_METHODS.providerAuthCancel,
+      WS_METHODS.providerAuthLogout,
+    ])
+      expect(CLIENT_GUARDED_RPC_SCOPES[method]).toBe("providers:manage");
+  });
+});
 
 describe("provider credential responses", () => {
   it("accepts the advertised field limit and rejects oversized or invalid fields", () => {

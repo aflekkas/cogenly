@@ -187,11 +187,16 @@ export const makeClaudeCapabilitiesCacheKey = Effect.fn("makeClaudeCapabilitiesC
   },
 );
 
+/** What a turn that failed on a signed-out Claude shows; clients add a Sign in action. */
+export const CLAUDE_SIGNED_OUT_MESSAGE =
+  "Claude is not signed in on this machine. Sign in, then send your message again. For API-key authentication, check this instance's configured credentials.";
+
 /**
- * Describe the spawned CLI's environment separately from the login command so
- * paths remain literal on every shell, including relative inherited values.
+ * The manual fix, for logs only. Describe the spawned CLI's environment
+ * separately from the login command so paths remain literal on every shell,
+ * including relative inherited values.
  */
-export const claudeSignedOutMessage = (input: {
+export const claudeSignedOutLogHint = (input: {
   readonly configDir: string | undefined;
   readonly cwd: string;
 }): string => {
@@ -199,5 +204,5 @@ export const claudeSignedOutMessage = (input: {
     input.configDir !== undefined
       ? ` from ${quotePath(input.cwd)}, with CLAUDE_CONFIG_DIR set to ${quotePath(input.configDir)}`
       : "";
-  return `Claude could not authenticate. For subscription login, run \`claude auth login\` on this environment's machine${configuration}, then start a new thread. For API-key authentication, check this instance's configured credentials.`;
+  return `Claude could not authenticate. To sign in by hand, run \`claude auth login\` on this machine${configuration}.`;
 };

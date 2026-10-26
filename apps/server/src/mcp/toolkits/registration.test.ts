@@ -1,4 +1,5 @@
 import * as ProviderAuthService from "../../provider/ProviderAuthService.ts";
+import * as ProviderSignInRequests from "../../provider/ProviderSignInRequests.ts";
 import * as ServerBrowser from "../../preview/ServerBrowser.ts";
 import * as StorageCleanup from "../../storageCleanup.ts";
 import * as Accounts from "../../accounts/Accounts.ts";
@@ -908,6 +909,7 @@ it.effect.each(smokeCases)(
         }).pipe(
           Layer.provide(Layer.succeed(HttpClient.HttpClient, smokeHttpClient)),
           Layer.provide(Layer.mock(ProviderAuthService.ProviderAuthService)({})),
+          Layer.provide(Layer.mock(ProviderSignInRequests.ProviderSignInRequests)({})),
           Layer.provide(
             Layer.mock(ServerEnvironment.ServerEnvironment)({
               getEnvironmentId: Effect.succeed(EnvironmentId.make("environment-scratch")),
