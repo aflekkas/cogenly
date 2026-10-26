@@ -1,6 +1,7 @@
 import {
   AgentId,
   ProjectLabelId,
+  ThreadId,
   VaultItemId,
   type VaultItemMetadata,
   type VaultUsageEntry,
@@ -15,6 +16,7 @@ import {
   vaultDraftFromItem,
   vaultDraftProblem,
   vaultPolicySummary,
+  vaultSavedFromThread,
   vaultUpdateInput,
   type VaultDraft,
 } from "./vault.logic";
@@ -250,5 +252,18 @@ describe("lastUsedByItem", () => {
     ]);
     expect(latest.get(VaultItemId.make("a"))).toBe("2026-10-05T00:00:00.000Z");
     expect(latest.get(VaultItemId.make("b"))).toBe("2026-10-01T00:00:00.000Z");
+  });
+});
+
+describe("vaultSavedFromThread", () => {
+  it("names the thread a sign-in card saved or updated the item from", () => {
+    const threadId = ThreadId.make("thread:1");
+    expect(vaultSavedFromThread({ action: "saved_from_request", threadId })).toEqual({
+      threadId,
+      updated: false,
+    });
+    expect(vaultSavedFromThread({ action: "updated_from_request", threadId })?.updated).toBe(true);
+    expect(vaultSavedFromThread({ action: "fill", threadId })).toBeNull();
+    expect(vaultSavedFromThread({ action: "saved_from_request", threadId: null })).toBeNull();
   });
 });

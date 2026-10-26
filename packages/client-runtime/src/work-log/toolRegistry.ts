@@ -1082,7 +1082,7 @@ function t3ActionIcon(definition: T3McpToolDefinition): WorkLogToolIcon {
   if (action === "thread-fork") return "git-fork";
   if (action === "workflow-stop" || action === "thread-interrupt") return "square-stop";
   if (action.startsWith("terminal-")) return "terminal";
-  if (action === "secret-request") return "key";
+  if (action === "secret-request" || action === "login-request") return "key";
   if (action === "html-preview" || action === "html-render") return "code";
   if (action === "capabilities") return "info";
   return "message-circle";
