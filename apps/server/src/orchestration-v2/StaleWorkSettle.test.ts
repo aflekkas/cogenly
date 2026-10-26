@@ -2,12 +2,16 @@ import { expect, it } from "@effect/vitest";
 import {
   CommandId,
   MessageId,
+  NodeId,
+  ProviderDriverKind,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
   type OrchestrationV2StoredEvent,
 } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
+import * as DateTime from "effect/DateTime";
+import { vi } from "vite-plus/test";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
@@ -15,6 +19,7 @@ import * as Sqlite from "../persistence/Sqlite.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as Worker from "./EffectWorker.ts";
 import * as Orchestrator from "./Orchestrator.ts";
+import * as Sessions from "./ProviderSessionManager.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import { makeControllableProvider } from "./testkit/ControllableProvider.ts";
 import { layerWithRegistry } from "./testkit/ProviderReplayHarness.ts";
@@ -125,4 +130,93 @@ it.effect("ends a delegated task no live work will end, and leaves a live one al
       "interrupted",
     );
   }).pipe(Effect.provide(runtime));
+});
+
+it.effect("observes a native subagent's live session without recording runtime activity", () => {
+  const provider = makeControllableProvider(CodexProviderCapabilitiesV2);
+  return Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const worker = yield* Worker.OrchestrationEffectWorkerV2;
+    const sessions = yield* Sessions.ProviderSessionManagerV2;
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-native"),
+      threadId: parentId,
+      projectId: ProjectId.make("project:native"),
+      title: "Native",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("send-native"),
+      threadId: parentId,
+      messageId: MessageId.make("message:native"),
+      text: "Work",
+      attachments: [],
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* worker.drain();
+    yield* waitFor(orchestrator, parentId, (row) => row.event.type === "provider-turn.updated");
+    const run = (yield* orchestrator.getThreadProjection(parentId)).runs[0]!;
+    const now = yield* DateTime.now;
+    const taskId = NodeId.make("node:native-live");
+    yield* provider.publish({
+      type: "subagent.updated",
+      driver: ProviderDriverKind.make("codex"),
+      subagent: {
+        id: taskId,
+        threadId: parentId,
+        runId: run.id,
+        parentNodeId: run.rootNodeId!,
+        origin: "provider_native",
+        createdBy: "agent",
+        driver: ProviderDriverKind.make("codex"),
+        providerInstanceId: modelSelection.instanceId,
+        providerThreadId: run.providerThreadId,
+        childThreadId: null,
+        nativeTaskRef: null,
+        prompt: "Explore",
+        title: "Explore",
+        model: "gpt-5",
+        status: "running",
+        result: null,
+        startedAt: now,
+        completedAt: null,
+        updatedAt: now,
+      },
+    });
+    yield* waitFor(orchestrator, parentId, (row) => row.event.type === "subagent.updated");
+    const get = vi
+      .spyOn(sessions, "get")
+      .mockImplementation(() => Effect.die("planning touched runtime activity"));
+    try {
+      yield* orchestrator.dispatch({
+        type: "thread.stale-work.settle",
+        commandId: CommandId.make("observe-native"),
+        threadId: parentId,
+        subagentIds: [taskId],
+        reason,
+      });
+      expect((yield* orchestrator.getThreadProjection(parentId)).subagents[0]!.status).toBe(
+        "running",
+      );
+      expect(get).not.toHaveBeenCalled();
+    } finally {
+      get.mockRestore();
+    }
+  }).pipe(
+    Effect.provide(
+      layerWithRegistry({ name: "stale-native-observation" }, provider.registry, {
+        runEffectWorker: false,
+      }),
+    ),
+  );
 });

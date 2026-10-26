@@ -10225,9 +10225,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             (candidate) => candidate.id === providerThreadId,
           )?.providerSessionId;
           if (sessionId === null || sessionId === undefined) return false;
-          return Option.isSome(
-            yield* providerSessions.get(sessionId).pipe(Effect.orElseSucceed(() => Option.none())),
-          );
+          return yield* providerSessions.isLive(sessionId);
         });
       const unreachable = new Set(command.unreachableChildThreadIds ?? []);
       const childIsLive = (childThreadId: ThreadId | null) =>
