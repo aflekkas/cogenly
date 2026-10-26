@@ -860,8 +860,15 @@ export const PreviewAutomationObservation = Schema.Struct({
   loading: Schema.optional(Schema.Boolean),
   elements: Schema.optional(Schema.Array(PreviewAutomationCompactElement)),
   errors: Schema.optional(Schema.Array(Schema.String)),
-  reset: Schema.optional(Schema.Boolean).annotate({
-    description: "Replace the previous view with elements when a diff would be larger.",
+  summary: Schema.optional(
+    Schema.Struct({
+      added: Schema.Number,
+      changed: Schema.Number,
+      removed: Schema.Number,
+    }),
+  ).annotate({
+    description:
+      "Counts in place of changes when the diff is too large to list; call preview_snapshot for the page.",
   }),
   changes: Schema.optional(
     Schema.Struct({

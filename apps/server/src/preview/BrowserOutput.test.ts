@@ -1,5 +1,10 @@
 import { describe, expect, it } from "@effect/vitest";
-import { actionOutput, compactElements, observationChanges } from "./BrowserOutput.ts";
+import {
+  actionOutput,
+  compactElements,
+  MAX_CHANGES_BYTES,
+  observationChanges,
+} from "./BrowserOutput.ts";
 
 describe("compact browser output", () => {
   it("keeps refs, names, input values and semantic states without layout containers", () => {
@@ -164,14 +169,37 @@ describe("action output policy", () => {
   });
 });
 
-it("replaces the view when a viewport change would make a diff larger than a compact response", () => {
+it("summarizes a diff over the cap instead of listing it", () => {
   const before = {
-    elements: Array.from({ length: 100 }, (_, i) => ({
+    url: "https://example.com/a",
+    title: "A",
+    elements: Array.from({ length: 150 }, (_, i) => ({
       ref: `t3-session-long-ref-${i}`,
       role: "link",
       name: `Link ${i}`,
     })),
   };
-  const after = { elements: [{ ref: "new", role: "textbox", name: "Search" }] };
-  expect(observationChanges(before, after)).toEqual({ ...after, reset: true });
+  const after = {
+    url: "https://example.com/b",
+    title: "B",
+    errors: ["TypeError: x is undefined"],
+    elements: Array.from({ length: 60 }, (_, i) => ({
+      ref: `new-${i}`,
+      role: "button",
+      name: `Action ${i}`,
+    })),
+  };
+  const result = observationChanges(before, after);
+  expect(result).toEqual({
+    url: "https://example.com/b",
+    title: "B",
+    summary: { added: 60, changed: 0, removed: 150 },
+    errors: ["TypeError: x is undefined"],
+    guidance: expect.stringContaining("preview_snapshot"),
+  });
+  expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(MAX_CHANGES_BYTES);
+  // A diff under the cap is still listed.
+  expect(
+    observationChanges(before, { ...before, elements: before.elements.slice(1) }),
+  ).toMatchObject({ changes: { removed: ["t3-session-long-ref-0"] } });
 });

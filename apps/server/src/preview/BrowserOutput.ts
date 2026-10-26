@@ -27,6 +27,9 @@ const structural = new Set([
 ]);
 const MAX_ELEMENTS = 150;
 const MAX_BYTES = 12_000;
+/** About 1,000 tokens. A larger diff is summarized; preview_snapshot has the details. */
+export const MAX_CHANGES_BYTES = 4_000;
+const MAX_SUMMARY_ERRORS = 5;
 
 /** Flatten Playwright's semantic tree, keeping actionable refs and visible content without boxes. */
 export const compactElements = (tree: string, viewport?: { width: number; height: number }) => {
@@ -136,11 +139,20 @@ export const observationChanges = (
     ...(after.omitted ? { omitted: after.omitted } : {}),
     ...(after.guidance ? { guidance: after.guidance } : {}),
   };
-  // A viewport move can remove and add most elements: repeating their refs costs more than a reset.
-  return Buffer.byteLength(JSON.stringify(changes)) >
-    Buffer.byteLength(JSON.stringify(after)) + 1024
-    ? { ...after, reset: true }
-    : changes;
+  if (Buffer.byteLength(JSON.stringify(changes)) <= MAX_CHANGES_BYTES) return changes;
+  // A navigation or viewport move can replace most elements: count them instead of listing them.
+  return {
+    ...(after.url !== undefined ? { url: after.url } : {}),
+    ...(after.title !== undefined ? { title: after.title } : {}),
+    ...(after.loading !== undefined ? { loading: after.loading } : {}),
+    summary: {
+      added: changes.changes.added.length,
+      changed: changes.changes.changed.length,
+      removed: changes.changes.removed.length,
+    },
+    ...(after.errors?.length ? { errors: after.errors.slice(-MAX_SUMMARY_ERRORS) } : {}),
+    guidance: "Too many changes to list. Call preview_snapshot for the current page.",
+  };
 };
 
 /** Keep inspection optional and prevent a failed read from turning a completed action into a retry. */
