@@ -426,20 +426,58 @@ describe("MachineSetup", () => {
     }),
   );
 
-  it.effect("reports a missing mapping as missing once start has run", () =>
+  it.effect("reports a missing mapping after the startup grace expires", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({
         status: { ...signedIn },
         mode: { enabled: true, servePort: 443, localPort: 3773 },
         // The tailnet refuses: the mapping stays missing.
-        runs: { serve: [() => finished({ _tag: "failed", reason: "other" })] },
+        runs: {
+          serve: Array.from(
+            { length: 4 },
+            () => () => finished({ _tag: "failed", reason: "other" }),
+          ),
+        },
       });
       yield* Effect.gen(function* () {
         const setup = yield* MachineSetup.MachineSetup;
         yield* setup.start(3773);
+        yield* TestClock.adjust("2 minutes");
         const after = yield* awaitStatus((status) => stepOf(status, "expose").state !== "working");
         assert.isFalse(after.tailscale.served);
         assert.equal(stepOf(after, "expose").state, "todo");
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
+  it.effect("re-ensures a missing mapping after tailscaled starts late", () =>
+    Effect.gen(function* () {
+      const ensured = yield* Deferred.make<void>();
+      const harness = yield* makeHarness({
+        status: null,
+        mode: { enabled: true, servePort: 443, localPort: 3773 },
+        runs: {
+          serve: [
+            (input, probe) =>
+              Ref.update(probe, (current) => ({
+                ...current,
+                serveMappings: [ours(input.localPort)],
+              })).pipe(
+                Effect.andThen(Deferred.succeed(ensured, undefined)),
+                Effect.andThen(finished()),
+              ),
+          ],
+        },
+      });
+      yield* Effect.gen(function* () {
+        const setup = yield* MachineSetup.MachineSetup;
+        yield* setup.start(3773);
+        assert.equal(stepOf(yield* setup.status, "expose").state, "working");
+        yield* Ref.update(harness.probe, (probe) => ({ ...probe, status: signedIn }));
+        yield* TestClock.adjust("30 seconds");
+        yield* Deferred.await(ensured);
+        assert.isTrue((yield* setup.status).tailscale.served);
+        yield* TestClock.adjust("30 seconds");
+        assert.equal((yield* Ref.get(harness.calls)).length, 1);
       }).pipe(Effect.provide(harness.layer));
     }),
   );

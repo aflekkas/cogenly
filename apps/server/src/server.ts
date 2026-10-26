@@ -219,7 +219,6 @@ import * as OrchestrationHttp from "./orchestration-v2/http.ts";
 import * as ProjectHttp from "./project/http.ts";
 import * as NetService from "@cogenly/shared/Net";
 import * as RelayClient from "@cogenly/shared/relayClient";
-import { disableTailscaleServe } from "@cogenly/tailscale";
 import * as ServerActivation from "./serverActivation.ts";
 
 // MCP handoff thread IDs include escaped provenance and can exceed find-my-way's
@@ -957,48 +956,17 @@ const layerMakeServer = Layer.unwrap(
           );
       }),
     );
-    // Machine setup points a saved Serve mapping at this run's port, adopts
-    // one made by hand, and waits in the background when the tailnet has not
-    // approved HTTPS yet. Only `--tailscale-serve` turns Serve off at shutdown;
-    // a mapping set up through Cogenly persists, like `tailscale serve --bg`.
+    // Keep Serve configured across restarts; MachineSetup reconciles it while running.
     const layerTailscaleServe = Layer.effectDiscard(
-      Effect.acquireRelease(
-        Effect.gen(function* () {
-          yield* Deferred.succeed(tailscaleParked, undefined).pipe(Effect.orDie);
-          yield* awaitActivation;
-          const server = yield* HttpServer.HttpServer;
-          const address = server.address;
-          if (typeof address === "string" || !("port" in address)) {
-            return null;
-          }
-          const setup = yield* MachineSetup.MachineSetup;
-          const serveMode = yield* TailscaleServeMode.TailscaleServeMode;
-          yield* setup
-            .start(address.port)
-            .pipe(
-              Effect.catchCause((cause) =>
-                Effect.logWarning("Failed to configure Tailscale Serve", { cause }),
-              ),
-            );
-          return serveMode.explicit ? yield* serveMode.current : null;
-        }),
-        (configured) =>
-          configured
-            ? disableTailscaleServe({ servePort: configured.servePort }).pipe(
-                Effect.tap(() =>
-                  Effect.logInfo("Tailscale Serve disabled", {
-                    servePort: configured.servePort,
-                  }),
-                ),
-                Effect.catch((cause) =>
-                  Effect.logWarning("Failed to disable Tailscale Serve", {
-                    cause,
-                    servePort: configured.servePort,
-                  }),
-                ),
-              )
-            : Effect.void,
-      ),
+      Effect.gen(function* () {
+        yield* Deferred.succeed(tailscaleParked, undefined).pipe(Effect.orDie);
+        yield* awaitActivation;
+        const server = yield* HttpServer.HttpServer;
+        const address = server.address;
+        if (typeof address === "string" || !("port" in address)) return;
+        const setup = yield* MachineSetup.MachineSetup;
+        yield* setup.start(address.port);
+      }),
     );
     const layerCloudDesiredLinkReconcile = Layer.effectDiscard(
       Effect.gen(function* () {

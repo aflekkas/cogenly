@@ -37,7 +37,7 @@ import {
 } from "./machineSetupSteps.ts";
 import * as TailscaleHost from "./TailscaleHost.ts";
 import * as TailscaleServeMode from "./TailscaleServeMode.ts";
-import { chooseServePort } from "./tailscaleState.ts";
+import { chooseServePort, targetsLocalPort } from "./tailscaleState.ts";
 
 /** How often a subscribed client sees Tailscale re-checked. */
 const SUBSCRIBE_RECHECK = "5 seconds";
@@ -114,12 +114,8 @@ export const make = Effect.gen(function* () {
 
   const progress = yield* Ref.make<MachineSetupProgress>(emptyProgress);
   const localPort = yield* Ref.make(config.port);
-  /**
-   * Until `start` has pointed Serve at this run, a missing mapping is expected:
-   * `--tailscale-serve` removes it at shutdown and this run puts it back. The
-   * "expose" step reads as working meanwhile, so health doesn't report a
-   * restart as Serve being broken.
-   */
+  // Allow tailscaled and the first reconciliation attempts to finish after boot.
+  const startedAt = yield* Ref.make<number | null>(null);
   const started = yield* Ref.make(false);
   const changes = yield* PubSub.sliding<void>(1);
   const notify = PubSub.publish(changes, undefined).pipe(Effect.asVoid);
@@ -156,7 +152,7 @@ export const make = Effect.gen(function* () {
     });
 
   const observe = Effect.gen(function* () {
-    const [setupHost, probe, mode, self, recorded, port, hasStarted] = yield* Effect.all(
+    const [setupHost, probe, mode, self, recorded, port, startTime, now] = yield* Effect.all(
       [
         host.host,
         host.probe,
@@ -164,12 +160,13 @@ export const make = Effect.gen(function* () {
         identity.self,
         Ref.get(progress),
         Ref.get(localPort),
-        Ref.get(started),
+        Ref.get(startedAt),
+        Clock.currentTimeMillis,
       ],
       { concurrency: "unbounded" },
     );
     const current =
-      !hasStarted && mode.enabled
+      mode.enabled && (startTime === null || now - startTime < 120_000)
         ? { ...recorded, working: adding(recorded.working, "expose") }
         : recorded;
     const observation: MachineSetupObservation = {
@@ -372,6 +369,8 @@ export const make = Effect.gen(function* () {
     yield* Ref.set(localPort, port);
     const observation = yield* observe;
     if (!observation.serveMode.enabled || observation.status?.backendState !== "Running") return;
+    const recorded = yield* Ref.get(progress);
+    if (recorded.working.has("expose") || recorded.serveApprovalUrl !== null) return;
     const choice = chooseServePort(
       observation.serveMappings ?? [],
       port,
@@ -393,8 +392,28 @@ export const make = Effect.gen(function* () {
     yield* update((current) => ({ ...current, working: adding(current.working, "expose") }));
     yield* launch("expose", "serve", observation, servePort);
   });
-  const start: MachineSetup["Service"]["start"] = (port) =>
-    startServe(port).pipe(Effect.ensuring(Ref.set(started, true).pipe(Effect.andThen(notify))));
+  const start: MachineSetup["Service"]["start"] = Effect.fn("MachineSetup.start")(function* (port) {
+    yield* Ref.set(localPort, port);
+    if (yield* Ref.getAndSet(started, true)) return;
+    yield* Ref.set(startedAt, yield* Clock.currentTimeMillis);
+    yield* startServe(port);
+    yield* Effect.forkIn(
+      Effect.gen(function* () {
+        let failures = 0;
+        while (true) {
+          yield* Effect.sleep(Math.min(30_000 * 2 ** failures, 300_000));
+          yield* startServe(port);
+          const observation = yield* observe;
+          const mapped = (observation.serveMappings ?? []).some((mapping) =>
+            targetsLocalPort(mapping.target, port),
+          );
+          failures = !observation.serveMode.enabled || mapped ? 0 : Math.min(failures + 1, 4);
+        }
+      }),
+      layerScope,
+    );
+    yield* notify;
+  });
 
   const lastAdoptCheck = yield* Ref.make<number | null>(null);
   const adoptServe: MachineSetup["Service"]["adoptServe"] = Effect.gen(function* () {
