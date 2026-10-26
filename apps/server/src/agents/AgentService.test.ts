@@ -2,6 +2,7 @@ import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { ProviderDriverKind } from "@cogenly/contracts";
 import { ProjectRepositoryMismatchError } from "@cogenly/contracts";
 import * as SharedState from "../sync/SharedState.ts";
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
@@ -70,254 +71,260 @@ import { agentFixture } from "./agent.testkit.ts";
 
 const encodeUnknown = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
-const makeHarness = Effect.sync(() => {
-  const projections = new Map<ThreadId, OrchestrationV2ThreadProjection>();
-  const launches: Launch.ThreadLaunchInput[] = [];
-  const launchFailure: {
-    current: ProjectRepositoryMismatchError | Launch.ThreadLaunchError | null;
-  } = { current: null };
-  const posts: Parameters<Events.EventSinkV2["Service"]["commitCommand"]>[0][] = [];
-  const jobs = new Map<string, Effect.Effect<void>>();
-  const receipts = new Set<string>();
-  const fixture = agentFixture();
-  const conversation = idleThreadProjection(liveThreadShell(fixture.conversationThreadId));
-  projections.set(fixture.conversationThreadId, conversation);
-  const calls: Threads.ThreadManagementSendInput[] = [];
-  const commands: import("@cogenly/contracts").OrchestrationV2ServerCommand[] = [];
-  const runFor = (
-    threadId: ThreadId,
-    status: OrchestrationV2Run["status"] = "completed",
-  ): OrchestrationV2Run => ({
-    id: RunId.make(`run:${threadId}`),
-    threadId,
-    ordinal: 1,
-    providerInstanceId: fixture.modelSelection.instanceId,
-    modelSelection: fixture.modelSelection,
-    providerThreadId: null,
-    userMessageId: MessageId.make(`message:${threadId}`),
-    rootNodeId: null,
-    activeAttemptId: null,
-    status,
-    requestedAt: DateTime.makeUnsafe(fixture.createdAt),
-    startedAt: null,
-    completedAt: null,
-    checkpointId: null,
-    contextHandoffId: null,
-  });
-  const boundaries = Layer.mergeAll(
-    Layer.mock(ProviderRegistry.ProviderRegistry)({
-      getProviders: Effect.succeed([
-        { instanceId: ProviderInstanceId.make("codex"), driver: ProviderDriverKind.make("codex") },
-        {
-          instanceId: ProviderInstanceId.make("codex-school"),
-          driver: ProviderDriverKind.make("codex"),
-        },
-        {
-          instanceId: ProviderInstanceId.make("claude-backup"),
-          driver: ProviderDriverKind.make("claudeAgent"),
-        },
-      ] as import("@cogenly/contracts").ServerProvider[]),
-    }),
-    Layer.mock(Folders.ManagedProjectFolders)({
-      namedProjectsRoot: Effect.succeed("/unused"),
-      scratchRoot: Effect.succeed(Option.none()),
-      ensureScratchProject: Effect.succeed({ projectId: ProjectId.make("project:scratch") }),
-    }),
-    Layer.mock(Launch.ThreadLaunchService)({
-      launch: (input) =>
-        Effect.suspend(() =>
-          launchFailure.current === null ? Effect.void : Effect.fail(launchFailure.current),
-        ).pipe(
-          Effect.andThen(
-            Effect.sync(() => {
-              launches.push(input);
-              const threadId = input.threadId!;
-              let projection = idleThreadProjection(liveThreadShell(threadId));
-              if (input.initialMessage) {
-                const run = runFor(threadId);
-                projection = {
-                  ...projection,
-                  runs: [run],
-                  messages: [
-                    {
-                      id: MessageId.make(`response:${threadId}`),
-                      threadId,
-                      runId: run.id,
-                      nodeId: null,
-                      role: "assistant",
-                      text: "Done. Your favourite colour is green.",
-                      attachments: [],
-                      streaming: false,
-                      createdAt: DateTime.makeUnsafe(fixture.createdAt),
-                      updatedAt: DateTime.makeUnsafe(fixture.createdAt),
-                      createdBy: "agent",
-                      creationSource: "provider",
-                    },
-                  ],
-                };
-              }
-              projections.set(threadId, projection);
-              return { threadId, projection, resumed: false };
-            }),
+const makeHarnessWithIdentity = (identity = layerSharedIdentity) =>
+  Effect.sync(() => {
+    const projections = new Map<ThreadId, OrchestrationV2ThreadProjection>();
+    const launches: Launch.ThreadLaunchInput[] = [];
+    const launchFailure: {
+      current: ProjectRepositoryMismatchError | Launch.ThreadLaunchError | null;
+    } = { current: null };
+    const posts: Parameters<Events.EventSinkV2["Service"]["commitCommand"]>[0][] = [];
+    const jobs = new Map<string, Effect.Effect<void>>();
+    const receipts = new Set<string>();
+    const fixture = agentFixture();
+    const conversation = idleThreadProjection(liveThreadShell(fixture.conversationThreadId));
+    projections.set(fixture.conversationThreadId, conversation);
+    const calls: Threads.ThreadManagementSendInput[] = [];
+    const commands: import("@cogenly/contracts").OrchestrationV2ServerCommand[] = [];
+    const runFor = (
+      threadId: ThreadId,
+      status: OrchestrationV2Run["status"] = "completed",
+    ): OrchestrationV2Run => ({
+      id: RunId.make(`run:${threadId}`),
+      threadId,
+      ordinal: 1,
+      providerInstanceId: fixture.modelSelection.instanceId,
+      modelSelection: fixture.modelSelection,
+      providerThreadId: null,
+      userMessageId: MessageId.make(`message:${threadId}`),
+      rootNodeId: null,
+      activeAttemptId: null,
+      status,
+      requestedAt: DateTime.makeUnsafe(fixture.createdAt),
+      startedAt: null,
+      completedAt: null,
+      checkpointId: null,
+      contextHandoffId: null,
+    });
+    const boundaries = Layer.mergeAll(
+      Layer.mock(ProviderRegistry.ProviderRegistry)({
+        getProviders: Effect.succeed([
+          {
+            instanceId: ProviderInstanceId.make("codex"),
+            driver: ProviderDriverKind.make("codex"),
+          },
+          {
+            instanceId: ProviderInstanceId.make("codex-school"),
+            driver: ProviderDriverKind.make("codex"),
+          },
+          {
+            instanceId: ProviderInstanceId.make("claude-backup"),
+            driver: ProviderDriverKind.make("claudeAgent"),
+          },
+        ] as import("@cogenly/contracts").ServerProvider[]),
+      }),
+      Layer.mock(Folders.ManagedProjectFolders)({
+        namedProjectsRoot: Effect.succeed("/unused"),
+        scratchRoot: Effect.succeed(Option.none()),
+        ensureScratchProject: Effect.succeed({ projectId: ProjectId.make("project:scratch") }),
+      }),
+      Layer.mock(Launch.ThreadLaunchService)({
+        launch: (input) =>
+          Effect.suspend(() =>
+            launchFailure.current === null ? Effect.void : Effect.fail(launchFailure.current),
+          ).pipe(
+            Effect.andThen(
+              Effect.sync(() => {
+                launches.push(input);
+                const threadId = input.threadId!;
+                let projection = idleThreadProjection(liveThreadShell(threadId));
+                if (input.initialMessage) {
+                  const run = runFor(threadId);
+                  projection = {
+                    ...projection,
+                    runs: [run],
+                    messages: [
+                      {
+                        id: MessageId.make(`response:${threadId}`),
+                        threadId,
+                        runId: run.id,
+                        nodeId: null,
+                        role: "assistant",
+                        text: "Done. Your favourite colour is green.",
+                        attachments: [],
+                        streaming: false,
+                        createdAt: DateTime.makeUnsafe(fixture.createdAt),
+                        updatedAt: DateTime.makeUnsafe(fixture.createdAt),
+                        createdBy: "agent",
+                        creationSource: "provider",
+                      },
+                    ],
+                  };
+                }
+                projections.set(threadId, projection);
+                return { threadId, projection, resumed: false };
+              }),
+            ),
           ),
-        ),
-    }),
-    Layer.mock(Projects.ProjectService)({}),
-    Layer.mock(TextGeneration.TextGeneration)({}),
-    Layer.mock(Settings.ServerSettingsService)({}),
-    Layer.mock(Threads.ThreadManagementService)({
-      getThreadRecords: (id) => Effect.succeed(projections.get(id)!),
-      getThreadShell: (id) => Effect.succeed(projections.has(id) ? liveThreadShell(id) : null),
-      sendToThread: (input) =>
-        Effect.sync(() => {
-          calls.push(input);
-          const run = runFor(input.threadId, "running");
-          return {
-            dispatch: { sequence: 0, storedEvents: [] },
-            projection: conversation,
-            message: {
-              id: input.messageId,
-              threadId: input.threadId,
-              runId: run.id,
-              nodeId: null,
-              role: "user" as const,
-              text: input.text,
-              attachments: input.attachments,
-              streaming: false,
-              createdAt: DateTime.makeUnsafe(fixture.createdAt),
-              updatedAt: DateTime.makeUnsafe(fixture.createdAt),
-              createdBy: "user" as const,
-              creationSource: "web" as const,
-            },
-            run,
-            turnItem: null,
-            delivery: "queued" as const,
-          };
-        }),
-      dispatch: (command) =>
-        Effect.sync(() => {
-          commands.push(command);
-          return { sequence: 0, storedEvents: [] };
-        }),
-    }),
-    Layer.mock(Projections.ProjectionStoreV2)({
-      getThreadRecords: (id) => {
-        const projection = projections.get(id);
-        return projection
-          ? Effect.succeed(projection)
-          : Effect.fail(new Projections.ProjectionStoreThreadNotFoundError({ threadId: id }));
-      },
-      getThread: (id) => Effect.succeed(projections.get(id)!.thread),
-      getThreadShell: (id) =>
-        Effect.succeed(
-          projections.has(id) ? { ...liveThreadShell(id), ...projections.get(id)!.thread } : null,
-        ),
-    }),
-    Layer.mock(Events.EventSinkV2)({
-      commitCommand: (input) =>
-        Effect.sync(() => {
-          if (!receipts.has(input.commandId)) {
-            posts.push(input);
-            receipts.add(input.commandId);
-          }
-          return {
-            receipt: {
-              commandId: input.commandId,
-              threadId: input.threadId,
-              commandType: input.commandType,
-              status: "accepted" as const,
-              acceptedAt: input.acceptedAt,
-              resultSequence: 0,
-              error: null,
-            },
-            storedEvents: [],
-            committed: true,
-            cancelledEffectCount: 0,
-          };
-        }),
-    }),
-    Layer.succeed(Scheduler.Scheduler, {
-      register: <E, R>(name: string, work: Effect.Effect<void, E, R>) =>
-        Effect.gen(function* () {
-          const context = yield* Effect.context<R>();
-          jobs.set(name, work.pipe(Effect.provideContext(context), Effect.orDie));
-        }),
-    }),
-    Layer.mock(Secrets.SecretRequests)({}),
-    Layer.mock(Git.GitWorkflowService)({ isRepository: () => Effect.succeed(true) }),
-    ServerConfig.layerTest(process.cwd(), { prefix: "t3-agent-service-" }),
-  );
-  const database = Sqlite.layerMemory;
-  const store = Store.layer.pipe(Layer.provide(layerSharedIdentity)).pipe(Layer.provide(database));
-  const labels = Labels.layer
-    .pipe(Layer.provide(layerSharedIdentity))
-    .pipe(
-      Layer.provide(
-        Layer.mergeAll(database, boundaries, LabelEvents.layer.pipe(Layer.provide(database))),
-      ),
+      }),
+      Layer.mock(Projects.ProjectService)({}),
+      Layer.mock(TextGeneration.TextGeneration)({}),
+      Layer.mock(Settings.ServerSettingsService)({}),
+      Layer.mock(Threads.ThreadManagementService)({
+        getThreadRecords: (id) => Effect.succeed(projections.get(id)!),
+        getThreadShell: (id) => Effect.succeed(projections.has(id) ? liveThreadShell(id) : null),
+        sendToThread: (input) =>
+          Effect.sync(() => {
+            calls.push(input);
+            const run = runFor(input.threadId, "running");
+            return {
+              dispatch: { sequence: 0, storedEvents: [] },
+              projection: conversation,
+              message: {
+                id: input.messageId,
+                threadId: input.threadId,
+                runId: run.id,
+                nodeId: null,
+                role: "user" as const,
+                text: input.text,
+                attachments: input.attachments,
+                streaming: false,
+                createdAt: DateTime.makeUnsafe(fixture.createdAt),
+                updatedAt: DateTime.makeUnsafe(fixture.createdAt),
+                createdBy: "user" as const,
+                creationSource: "web" as const,
+              },
+              run,
+              turnItem: null,
+              delivery: "queued" as const,
+            };
+          }),
+        dispatch: (command) =>
+          Effect.sync(() => {
+            commands.push(command);
+            return { sequence: 0, storedEvents: [] };
+          }),
+      }),
+      Layer.mock(Projections.ProjectionStoreV2)({
+        getThreadRecords: (id) => {
+          const projection = projections.get(id);
+          return projection
+            ? Effect.succeed(projection)
+            : Effect.fail(new Projections.ProjectionStoreThreadNotFoundError({ threadId: id }));
+        },
+        getThread: (id) => Effect.succeed(projections.get(id)!.thread),
+        getThreadShell: (id) =>
+          Effect.succeed(
+            projections.has(id) ? { ...liveThreadShell(id), ...projections.get(id)!.thread } : null,
+          ),
+      }),
+      Layer.mock(Events.EventSinkV2)({
+        commitCommand: (input) =>
+          Effect.sync(() => {
+            if (!receipts.has(input.commandId)) {
+              posts.push(input);
+              receipts.add(input.commandId);
+            }
+            return {
+              receipt: {
+                commandId: input.commandId,
+                threadId: input.threadId,
+                commandType: input.commandType,
+                status: "accepted" as const,
+                acceptedAt: input.acceptedAt,
+                resultSequence: 0,
+                error: null,
+              },
+              storedEvents: [],
+              committed: true,
+              cancelledEffectCount: 0,
+            };
+          }),
+      }),
+      Layer.succeed(Scheduler.Scheduler, {
+        register: <E, R>(name: string, work: Effect.Effect<void, E, R>) =>
+          Effect.gen(function* () {
+            const context = yield* Effect.context<R>();
+            jobs.set(name, work.pipe(Effect.provideContext(context), Effect.orDie));
+          }),
+      }),
+      Layer.mock(Secrets.SecretRequests)({}),
+      Layer.mock(Git.GitWorkflowService)({ isRepository: () => Effect.succeed(true) }),
+      ServerConfig.layerTest(process.cwd(), { prefix: "t3-agent-service-" }),
     );
-  const agents = Agents.layer
-    .pipe(Layer.provide(layerSharedIdentity))
-    .pipe(Layer.provide(Layer.mergeAll(boundaries, store, labels, database)));
-  const schedules = Schedules.layer
-    .pipe(Layer.provide(layerSharedIdentity))
-    .pipe(Layer.provide(Layer.mergeAll(boundaries, agents, store, database)));
-  const work = Work.layer.pipe(Layer.provide(Layer.mergeAll(store, boundaries)));
-  const workspace = Workspace.layer.pipe(
-    Layer.provide(Layer.mergeAll(store, agents, schedules, work, boundaries, database)),
-  );
-  const policy = Policy.layer.pipe(
-    Layer.provide(Layer.mergeAll(store, workspace, boundaries, database)),
-  );
-  const eventStore = EventStore.layerFromOrchestrationEventStore.pipe(
-    Layer.provide(LabelEvents.layer.pipe(Layer.provide(database))),
-  );
-  const bus = AgentEvents.layer
-    .pipe(Layer.provide(layerSharedIdentity))
-    .pipe(Layer.provide(Layer.mergeAll(agents, schedules, store, database)));
-  const reactor = EventReactor.layer.pipe(
-    Layer.provide(Layer.mergeAll(bus, eventStore, boundaries, database)),
-  );
-  const layer = Layer.mergeAll(
-    store,
-    agents,
-    schedules,
-    workspace,
-    policy,
-    labels,
-    database,
-    eventStore,
-    bus,
-    reactor,
-    boundaries,
-  ).pipe(Layer.provide(NodeServices.layer));
-  const triggerInput: ScheduledTaskUpsertInput = {
-    title: "Check colour",
-    prompt: "Recall the owner's favourite colour.",
-    agentId: fixture.id,
-    enabled: true,
-    schedule: { type: "interval", everyMs: 60000 },
-    projectId: fixture.projectId!,
-    threadId: fixture.conversationThreadId,
-    workspaceStrategy: { type: "root" },
-    modelSelection: fixture.modelSelection,
-    runtimeMode: fixture.runtimeMode,
-    interactionMode: "default",
-  };
-  return {
-    layer,
-    fixture,
-    launches,
-    launchFailure,
-    posts,
-    calls,
-    commands,
-    jobs,
-    triggerInput,
-    projections,
-    runFor,
-  };
-});
+    const database = Sqlite.layerMemory;
+    const store = Store.layer.pipe(Layer.provide(identity)).pipe(Layer.provide(database));
+    const labels = Labels.layer
+      .pipe(Layer.provide(identity))
+      .pipe(
+        Layer.provide(
+          Layer.mergeAll(database, boundaries, LabelEvents.layer.pipe(Layer.provide(database))),
+        ),
+      );
+    const agents = Agents.layer
+      .pipe(Layer.provide(identity))
+      .pipe(Layer.provide(Layer.mergeAll(boundaries, store, labels, database)));
+    const schedules = Schedules.layer
+      .pipe(Layer.provide(identity))
+      .pipe(Layer.provide(Layer.mergeAll(boundaries, agents, store, database)));
+    const work = Work.layer.pipe(Layer.provide(Layer.mergeAll(store, boundaries)));
+    const workspace = Workspace.layer.pipe(
+      Layer.provide(Layer.mergeAll(store, agents, schedules, work, boundaries, database)),
+    );
+    const policy = Policy.layer.pipe(
+      Layer.provide(Layer.mergeAll(store, workspace, boundaries, database)),
+    );
+    const eventStore = EventStore.layerFromOrchestrationEventStore.pipe(
+      Layer.provide(LabelEvents.layer.pipe(Layer.provide(database))),
+    );
+    const bus = AgentEvents.layer
+      .pipe(Layer.provide(identity))
+      .pipe(Layer.provide(Layer.mergeAll(agents, schedules, store, database)));
+    const reactor = EventReactor.layer.pipe(
+      Layer.provide(Layer.mergeAll(bus, eventStore, boundaries, database)),
+    );
+    const layer = Layer.mergeAll(
+      store,
+      agents,
+      schedules,
+      workspace,
+      policy,
+      labels,
+      database,
+      eventStore,
+      bus,
+      reactor,
+      boundaries,
+    ).pipe(Layer.provide(NodeServices.layer));
+    const triggerInput: ScheduledTaskUpsertInput = {
+      title: "Check colour",
+      prompt: "Recall the owner's favourite colour.",
+      agentId: fixture.id,
+      enabled: true,
+      schedule: { type: "interval", everyMs: 60000 },
+      projectId: fixture.projectId!,
+      threadId: fixture.conversationThreadId,
+      workspaceStrategy: { type: "root" },
+      modelSelection: fixture.modelSelection,
+      runtimeMode: fixture.runtimeMode,
+      interactionMode: "default",
+    };
+    return {
+      layer,
+      fixture,
+      launches,
+      launchFailure,
+      posts,
+      calls,
+      commands,
+      jobs,
+      triggerInput,
+      projections,
+      runFor,
+    };
+  });
+
+const makeHarness = makeHarnessWithIdentity();
 
 it.effect("drains a deferred webhook fire without a next scheduled time", () =>
   Effect.gen(function* () {
@@ -565,6 +572,68 @@ describe("agent execution", () => {
         expect((yield* store.get(h.fixture.id)).consecutiveFailures).toBe(0);
       }).pipe(Effect.provide(h.layer));
     }),
+  );
+
+  it.effect(
+    "startup reconciles a replica deletion while its offline owner later stops its work",
+    () =>
+      Effect.gen(function* () {
+        const ownerId = EnvironmentId.make("test-local-machine");
+        const hubId = EnvironmentId.make("test-hub");
+        const owner = yield* makeHarness;
+        const hub = yield* makeHarnessWithIdentity(
+          Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+            getEnvironmentId: Effect.succeed(hubId),
+          }),
+        );
+        const boot = (h: typeof owner) =>
+          Effect.gen(function* () {
+            const services = yield* Layer.build(h.layer);
+            return yield* Effect.gen(function* () {
+              const store = yield* Store.AgentStore;
+              const agents = yield* Agents.AgentService;
+              const schedules = yield* Schedules.ScheduledTaskService;
+              const context = yield* Layer.build(
+                SharedState.layer.pipe(
+                  Layer.provide(
+                    Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+                      getEnvironmentId: Effect.succeed(h === owner ? ownerId : hubId),
+                    }),
+                  ),
+                ),
+              );
+              const shared = yield* SharedState.SharedState.pipe(Effect.provideContext(context));
+              return { store, agents, schedules, shared };
+            }).pipe(Effect.provideContext(services));
+          });
+        const spoke = yield* boot(owner);
+        const replica = yield* boot(hub);
+        yield* spoke.store.save(owner.fixture);
+        const { task } = yield* spoke.schedules.upsert(owner.triggerInput);
+        yield* spoke.agents.trigger(task, "offline-delete", task.prompt);
+        yield* replica.shared.receive(
+          yield* spoke.shared.readBatch(0, hubId, false),
+          ownerId,
+          false,
+        );
+        yield* replica.shared.write("agent", owner.fixture.id, {}, true);
+        // No RemoteThreadLaunch service exists here, just as before peers reconnect on startup.
+        yield* replica.agents.reconcile({ afterRestart: true });
+        yield* replica.agents.reconcile();
+        expect(hub.commands).toEqual([]);
+        expect((yield* replica.shared.get("agent", owner.fixture.id))?.tombstone).not.toBeNull();
+        expect(yield* spoke.store.list()).toHaveLength(1);
+        yield* spoke.shared.receive(
+          yield* replica.shared.readBatch(0, ownerId, false),
+          hubId,
+          true,
+        );
+        yield* spoke.agents.reconcile();
+        yield* spoke.agents.reconcile();
+        expect(yield* spoke.store.list()).toEqual([]);
+        expect((yield* spoke.schedules.list()).tasks).toEqual([]);
+        expect(owner.commands.filter((command) => command.type === "thread.stop")).toHaveLength(2);
+      }),
   );
 
   it.effect("an incoming agent tombstone stops owner work through the normal deletion path", () =>

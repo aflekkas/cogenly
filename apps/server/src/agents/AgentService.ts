@@ -311,6 +311,36 @@ const make = Effect.gen(function* () {
               message: "Only the owner can change agent permissions or runtime mode.",
             })
           : undefined;
+  // Tombstones are durable shared intent. Each machine cleans up its own work;
+  // replicas must never contact the owner during startup reconciliation.
+  const finishAgentDeletion = (agent: Agent) =>
+    Effect.gen(function* () {
+      // Retire before stopping work so a due trigger cannot launch while deletion waits.
+      yield* store.retire(agent.id);
+      const runs = yield* store.runs(agent.id);
+      const threadIds = [
+        agent.conversationThreadId,
+        ...runs
+          .filter((run) => run.status === "starting" || run.status === "running")
+          .map((run) => run.workThreadId),
+      ];
+      for (const threadId of agent.ownerMachine === undefined ||
+      agent.ownerMachine === shared.environmentId
+        ? threadIds
+        : []) {
+        const thread = yield* projections.getThreadShell(threadId);
+        if (thread === null) continue;
+        yield* threads.dispatch({
+          type: "thread.stop",
+          commandId: CommandId.make(`agent-delete:${agent.id}:${threadId}`),
+          threadId,
+          reason: "Agent deleted.",
+        });
+      }
+      const deleted = yield* store.delete(agent.id);
+      yield* changed;
+      return { deleted };
+    });
   const removeAgent = (id: AgentId, callerAgentId?: AgentId) =>
     Effect.gen(function* () {
       const denial = agentCallerDenial(callerAgentId, id, {});
@@ -339,31 +369,7 @@ const make = Effect.gen(function* () {
         yield* changed;
         return result;
       }
-      // Retire before stopping work so a due trigger cannot launch while deletion waits.
-      yield* store.retire(id);
-      const runs = yield* store.runs(id);
-      const threadIds = [
-        agent.conversationThreadId,
-        ...runs
-          .filter((run) => run.status === "starting" || run.status === "running")
-          .map((run) => run.workThreadId),
-      ];
-      for (const threadId of agent.ownerMachine === undefined ||
-      agent.ownerMachine === shared.environmentId
-        ? threadIds
-        : []) {
-        const thread = yield* projections.getThreadShell(threadId);
-        if (thread === null) continue;
-        yield* threads.dispatch({
-          type: "thread.stop",
-          commandId: CommandId.make(`agent-delete:${id}:${threadId}`),
-          threadId,
-          reason: "Agent deleted.",
-        });
-      }
-      const deleted = yield* store.delete(id);
-      yield* changed;
-      return { deleted };
+      return yield* finishAgentDeletion(agent);
     }).pipe(Effect.mapError(failure));
   const retryFallback = Effect.fn("AgentService.retryFallback")(function* (
     agent: Agent,
@@ -411,7 +417,8 @@ const make = Effect.gen(function* () {
       const deletions = yield* sql<{
         id: string;
       }>`SELECT d.id FROM shared_documents d JOIN agents a ON a.agent_id=d.id WHERE d.kind='agent' AND d.tombstone_json IS NOT NULL`;
-      for (const document of deletions) yield* removeAgent(AgentId.make(document.id));
+      for (const document of deletions)
+        yield* finishAgentDeletion(yield* store.get(AgentId.make(document.id)));
       const runs = yield* store.runs();
       // Conversation and governed Work runs share the same retry path. Background
       // records are handled below so their reservation remains active during retry.
