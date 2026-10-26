@@ -137,6 +137,13 @@ host process to write. Unsupported platforms or failed probes disable chat
 terminals, and machine security status reports the result.
 
 This is a local filesystem boundary, with a terminal-private temp exception.
+Reads are open except for credentials, which would let a chat act outside its
+MCP grants: the Cogenly home (with its worktree, project and tool roots shown
+again), provider homes from settings, SSH, gh and git credential stores, and
+keychains. The list is derived per launch in
+[`lookupMasks.ts`](../../apps/server/src/terminal/lookupMasks.ts). Linux can
+mask only paths that exist at launch, and only macOS can refuse Cogenly's own
+port, on loopback only; elsewhere the port stays reachable without credentials.
 Network access deliberately remains on for CLI and documentation lookups, so it
 does not guarantee the absence of remote writes. The instructions prohibit those
 commands; there is no network broker. Project file tools remain a separate,

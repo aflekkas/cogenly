@@ -1,8 +1,76 @@
+/**
+ * What a lookup sandbox hides from an otherwise readable host. Only chat
+ * (read-only lookup) terminals are sandboxed: full-access agents are
+ * intentionally unsandboxed and can read all of this.
+ */
+export interface LookupMasks {
+  /**
+   * Cogenly state and credential stores. `missing` paths are hidden on macOS
+   * only, since Linux can mount only over a path that already exists.
+   */
+  readonly hidden: ReadonlyArray<{
+    readonly path: string;
+    readonly kind: "directory" | "file" | "missing";
+  }>;
+  /** Workspace roots inside a hidden directory, such as Cogenly's worktrees. */
+  readonly reexposed: ReadonlyArray<string>;
+  /** Cogenly's own HTTP/WS port, refused on loopback where the platform allows it. */
+  readonly serverPort: number | null;
+}
+
+export const noLookupMasks: LookupMasks = { hidden: [], reexposed: [], serverPort: null };
+
+const within = (child: string, parent: string) =>
+  child === parent || child.startsWith(parent.endsWith("/") ? parent : `${parent}/`);
+
+/**
+ * Ordered hide/show steps. Later steps win on both platforms: Seatbelt takes
+ * the last matching rule and bwrap mounts in argument order. Hidden paths
+ * inside a re-exposed root are hidden again after it.
+ */
+export const lookupMaskSteps = (masks: LookupMasks) => {
+  const reexposed = masks.reexposed.filter((root) =>
+    masks.hidden.some(
+      (hidden) => hidden.kind === "directory" && root !== hidden.path && within(root, hidden.path),
+    ),
+  );
+  const outermost = masks.hidden.filter(
+    (entry) =>
+      !masks.hidden.some(
+        (other) =>
+          other !== entry &&
+          other.kind !== "file" &&
+          other.path !== entry.path &&
+          within(entry.path, other.path),
+      ),
+  );
+  return [
+    ...outermost.map((entry) => ({ hide: entry }) as const),
+    ...reexposed.map((path) => ({ show: path }) as const),
+    ...masks.hidden
+      .filter((entry) => reexposed.some((root) => within(entry.path, root)))
+      .map((entry) => ({ hide: entry }) as const),
+  ];
+};
+
+const macMaskRules = (masks: LookupMasks): string =>
+  lookupMaskSteps(masks)
+    .map((step) =>
+      "show" in step
+        ? `(allow file-read* (subpath ${JSON.stringify(step.show)}))`
+        : `(deny file-read* (subpath ${JSON.stringify(step.hide.path)}))`,
+    )
+    .join("\n");
+
 /** A deny-by-default Seatbelt profile; children inherit it across fork and exec. */
-export const macReadOnlyProfile = (temporaryDirectory: string): string => `
+export const macReadOnlyProfile = (
+  temporaryDirectory: string,
+  masks: LookupMasks = noLookupMasks,
+): string => `
 (version 1)
 (deny default)
 (allow file-read*)
+${macMaskRules(masks)}
 (allow process-exec process-fork)
 (allow process-info* signal (target same-sandbox))
 (allow sysctl-read)
@@ -10,6 +78,14 @@ export const macReadOnlyProfile = (temporaryDirectory: string): string => `
 (allow file-write* (subpath ${JSON.stringify(temporaryDirectory)}))
 (allow file-write-data file-ioctl (literal "/dev/null") (literal "/dev/tty"))
 (allow network-outbound (remote ip "*:*"))
+${
+  // Seatbelt filters remote hosts only as "*" or "localhost", so a server also
+  // bound to a LAN or tailnet address stays reachable there. Its routes still
+  // need credentials, which the masks above hide.
+  masks.serverPort === null
+    ? ""
+    : `(deny network-outbound (remote ip ${JSON.stringify(`localhost:${masks.serverPort}`)}))`
+}
 (allow network-bind (local ip "*:*"))
 (allow system-socket (socket-domain AF_INET) (socket-domain AF_INET6) (socket-domain AF_UNIX))
 ; macOS libc resolves DNS through this socket, not an Internet socket.
@@ -124,10 +200,28 @@ export const linuxReadOnlySeccomp = (architecture: string): Uint8Array | null =>
   return new Uint8Array(buffer);
 };
 
+/**
+ * Empty tmpfs over hidden directories and /dev/null over hidden files. A mount
+ * namespace cannot filter connect() by port and a network namespace would
+ * disable lookups, so Linux leaves Cogenly's port reachable; its routes still
+ * need credentials, which these masks hide.
+ */
+const linuxMaskArguments = (masks: LookupMasks): string[] =>
+  lookupMaskSteps(masks).flatMap((step) =>
+    "show" in step
+      ? ["--ro-bind", step.show, step.show]
+      : step.hide.kind === "directory"
+        ? ["--tmpfs", step.hide.path]
+        : step.hide.kind === "file"
+          ? ["--ro-bind", "/dev/null", step.hide.path]
+          : [],
+  );
+
 export const linuxReadOnlyArguments = (input: {
   readonly shell: string;
   readonly args: ReadonlyArray<string>;
   readonly cwd: string;
+  readonly masks?: LookupMasks;
 }): string[] => [
   "--unshare-user",
   "--disable-userns",
@@ -153,6 +247,7 @@ export const linuxReadOnlyArguments = (input: {
   ...(["/tmp/"].some((root) => input.cwd.startsWith(root))
     ? ["--ro-bind", input.cwd, input.cwd]
     : []),
+  ...linuxMaskArguments(input.masks ?? noLookupMasks),
   "--setenv",
   "TMPDIR",
   "/tmp",

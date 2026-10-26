@@ -69,9 +69,11 @@ repositories from **Work** or the command palette.
 
 A chat is a conversation; Work is a coding session in a repository. Chats run in
 conversation mode: the agent answers directly and looks things up itself. It can run
-quick read-only commands, such as searching files, reading git history or querying
-`gh`, from the chat's project folder (or its own folder when it has no project), and
-each command shows in the conversation. It doesn't edit repositories, install
+quick read-only commands, such as searching files or reading git history, from the
+chat's project folder (or its own folder when it has no project), and each command
+shows in the conversation. Chat commands can't read Cogenly's data, provider logins,
+SSH keys or saved CLI credentials, so commands that need a login, such as `gh`, run
+signed out; use Work for those. It doesn't edit repositories, install
 anything or run long builds from a chat; it hands that work to a task instead.
 Chat commands need full-access mode and the `enableAgentTerminals` preference. They also require a working local sandbox:
 macOS uses the built-in `sandbox-exec`. On Linux, Cogenly installs the distro's

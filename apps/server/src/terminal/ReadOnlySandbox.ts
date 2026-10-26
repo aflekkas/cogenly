@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
@@ -25,6 +26,9 @@ import {
   type SandboxFailure,
 } from "./sandboxProvisioning.ts";
 import * as ProcessRunner from "../processRunner.ts";
+import * as ServerConfig from "../config.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import { resolveLookupMasks } from "./lookupMasks.ts";
 import {
   linuxReadOnlyArguments,
   linuxReadOnlySeccomp,
@@ -73,6 +77,7 @@ export const make = Effect.gen(function* () {
   const platform = yield* HostProcess.Platform;
   const architecture = yield* HostProcess.Architecture;
   const environment = yield* HostProcess.Environment;
+  const home = yield* HostProcess.HomeDirectory;
   const resolve = (command: string) =>
     resolveCommandPath(command, { env: environment }).pipe(
       Effect.provideService(FileSystem.FileSystem, fs),
@@ -80,6 +85,22 @@ export const make = Effect.gen(function* () {
     );
   const scope = yield* Effect.scope;
   const filter = platform === "linux" ? linuxReadOnlySeccomp(architecture) : null;
+  // Optional so CLI probes and tests build without a server. Read per launch:
+  // provider instances can change while the server runs.
+  const serverConfig = yield* Effect.serviceOption(ServerConfig.ServerConfig);
+  const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
+  const masks = Effect.gen(function* () {
+    const settings = Option.isSome(serverSettings)
+      ? yield* serverSettings.value.getSettings.pipe(Effect.orElseSucceed(() => null))
+      : null;
+    return yield* resolveLookupMasks({ config: serverConfig, settings });
+  }).pipe(
+    Effect.provideService(FileSystem.FileSystem, fs),
+    Effect.provideService(Path.Path, path),
+    Effect.provideService(HostProcess.Platform, platform),
+    Effect.provideService(HostProcess.Environment, environment),
+    Effect.provideService(HostProcess.HomeDirectory, home),
+  );
   let binary: string | null = null;
   let status: SandboxStatus = {
     available: false,
@@ -114,10 +135,11 @@ export const make = Effect.gen(function* () {
           new SandboxUnavailable({ reason: "a private sandbox directory could not be created." }),
       ),
     );
+    const hidden = yield* masks;
     if (platform === "darwin") {
       return {
         shell: sandboxBinary,
-        args: ["-p", macReadOnlyProfile(directory), input.shell, ...input.args],
+        args: ["-p", macReadOnlyProfile(directory, hidden), input.shell, ...input.args],
         env: { TMPDIR: directory, TMP: directory, TEMP: directory },
       };
     }
@@ -137,7 +159,7 @@ export const make = Effect.gen(function* () {
         "cogenly-sandbox",
         filterPath,
         sandboxBinary,
-        ...linuxReadOnlyArguments(input),
+        ...linuxReadOnlyArguments({ ...input, masks: hidden }),
       ],
       env: { TMPDIR: "/tmp", TMP: "/tmp", TEMP: "/tmp" },
     };

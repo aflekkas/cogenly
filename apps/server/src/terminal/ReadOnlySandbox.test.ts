@@ -1,3 +1,5 @@
+import * as NodeNet from "node:net";
+import { ProviderDriverKind, ProviderInstanceId } from "@cogenly/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
@@ -9,6 +11,8 @@ import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as PtyAdapter from "@cogenly/shared/PtyAdapter";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as ProcessRunner from "../processRunner.ts";
+import * as ServerConfig from "../config.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as ReadOnlySandbox from "./ReadOnlySandbox.ts";
 import * as Manager from "./Manager.ts";
 import * as NodePtyAdapter from "./NodePtyAdapter.ts";
@@ -236,6 +240,114 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "darwin")(
           ),
           Effect.scoped,
         ),
+    );
+  },
+);
+
+describe.skipIf(!["darwin", "linux"].includes(HostProcess.Platform.defaultValue()))(
+  "behavioral credential masks (requires sandbox-exec or bwrap; skipped elsewhere)",
+  () => {
+    it.effect("hides Cogenly state and provider homes but keeps workspaces readable", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* fs.realPath(
+          yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-mask-test-" }),
+        );
+        const home = `${root}/home`;
+        const baseDir = `${home}/.cogenly`;
+        yield* fs.makeDirectory(`${home}/.ssh`, { recursive: true });
+        yield* fs.writeFileString(`${home}/.ssh/id_ed25519`, "ssh-secret");
+        yield* fs.makeDirectory(`${root}/provider-home`, { recursive: true });
+        yield* fs.writeFileString(`${root}/provider-home/auth.json`, "provider-secret");
+        const project = `${root}/project`;
+        yield* fs.makeDirectory(project, { recursive: true });
+        yield* fs.writeFileString(`${project}/notes`, "project contents");
+        const listener = yield* Effect.acquireRelease(
+          Effect.callback<NodeNet.Server>((resume) => {
+            const server = NodeNet.createServer((socket) => socket.end());
+            server.listen(0, "127.0.0.1", () => resume(Effect.succeed(server)));
+          }),
+          (server) =>
+            Effect.callback<void>((resume) => {
+              server.close(() => resume(Effect.void));
+            }),
+        );
+        const port = (listener.address() as NodeNet.AddressInfo).port;
+        const config = yield* ServerConfig.ServerConfig.pipe(
+          Effect.provide(ServerConfig.layerTest(project, baseDir)),
+        );
+        yield* fs.makeDirectory(config.secretsDir, { recursive: true });
+        yield* fs.writeFileString(`${config.secretsDir}/vault-key.bin`, "vault-secret");
+        yield* fs.writeFileString(config.dbPath, "database-secret");
+        const worktree = `${config.worktreesDir}/repo`;
+        yield* fs.makeDirectory(worktree, { recursive: true });
+        yield* fs.writeFileString(`${worktree}/readme`, "worktree contents");
+        const settings = yield* ServerSettings.ServerSettingsService.pipe(
+          Effect.provide(ServerSettings.layerTest()),
+        );
+        yield* settings.updateProviderInstance({
+          operation: "create",
+          instanceId: ProviderInstanceId.make("codex-work"),
+          instance: {
+            driver: ProviderDriverKind.make("codex"),
+            config: { homePath: `${root}/provider-home` },
+          },
+        });
+        const sandbox = yield* ReadOnlySandbox.make.pipe(
+          Effect.provideService(ServerConfig.ServerConfig, { ...config, port }),
+          Effect.provideService(ServerSettings.ServerSettingsService, settings),
+          Effect.provideService(HostProcess.HomeDirectory, home),
+        );
+        if (HostProcess.Platform.defaultValue() === "darwin")
+          expect(sandbox.status.available).toBe(true);
+        // Linux CI hosts often block unprivileged user namespaces; nothing to exercise there.
+        if (!sandbox.status.available) return;
+        const runner = yield* ProcessRunner.ProcessRunner;
+        const read = (file: string, cwd = project) =>
+          sandbox.prepare({ shell: "/bin/sh", args: ["-c", 'cat "$1"', "read", file], cwd }).pipe(
+            Effect.flatMap((launch) =>
+              runner.run({
+                command: launch.shell,
+                args: launch.args,
+                cwd,
+                env: { PATH: "/usr/bin:/bin", ...launch.env },
+                timeout: "5 seconds",
+                maxOutputBytes: 4096,
+              }),
+            ),
+          );
+        for (const secret of [
+          `${config.secretsDir}/vault-key.bin`,
+          config.dbPath,
+          `${home}/.ssh/id_ed25519`,
+          `${root}/provider-home/auth.json`,
+        ]) {
+          const result = yield* read(secret);
+          expect(result.code, secret).not.toBe(0);
+          expect(result.stdout).not.toContain("secret");
+        }
+        expect((yield* read(`${project}/notes`)).stdout).toBe("project contents");
+        expect((yield* read(`${worktree}/readme`, worktree)).stdout).toBe("worktree contents");
+        if (HostProcess.Platform.defaultValue() === "darwin") {
+          const launch = yield* sandbox.prepare({
+            shell: "/bin/sh",
+            args: ["-c", `/usr/bin/nc -z 127.0.0.1 ${port}`],
+            cwd: project,
+          });
+          const connect = yield* runner.run({
+            command: launch.shell,
+            args: launch.args,
+            cwd: project,
+            env: { PATH: "/usr/bin:/bin", ...launch.env },
+            timeout: "5 seconds",
+            maxOutputBytes: 4096,
+          });
+          expect(connect.code).not.toBe(0);
+        }
+      }).pipe(
+        Effect.provide(ProcessRunner.layer.pipe(Layer.provideMerge(NodeServices.layer))),
+        Effect.scoped,
+      ),
     );
   },
 );
