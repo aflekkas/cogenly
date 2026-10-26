@@ -58,10 +58,7 @@ export function RepositoryActionsSettings({
     ? environments.find((environment) => environment.environmentId === representative.environmentId)
         ?.serverConfig
     : undefined;
-  const scripts =
-    representative && representativeConfig
-      ? representative.scripts
-      : [];
+  const scripts = representative && representativeConfig ? representative.scripts : [];
   const keybindings = representativeConfig?.keybindings ?? DEFAULT_RESOLVED_KEYBINDINGS;
   const [request, setRequest] = useState<ProjectScriptEditorRequest | null>(null);
   const { saving, persist, submit } = useProjectScriptSettings(members);
