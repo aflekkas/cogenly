@@ -79,6 +79,42 @@ export function alertMessage(
   return { subject: heading, text: lines.join("\n") };
 }
 
+/** Titles listed in one grouped message; the rest are counted. */
+const GROUP_LIST_LIMIT = 8;
+
+/** Alerts from one round, one group per machine and check, in first-seen order. */
+export function groupAlertsByCheck(
+  alerts: ReadonlyArray<MachineHealthAlert>,
+): ReadonlyArray<ReadonlyArray<MachineHealthAlert>> {
+  const groups = new Map<string, Array<MachineHealthAlert>>();
+  for (const alert of alerts) {
+    const key = JSON.stringify([alert.originEnvironmentId, alert.checkId]);
+    groups.set(key, [...(groups.get(key) ?? []), alert]);
+  }
+  return [...groups.values()];
+}
+
+/** One message for the alerts of one check on one machine, so a burst sends once. */
+export function alertGroupMessage(
+  alerts: ReadonlyArray<MachineHealthAlert>,
+  transition: "opened" | "resolved",
+): AlertMessage | null {
+  const [first, ...rest] = alerts;
+  if (first === undefined) return null;
+  if (rest.length === 0) return alertMessage(first, transition);
+  const machine = sanitizeAlertText(first.originMachineName, 80);
+  const heading =
+    transition === "opened"
+      ? `Cogenly health alert on ${machine}: ${alerts.length} problems`
+      : `Resolved on ${machine}: ${alerts.length} problems`;
+  const listed = alerts
+    .slice(0, GROUP_LIST_LIMIT)
+    .map((alert) => `- ${sanitizeAlertText(alert.title, 160)}`);
+  const more = alerts.length - listed.length;
+  const lines = [heading, ...listed, ...(more > 0 ? [`…and ${more} more.`] : []), HINT];
+  return { subject: heading, text: lines.join("\n") };
+}
+
 export function testMessage(machineName: string): AlertMessage {
   const machine = sanitizeAlertText(machineName, 80);
   const subject = `Cogenly test alert from ${machine}`;

@@ -114,6 +114,28 @@ describe("health alert engine", () => {
     });
   });
 
+  it("picks up a new title at the same severity in place, keeping the id", () => {
+    const titled = (title: string): HealthRound => ({
+      observations: [
+        {
+          ...seen("fail", "stuck-runs:thread:a"),
+          item: { ...item("fail", "stuck-runs:thread:a"), title },
+        },
+      ],
+    });
+    const results = run([
+      titled("3 subagents stuck"),
+      titled("3 subagents stuck"),
+      titled("3 subagents stuck"),
+      titled("18 subagents stuck"),
+      titled("18 subagents stuck"),
+    ]);
+    expect(transitions(results)).toEqual(["-", "-", "open", "change", "-"]);
+    expect(healthAlertsSnapshot(results[4]!.state).open).toEqual([
+      expect.objectContaining({ id: results[2]!.opened[0]!.id, title: "18 subagents stuck" }),
+    ]);
+  });
+
   it("treats unknown as holding the previous state", () => {
     const unknown = { observations: [seen("unknown")] };
     // Pending: unknown neither opens nor resets the streak.

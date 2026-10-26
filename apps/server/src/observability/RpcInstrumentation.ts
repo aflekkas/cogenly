@@ -169,6 +169,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.machinesHealthSubscribe]: "machines",
   [WS_METHODS.machinesHealthAlertsSubscribe]: "machines",
   [WS_METHODS.machinesHealthRetrySync]: "machines",
+  [WS_METHODS.machinesHealthFix]: "machines",
   [WS_METHODS.machinesHealthTestAlertChannels]: "machines",
   [WS_METHODS.machinesMoveThreads]: "machines",
   [WS_METHODS.machinesForkThread]: "machines",

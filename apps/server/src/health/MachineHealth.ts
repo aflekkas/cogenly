@@ -27,7 +27,6 @@ import {
   type MachineInfo,
   type MachineListResult,
   type PeerCallError,
-  ThreadId,
 } from "@cogenly/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -58,9 +57,8 @@ import * as ThreadSync from "../threadSync/ThreadSync.ts";
 import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
 import * as HealthCanary from "./HealthCanary.ts";
 import * as ComputerUseService from "../computerUse/ComputerUseService.ts";
+import { readStaleRuns } from "./staleRuns.ts";
 import {
-  type ActiveRun,
-  STUCK_RUN_AFTER_MS,
   type SyncPeerProgress,
   type SyncPeerSample,
   bootServiceCheck,
@@ -118,8 +116,6 @@ const EVALUATE_EVERY = Duration.seconds(30);
 /** How long a paired machine has to answer with its report. */
 const PEER_REPORT_TIMEOUT = Duration.seconds(15);
 const RETRY_SYNC_TIMEOUT = Duration.seconds(60);
-/** Rows read per stuck-run query; the check lists fewer. */
-const STUCK_RUN_QUERY_LIMIT = 50;
 
 const unavailable = (cause?: unknown) =>
   new MachineHealthError({ reason: "unavailable", ...(cause === undefined ? {} : { cause }) });
@@ -356,56 +352,10 @@ const make = Effect.gen(function* () {
     });
 
   const activeRuns = (now: DateTime.Utc) =>
-    Effect.gen(function* () {
-      const cutoff = DateTime.formatIso(
-        DateTime.makeUnsafe(DateTime.toEpochMillis(now) - STUCK_RUN_AFTER_MS),
-      );
-      type Row = {
-        readonly id: string;
-        readonly thread_id: string;
-        readonly title: string;
-        readonly started_at: string;
-      };
-      // Replicas of threads another machine runs are that machine's report.
-      const [runs, subagents] = yield* Effect.all([
-        sql<Row>`SELECT r.run_id AS id, r.thread_id, t.title, r.requested_at AS started_at
-          FROM orchestration_v2_projection_runs r
-          JOIN orchestration_v2_projection_threads t ON t.thread_id = r.thread_id
-          WHERE r.status IN ('preparing', 'starting', 'running')
-            AND r.requested_at < ${cutoff}
-            AND t.deleted_at IS NULL
-            AND NOT EXISTS (SELECT 1 FROM thread_owners o WHERE o.thread_id = r.thread_id AND o.local = 0)
-          ORDER BY r.requested_at
-          LIMIT ${STUCK_RUN_QUERY_LIMIT}`,
-        sql<Row>`SELECT s.subagent_id AS id, s.thread_id, t.title,
-            COALESCE(s.started_at, s.updated_at) AS started_at
-          FROM orchestration_v2_projection_subagents s
-          JOIN orchestration_v2_projection_threads t ON t.thread_id = s.thread_id
-          WHERE s.status IN ('pending', 'starting', 'running')
-            AND COALESCE(s.started_at, s.updated_at) < ${cutoff}
-            AND t.deleted_at IS NULL
-            AND NOT EXISTS (SELECT 1 FROM thread_owners o WHERE o.thread_id = s.thread_id AND o.local = 0)
-          ORDER BY started_at
-          LIMIT ${STUCK_RUN_QUERY_LIMIT}`,
-      ]);
-      const toActive = (kind: ActiveRun["kind"]) => (row: Row) =>
-        Option.match(DateTime.make(row.started_at), {
-          onNone: () => [],
-          onSome: (startedAt): ActiveRun[] => [
-            {
-              kind,
-              id: row.id,
-              threadId: ThreadId.make(row.thread_id),
-              threadTitle: row.title,
-              startedAt: DateTime.toUtc(startedAt),
-            },
-          ],
-        });
-      return stuckRunsCheck({
-        active: [...runs.flatMap(toActive("run")), ...subagents.flatMap(toActive("subagent"))],
-        now,
-      });
-    });
+    readStaleRuns(now).pipe(
+      Effect.provideService(SqlClient.SqlClient, sql),
+      Effect.map((active) => stuckRunsCheck({ active, now })),
+    );
 
   const evaluate: Effect.Effect<MachineHealthReport> = Effect.gen(function* () {
     const now = yield* DateTime.now;
