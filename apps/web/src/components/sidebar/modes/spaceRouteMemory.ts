@@ -8,6 +8,7 @@ import type { EnvironmentId, ThreadId } from "@cogenly/contracts";
 import { useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo } from "react";
 
+import { useAgents } from "../../../agents/agentsClient";
 import { type DraftId, useComposerDraftStore } from "../../../composerDraftStore";
 import { useThreadKind, useThreadKindResolver } from "../../../hooks/useThreadKind";
 import { appAtomRegistry } from "../../../rpc/atomRegistry";
@@ -16,11 +17,13 @@ import { primaryEnvironmentIdAtom } from "../../../state/primaryEnvironment";
 import { allEnvironmentShellsBootstrappedAtom } from "../../../state/shell";
 import { sidebarModeForThreadKind } from "../../../threadCapabilities";
 import {
+  forgetSpaceRouteToThread,
   parseStoredSpaceRouteMemory,
   rememberSpaceRoute,
   resolveSpaceReturn,
   spaceOfRoute,
   spaceRouteForMatch,
+  threadRouteAvailability,
   type RememberedSpaceRoute,
   type SidebarSpace,
   type SpaceRouteAvailability,
@@ -50,9 +53,24 @@ function readMemory(): SpaceRouteMemory {
 }
 
 function recordSpaceRoute(space: SidebarSpace, entry: RememberedSpaceRoute): void {
-  const memory = readMemory();
-  const next = rememberSpaceRoute(memory, space, entry);
-  if (next === memory) return;
+  writeMemory(rememberSpaceRoute(readMemory(), space, entry));
+}
+
+/** Forgets Agents' page when it shows a deleted agent's conversation. */
+export function forgetAgentConversationRoute(agent: {
+  readonly environmentId: string;
+  readonly conversationThreadId: string;
+}): void {
+  writeMemory(
+    forgetSpaceRouteToThread(readMemory(), "agents", {
+      environmentId: agent.environmentId,
+      threadId: agent.conversationThreadId,
+    }),
+  );
+}
+
+function writeMemory(next: SpaceRouteMemory): void {
+  if (next === readMemory()) return;
   const key = storageKey();
   cached = { key, memory: next };
   try {
@@ -118,6 +136,7 @@ export function SpaceRouteMemoryTracker() {
  */
 export function useSpaceReturn(): (space: SidebarSpace) => string | null {
   const resolveKind = useThreadKindResolver();
+  const { agents, loading: agentsLoading } = useAgents();
   return useCallback(
     (space) =>
       resolveSpaceReturn(readMemory(), space, (route, owner): SpaceRouteAvailability => {
@@ -129,8 +148,18 @@ export function useSpaceReturn(): (space: SidebarSpace) => string | null {
             if (thread === null) {
               return appAtomRegistry.get(allEnvironmentShellsBootstrappedAtom) ? "gone" : "unknown";
             }
-            if (thread.archivedAt !== null) return "gone";
-            return sidebarModeForThreadKind(resolveKind(thread)) === owner ? "available" : "gone";
+            return threadRouteAvailability({
+              space: owner,
+              mode: sidebarModeForThreadKind(resolveKind(thread)),
+              archived: thread.archivedAt !== null,
+              agentListed: agentsLoading
+                ? null
+                : agents.some(
+                    (agent) =>
+                      agent.environmentId === route.environmentId &&
+                      agent.conversationThreadId === route.threadId,
+                  ),
+            });
           }
           case "draft": {
             const draft = useComposerDraftStore
@@ -143,6 +172,6 @@ export function useSpaceReturn(): (space: SidebarSpace) => string | null {
             return "available";
         }
       }),
-    [resolveKind],
+    [agents, agentsLoading, resolveKind],
   );
 }

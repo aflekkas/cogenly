@@ -43,6 +43,7 @@ import {
 import { onePerAgent } from "./agentGroups.logic";
 import { triggerErrorMessage } from "./agentWorkspace.logic";
 import { AgentHydrationContext, AgentsClientContext } from "./agentsContext";
+import { forgetAgentConversationRoute } from "../components/sidebar/modes/spaceRouteMemory";
 
 export class AgentCreatedWithoutTriggerError extends Error {
   constructor(
@@ -598,6 +599,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
       },
       remove: async (agent) => {
         commandValue(await remove({ environmentId: agent.environmentId, input: { id: agent.id } }));
+        forgetAgentConversationRoute(agent);
       },
       markRead: async (agent, messageId) => {
         commandValue(
