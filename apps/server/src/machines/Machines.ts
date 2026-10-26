@@ -113,6 +113,7 @@ const make = Effect.gen(function* () {
               }),
             )
           : relateHubMachine(fromHub)),
+        serverVersion: fromHub?.serverVersion ?? view.link.hub.serverVersion,
         online: hubOnline,
         lastSeenAt: hubOnline ? null : view.link.lastSeenAt,
         pairedAt: view.link.pairedAt,
