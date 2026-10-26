@@ -32,7 +32,8 @@ project names are kept separately until you choose how to combine them.
 ## Your conversations on every machine
 
 Chats, Work and agent conversations show up on every paired machine. Each one
-runs on one machine, shown as "Runs on" in the thread header. Open it from any
+runs on one machine, named on its sidebar card, under the composer, and in
+thread details. Open it from any
 machine to read it, follow it live, or send a message: the message runs on the
 machine that runs the thread. If that machine is offline, sending fails with
 a notice instead of waiting; reading still works. Attachments open from any

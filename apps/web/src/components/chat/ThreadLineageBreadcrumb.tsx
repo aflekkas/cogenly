@@ -3,7 +3,7 @@ import { scopeThreadRef } from "@cogenly/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@cogenly/client-runtime/state/models";
 import type { ThreadId } from "@cogenly/contracts";
 import { EllipsisIcon } from "lucide-react";
-import { type ReactNode, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { cn } from "~/lib/utils";
 
@@ -57,8 +57,7 @@ const HEADER_TITLE_MAX_WIDTH_CLASS = "max-w-[min(40rem,calc(100%-10rem))]";
 
 // The title row is a size container, so the trail drops ancestors by the room
 // it has: the root and the "…" menu below 28rem, the parent below 16rem.
-// Every minimum left at those widths fits beside the "Runs on" chip, so the
-// trail never runs under it; below 16rem the title alone shrinks.
+// Below 16rem the title alone shrinks.
 const ROOT_HIDE_CLASS = "@max-[28rem]/thread-title:hidden";
 const PARENT_HIDE_CLASS = "@max-[16rem]/thread-title:hidden";
 
@@ -70,17 +69,7 @@ const PARENT_HIDE_CLASS = "@max-[16rem]/thread-title:hidden";
  * a deeper chain keeps its root and direct parent and folds the middle into a
  * "…" menu. Until the thread's shell loads, the title shows alone.
  */
-export function ThreadHeaderTitle(
-  props: Parameters<typeof ThreadHeaderTitleContent>[0] & {
-    /**
-     * Shown right after the title, such as the "Runs on" chip. It shares the
-     * title's row wherever the title renders (the page's top bar or the fixed
-     * titlebar slot), so the title truncates before the two can overlap.
-     */
-    readonly trailing?: ReactNode;
-  },
-) {
-  const { trailing, ...titleProps } = props;
+export function ThreadHeaderTitle(props: Parameters<typeof ThreadHeaderTitleContent>[0]) {
   return (
     <WorkspacePageTitle>
       <div
@@ -91,8 +80,7 @@ export function ThreadHeaderTitle(
         // Leads the top bar, so it rides the pane's left edge when the sidebar toggles.
         data-panel-flip="start"
       >
-        <ThreadHeaderTitleContent {...titleProps} />
-        {trailing}
+        <ThreadHeaderTitleContent {...props} />
       </div>
     </WorkspacePageTitle>
   );

@@ -287,13 +287,13 @@ import { WizardPopup } from "./ui/wizard";
 import { BranchToolbar, type BranchToolbarHandle } from "./BranchToolbar";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { ThreadHeaderTitle } from "./chat/ThreadLineageBreadcrumb";
-import { ThreadOwnerBadge } from "../machines/ThreadOwnerBadge";
 import {
   describeOfflineLaunch,
   mergeRunOnOptions,
   resolveDraftLaunchTarget,
   resolveRunOnPick,
 } from "../machines/launchMachine.logic";
+import { threadOwnerMachine } from "../machines/machines.logic";
 import { useEnvironmentMachineList } from "../machines/useMachines";
 import { resolveThreadOrigin } from "./chat/threadLineage.logic";
 import { isEditableFocused } from "../lib/editableFocus";
@@ -2247,6 +2247,10 @@ export default function ChatView(props: ChatViewProps) {
     activeEnvironment: activeEnvironmentOption,
     canPickEnvironment: canPickRunOn,
   });
+  // A started thread another paired machine runs keeps its machine named
+  // under the composer, the one place the open thread shows it.
+  const threadRunsOnOtherMachine =
+    isServerThread && threadOwnerMachine(runOnMachineList, pickedRunOnMachine) !== null;
 
   const openOrReuseProjectDraftThread = async (input: {
     branch: string;
@@ -3698,6 +3702,7 @@ export default function ChatView(props: ChatViewProps) {
     hasActiveProject: activeProject !== null,
     isGitRepo,
     showEnvironmentIndicator: showComposerEnvironmentIndicator,
+    runsOnOtherMachine: threadRunsOnOtherMachine,
     hostsRestingComposerControls: routeKind === "server",
   });
   const showComposerContextStrip = shouldShowComposerContextStrip({
@@ -3706,6 +3711,7 @@ export default function ChatView(props: ChatViewProps) {
     hasActiveProject: activeProject !== null,
     isGitRepo,
     showEnvironmentIndicator: showComposerEnvironmentIndicator,
+    runsOnOtherMachine: threadRunsOnOtherMachine,
     hostsRestingComposerControls: routeKind === "server" && restingComposerControlsVisible,
   });
   const mountComposerModelStrip = routeKind === "server" && !mountComposerContextStrip;
@@ -9475,14 +9481,6 @@ export default function ChatView(props: ChatViewProps) {
               title={activeThread.title}
               messagesCarried={workHandoffMessagesCarried}
               onOpenThread={onOpenRelatedThreadStable}
-              trailing={
-                activeThreadShell ? (
-                  <ThreadOwnerBadge
-                    environmentId={activeThreadShell.environmentId}
-                    ownerMachine={activeThreadShell.source.ownerMachine}
-                  />
-                ) : null
-              }
             />
           ) : (
             <h2 className="sr-only">{activeThread.title}</h2>
