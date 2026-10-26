@@ -1,3 +1,4 @@
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 import { normalizeLegacyProviderThread } from "@cogenly/shared/legacyProviderThreadIdentity";
 import { isMisroutedLegacyRecoveryEvent } from "@cogenly/shared/legacyRecoveryEvent";
 import { withWorkMetadata } from "@cogenly/shared/workMetadata";
@@ -1257,7 +1258,8 @@ const decodeRows =
       return Effect.forEach(
         misses,
         (index) =>
-          decode(rows[index]!.payload_json).pipe(
+          (index % 16 === 0 ? NodeSqliteClient.eventLoopTurn : Effect.void).pipe(
+            Effect.andThen(decode(rows[index]!.payload_json)),
             Effect.map((value) => {
               rememberDecodedRow(rows[index]!.payload_json, decode, value);
               values[index] = value;
@@ -6310,44 +6312,82 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
 
     return {
       apply,
-      getShellSnapshot,
-      readShellSnapshot,
-      getThreadShell,
-      getThread,
-      getThreadsWithPullRequests,
-      getThreadWorktreePaths,
-      getRecentThreadTitles,
-      getThreadProjection,
-      getTurnStartContext,
-      getTurnStartHistory,
-      getRuntimeRecoveryProjection,
-      getRunningTurnContext,
-      getThreadProviderContext,
-      getRuntimeResponseContext,
-      getCheckpointContext,
-      getCheckpointCaptureContext,
-      getRunMessage,
-      canStartQueuedRun,
-      getPendingNativeUserInputs,
-      hasUnpairedRunInterruptRequest,
-      isNodeStored,
-      getMessageCount,
-      getNextTurnItemOrdinal,
-      getTurnItem,
-      getThreadRecords,
-      getRuntimeRequest,
-      getPlan,
-      getProviderControlContext,
-      getLimitRecoveryCandidates,
-      getRecoveryThreadIds,
-      getUnreadableThreadIds,
-      getThreadSnapshot,
-      getThreadSnapshotWindow,
-      getTimelinePage,
-      getThreadHistoryPage,
-      searchThread,
+      getShellSnapshot: (...args: Parameters<typeof getShellSnapshot>) =>
+        getShellSnapshot(...args).pipe(NodeSqliteClient.readOnly),
+      readShellSnapshot: (...args: Parameters<typeof readShellSnapshot>) =>
+        readShellSnapshot(...args).pipe(NodeSqliteClient.readOnly),
+      getThreadShell: (...args: Parameters<typeof getThreadShell>) =>
+        getThreadShell(...args).pipe(NodeSqliteClient.readOnly),
+      getThread: (...args: Parameters<typeof getThread>) =>
+        getThread(...args).pipe(NodeSqliteClient.readOnly),
+      getThreadsWithPullRequests: (...args: Parameters<typeof getThreadsWithPullRequests>) =>
+        getThreadsWithPullRequests(...args).pipe(NodeSqliteClient.readOnly),
+      getThreadWorktreePaths: (...args: Parameters<typeof getThreadWorktreePaths>) =>
+        getThreadWorktreePaths(...args).pipe(NodeSqliteClient.readOnly),
+      getRecentThreadTitles: (...args: Parameters<typeof getRecentThreadTitles>) =>
+        getRecentThreadTitles(...args).pipe(NodeSqliteClient.readOnly),
+      getThreadProjection: (...args: Parameters<typeof getThreadProjection>) =>
+        getThreadProjection(...args).pipe(NodeSqliteClient.readOnly),
+      getTurnStartContext: (...args: Parameters<typeof getTurnStartContext>) =>
+        getTurnStartContext(...args).pipe(NodeSqliteClient.readOnly),
+      getTurnStartHistory: (...args: Parameters<typeof getTurnStartHistory>) =>
+        getTurnStartHistory(...args).pipe(NodeSqliteClient.readOnly),
+      getRuntimeRecoveryProjection: (...args: Parameters<typeof getRuntimeRecoveryProjection>) =>
+        getRuntimeRecoveryProjection(...args).pipe(NodeSqliteClient.readOnly),
+      getRunningTurnContext: (...args: Parameters<typeof getRunningTurnContext>) =>
+        getRunningTurnContext(...args).pipe(NodeSqliteClient.readOnly),
+      getThreadProviderContext: (...args: Parameters<typeof getThreadProviderContext>) =>
+        getThreadProviderContext(...args).pipe(NodeSqliteClient.readOnly),
+      getRuntimeResponseContext: (...args: Parameters<typeof getRuntimeResponseContext>) =>
+        getRuntimeResponseContext(...args).pipe(NodeSqliteClient.readOnly),
+      getCheckpointContext: (...args: Parameters<typeof getCheckpointContext>) =>
+        getCheckpointContext(...args).pipe(NodeSqliteClient.readOnly),
+      getCheckpointCaptureContext: (...args: Parameters<typeof getCheckpointCaptureContext>) =>
+        getCheckpointCaptureContext(...args).pipe(NodeSqliteClient.readOnly),
+      getRunMessage: (...args: Parameters<typeof getRunMessage>) =>
+        getRunMessage(...args).pipe(NodeSqliteClient.readOnly),
+      canStartQueuedRun: (...args: Parameters<typeof canStartQueuedRun>) =>
+        canStartQueuedRun(...args).pipe(NodeSqliteClient.readOnly),
+      getPendingNativeUserInputs: (...args: Parameters<typeof getPendingNativeUserInputs>) =>
+        getPendingNativeUserInputs(...args).pipe(NodeSqliteClient.readOnly),
+      hasUnpairedRunInterruptRequest: (
+        ...args: Parameters<typeof hasUnpairedRunInterruptRequest>
+      ) => hasUnpairedRunInterruptRequest(...args).pipe(NodeSqliteClient.readOnly),
+      isNodeStored: (...args: Parameters<typeof isNodeStored>) =>
+        isNodeStored(...args).pipe(NodeSqliteClient.readOnly),
+      getMessageCount: (...args: Parameters<typeof getMessageCount>) =>
+        getMessageCount(...args).pipe(NodeSqliteClient.readOnly),
+      getNextTurnItemOrdinal: (...args: Parameters<typeof getNextTurnItemOrdinal>) =>
+        getNextTurnItemOrdinal(...args).pipe(NodeSqliteClient.readOnly),
+      getTurnItem: (...args: Parameters<typeof getTurnItem>) =>
+        getTurnItem(...args).pipe(NodeSqliteClient.readOnly),
+      getThreadRecords: (...args: Parameters<typeof getThreadRecords>) =>
+        getThreadRecords(...args).pipe(NodeSqliteClient.readOnly),
+      getRuntimeRequest: (...args: Parameters<typeof getRuntimeRequest>) =>
+        getRuntimeRequest(...args).pipe(NodeSqliteClient.readOnly),
+      getPlan: (...args: Parameters<typeof getPlan>) =>
+        getPlan(...args).pipe(NodeSqliteClient.readOnly),
+      getProviderControlContext: (...args: Parameters<typeof getProviderControlContext>) =>
+        getProviderControlContext(...args).pipe(NodeSqliteClient.readOnly),
+      getLimitRecoveryCandidates: (...args: Parameters<typeof getLimitRecoveryCandidates>) =>
+        getLimitRecoveryCandidates(...args).pipe(NodeSqliteClient.readOnly),
+      getRecoveryThreadIds: (...args: Parameters<typeof getRecoveryThreadIds>) =>
+        getRecoveryThreadIds(...args).pipe(NodeSqliteClient.readOnly),
+      getUnreadableThreadIds: (...args: Parameters<typeof getUnreadableThreadIds>) =>
+        getUnreadableThreadIds(...args).pipe(NodeSqliteClient.readOnly),
+      getThreadSnapshot: (...args: Parameters<typeof getThreadSnapshot>) =>
+        getThreadSnapshot(...args).pipe(NodeSqliteClient.readOnly),
+      getThreadSnapshotWindow: (...args: Parameters<typeof getThreadSnapshotWindow>) =>
+        getThreadSnapshotWindow(...args).pipe(NodeSqliteClient.readOnly),
+      getTimelinePage: (...args: Parameters<typeof getTimelinePage>) =>
+        getTimelinePage(...args).pipe(NodeSqliteClient.readOnly),
+      getThreadHistoryPage: (...args: Parameters<typeof getThreadHistoryPage>) =>
+        getThreadHistoryPage(...args).pipe(NodeSqliteClient.readOnly),
+      searchThread: (...args: Parameters<typeof searchThread>) =>
+        searchThread(...args).pipe(NodeSqliteClient.readOnly),
       searchThreadStream,
-      getThreadAttachmentIds,
+      getThreadAttachmentIds: (...args: Parameters<typeof getThreadAttachmentIds>) =>
+        getThreadAttachmentIds(...args).pipe(NodeSqliteClient.readOnly),
     } satisfies ProjectionStoreV2Shape;
   }),
 );

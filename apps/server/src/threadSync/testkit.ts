@@ -474,7 +474,19 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
         Layer.provide(repositoryCheckout),
         Layer.provide(identities),
         Layer.provide(folders),
-        Layer.provideMerge(SharedSync.layer.pipe(Layer.provideMerge(SharedState.layer))),
+        Layer.provideMerge(
+          SharedSync.layer.pipe(
+            Layer.provideMerge(
+              Layer.effect(
+                SharedState.SharedState,
+                Effect.map(SharedState.SharedState, (state) => ({
+                  ...state,
+                  changes: Stream.never,
+                })),
+              ).pipe(Layer.provide(SharedState.layer)),
+            ),
+          ),
+        ),
         Layer.provide(
           Layer.succeed(Machines.Machines, { ...machine.machines, subscribe: Stream.never }),
         ),

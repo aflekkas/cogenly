@@ -1,3 +1,4 @@
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 import {
   OrchestratorMcpFailure,
   type ProviderInteractionMode,
@@ -99,6 +100,7 @@ export class Declaration<out Handler> {
     declare = (handle) => {
       const declaration = new Declaration(builtHere, (params: Parameters<typeof handle>[0]) =>
         handle(params).pipe(
+          NodeSqliteClient.interactive,
           // Second layer: scrub exact vault values from every tool result
           // before serialization. Transformed values need source-level
           // protection, such as the broker's evaluation seal after vault_fill.
