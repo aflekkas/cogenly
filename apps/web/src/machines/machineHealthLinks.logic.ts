@@ -31,6 +31,13 @@ export type MachineHealthLink =
       readonly environmentId: EnvironmentId;
       readonly instanceId: ProviderInstanceId;
     }
+  | {
+      /** The guided sign-in, sent through `environmentId` to the machine that signs in. */
+      readonly kind: "providerSignIn";
+      readonly environmentId: EnvironmentId;
+      readonly targetEnvironmentId?: EnvironmentId;
+      readonly instanceId: ProviderInstanceId;
+    }
   | { readonly kind: "integrations"; readonly environmentId: EnvironmentId }
   | { readonly kind: "storage"; readonly environmentId: EnvironmentId }
   | {
@@ -348,6 +355,17 @@ function signInLink(
   const { target } = problem;
   if (problem.fix !== "sign-in") return null;
   if (target?._tag !== "provider" && target?._tag !== "integration") return null;
+  // A provider signs in right here, through whichever server reaches its machine.
+  const via = target._tag === "provider" ? commandEnvironment(context) : null;
+  if (target._tag === "provider" && via !== null) {
+    const origin = context.originEnvironmentId;
+    return {
+      kind: "providerSignIn",
+      environmentId: via,
+      ...(via === origin ? {} : { targetEnvironmentId: origin }),
+      instanceId: target.instanceId,
+    };
+  }
   const action = healthTargetAction(target, context);
   return action.kind === "open" ? action.link : null;
 }

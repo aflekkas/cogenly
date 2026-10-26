@@ -54,10 +54,10 @@ export function getProviderSummary(provider: ServerProvider | undefined) {
     };
   }
   if (provider.auth.status === "unauthenticated") {
-    const authLabel = provider.auth.label ?? provider.auth.type;
+    // The provider's Account rows carry the per-machine Sign in action.
     return {
-      headline: authLabel ? `Not authenticated · ${authLabel}` : "Not authenticated",
-      detail: provider.message ?? null,
+      headline: "Not signed in",
+      detail: provider.setup?.canAuthenticate === false ? (provider.message ?? null) : null,
     };
   }
   if (provider.status === "warning") {

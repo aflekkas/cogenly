@@ -65,6 +65,16 @@ export function secretRequestDisplay(
   }
 }
 
+/** A provider sign-in card closes "saved" when its machine reports the provider signed in. */
+export function providerSignInRequestDisplay(
+  item: Pick<SecretRequestItem, "secretStatus">,
+  visibility: "local" | "inherited" | "synthetic",
+): SecretRequestDisplay {
+  return item.secretStatus === "saved"
+    ? { kind: "answered", outcome: "saved", label: "Signed in" }
+    : secretRequestDisplay(item, visibility);
+}
+
 /**
  * Builds the RPC payload for an answer. A save with a blank value returns null,
  * since the server rejects it; callers keep Save disabled instead.

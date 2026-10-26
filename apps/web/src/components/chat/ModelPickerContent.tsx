@@ -7,6 +7,7 @@ import {
 import { resolveSelectableModel } from "@cogenly/shared/model";
 import { useAtomValue } from "@effect/atom-react";
 import { formatProviderUpdateRequiredNotice } from "@cogenly/client-runtime/providerUpdateRequiredModels";
+import { providerSignedOutLabel } from "@cogenly/client-runtime/provider-sign-in";
 import { useNavigate } from "@tanstack/react-router";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import {
@@ -95,6 +96,12 @@ export function shouldIncludeModelPickerOption(input: {
   readonly activeModel: string;
 }): boolean {
   return isProviderInstancePickerReady(input.entry);
+}
+
+export interface ModelPickerProviderSignIn {
+  /** Each signed-out instance and the machine it must sign in on. */
+  readonly signedOut: ReadonlyMap<ProviderInstanceId, string>;
+  readonly onSignIn: (instanceId: ProviderInstanceId) => void;
 }
 
 export function shouldOfferModelPickerSetup(
@@ -196,6 +203,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
   onRequestClose?: () => void;
   onOpenProviderSetup?: (instanceId: ProviderInstanceId) => void;
+  /** Providers signed out on the machine that runs the thread, and how to sign one in. */
+  providerSignIn?: ModelPickerProviderSignIn | undefined;
   getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
 }) {
@@ -326,6 +335,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         }
       }
     }
+    // A signed-out provider stays reachable so its Sign in shows.
+    for (const instanceId of props.providerSignIn?.signedOut.keys() ?? [])
+      instanceIds.add(instanceId);
     return instanceIds.size > 0 ? instanceIds : undefined;
   }, [
     activeInstanceHasSelectableUnavailableModel,
@@ -333,6 +345,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     modelOptionsByInstance,
     props.activeInstanceId,
     props.onOpenProviderSetup,
+    props.providerSignIn,
   ]);
 
   // Flatten models into one array. One pass over the
@@ -497,6 +510,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     )
       ? [selectedEntry]
       : [];
+
+  const signInMachineName =
+    selectedEntry && matchesLockedProvider(selectedEntry)
+      ? props.providerSignIn?.signedOut.get(selectedEntry.instanceId)
+      : undefined;
 
   // Models the manifest announces that this provider's installed CLI is too
   // old to run. Without this, a new model just seems missing until the user
@@ -759,6 +777,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             showFavorites
             instanceEntries={sidebarInstanceEntries}
             {...(selectableUnavailableInstanceIds ? { selectableUnavailableInstanceIds } : {})}
+            {...(props.providerSignIn
+              ? { signedOutInstances: props.providerSignIn.signedOut }
+              : {})}
             {...(lockedDisabledInstanceIds
               ? {
                   disabledInstanceIds: lockedDisabledInstanceIds,
@@ -903,7 +924,24 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                 />
               </ComboboxListVirtualized>
             </div>
-            {providerSetupEntries.length > 0 ? (
+            {signInMachineName !== undefined && selectedEntry ? (
+              <div className="shrink-0 border-t border-border/70 p-2">
+                <div className="px-1 py-1.5 text-xs leading-snug">
+                  <p className="text-muted-foreground">
+                    {providerSignedOutLabel(signInMachineName)}.
+                  </p>
+                  <InlineButton
+                    className="mt-1"
+                    onClick={() => {
+                      props.onRequestClose?.();
+                      props.providerSignIn?.onSignIn(selectedEntry.instanceId);
+                    }}
+                  >
+                    Sign in on {signInMachineName}
+                  </InlineButton>
+                </div>
+              </div>
+            ) : providerSetupEntries.length > 0 ? (
               <div className="scroll-fade-y max-h-44 shrink-0 overflow-y-auto border-t border-border/70 p-2">
                 {providerSetupEntries.map((entry) => (
                   <div key={entry.instanceId} className="px-1 py-1.5 text-xs leading-snug">
