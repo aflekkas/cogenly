@@ -279,6 +279,7 @@ function VaultLoginDetail(props: {
             agentIds={item.policy.allowedAgentIds}
             agents={props.agents}
             disabled={disabled}
+            hideLabel
             onChange={(patch) =>
               void run(() =>
                 props.onUpdate({ id: item.id, policy: vaultPolicyWithAccess(item.policy, patch) }),

@@ -39,6 +39,8 @@ export function VaultAccessOptions(props: {
   readonly agentIds: ReadonlyArray<AgentId>;
   readonly agents: ReadonlyArray<{ readonly id: AgentId; readonly name: string }>;
   readonly disabled?: boolean;
+  /** The surrounding row already says "Access"; the group keeps it for screen readers. */
+  readonly hideLabel?: boolean;
   readonly onChange: (patch: {
     readonly mode?: VaultPolicyMode;
     readonly agentIds?: ReadonlyArray<AgentId>;
@@ -51,9 +53,15 @@ export function VaultAccessOptions(props: {
     });
   return (
     <div className="space-y-2">
-      <Label id={labelId} render={<div />}>
-        Access
-      </Label>
+      {props.hideLabel ? (
+        <span id={labelId} className="sr-only">
+          Access
+        </span>
+      ) : (
+        <Label id={labelId} render={<div />}>
+          Access
+        </Label>
+      )}
       <RadioGroup
         aria-labelledby={labelId}
         value={props.mode}
