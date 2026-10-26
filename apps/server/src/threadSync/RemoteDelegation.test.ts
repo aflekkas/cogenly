@@ -5,7 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as ServerConfig from "../config.ts";
-import { pair } from "../machines/testkit.ts";
+import { pair, awaitLinkState, startProxy } from "../machines/testkit.ts";
 import { startThreadMachine, threadCreated, userMessage } from "./testkit.ts";
 
 it.live(
@@ -64,6 +64,22 @@ it.live(
       });
       yield* Option.getOrThrow(laptop.worker).drain();
       const run = (yield* parent.getThreadProjection(parentId)).runs[0]!;
+      // Also block the opposite bulk stream. The child must bypass both.
+      const poison = threadCreated("event:hub-poison", at);
+      if (poison.type !== "thread.created") return yield* Effect.die("Missing thread");
+      yield* hub.sink.write({
+        events: [
+          {
+            ...poison,
+            threadId: ThreadId.make("thread:poison"),
+            payload: { ...poison.payload, id: ThreadId.make("thread:poison") },
+          },
+        ],
+      });
+      yield* laptop.sql`CREATE TRIGGER refuse_hub BEFORE INSERT ON orchestration_v2_projection_threads
+        WHEN NEW.thread_id = 'thread:poison' BEGIN SELECT RAISE(FAIL, 'refused'); END`;
+      expect((yield* Effect.result(hub.sync.sync(laptop.environmentId)))._tag).toBe("Failure");
+      const before = yield* laptop.replication.cursors(hub.environmentId);
       const accepted = yield* parent.dispatch({
         type: "delegated_task.request",
         commandId: CommandId.make("delegate-to-hub"),
@@ -86,10 +102,57 @@ it.live(
       expect((yield* parent.getThreadProjection(childId)).thread.ownerMachine).toBe(
         hub.environmentId,
       );
+      expect((yield* laptop.replication.cursors(hub.environmentId)).received).toEqual(
+        before.received,
+      );
+      expect((yield* parent.getThreadProjection(childId)).messages[0]?.text).toBe(
+        "Do the task on the hub",
+      );
       // The parent never reached the hub; the child names it only by id.
       expect(yield* Effect.result(hub.projections.getThreadProjection(parentId))).toMatchObject({
         _tag: "Failure",
       });
+      const childEngine = Option.getOrThrow(hub.engine);
+      const worker = Option.getOrThrow(hub.worker);
+      yield* worker.drain();
+      yield* childEngine.streamStoredEventsFrom({ afterSequence: 0, threadId: childId }).pipe(
+        Stream.filter((row) => row.event.type === "provider-turn.updated"),
+        Stream.take(1),
+        Stream.runDrain,
+      );
+      const child = yield* childEngine.getThreadProjection(childId);
+      yield* hub.provider.finish(hub.provider.turns[0]!, child.providerTurns[0]!.id);
+      yield* childEngine.streamStoredEventsFrom({ afterSequence: 0, threadId: childId }).pipe(
+        Stream.filter(
+          (row) =>
+            row.event.type === "provider-turn.updated" && row.event.payload.status === "completed",
+        ),
+        Stream.take(1),
+        Stream.runDrain,
+      );
+      yield* worker.drain();
+      yield* childEngine.streamStoredEventsFrom({ afterSequence: 0, threadId: childId }).pipe(
+        Stream.filter(
+          (row) => row.event.type === "run.updated" && row.event.payload.status === "completed",
+        ),
+        Stream.take(1),
+        Stream.runDrain,
+      );
+      yield* laptop.tick("remote-delegated-results");
+      yield* parent.streamStoredEventsFrom({ afterSequence: 0, threadId: parentId }).pipe(
+        Stream.filter(
+          (row) => row.event.type === "subagent.updated" && row.event.payload.result !== null,
+        ),
+        Stream.take(1),
+        Stream.runDrain,
+      );
+      const finished = yield* parent.getThreadProjection(parentId);
+      expect(finished.runs[0]?.delegatedCompletion?.delivery?.taskIds).toContain(
+        task.event.payload.id,
+      );
+      expect((yield* laptop.replication.cursors(hub.environmentId)).received).toEqual(
+        before.received,
+      );
     }).pipe(Effect.scoped),
   30000,
 );
@@ -101,6 +164,9 @@ it.live.each([
   "stopping",
   "attach-refused",
   "slow-progress",
+  "replica-refused",
+  "legacy",
+  "offline",
 ] as const)(
   "remote delegation: %s, owner execution, replicated results, parent wake and idempotent retry",
   (outcome) =>
@@ -121,9 +187,15 @@ it.live.each([
         true,
         undefined,
         false,
-        { afterLaunch: () => afterLaunch },
+        { afterLaunch: () => afterLaunch, legacyDelegation: outcome === "legacy" },
       );
-      yield* pair(hub, laptop);
+      const proxy = yield* startProxy(hub);
+      yield* pair(hub, laptop, proxy.url);
+      const poisonAt = yield* DateTime.now;
+      yield* laptop.sink.write({ events: [threadCreated("event:bulk-poison", poisonAt)] });
+      yield* hub.sql`CREATE TRIGGER refuse_child_bulk BEFORE INSERT ON orchestration_v2_projection_threads
+        WHEN NEW.thread_id = 'thread:on-laptop' BEGIN SELECT RAISE(FAIL, 'refused'); END`;
+      expect((yield* Effect.result(laptop.sync.sync(hub.environmentId)))._tag).toBe("Failure");
       const parent = Option.getOrThrow(hub.engine);
       const childEngine = Option.getOrThrow(laptop.engine);
       const parentWorker = Option.getOrThrow(hub.worker);
@@ -184,6 +256,43 @@ it.live.each([
         createdBy: "agent" as const,
         creationSource: "mcp" as const,
       };
+      if (outcome === "offline") {
+        yield* Effect.sync(() => proxy.server.close());
+        yield* proxy.dropAll;
+        yield* awaitLinkState(laptop, (view) => view.status !== "online");
+        expect(yield* parent.dispatch(request).pipe(Effect.flip)).toMatchObject({
+          reason: "offline",
+        });
+        expect(laptop.launched).toHaveLength(0);
+        return;
+      }
+      if (outcome === "legacy") {
+        const error = yield* parent.dispatch(request).pipe(Effect.flip);
+        expect(error).toMatchObject({ reason: "rejected" });
+        expect(error.message).toContain("0.3.3");
+        expect(laptop.launched).toHaveLength(0);
+        return;
+      }
+      if (outcome === "replica-refused") {
+        afterLaunch =
+          hub.sql`CREATE TRIGGER refuse_child BEFORE INSERT ON orchestration_v2_projection_threads
+          WHEN NEW.thread_id = 'thread:delegated-task:remote-delegate'
+          BEGIN SELECT RAISE(FAIL, 'refused'); END`.pipe(Effect.asVoid, Effect.orDie);
+        yield* parent.dispatch(request).pipe(Effect.flip);
+        const childId = laptop.launched[0]!.threadId!;
+        const child = yield* childEngine.getThreadProjection(childId);
+        expect(child.runs.every((run) => ["interrupted", "cancelled"].includes(run.status))).toBe(
+          true,
+        );
+        expect(yield* hub.sql`SELECT * FROM remote_delegation_intents`).toHaveLength(0);
+        // A restart retries an unadopted intent without needing a local child projection.
+        yield* hub.sql`INSERT INTO remote_delegation_intents VALUES (
+          ${childId}, ${laptop.environmentId}, 'recovered-launch', ${parentId})`;
+        yield* hub.tick("remote-delegated-results");
+        expect(yield* hub.sql`SELECT * FROM remote_delegation_intents`).toHaveLength(0);
+        expect((yield* parent.getThreadProjection(parentId)).subagents).toHaveLength(0);
+        return;
+      }
       if (outcome === "stopping") {
         yield* parent.dispatch({
           type: "run.interrupt",
@@ -211,6 +320,7 @@ it.live.each([
           true,
         );
         expect((yield* parent.getThreadProjection(parentId)).subagents).toHaveLength(0);
+        expect(yield* hub.sql`SELECT * FROM remote_delegation_intents`).toHaveLength(0);
         return;
       }
       const accepted = yield* parent.dispatch(request);
@@ -258,7 +368,7 @@ it.live.each([
           threadId: childId,
           limitRecovery: { runId: failed.id, resetAt, autoResume: true },
         });
-        yield* laptop.sync.sync(hub.environmentId);
+        yield* hub.tick("remote-delegated-results");
         yield* parent.recoverDelegatedTasks;
         expect((yield* parent.getThreadProjection(parentId)).subagents[0]?.result).toBeNull();
         // Stop crosses the peer link and ends recovery on the owner.
@@ -309,7 +419,7 @@ it.live.each([
           Stream.take(1),
           Stream.runDrain,
         );
-        yield* laptop.sync.sync(hub.environmentId);
+        yield* hub.tick("remote-delegated-results");
         yield* parent.recoverDelegatedTasks;
         yield* parent.streamStoredEventsFrom({ afterSequence: 0, threadId: parentId }).pipe(
           Stream.filter(
@@ -355,7 +465,7 @@ it.live.each([
             .pipe(Effect.as(false), Effect.orDie),
         );
       }
-      yield* laptop.sync.sync(hub.environmentId);
+      yield* hub.tick("remote-delegated-results");
       yield* parent.streamStoredEventsFrom({ afterSequence: 0, threadId: parentId }).pipe(
         Stream.filter(
           (row) =>

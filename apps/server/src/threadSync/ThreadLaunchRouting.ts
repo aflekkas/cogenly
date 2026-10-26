@@ -4,7 +4,8 @@ import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
  * caller sends a portable launch over `threads.launch.v1` (through the hub
  * when both are spokes); the target resolves the project in its own terms,
  * launches through its own ThreadLaunchService so it owns the thread from its
- * first event and runs its first turn, pushes the thread back, then replies.
+ * first event and runs its first turn. Delegated callers fetch that child on
+ * the priority channel; other launches push history before replying.
  * An offline target fails the launch at once; it is never queued. See
  * docs/internals/thread-sync.md.
  */
@@ -22,6 +23,9 @@ import {
   type ThreadLaunchPortable,
   type ThreadLaunchProject,
   ThreadLaunchRemote,
+  ThreadCommandForward,
+  ThreadId,
+  EnvironmentId as EnvironmentIdSchema,
   ThreadMachineCatalog,
   ThreadTaskProgress,
   ThreadAgentCreate,
@@ -40,9 +44,7 @@ import * as Projects from "../orchestration-v2/ProjectStore.ts";
 import * as Git from "../vcs/GitVcsDriver.ts";
 import { derive } from "@cogenly/provider-core/server/IdAllocator";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
-import * as Clock from "effect/Clock";
-import * as Ref from "effect/Ref";
-import type * as Crypto from "effect/Crypto";
+import * as Crypto from "effect/Crypto";
 import type * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import type * as FileSystem from "effect/FileSystem";
@@ -123,16 +125,88 @@ const make = Effect.gen(function* () {
   const providers = yield* Effect.serviceOption(ProviderRegistry.ProviderRegistry);
   const orchestrator = yield* Effect.serviceOption(Orchestrator.OrchestratorV2);
   const scheduler = yield* Scheduler.Scheduler;
+  const crypto = yield* Crypto.Crypto;
+  const creating = new Set<string>();
+  const abandon = (childThreadId: ThreadId, target: EnvironmentId, commandId: CommandId) =>
+    Effect.gen(function* () {
+      // A committed parent link wins, including a crash just after attachment.
+      const attached = yield* sql`SELECT 1 FROM orchestration_v2_projection_subagents
+        WHERE child_thread_id = ${childThreadId} AND origin = 'app_owned'`;
+      if (attached.length === 0)
+        yield* routing.callMachine(
+          target,
+          ThreadCommandForward,
+          {
+            command: {
+              type: "thread.stop",
+              commandId: CommandId.make(
+                `${commandId}:abandon-child:${yield* crypto.randomUUIDv4()}`,
+              ),
+              threadId: childThreadId,
+            },
+            files: [],
+            priority: true,
+          },
+          "30 seconds",
+        );
+      yield* sql`DELETE FROM remote_delegation_intents WHERE child_thread_id = ${childThreadId}`;
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("Remote delegation cleanup deferred until reconnect", {
+          childThreadId,
+          reason: error._tag,
+        }),
+      ),
+    );
   if (Option.isSome(orchestrator)) {
-    const nextRecoveryAt = yield* Ref.make(0);
     yield* scheduler.register(
       "remote-delegated-results",
       Effect.gen(function* () {
-        const now = yield* Clock.currentTimeMillis;
-        if (now < (yield* Ref.get(nextRecoveryAt))) return;
-        yield* Ref.set(nextRecoveryAt, now + 30_000);
-        if ((yield* machines.list).link._tag !== "standalone")
-          yield* orchestrator.value.recoverDelegatedTasks;
+        if ((yield* machines.list).link._tag === "standalone") return;
+        const abandoned = yield* sql<{
+          readonly child_thread_id: string;
+          readonly target: string;
+          readonly command_id: string;
+        }>`SELECT child_thread_id, target, command_id FROM remote_delegation_intents`;
+        yield* Effect.forEach(
+          abandoned.filter((row) => !creating.has(row.child_thread_id)),
+          (row) =>
+            abandon(
+              ThreadId.make(row.child_thread_id),
+              EnvironmentIdSchema.make(row.target),
+              CommandId.make(row.command_id),
+            ),
+          { concurrency: 8, discard: true },
+        );
+        // Pending parent links are durable, so reconnect/restart resumes tracking.
+        const pending = yield* sql<{
+          readonly child_thread_id: string;
+          readonly owner_env: string;
+        }>`
+          SELECT DISTINCT s.child_thread_id, o.owner_env
+          FROM orchestration_v2_projection_subagents s
+          JOIN thread_owners o ON o.thread_id = s.child_thread_id AND o.local = 0
+          WHERE s.origin = 'app_owned' AND json_extract(s.payload_json, '$.result') IS NULL
+            AND NOT EXISTS (SELECT 1 FROM thread_owners p WHERE p.thread_id = s.thread_id AND p.local = 0)`;
+        yield* Effect.forEach(
+          pending,
+          (row) =>
+            routing
+              .refreshDelegated(
+                EnvironmentIdSchema.make(row.owner_env),
+                ThreadId.make(row.child_thread_id),
+              )
+              .pipe(
+                Effect.catch((error) =>
+                  Effect.logWarning("Remote delegated tracking deferred", {
+                    threadId: row.child_thread_id,
+                    reason: error.reason,
+                  }),
+                ),
+              ),
+          { concurrency: 8, discard: true },
+        );
+        yield* orchestrator.value.recoverDelegatedTasks;
       }),
     );
   }
@@ -248,28 +322,16 @@ const make = Effect.gen(function* () {
         .pipe(Effect.timeout(LAUNCH_TIMEOUT), fromPeer(nameOf(view, payload.target)));
     });
 
-  /**
-   * Pushes this machine's threads to `hop` before a child or fork starts there.
-   * A fork copies its source's history on the target, so it needs the push. A
-   * delegated child records its parent only by id, so a replication stream
-   * stuck on some other thread must not block it: it logs and launches.
-   */
-  const pushHistory = (hop: EnvironmentId, required: boolean, name: string) =>
+  /** Forks need their source history on the target before launch. */
+  const pushHistory = (hop: EnvironmentId, name: string) =>
     threadSync.sync(hop).pipe(
-      Effect.catchTags({
-        ThreadReplicationError: (error) =>
-          required
-            ? Effect.fail(
-                new ThreadRemoteError({
-                  reason: "behind",
-                  detail: `Thread history could not be sent to ${name} (${error.reason}), so the fork cannot start there yet.`,
-                }),
-              )
-            : Effect.logWarning("Launching a delegated child before thread replication caught up", {
-                hop,
-                reason: error.reason,
-              }),
-      }),
+      Effect.mapError(
+        (error) =>
+          new ThreadRemoteError({
+            reason: "behind",
+            detail: `Thread history could not be sent to ${name} (${error.reason}), so the fork cannot start there yet.`,
+          }),
+      ),
     );
 
   /** The project link a remote sits under; `preferred` first, as it is the launch's own. */
@@ -399,10 +461,12 @@ const make = Effect.gen(function* () {
       const files = yield* readAttachmentFiles(input.initialMessage?.attachments ?? []).pipe(
         Effect.provideContext(context),
       );
-      if (input.subagent !== undefined || input.fork !== undefined)
-        yield* pushHistory(yield* nextHop(view, machine), input.fork !== undefined, name);
+      const priority = input.subagent !== undefined && input.threadId !== undefined;
+      if (priority) yield* routing.refreshDelegated(machine, input.threadId!);
+      if (input.fork !== undefined) yield* pushHistory(yield* nextHop(view, machine), name);
       const result = yield* callTarget(view, {
         target: machine,
+        ...(priority ? { priority: true } : {}),
         commandId: input.commandId,
         ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
         project,
@@ -410,13 +474,17 @@ const make = Effect.gen(function* () {
         ...(bundle === undefined ? {} : { bundle }),
         files,
       });
-      // The target pushed the thread here before it answered.
-      const projection = yield* projections.getThreadProjection(result.threadId).pipe(
+      const projection = yield* Effect.gen(function* () {
+        if (priority) yield* routing.refreshDelegated(machine, result.threadId);
+        return yield* projections.getThreadProjection(result.threadId);
+      }).pipe(
         Effect.mapError(
           () =>
             new ThreadRemoteError({
-              reason: "rejected",
-              detail: `The thread started on ${name} but has not reached this machine yet. It appears once it does.`,
+              reason: priority ? "behind" : "rejected",
+              detail: priority
+                ? `The child on ${name} could not be read. Its creation is being cancelled; retry with the same clientRequestId.`
+                : `The thread started on ${name} but has not reached this machine yet. It appears once it does.`,
             }),
         ),
       );
@@ -427,7 +495,7 @@ const make = Effect.gen(function* () {
   yield* registry.registerDelegation((command) =>
     Effect.gen(function* () {
       const { machine, ...local } = command;
-      if (machine === self)
+      if (machine === undefined || machine === self)
         return yield* threads.dispatch(local).pipe(
           Effect.mapError(
             () =>
@@ -440,26 +508,6 @@ const make = Effect.gen(function* () {
       const childThreadId = derive.delegatedTaskThread({ commandId: command.commandId });
       const attach = (driver: import("@cogenly/contracts").ProviderDriverKind) =>
         threads.dispatch({ ...local, type: "delegated_task.attach", driver }).pipe(
-          Effect.tapError((error) =>
-            error._tag === "OrchestratorDispatchError" ||
-            error._tag === "OrchestratorCommandRejectedError" ||
-            error._tag === "ThreadManagementProviderInstanceDisabledError"
-              ? threads
-                  .dispatch({
-                    type: "thread.stop",
-                    commandId: CommandId.make(`${command.commandId}:abandon-child`),
-                    threadId: childThreadId,
-                  })
-                  .pipe(
-                    Effect.catchCause((cause) =>
-                      Effect.logWarning(
-                        "Failed to stop a remote child after its parent refused attachment",
-                        { childThreadId, cause },
-                      ),
-                    ),
-                  )
-              : Effect.void,
-          ),
           Effect.mapError(
             () =>
               new ThreadRemoteError({
@@ -510,51 +558,74 @@ const make = Effect.gen(function* () {
           startFromOrigin: false,
         };
       }
-      const result = yield* launches
-        .launch({
-          commandId: CommandId.make(`${command.commandId}:remote-child`),
-          threadId: childThreadId,
-          projectId: parent.thread.projectId,
-          machine,
-          ...(parent.thread.surface === undefined ? {} : { surface: parent.thread.surface }),
-          subagent: {
-            parentThreadId: command.parentThreadId,
-            rootThreadId: parent.thread.lineage.rootThreadId,
-            taskNodeId: derive.delegatedTaskNode({ commandId: command.commandId }),
-          },
-          title: command.title ?? command.task.slice(0, 100),
-          modelSelection: command.modelSelection,
-          runtimeMode: command.runtimeMode,
-          interactionMode: command.interactionMode,
-          workspaceStrategy,
-          ...(repositorySource === undefined ? {} : { repositorySource }),
-          initialMessage: {
-            messageId: derive.delegatedTaskMessage({ commandId: command.commandId }),
-            senderThreadId: command.parentThreadId,
-            text: command.task,
-            attachments: [],
-          },
-          createdBy: command.createdBy,
-          creationSource: command.creationSource,
-        })
-        .pipe(
-          Effect.mapError(
-            (error) =>
-              ThreadLaunch.remoteLaunchFailure(error) ??
-              new ThreadRemoteError({
-                reason: "rejected",
-                detail: "The target refused to launch the delegated child.",
-              }),
-          ),
+      // Refuse offline/older peers before starting work or recording cleanup.
+      yield* routing.refreshDelegated(machine, childThreadId);
+      // Persist before crossing the peer link. Failed or interrupted creation is
+      // cancelled directly; a restart retries cleanup even without a child replica.
+      yield* sql`INSERT OR IGNORE INTO remote_delegation_intents
+        (child_thread_id, target, command_id, parent_thread_id)
+        VALUES (${childThreadId}, ${machine}, ${command.commandId}, ${command.parentThreadId})`.pipe(
+        Effect.orDie,
+      );
+      creating.add(childThreadId);
+      return yield* Effect.gen(function* () {
+        const result = yield* launches
+          .launch({
+            commandId: CommandId.make(`${command.commandId}:remote-child`),
+            threadId: childThreadId,
+            projectId: parent.thread.projectId,
+            machine,
+            ...(parent.thread.surface === undefined ? {} : { surface: parent.thread.surface }),
+            subagent: {
+              parentThreadId: command.parentThreadId,
+              rootThreadId: parent.thread.lineage.rootThreadId,
+              taskNodeId: derive.delegatedTaskNode({ commandId: command.commandId }),
+            },
+            title: command.title ?? command.task.slice(0, 100),
+            modelSelection: command.modelSelection,
+            runtimeMode: command.runtimeMode,
+            interactionMode: command.interactionMode,
+            workspaceStrategy,
+            ...(repositorySource === undefined ? {} : { repositorySource }),
+            initialMessage: {
+              messageId: derive.delegatedTaskMessage({ commandId: command.commandId }),
+              senderThreadId: command.parentThreadId,
+              text: command.task,
+              attachments: [],
+            },
+            createdBy: command.createdBy,
+            creationSource: command.creationSource,
+          })
+          .pipe(
+            Effect.mapError(
+              (error) =>
+                ThreadLaunch.remoteLaunchFailure(error) ??
+                new ThreadRemoteError({
+                  reason: "rejected",
+                  detail: "The target refused to launch the delegated child.",
+                }),
+            ),
+          );
+        const driver = result.projection.providerThreads[0]?.driver;
+        if (driver === undefined)
+          return yield* new ThreadRemoteError({
+            reason: "behind",
+            detail:
+              "The remote child has not replicated its provider thread yet. Retry with the same clientRequestId.",
+          });
+        const attached = yield* attach(driver);
+        yield* sql`DELETE FROM remote_delegation_intents WHERE child_thread_id = ${childThreadId}`.pipe(
+          Effect.orDie,
         );
-      const driver = result.projection.providerThreads[0]?.driver;
-      if (driver === undefined)
-        return yield* new ThreadRemoteError({
-          reason: "behind",
-          detail:
-            "The remote child has not replicated its provider thread yet. Retry with the same clientRequestId.",
-        });
-      return yield* attach(driver);
+        return attached;
+      }).pipe(
+        Effect.onExit(() => abandon(childThreadId, machine, command.commandId)),
+        Effect.ensuring(
+          Effect.sync(() => {
+            creating.delete(childThreadId);
+          }),
+        ),
+      );
     }),
   );
 
@@ -790,14 +861,11 @@ const make = Effect.gen(function* () {
         // Only the hub relays, and never back to the machine that asked.
         if (view.link._tag !== "hub" || payload.target === caller.environmentId)
           return yield* new ThreadRemoteError({ reason: "not-owner" });
-        if (payload.launch.subagent !== undefined || payload.launch.fork !== undefined)
-          yield* pushHistory(
-            payload.target,
-            payload.launch.fork !== undefined,
-            nameOf(view, payload.target),
-          );
+        if (payload.launch.fork !== undefined)
+          yield* pushHistory(payload.target, nameOf(view, payload.target));
         const relayed = yield* callTarget(view, payload);
-        yield* threadSync.sync(caller.environmentId).pipe(Effect.ignore);
+        if (payload.priority !== true)
+          yield* threadSync.sync(caller.environmentId).pipe(Effect.ignore);
         return relayed;
       }
       if (payload.project.kind === "repository")
@@ -843,8 +911,9 @@ const make = Effect.gen(function* () {
               new ThreadRemoteError({ reason: "rejected", detail: launchFailureDetail(error) }),
           ),
         );
-      // The caller's projection shows the thread by the time it hears back.
-      yield* threadSync.sync(caller.environmentId).pipe(Effect.ignore);
+      // New delegated callers fetch only this thread over the priority channel.
+      if (payload.priority !== true)
+        yield* threadSync.sync(caller.environmentId).pipe(Effect.ignore);
       const last = yield* sql<{ readonly event_id: string }>`SELECT event_id
         FROM orchestration_events
         WHERE stream_id = ${result.threadId} AND aggregate_kind = 'thread'
