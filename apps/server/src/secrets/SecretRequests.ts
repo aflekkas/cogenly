@@ -12,6 +12,7 @@ import {
   CommandId,
   SecretRef,
   SecretRequestError,
+  VaultItemId,
   type ProjectId,
   type SecretRequestAnswerInput,
   type ThreadId,
@@ -104,6 +105,16 @@ const make = Effect.gen(function* () {
     yield* store.getOrCreateRandom("secret-request-salt", 32).pipe(Effect.orDie),
   ).toString("hex");
 
+  /** Removes a vault item this answer created; logged, since the value stays in the vault otherwise. */
+  const removeVaultItem = (itemId: string) =>
+    vault.delete({ id: VaultItemId.make(itemId) }).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("Could not remove an unused secret request item", {
+          reason: error.reason,
+        }),
+      ),
+    );
+
   const answerLock = yield* Semaphore.make(1);
   const answer: SecretRequests["Service"]["answer"] = (input) =>
     Effect.gen(function* () {
@@ -137,12 +148,14 @@ const make = Effect.gen(function* () {
       // A value already there on a card still pending is an earlier save whose
       // record failed and could not be cleaned up; recording it finishes that save.
       let secretVault = item.secretVault;
+      let savedVaultItemId: string | undefined;
       if (input.answer.type === "save" && secretVault) {
         const saved = yield* vault
           .saveSecretValue({ ...secretVault, value: input.answer.secret })
           .pipe(
             Effect.mapError((cause) => new SecretRequestError({ reason: "vault_failed", cause })),
           );
+        savedVaultItemId = saved.item.id;
         secretVault = {
           ...secretVault,
           savedItemId: saved.item.id,
@@ -188,7 +201,9 @@ const make = Effect.gen(function* () {
           // stored above would make that retry look already answered.
           Effect.tapError(() =>
             input.answer.type === "save"
-              ? removeLogged(storeName(refFor(salt, input.threadId, item.id)))
+              ? savedVaultItemId !== undefined
+                ? removeVaultItem(savedVaultItemId)
+                : removeLogged(storeName(refFor(salt, input.threadId, item.id)))
               : Effect.void,
           ),
         );

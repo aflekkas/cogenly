@@ -53,6 +53,7 @@ const fixture = (
   login: OrchestrationV2LoginRequest | undefined,
   runStatus = "running",
   extra: Record<string, unknown> = {},
+  failRecord = false,
 ) => {
   const commands: Array<string> = [];
   const notifications: string[] = [];
@@ -77,20 +78,22 @@ const fixture = (
   const threads = Layer.mock(Threads.ThreadManagementService)({
     getThreadRecords: () => Effect.succeed(records as never),
     dispatch: (command) =>
-      Effect.sync(() => {
-        commands.push(JSON.stringify(command));
-        if (command.type === "secret_request.record") {
-          records.turnItems = [
-            {
-              ...card,
-              secretStatus: command.secretStatus,
-              login: command.login ?? login,
-              secretVault: command.secretVault,
-            },
-          ];
-        }
-        return { sequence: 0, storedEvents: [] } as never;
-      }),
+      failRecord && command.type === "secret_request.record"
+        ? (Effect.fail("record failed") as never)
+        : Effect.sync(() => {
+            commands.push(JSON.stringify(command));
+            if (command.type === "secret_request.record") {
+              records.turnItems = [
+                {
+                  ...card,
+                  secretStatus: command.secretStatus,
+                  login: command.login ?? login,
+                  secretVault: command.secretVault,
+                },
+              ];
+            }
+            return { sequence: 0, storedEvents: [] } as never;
+          }),
   });
   const base = Layer.mergeAll(
     Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer)),
@@ -321,6 +324,29 @@ it.effect("a late secret answer goes directly to the vault and emits metadata on
     expect(box.notifications.join("").includes(fakeSecret)).toBe(false);
     expect(box.card().secretStatus).toBe("saved");
     expect(box.notifications).toHaveLength(1);
+  }).pipe(Effect.provide(box.layer));
+});
+
+it.effect("a vault save whose record fails leaves no vault item behind", () => {
+  const box = fixture(
+    undefined,
+    "completed",
+    { secretVault: { name: "doomed-key", type: "api_key", domains: ["example.test"] } },
+    true,
+  );
+  return Effect.gen(function* () {
+    const requests = yield* SecretRequests.SecretRequests;
+    const vault = yield* Vault.Vault;
+    const error = yield* requests
+      .answer({
+        threadId,
+        turnItemId,
+        answer: { type: "save", secret: "GOCSPX-fakeOnly_0123456789abCDef" },
+      })
+      .pipe(Effect.flip);
+    expect(error.reason).toBe("record_failed");
+    expect((yield* vault.list({})).items).toEqual([]);
+    expect(box.card().secretStatus).toBe("pending");
   }).pipe(Effect.provide(box.layer));
 });
 
