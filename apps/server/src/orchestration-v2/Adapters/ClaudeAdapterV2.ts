@@ -88,6 +88,7 @@ import {
   type ProviderThreadId,
   type RunId,
   type ThreadId,
+  PROVIDER_SIGNED_OUT_FAILURE_CODE,
 } from "@cogenly/contracts";
 
 import * as Cause from "effect/Cause";
@@ -129,7 +130,8 @@ import {
 import {
   claudeManagedMcpServerNames,
   claudeSessionTranscriptExists,
-  claudeSignedOutMessage,
+  CLAUDE_SIGNED_OUT_MESSAGE,
+  claudeSignedOutLogHint,
   makeClaudeEnvironment,
   resolveClaudeSessionConfigDir,
 } from "../../provider/Drivers/ClaudeHome.ts";
@@ -7215,10 +7217,13 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             if (message.parent_tool_use_id === null) {
               context.latestAssistantRateLimited = message.error === "rate_limit";
               if (message.error === "authentication_failed") {
-                context.authenticationFailureMessage = claudeSignedOutMessage({
-                  configDir: adapterOptions.environment.CLAUDE_CONFIG_DIR,
-                  cwd: path.resolve(context.input.runtimePolicy.cwd ?? "."),
-                });
+                context.authenticationFailureMessage = CLAUDE_SIGNED_OUT_MESSAGE;
+                yield* Effect.logWarning(
+                  claudeSignedOutLogHint({
+                    configDir: adapterOptions.environment.CLAUDE_CONFIG_DIR,
+                    cwd: path.resolve(context.input.runtimePolicy.cwd ?? "."),
+                  }),
+                );
               }
             }
           }
@@ -8086,9 +8091,16 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               resetTimes.length > 0 && resetTimes.every((time) => time !== null)
                 ? resetTimes.reduce((latest, time) => (time! > latest ? time! : latest), "")
                 : null;
-            const resultFailure = interrupted
+            const parsedFailure = interrupted
               ? null
               : providerFailureFromResult(message, completedAt, failureHint, usageLimited);
+            // Clients key their Sign in card on this code, whatever the API status was.
+            const resultFailure =
+              parsedFailure !== null &&
+              !permissionDenied &&
+              context.authenticationFailureMessage !== undefined
+                ? { ...parsedFailure, code: PROVIDER_SIGNED_OUT_FAILURE_CODE }
+                : parsedFailure;
             const terminalFailure =
               resultFailure?.class === "usage_limit"
                 ? classifyClaudeLimitFailure({

@@ -21,6 +21,7 @@ import * as Schema from "effect/Schema";
 import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
 import * as SecretRequests from "../../../secrets/SecretRequests.ts";
 import * as ProviderAuthService from "../../../provider/ProviderAuthService.ts";
+import * as ProviderSignInRequests from "../../../provider/ProviderSignInRequests.ts";
 import * as Machines from "../../../machines/Machines.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as MachineSetup from "../../../tailscale/MachineSetup.ts";
@@ -40,6 +41,7 @@ export const MachinesToolkit = Toolkit.make(
     failureMode: "return",
     dependencies: [
       ProviderAuthService.ProviderAuthService,
+      ProviderSignInRequests.ProviderSignInRequests,
       SecretRequests.SecretRequests,
       ...callerDependencies,
     ],
@@ -50,7 +52,7 @@ export const MachinesToolkit = Toolkit.make(
     }),
     success: ProviderAuthState,
     description:
-      "Start, read, finish, cancel or sign out an official provider CLI login on this machine or a paired targetEnvironmentId. Start returns immediately; read for browser instructions and completion. Each machine obtains its own login, so rotating refresh tokens are never copied. Give the user the browser URL and device code, or collect the Claude browser code through request_secret and pass its codeRef with a respond request; the service consumes it without exposing the value. Never print credentials. No approval gate.",
+      "Sign a provider (Claude, Codex) in on this machine or a paired targetEnvironmentId, or read, cancel or sign out its login. From a thread, start posts a guided sign-in card in the thread and returns at once: the user opens the sign-in page and enters any code on their own device, and this thread is told when that machine is signed in, even after this turn ends. Don't ask for links or codes in chat. Without a thread, start runs the official CLI login: read for browser instructions and completion, and pass a Claude browser code collected with request_secret as codeRef on a respond request. Each machine obtains its own login, so rotating refresh tokens are never copied. Never print credentials. No approval gate.",
   }).annotate(Tool.Destructive, false),
   Tool.make("machines_list", {
     failure: OrchestratorMcpFailure,
