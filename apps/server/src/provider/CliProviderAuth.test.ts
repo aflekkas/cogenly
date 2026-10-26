@@ -121,3 +121,20 @@ it.live(
       expect(pending.changes()).toBe(0);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
+
+it("accepts Codex's current device-code format only after the complete code arrives", () => {
+  expect(
+    CliProviderAuth.cliLoginInteraction(
+      "codex",
+      "https://auth.openai.com/codex/device\nABCD-EFGH\n",
+    ),
+  ).toEqual({
+    type: "deviceCode",
+    id: "cli-login",
+    url: "https://auth.openai.com/codex/device",
+    userCode: "ABCD-EFGH",
+  });
+  expect(
+    CliProviderAuth.cliLoginInteraction("codex", "https://auth.openai.com/codex/device\nABCD-EFGH"),
+  ).toBeUndefined();
+});

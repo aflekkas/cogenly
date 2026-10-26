@@ -3,6 +3,8 @@ import {
   ProviderMachineAuth,
   type ProviderMachineAuthRequest,
   type EnvironmentId,
+  type ProjectId,
+  type SecretRef,
   type ChatGptReconnectProfile,
   type ChatGptTransferredProfile,
   type ProviderAuthRespondInput,
@@ -11,6 +13,7 @@ import {
   type ProviderInstanceId,
   type ProviderSessionId,
 } from "@cogenly/contracts";
+import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as Machines from "../machines/Machines.ts";
 import * as PeerChannels from "../machines/PeerChannels.ts";
 import * as Equal from "effect/Equal";
@@ -40,7 +43,8 @@ export class ProviderAuthService extends Context.Service<
     readonly manageSignIn: (
       request: ProviderMachineAuthRequest,
       owner: string,
-    ) => Effect.Effect<ProviderAuthState, ProviderSetupError>;
+      code?: { readonly ref: SecretRef; readonly projectId: ProjectId },
+    ) => Effect.Effect<ProviderAuthState, ProviderSetupError, SecretRequests.SecretRequests>;
     readonly reconnectProfile: (
       input: ProviderAuthTarget & { methodId: string },
     ) => Effect.Effect<ChatGptReconnectProfile | null, ProviderSetupError>;
@@ -345,27 +349,75 @@ export const makeProviderAuthService = Effect.gen(function* () {
         );
     }
   };
-  yield* channels.register(ProviderMachineAuth, ({ owner, request }, caller) =>
-    execute(request, `${caller.environmentId}:${owner}`),
-  );
+  const unreachable = (request: ProviderMachineAuthRequest) =>
+    new ProviderSetupError({
+      instanceId: request.input.instanceId,
+      operation: request.operation,
+      detail:
+        "The paired machine could not complete this sign-in action. Check its connection and try again.",
+    });
   const remote = (target: EnvironmentId, request: ProviderMachineAuthRequest, owner: string) =>
-    machines.call(target, ProviderMachineAuth, { owner, request }).pipe(
-      Effect.mapError(
-        () =>
-          new ProviderSetupError({
-            instanceId: request.input.instanceId,
-            operation: request.operation,
-            detail:
-              "The paired machine could not complete this sign-in action. Check its connection and try again.",
-          }),
-      ),
-    );
+    Effect.gen(function* () {
+      const list = yield* machines.list;
+      if (
+        list.machines.some(
+          (machine) => machine.environmentId === target && machine.relation === "this",
+        )
+      )
+        return yield* execute(request, owner);
+      const destination =
+        list.link._tag === "spoke" &&
+        list.machines.some(
+          (machine) => machine.environmentId === target && machine.relation === "peer",
+        )
+          ? list.link.hubEnvironmentId
+          : target;
+      return yield* machines.call(destination, ProviderMachineAuth, { owner, request });
+    }).pipe(Effect.mapError(() => unreachable(request)));
+  yield* channels.register(ProviderMachineAuth, ({ owner, request }, caller) =>
+    Effect.gen(function* () {
+      const namespacedOwner = `${caller.environmentId}:${owner}`;
+      const list = yield* machines.list.pipe(Effect.mapError(() => unreachable(request)));
+      const target = request.input.targetEnvironmentId;
+      const self = list.machines.find((machine) => machine.relation === "this");
+      if (target && target !== self?.environmentId) {
+        // Only a hub forwards a spoke's request to another directly paired spoke.
+        // A spoke never forwards again, so a bad target cannot create a routing loop.
+        if (
+          list.link._tag !== "hub" ||
+          !list.machines.some(
+            (machine) => machine.environmentId === target && machine.relation === "spoke",
+          )
+        )
+          return yield* unreachable(request);
+        return yield* remote(target, request, namespacedOwner);
+      }
+      return yield* execute(request, namespacedOwner);
+    }),
+  );
   return ProviderAuthService.of({
     ...local,
-    manageSignIn: (request, owner) =>
-      request.input.targetEnvironmentId
-        ? remote(request.input.targetEnvironmentId, request, owner)
-        : execute(request, owner),
+    manageSignIn: (request, owner, code) => {
+      const run = (value: ProviderMachineAuthRequest) =>
+        value.input.targetEnvironmentId
+          ? remote(value.input.targetEnvironmentId, value, owner)
+          : execute(value, owner);
+      if (!code) return run(request);
+      if (request.operation !== "respond" || request.input.response.type !== "credentials")
+        return Effect.fail(unreachable(request));
+      const input = request.input;
+      return Effect.gen(function* () {
+        const secrets = yield* SecretRequests.SecretRequests;
+        return yield* secrets
+          .adopt(code, (value) =>
+            run({
+              operation: "respond",
+              input: { ...input, response: { type: "credentials", values: { code: value } } },
+            }),
+          )
+          .pipe(Effect.mapError(() => unreachable(request)));
+      });
+    },
     start: (input, owner) =>
       input.targetEnvironmentId
         ? remote(input.targetEnvironmentId, { operation: "start", input }, owner)

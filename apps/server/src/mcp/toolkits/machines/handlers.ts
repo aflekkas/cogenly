@@ -7,6 +7,7 @@ import {
 import * as Effect from "effect/Effect";
 
 import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
+import { resolveProjectId } from "../../threadAccess.ts";
 import * as ProviderAuthService from "../../../provider/ProviderAuthService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as Machines from "../../../machines/Machines.ts";
@@ -84,11 +85,14 @@ export const withoutSignInLink = (status: MachineSetupStatus): MachineSetupStatu
 });
 
 export const layer = McpToolAccess.toLayer(MachinesToolkit, {
-  provider_sign_in: McpToolAccess.writesEnvironment((input) =>
+  provider_sign_in: McpToolAccess.writesEnvironment((input, check) =>
     Effect.gen(function* () {
       const auth = yield* ProviderAuthService.ProviderAuthService;
       const invocation = yield* McpInvocationContext.McpInvocationContext;
-      return yield* auth.manageSignIn(input.request, invocation.requestNamespace).pipe(
+      const code = input.codeRef
+        ? { ref: input.codeRef, projectId: yield* resolveProjectId(yield* check, input.projectId) }
+        : undefined;
+      return yield* auth.manageSignIn(input.request, invocation.requestNamespace, code).pipe(
         Effect.mapError(
           () =>
             new OrchestratorMcpFailure({

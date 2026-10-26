@@ -109,7 +109,7 @@ describe("portable provider configuration", () => {
     expect(
       plan.settings?.providerInstances[ProviderInstanceId.make("claudeAgent")]?.config,
     ).toMatchObject({
-      homePath: "~/.cogenly/provider-homes/claudeAgent",
+      homePath: `~/.cogenly/provider-homes/claudeAgent/${work.slice(0, 16)}`,
       syncAccountIdentity: work,
     });
     expect(Object.keys(plan.settings?.providerInstances ?? {})).toEqual([
@@ -136,5 +136,26 @@ describe("portable provider configuration", () => {
       documents: new Map([["universal", { [`provider:${id}`]: value }]]),
     });
     expect(recreated.settings?.providerInstances[id]?.displayName).toBe("Personal");
+  });
+  it("a peer's later account change requires a fresh home instead of silently using the old login", () => {
+    const previous = encodeProviderSettings({ driver }, account, 0);
+    const incoming = encodeProviderSettings({ driver }, work, 0);
+    const settings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      providerInstances: {
+        [id]: { driver, config: { homePath: "/old-login", syncAccountIdentity: account } },
+      },
+    };
+    const plan = planSettingsReconcile({
+      settings,
+      base: new Map([[settingsBaseKey("universal", "", `provider:${id}`), previous]]),
+      documents: new Map([["universal", { [`provider:${id}`]: incoming }]]),
+      accounts: new Map([[id, { identity: account, homePath: "/old-login", driver }]]),
+    });
+    expect(plan.settings?.providerInstances[id]?.config).toMatchObject({
+      homePath: `~/.cogenly/provider-homes/${id}/${work.slice(0, 16)}`,
+      syncAccountIdentity: work,
+    });
+    expect(plan.publish.size).toBe(0);
   });
 });

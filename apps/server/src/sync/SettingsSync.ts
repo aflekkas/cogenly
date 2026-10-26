@@ -20,6 +20,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 import { readProviderAccountIdentities } from "./providerAccountIdentity.ts";
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { SharedState } from "./SharedState.ts";
 import { UNIVERSAL_SETTINGS_DOCUMENT_ID } from "./settingsDocument.ts";
@@ -121,8 +122,12 @@ export const layer = Layer.effect(
     const service = yield* make;
     const settings = yield* ServerSettingsService;
     const shared = yield* SharedState;
+    const providers = yield* ProviderRegistry.ProviderRegistry;
     const wake = yield* Queue.sliding<void>(1);
-    yield* Stream.merge(settings.streamChanges, shared.changes).pipe(
+    yield* Stream.merge(
+      Stream.merge(settings.streamChanges, shared.changes),
+      providers.streamChanges,
+    ).pipe(
       Stream.runForEach(() => Queue.offer(wake, undefined)),
       Effect.forkScoped,
     );

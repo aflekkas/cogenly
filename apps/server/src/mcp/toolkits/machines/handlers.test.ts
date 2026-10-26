@@ -1,3 +1,4 @@
+import * as SecretRequests from "../../../secrets/SecretRequests.ts";
 import * as ProviderAuthService from "../../../provider/ProviderAuthService.ts";
 import { expect, it } from "@effect/vitest";
 import {
@@ -92,6 +93,7 @@ const makeServer = (options: {
     Layer.provideMerge(McpServer.McpServer.layer),
     Layer.provideMerge(
       Layer.mergeAll(
+        Layer.mock(SecretRequests.SecretRequests)({}),
         Layer.mock(ProviderAuthService.ProviderAuthService)({
           manageSignIn: options.manageSignIn ?? (() => Effect.die("unused")),
         }),

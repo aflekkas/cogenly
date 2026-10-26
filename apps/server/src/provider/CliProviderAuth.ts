@@ -9,7 +9,7 @@ import * as ProviderAuthFlow from "@cogenly/provider-core/server/providerAuthFlo
 /** Only public sign-in instructions leave the subprocess; native output never enters logs or state. */
 export function cliLoginInteraction(driver: "codex" | "claudeAgent", output: string) {
   const clean = NodeUtil.stripVTControlCharacters(output);
-  const urls = clean.match(/https:\/\/[^\s<>"']+/g) ?? [];
+  const urls = clean.match(/https:\/\/[^\s<>"']+(?=\s)/g) ?? [];
   for (const raw of urls) {
     let url: URL;
     try {
@@ -22,7 +22,7 @@ export function cliLoginInteraction(driver: "codex" | "claudeAgent", output: str
       url.hostname === "auth.openai.com" &&
       url.pathname === "/codex/device"
     ) {
-      const code = clean.match(/\b[A-Z0-9]{4}-[A-Z0-9]{5}\b/);
+      const code = clean.match(/\b[A-Z0-9]{4}-[A-Z0-9]{4,5}(?=\s)/);
       if (code)
         return {
           type: "deviceCode" as const,

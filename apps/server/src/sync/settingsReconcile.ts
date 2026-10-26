@@ -153,15 +153,27 @@ export function planSettingsReconcile(input: SettingsReconcileInput): SettingsRe
     base.push({ documentId: UNIVERSAL_SETTINGS_DOCUMENT_ID, scope: "", key, value: outcome.value });
   }
   const instances: Record<string, ProviderInstanceConfig> = { ...input.settings.providerInstances };
-  // On first sync align homes by verified driver/account identity. In particular,
+  // Align initial homes and subsequent account changes by verified identity. In particular,
   // a peer's default ID may name a different account from this machine's default.
   const aligned = new Set<string>();
   for (const [key, value] of Object.entries(universal ?? {})) {
     const id = providerIdFromSettingsKey(key);
-    if (!id || input.base.has(settingsBaseKey(UNIVERSAL_SETTINGS_DOCUMENT_ID, "", key))) continue;
+    if (!id) continue;
+    const previous = input.base.get(settingsBaseKey(UNIVERSAL_SETTINGS_DOCUMENT_ID, "", key));
+    const previousProvider =
+      previous === undefined ? undefined : providerSettingsCodec.decode(previous);
     const decoded = providerSettingsCodec.decode(value);
     if (Option.isNone(decoded) || !decoded.value?.accountIdentity) continue;
     const remote = decoded.value;
+    const accountIdentity = remote.accountIdentity;
+    if (!accountIdentity) continue;
+    if (instances[id] && instances[id].driver !== remote.driver) continue;
+    if (
+      previousProvider &&
+      Option.isSome(previousProvider) &&
+      previousProvider.value?.accountIdentity === remote.accountIdentity
+    )
+      continue;
     const matches = Array.from(input.accounts ?? []).filter(
       ([, account]) =>
         account.driver === remote.driver && account.identity === remote.accountIdentity,
@@ -188,7 +200,7 @@ export function planSettingsReconcile(input: SettingsReconcileInput): SettingsRe
         driver: remote.driver,
         config: {
           ...(typeof current?.config === "object" && current.config !== null ? current.config : {}),
-          homePath: `~/.cogenly/provider-homes/${id}`,
+          homePath: `~/.cogenly/provider-homes/${id}/${accountIdentity.slice(0, 16)}`,
           shadowHomePath: "",
         },
       };
@@ -207,6 +219,16 @@ export function planSettingsReconcile(input: SettingsReconcileInput): SettingsRe
     }),
   ]);
   for (const id of ids) {
+    const actualIdentity = aligned.has(id) ? undefined : input.accounts?.get(id)?.identity;
+    const current = instances[id];
+    if (current && actualIdentity) {
+      const config =
+        typeof current.config === "object" && current.config !== null ? current.config : {};
+      if (!("syncAccountIdentity" in config) || config.syncAccountIdentity !== actualIdentity) {
+        instances[id] = { ...current, config: { ...config, syncAccountIdentity: actualIdentity } };
+        changed = true;
+      }
+    }
     const key = providerSettingsKey(id);
     const outcome = reconcileSettingsField({
       local: encodeProviderSettings(
