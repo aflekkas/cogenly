@@ -1496,7 +1496,7 @@ export function codexThreadRuntimeParams(input: {
   readonly mcpSession: McpProviderSession.McpProviderSessionConfig | undefined;
   readonly modelSelection?: { readonly model: string };
   readonly runtimePolicy?: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
-  /** Turned off for this thread unless the runtime policy lets provider connectors through. */
+  /** Native servers and apps turned off for this thread. */
   readonly providerDuplicates?: CodexProviderDuplicates | undefined;
 }): {
   readonly cwd?: string;
@@ -1504,10 +1504,7 @@ export function codexThreadRuntimeParams(input: {
   readonly config: Readonly<Record<string, Schema.Json>>;
 } {
   const { mcpSession } = input;
-  const duplicates =
-    input.runtimePolicy?.useProviderConnectors === true
-      ? { appIds: [], mcpServerNames: input.providerDuplicates?.blockedRepoServerNames ?? [] }
-      : input.providerDuplicates;
+  const duplicates = input.providerDuplicates;
   return {
     ...(input.runtimePolicy?.cwd == null ? {} : { cwd: input.runtimePolicy.cwd }),
     ...(input.modelSelection === undefined ? {} : { model: input.modelSelection.model }),
@@ -1520,9 +1517,8 @@ export function codexThreadRuntimeParams(input: {
             "features.multi_agent_v2": false,
           }
         : {}),
-      ...(input.runtimePolicy?.useProviderConnectors === true
-        ? {}
-        : { "features.plugins": false, "features.apps": false }),
+      "features.plugins": false,
+      "features.apps": false,
       // The combined table preserves literal dots and quotes in MCP names.
       // Codex merges it with the configured transports and passes it to subagents.
       ...Object.fromEntries((duplicates?.appIds ?? []).map((id) => [`apps.${id}.enabled`, false])),
@@ -1748,43 +1744,40 @@ export const layerAppServerClientFactory: Layer.Layer<
           // launch override names only servers from outside the repo; the
           // repo's own servers stay on and are sorted per thread below.
           const listingCwd = yield* HostProcess.HomeDirectory;
-          const nativeOffArgs =
-            input.runtimePolicy?.useProviderConnectors === true
-              ? []
-              : yield* Effect.gen(function* () {
-                  const listing = yield* resolveSpawnCommand(
-                    input.settings.binaryPath || "codex",
-                    [
-                      ...codexAppServerArgs(launchArgs).slice(1),
-                      ...codexNativeMcpOffArgs([]),
-                      "mcp",
-                      "list",
-                      "--json",
-                    ],
-                    { env: environment },
-                  );
-                  const json = yield* spawner
-                    .string(
-                      ChildProcess.make(listing.command, listing.args, {
-                        env: environment,
-                        shell: listing.shell,
-                        cwd: listingCwd,
-                      }),
-                    )
-                    .pipe(Effect.timeout("10 seconds"));
-                  const names = yield* Effect.try(() => codexNativeMcpNames(json));
-                  return codexNativeMcpOffArgs(names);
-                }).pipe(
-                  (read) => requireCodexNativeMcpEnumeration("launch", read),
-                  Effect.mapError(
-                    (cause) =>
-                      new ProviderAdapter.ProviderAdapterOpenSessionError({
-                        driver: CODEX_PROVIDER,
-                        providerSessionId: input.providerSessionId,
-                        cause,
-                      }),
-                  ),
-                );
+          const nativeOffArgs = yield* Effect.gen(function* () {
+            const listing = yield* resolveSpawnCommand(
+              input.settings.binaryPath || "codex",
+              [
+                ...codexAppServerArgs(launchArgs).slice(1),
+                ...codexNativeMcpOffArgs([]),
+                "mcp",
+                "list",
+                "--json",
+              ],
+              { env: environment },
+            );
+            const json = yield* spawner
+              .string(
+                ChildProcess.make(listing.command, listing.args, {
+                  env: environment,
+                  shell: listing.shell,
+                  cwd: listingCwd,
+                }),
+              )
+              .pipe(Effect.timeout("10 seconds"));
+            const names = yield* Effect.try(() => codexNativeMcpNames(json));
+            return codexNativeMcpOffArgs(names);
+          }).pipe(
+            (read) => requireCodexNativeMcpEnumeration("launch", read),
+            Effect.mapError(
+              (cause) =>
+                new ProviderAdapter.ProviderAdapterOpenSessionError({
+                  driver: CODEX_PROVIDER,
+                  providerSessionId: input.providerSessionId,
+                  cause,
+                }),
+            ),
+          );
           const command = yield* makeCodexAppServerSpawnCommand({
             command: input.settings.binaryPath || "codex",
             args: [...codexAppServerArgs(launchArgs), ...nativeOffArgs],

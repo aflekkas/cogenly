@@ -1223,10 +1223,6 @@ export const ServerSettings = Schema.Struct({
    * between a desktop window and a phone attached to the same server.
    */
   enableAgentBrowserAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
-  /** Off restores CLI-native MCP configuration; otherwise Cogenly owns integrations. */
-  useProviderConnectors: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  /** The owner reviewed the one-time native-definition import offer. */
-  nativeMcpImportReviewed: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   defaultAutoPull: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   defaultModelSelection: Schema.NullOr(ModelSelection).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
@@ -1449,7 +1445,6 @@ export const UNIVERSAL_SERVER_SETTING_KEYS = [
   "reviewGuidesEnabled",
   "reviewGuideInstructions",
   "pullRequestMergeMethod",
-  "useProviderConnectors",
 ] as const satisfies ReadonlyArray<keyof ServerSettings>;
 export type UniversalServerSettingKey = (typeof UNIVERSAL_SERVER_SETTING_KEYS)[number];
 
@@ -1671,8 +1666,6 @@ export const ServerSettingsPatch = Schema.Struct({
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
-  useProviderConnectors: Schema.optionalKey(Schema.Boolean),
-  nativeMcpImportReviewed: Schema.optionalKey(Schema.Boolean),
   defaultAutoPull: Schema.optionalKey(Schema.Boolean),
   defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   defaultRuntimeMode: Schema.optionalKey(RuntimeMode),

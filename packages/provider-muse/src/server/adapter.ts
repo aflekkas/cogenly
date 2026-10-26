@@ -1,4 +1,4 @@
-import { museNativeMcpNotice } from "./nativeMcpPolicy.ts";
+import { MUSE_NATIVE_MCP_NOTICE } from "./nativeMcpPolicy.ts";
 import { parseMuseUsageLimits } from "./usageLimits.ts";
 import type { ServerProviderUsageLimits } from "@cogenly/contracts";
 import { COGENLY_ORCHESTRATION_INSTRUCTIONS as COGENLY_ORCHESTRATION_INSTRUCTIONS } from "@cogenly/provider-core/server/orchestrationInstructions";
@@ -2094,7 +2094,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                       (turnInput.runtimePolicy.conversationMode === true
                         ? `\n${conversationModeInstructions({ terminal: terminalTools, builder: turnInput.runtimePolicy.builderMode })}`
                         : "") +
-                      (museNativeMcpNotice(turnInput.runtimePolicy.useProviderConnectors) ?? "") +
+                      MUSE_NATIVE_MCP_NOTICE +
                       (turnInput.runtimePolicy.projectManifest === undefined
                         ? ""
                         : `\n${turnInput.runtimePolicy.projectManifest}`) +

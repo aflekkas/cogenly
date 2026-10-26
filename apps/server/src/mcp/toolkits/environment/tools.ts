@@ -41,7 +41,6 @@ const PreferenceFields = {
   newWorktreesStartFromOrigin: ServerSettings.fields.newWorktreesStartFromOrigin,
   enableAgentTerminals: ServerSettings.fields.enableAgentTerminals,
   enableProviderUpdateChecks: ServerSettings.fields.enableProviderUpdateChecks,
-  useProviderConnectors: ServerSettings.fields.useProviderConnectors,
   projectsRoot: ServerSettings.fields.projectsRoot,
   modelEffortDefaults: ServerSettings.fields.modelEffortDefaults,
   backgroundActivity: Schema.Struct({ profile: BackgroundActivityProfileSelection }),
@@ -80,7 +79,7 @@ const EnvironmentReadTool = Tool.make("environment_read", {
 const EnvironmentPreferencesTool = Tool.make("environment_preferences_update", {
   ...shared,
   description:
-    "Update selected preferences through normal settings persistence and notifications. Requires a live full-access/default calling thread. defaultThreadEnvMode, setModelEffortDefault, newWorktreesStartFromOrigin, enableAgentTerminals, sourceControlWritingStyle and useProviderConnectors are universal: they reach every paired machine. The client-prefixed appearance, notifications, confirmation, composer, sidebar and diff preferences, and sharedKeybindings, are universal too. sharedKeybindings is the complete ordered list of { key, command, when? } rules; use mod for the platform modifier. enableProviderUpdateChecks, backgroundActivity and projectsRoot apply to this machine only. Omitted fields are preserved; empty customInstructions clears them. setModelEffortDefault sets the reasoning effort a model starts at ({ provider: instance id, model: slug, option: { id: the model's effort option id from orchestrator_capabilities, e.g. reasoningEffort or effort, value } }); option null restores the model's own default. projectsRoot sets where new project folders and their repositories go on this machine; empty restores the default, <Cogenly home>/projects. Existing project folders are not moved. useProviderConnectors (off by default) restores provider-native MCP servers, connectors, plugins and apps; servers checked into a repo load either way. It applies to new agent sessions.",
+    "Update selected preferences through normal settings persistence and notifications. Requires a live full-access/default calling thread. defaultThreadEnvMode, setModelEffortDefault, newWorktreesStartFromOrigin, enableAgentTerminals and sourceControlWritingStyle are universal: they reach every paired machine. The client-prefixed appearance, notifications, confirmation, composer, sidebar and diff preferences, and sharedKeybindings, are universal too. sharedKeybindings is the complete ordered list of { key, command, when? } rules; use mod for the platform modifier. enableProviderUpdateChecks, backgroundActivity and projectsRoot apply to this machine only. Omitted fields are preserved; empty customInstructions clears them. setModelEffortDefault sets the reasoning effort a model starts at ({ provider: instance id, model: slug, option: { id: the model's effort option id from orchestrator_capabilities, e.g. reasoningEffort or effort, value } }); option null restores the model's own default. projectsRoot sets where new project folders and their repositories go on this machine; empty restores the default, <Cogenly home>/projects. Existing project folders are not moved.",
   parameters: Schema.Struct({
     ...UniversalClientPreferencePatch.fields,
     sharedKeybindings: ServerSettingsPatch.fields.sharedKeybindings,
@@ -89,7 +88,6 @@ const EnvironmentPreferencesTool = Tool.make("environment_preferences_update", {
     newWorktreesStartFromOrigin: ServerSettingsPatch.fields.newWorktreesStartFromOrigin,
     enableAgentTerminals: ServerSettingsPatch.fields.enableAgentTerminals,
     enableProviderUpdateChecks: ServerSettingsPatch.fields.enableProviderUpdateChecks,
-    useProviderConnectors: ServerSettingsPatch.fields.useProviderConnectors,
     backgroundActivity: Schema.optionalKey(Schema.Struct({ profile: BackgroundActivityProfile })),
     sourceControlWritingStyle: ServerSettingsPatch.fields.sourceControlWritingStyle,
     projectsRoot: ServerSettingsPatch.fields.projectsRoot,
