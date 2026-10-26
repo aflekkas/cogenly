@@ -25,7 +25,6 @@ import { TraitsPicker } from "../chat/TraitsPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
 import { Switch } from "../ui/switch";
-import { ComputerUsePermissionsSetting } from "./ComputerUsePermissionsSetting";
 import { ScopedSwitch } from "./ScopedSwitch";
 import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
@@ -55,7 +54,7 @@ function isWorktreeSubmodules(value: string | null): value is WorktreeSubmodules
 export function ProjectDefaultsSettings({
   category,
 }: {
-  category: "models" | "new-threads" | "integrations" | "source-control";
+  category: "models" | "new-threads" | "source-control";
 }) {
   const { scope, target, targets, connectedEnvironments } = useSettingsScope();
   const settings = useScopedSettings();
@@ -84,8 +83,6 @@ export function ProjectDefaultsSettings({
   const mixedModel = useScopedSettingsMixed(["defaultModelSelection"]);
   const mixedWorkspace = useScopedSettingsMixed(["defaultThreadEnvMode"]);
   const mixedSubmodules = useScopedSettingsMixed(["worktreeSubmodules"]);
-  const mixedBrowser = useScopedSettingsMixed(["enableAgentBrowserAccess"]);
-  const mixedComputerUse = useScopedSettingsMixed(["enableAgentComputerUse"]);
   const mixedAutoPull = useScopedSettingsMixed(["defaultAutoPull"]);
   const mixedAgentCredits = useScopedSettingsMixed(["removeAgentCreditsOnMerge"]);
   const mixedMergeMethod = useScopedSettingsMixed(["pullRequestMergeMethod"]);
@@ -261,20 +258,8 @@ export function ProjectDefaultsSettings({
 
   return (
     <SettingsSection
-      id={
-        category === "new-threads"
-          ? "project-defaults"
-          : category === "integrations"
-            ? "browser-access"
-            : "source-control-defaults"
-      }
-      title={
-        category === "new-threads"
-          ? "New threads"
-          : category === "integrations"
-            ? "Agent access"
-            : "Repositories"
-      }
+      id={category === "new-threads" ? "project-defaults" : "source-control-defaults"}
+      title={category === "new-threads" ? "New threads" : "Repositories"}
     >
       {category === "new-threads" ? (
         <>
@@ -356,7 +341,7 @@ export function ProjectDefaultsSettings({
             }
           />
         </>
-      ) : category === "source-control" ? (
+      ) : (
         <>
           <SettingsRow
             serverScoped
@@ -461,77 +446,6 @@ export function ProjectDefaultsSettings({
               </Select>
             }
           />
-        </>
-      ) : (
-        <>
-          <SettingsRow
-            serverScoped
-            settingKeys={["enableAgentBrowserAccess"]}
-            mixed={mixedBrowser}
-            {...searchableSetting("agent-browser-access")}
-            description={
-              isProjectScope
-                ? "Allow agents in this project to use the shared browser. Applies when the agent session next starts."
-                : "Allow agents to use the shared browser. Projects can override it."
-            }
-            resetAction={
-              settings.enableAgentBrowserAccess !==
-              DEFAULT_SERVER_SETTINGS.enableAgentBrowserAccess ? (
-                <SettingResetButton
-                  label="default browser access"
-                  onClick={() =>
-                    updateSettings({
-                      enableAgentBrowserAccess: DEFAULT_SERVER_SETTINGS.enableAgentBrowserAccess,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <Switch
-                aria-label="Agent browser access"
-                mixed={mixedBrowser}
-                checked={mixedBrowser ? false : settings.enableAgentBrowserAccess}
-                onCheckedChange={(enabled) => updateSettings({ enableAgentBrowserAccess: enabled })}
-              />
-            }
-          />
-          <SettingsRow
-            serverScoped
-            settingKeys={["enableAgentComputerUse"]}
-            mixed={mixedComputerUse}
-            {...searchableSetting("agent-computer-use")}
-            description={
-              isProjectScope
-                ? "Allow agents in this project to control this machine's apps: clicks, typing, screenshots. Applies when the agent session next starts."
-                : "Allow agents to control this machine's apps: clicks, typing, screenshots. macOS asks once for Accessibility and Screen Recording. Projects can override it."
-            }
-            resetAction={
-              settings.enableAgentComputerUse !== DEFAULT_SERVER_SETTINGS.enableAgentComputerUse ? (
-                <SettingResetButton
-                  label="default computer use"
-                  onClick={() =>
-                    updateSettings({
-                      enableAgentComputerUse: DEFAULT_SERVER_SETTINGS.enableAgentComputerUse,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <Switch
-                aria-label="Computer use"
-                mixed={mixedComputerUse}
-                checked={mixedComputerUse ? false : settings.enableAgentComputerUse}
-                onCheckedChange={(enabled) => updateSettings({ enableAgentComputerUse: enabled })}
-              />
-            }
-          />
-          {isProjectScope ? null : (
-            <ComputerUsePermissionsSetting
-              enabled={!mixedComputerUse && settings.enableAgentComputerUse}
-            />
-          )}
         </>
       )}
     </SettingsSection>

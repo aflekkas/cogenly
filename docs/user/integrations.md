@@ -7,10 +7,11 @@ request the agent opens. Never paste credentials into a conversation.
 
 Settings → Integrations shows connected accounts, live connection status and
 which projects can use each account. **Connect with an agent** opens a new chat
-that starts “Connect” for you to finish with the service's name; before your
-first connection, a suggested service such as Slack or Notion fills it in.
-**Reconnect** renews a sign-in;
-**Disconnect** stops access until you reconnect; **Remove** deletes the connection.
+that starts “Connect” for you to finish with the service's name; a suggested
+service such as Slack or Notion fills it in. An account that needs attention
+offers **Reconnect**, which renews its sign-in; a working one offers **Test**.
+The account's menu also has **Turn off**, which stops access until you
+reconnect, and **Remove**, which deletes the connection.
 Ask an agent to rename an account or change its project scope. Connect a service
 again to add another account, such as personal Gmail and work Gmail.
 
@@ -53,7 +54,8 @@ availability; the agent also verifies that the required data can be read.
 
 ## Provider configuration
 
-**Use only Cogenly integrations** is on by default in Settings → Integrations.
+**Use only Cogenly integrations** is on by default in Settings → Integrations →
+Agent access.
 Agents then use only the integrations connected in Cogenly, not the MCP
 servers, claude.ai connectors and Codex plugins set up in Claude or Codex. This
 keeps integrations in one place and avoids duplicate tools. The setting follows
@@ -75,7 +77,7 @@ Some servers stay on either way:
 - **Muse's own servers.** Muse can't hide them.
 
 To keep using a server you set up in Claude or Codex, bring it over with
-**Import from Claude and Codex** on the same page. **Review** lists what was
+**Import from Claude and Codex** at the top of Settings → Integrations. **Review** lists what was
 found and what each server still needs. **Import** brings the definitions over,
 turned off; an agent then collects secrets into the vault and checks each
 connection with you. claude.ai connectors need a new sign-in through Cogenly

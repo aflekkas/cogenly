@@ -150,7 +150,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
       title="Device hosts"
       serverScoped
       settingKeys={["deviceHosts"]}
-      description="Add remote machines with simulator or emulator runtimes installed, and this machine will connect over SSH and set up device tools automatically."
+      description="Other machines with simulators or emulators. This machine connects to them over SSH and sets up the device tools."
       control={
         <Button
           size="sm"
@@ -169,8 +169,8 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
     >
       <div className="pt-3 pb-2">
         {!props.environmentId ? (
-          <p className="text-sm text-muted-foreground">
-            Connect a selected machine to manage device hosts.
+          <p className="text-xs text-muted-foreground">
+            Connect this machine to manage its device hosts.
           </p>
         ) : (
           <>
@@ -289,7 +289,7 @@ function DeviceHostList({
   return (
     <>
       {rows.length === 0 ? (
-        <p className="py-2 text-sm text-muted-foreground">No device hosts.</p>
+        <p className="py-2 text-xs text-muted-foreground">No device hosts yet.</p>
       ) : null}
       {rows.map(({ host, members }) => {
         const hostChecks = checks[deviceHostConnectionKey(host)];
