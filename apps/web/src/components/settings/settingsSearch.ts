@@ -592,7 +592,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "diagnostics",
     title: "Diagnostics",
     to: "/settings/diagnostics",
-    searchTerms: ["logs traces live processes resource history failures spans cpu memory"],
+    searchTerms: [
+      "logs traces trace diagnostics live processes resource monitor resource history failures repeated failures slowest spans span logs warnings errors top span names most frequent cpu memory",
+    ],
   },
   {
     id: "open-source-licenses",

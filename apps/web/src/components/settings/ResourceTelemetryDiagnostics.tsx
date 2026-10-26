@@ -57,7 +57,7 @@ import {
   visibleResourceTelemetryProcesses,
 } from "./ResourceTelemetryDiagnostics.logic";
 import { SettingsGroup } from "./SettingsGroup";
-import { SettingsRefreshAction, SettingsSection } from "./settingsLayout";
+import { SettingsRefreshAction, SettingsRow, SettingsSection } from "./settingsLayout";
 
 const HISTORY_WINDOWS = [
   { label: "5m", windowMs: 5 * 60_000, bucketMs: 15_000 },
@@ -800,10 +800,17 @@ function AttributionTable({ entries }: { entries: ReadonlyArray<ResourceAttribut
   );
 }
 
+/**
+ * The native resource monitor's sections. When the monitor can't run on this machine they
+ * collapse to one status row with Retry, followed by `fallback`, the server's own process
+ * sampling, so the page never shows the same processes twice or a wall of empty tables.
+ */
 export function ResourceTelemetryDiagnostics({
   environmentId,
+  fallback,
 }: {
   environmentId: EnvironmentId | null;
+  fallback: ReactNode;
 }) {
   const [windowMs, setWindowMs] = useState(15 * 60_000);
   const selectedWindow =
@@ -953,6 +960,36 @@ export function ResourceTelemetryDiagnostics({
       snapshot.power.idle !== "unknown" ||
       snapshot.power.locked !== "unknown" ||
       snapshot.power.thermalState !== "unknown");
+
+  const nativeStatus = snapshot?.health.native.status ?? null;
+  const nativeMissing =
+    (snapshot === null && telemetry.error !== null) ||
+    nativeStatus === "unavailable" ||
+    nativeStatus === "stopped";
+  if (nativeMissing) {
+    const reason =
+      telemetry.error ??
+      (snapshot ? Option.getOrNull(snapshot.health.native.lastError) : null) ??
+      "The monitor stopped.";
+    return (
+      <>
+        <SettingsSection title="Resource monitor">
+          <SettingsRow
+            title="The detailed monitor isn't running"
+            description={reason}
+            control={
+              canMaintainEnvironment ? (
+                <Button size="sm" variant="outline" disabled={isRetrying} onClick={retryCollector}>
+                  {isRetrying ? "Retrying…" : "Retry"}
+                </Button>
+              ) : undefined
+            }
+          />
+        </SettingsSection>
+        {fallback}
+      </>
+    );
+  }
 
   return (
     <>
