@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerConfig from "../config.ts";
@@ -232,9 +233,24 @@ describe("project label folders", () => {
       expect(yield* fs.exists(unusedDir)).toBe(false);
       expect(yield* fs.readFileString(path.join(keptDir, "Resources", "brief.md"))).toBe("keep\n");
       // What stays is an orphan, listed for the user to adopt.
-      expect((yield* labels.listOrphanFolders()).folders).toEqual([
-        { dirName: "Kept", path: keptDir, reason: "deleted_project" },
+      const listed = yield* labels.listOrphanFolders();
+      expect(listed.folders).toEqual([
+        { dirName: "Kept", path: keptDir, reason: "deleted_project", empty: false },
       ]);
+      // A 0.3.2 client still decodes the list: it requires `empty`.
+      const legacyClientList = Schema.Struct({
+        folders: Schema.Array(
+          Schema.Struct({
+            dirName: Schema.String,
+            path: Schema.String,
+            reason: Schema.Literals(["no_marker", "deleted_project"]),
+            empty: Schema.Boolean,
+          }),
+        ),
+      });
+      expect((yield* Schema.decodeUnknownEffect(legacyClientList)(listed)).folders[0]?.empty).toBe(
+        false,
+      );
     }).pipe(Effect.provide(labelsLayer("label-folders-delete"))),
   );
 

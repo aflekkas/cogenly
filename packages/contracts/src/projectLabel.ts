@@ -402,6 +402,11 @@ export const ProjectOrphanFolder = Schema.Struct({
   dirName: TrimmedNonEmptyString,
   path: TrimmedNonEmptyString,
   reason: Schema.Literals(["no_marker", "deleted_project"]),
+  /**
+   * Always false now: kept for clients older than 0.3.3, which require it and
+   * offered Remove only for empty folders. Newer clients ignore it.
+   */
+  empty: Schema.optional(Schema.Boolean),
 });
 export type ProjectOrphanFolder = typeof ProjectOrphanFolder.Type;
 export const ProjectOrphanFoldersResult = Schema.Struct({

@@ -647,6 +647,8 @@ const make = Effect.gen(function* () {
         dirName: entry,
         path: dir,
         reason: Option.isSome(id) ? "deleted_project" : "no_marker",
+        // Older clients decode this as required; false keeps their removed Remove hidden.
+        empty: false,
       });
     }
     return orphans;
