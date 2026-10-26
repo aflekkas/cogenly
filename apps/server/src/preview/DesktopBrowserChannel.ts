@@ -112,7 +112,10 @@ const make = Effect.gen(function* () {
   const changes = yield* PubSub.unbounded<{ key: DesktopTabKey; attached: boolean }>();
   const attachedTabs = new Set<string>();
   /** CDP frames from the desktop, per tab, for the endpoint connected to it. */
-  const inbound = new Map<string, Queue.Queue<string>>();
+  const inbound = new Map<
+    string,
+    { readonly connectionId: string; readonly queue: Queue.Queue<string> }
+  >();
   const writeLock = yield* Semaphore.make(1);
 
   if (inputFd === undefined || controlFd === undefined) {
@@ -171,8 +174,10 @@ const make = Effect.gen(function* () {
       const id = keyOf(key);
       switch (event.type) {
         case "cdp": {
-          const queue = inbound.get(id);
-          return queue ? Queue.offer(queue, event.message).pipe(Effect.asVoid) : Effect.void;
+          const current = inbound.get(id);
+          return current?.connectionId === event.connectionId
+            ? Queue.offer(current.queue, event.message).pipe(Effect.asVoid)
+            : Effect.void;
         }
         case "permission": {
           const waiter = permissionWaiters.get(event.requestId);
@@ -183,8 +188,8 @@ const make = Effect.gen(function* () {
           return PubSub.publish(changes, { key, attached: true });
         case "detached": {
           attachedTabs.delete(id);
-          const queue = inbound.get(id);
-          return (queue ? Queue.shutdown(queue) : Effect.void).pipe(
+          const current = inbound.get(id);
+          return (current ? Queue.shutdown(current.queue) : Effect.void).pipe(
             Effect.andThen(PubSub.publish(changes, { key, attached: false })),
           );
         }
@@ -204,7 +209,10 @@ const make = Effect.gen(function* () {
         path: `/${secret}`,
       }).pipe(Effect.orDie);
       const queue = yield* Queue.unbounded<string>();
-      inbound.set(id, queue);
+      const connectionId = NodeCrypto.randomUUID();
+      const previous = inbound.get(id);
+      inbound.set(id, { connectionId, queue });
+      if (previous) yield* Queue.shutdown(previous.queue);
       // A detach before this registration shut down no queue, so check again.
       if (!attachedTabs.has(id)) {
         inbound.delete(id);
@@ -212,9 +220,11 @@ const make = Effect.gen(function* () {
       }
       yield* Effect.addFinalizer(() =>
         Effect.gen(function* () {
-          if (inbound.get(id) === queue) inbound.delete(id);
+          const current = inbound.get(id)?.queue === queue;
+          if (current) inbound.delete(id);
           yield* Queue.shutdown(queue);
-          yield* command({ type: "release", ...key });
+          // An older endpoint must not release its replacement's relay.
+          if (current) yield* command({ type: "release", ...key, connectionId });
         }),
       );
       // The relay serves one Playwright connection; a second would see the first's sessions.
@@ -224,6 +234,7 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             if (connected) return;
             connected = true;
+            yield* command({ type: "connect", ...key, connectionId });
             const writer = yield* socket.writer;
             const reader = yield* socket.reader;
             yield* Stream.fromQueue(queue).pipe(
@@ -239,6 +250,7 @@ const make = Effect.gen(function* () {
                     command({
                       type: "cdp",
                       ...key,
+                      connectionId,
                       message: typeof frame === "string" ? frame : decoder.decode(frame),
                     }),
                   { discard: true },

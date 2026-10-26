@@ -36,7 +36,12 @@ export const DesktopBrowserEvent = Schema.Union([
   /** Its `<webview>` went away: closed, crashed, swapped, or devtools took the debugger. */
   Schema.Struct({ type: Schema.Literal("detached"), ...TabKey }),
   /** One CDP message from the tab's relay. */
-  Schema.Struct({ type: Schema.Literal("cdp"), ...TabKey, message: Schema.String }),
+  Schema.Struct({
+    type: Schema.Literal("cdp"),
+    ...TabKey,
+    connectionId: TrimmedNonEmptyString,
+    message: Schema.String,
+  }),
   /** The answer to a `permission` command, matched by `requestId`. */
   Schema.Struct({
     type: Schema.Literal("permission"),
@@ -72,10 +77,25 @@ export const DesktopBrowserCommand = Schema.Union([
     profileId: BrowserProfileId,
     cookie: LocalImportedBrowserCookie,
   }),
+  /** Starts a generation before its first CDP command, retiring the old relay. */
+  Schema.Struct({
+    type: Schema.Literal("connect"),
+    ...TabKey,
+    connectionId: TrimmedNonEmptyString,
+  }),
   /** One CDP message for the tab's relay. */
-  Schema.Struct({ type: Schema.Literal("cdp"), ...TabKey, message: Schema.String }),
+  Schema.Struct({
+    type: Schema.Literal("cdp"),
+    ...TabKey,
+    connectionId: TrimmedNonEmptyString,
+    message: Schema.String,
+  }),
   /** The server stopped driving this tab, so the relay can drop its sessions. */
-  Schema.Struct({ type: Schema.Literal("release"), ...TabKey }),
+  Schema.Struct({
+    type: Schema.Literal("release"),
+    ...TabKey,
+    connectionId: TrimmedNonEmptyString,
+  }),
   /** Where an agent action is about to land, so the desktop draws its cursor there. */
   Schema.Struct({
     type: Schema.Literal("pointer"),
