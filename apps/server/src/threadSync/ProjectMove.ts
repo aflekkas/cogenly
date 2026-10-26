@@ -193,9 +193,10 @@ const make = Effect.gen(function* () {
     const threadIds = yield* projectThreads(input.id);
     const threads: {
       moved: Array<ThreadId>;
+      branches: Array<NonNullable<ThreadMoveResult["branches"]>[number]>;
       skipped: Array<ThreadMoveResult["skipped"][number]>;
       planned: Array<NonNullable<ThreadMoveResult["planned"]>[number]>;
-    } = { moved: [], skipped: [], planned: [] };
+    } = { moved: [], skipped: [], planned: [], branches: [] };
     for (let at = 0; at < threadIds.length; at += THREAD_MOVE_MAX_THREADS) {
       const result = yield* transfer.move({
         threadIds: threadIds.slice(at, at + THREAD_MOVE_MAX_THREADS),
@@ -206,13 +207,18 @@ const make = Effect.gen(function* () {
         ...(dryRun ? { dryRun } : {}),
       });
       threads.moved.push(...result.moved);
+      threads.branches.push(...(result.branches ?? []));
       threads.skipped.push(...result.skipped);
       threads.planned.push(...(result.planned ?? []));
     }
-    const { planned: _planned, ...moved } = threads;
+    const { planned: _planned, branches, ...moved } = threads;
     return {
       repositories,
-      threads: dryRun ? threads : moved,
+      threads: {
+        ...moved,
+        ...(dryRun ? { planned: threads.planned } : {}),
+        ...(branches.length > 0 ? { branches } : {}),
+      },
     } satisfies ProjectMoveResult;
   });
 

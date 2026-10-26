@@ -8,30 +8,33 @@ import * as Path from "effect/Path";
 
 import { FetchHttpClient } from "effect/http";
 
+import packageJson from "../../package.json" with { type: "json" };
+
 import * as BootService from "../cloud/bootService.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { retireLegacyLauncher, runUpdate } from "./update.ts";
 
 /** A home with two downloaded versions and an empty bin directory on PATH. */
-const setup = Effect.gen(function* () {
-  const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const root = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-update-launcher-" });
-  const versionsDir = path.join(root, "home/runtime/versions");
-  const oldEntry = path.join(versionsDir, "0.1.0/t3");
-  const newEntry = path.join(versionsDir, "0.2.0/t3");
-  const bin = path.join(root, "bin");
-  for (const entry of [oldEntry, newEntry]) {
-    yield* fs.makeDirectory(path.dirname(entry), { recursive: true });
-    yield* fs.writeFileString(entry, "");
-    yield* fs.writeFileString(
-      path.join(path.dirname(entry), ".install-complete"),
-      `${path.basename(path.dirname(entry))}\n`,
-    );
-  }
-  yield* fs.makeDirectory(bin, { recursive: true });
-  return { fs, path, root, versionsDir, oldEntry, newEntry, bin };
-});
+const setup = (oldVersion = "0.1.0") =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const root = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-update-launcher-" });
+    const versionsDir = path.join(root, "home/runtime/versions");
+    const oldEntry = path.join(versionsDir, oldVersion, "t3");
+    const newEntry = path.join(versionsDir, "0.2.0/t3");
+    const bin = path.join(root, "bin");
+    for (const entry of [oldEntry, newEntry]) {
+      yield* fs.makeDirectory(path.dirname(entry), { recursive: true });
+      yield* fs.writeFileString(entry, "");
+      yield* fs.writeFileString(
+        path.join(path.dirname(entry), ".install-complete"),
+        `${path.basename(path.dirname(entry))}\n`,
+      );
+    }
+    yield* fs.makeDirectory(bin, { recursive: true });
+    return { fs, path, root, versionsDir, oldEntry, newEntry, bin };
+  });
 
 const retire = (input: { launchedAs: string; versionsDir: string; targetEntryPath: string }) =>
   retireLegacyLauncher(input).pipe(
@@ -42,7 +45,7 @@ const retire = (input: { launchedAs: string; versionsDir: string; targetEntryPat
 describe("runUpdate when already current", () => {
   it.effect("still replaces a legacy t3 launcher with cogenly", () =>
     Effect.gen(function* () {
-      const { fs, path, oldEntry, bin } = yield* setup;
+      const { fs, path, oldEntry, bin } = yield* setup(packageJson.version);
       const legacy = path.join(bin, "t3");
       yield* fs.symlink(oldEntry, legacy);
       yield* runUpdate({
@@ -50,7 +53,7 @@ describe("runUpdate when already current", () => {
         logsDir: path.join(bin, "..", "home", "logs"),
         serverRuntimeStatePath: path.join(bin, "..", "home", "runtime-state.json"),
         channel: undefined,
-        requestedVersion: "0.1.0",
+        requestedVersion: packageJson.version,
         allowDowngrade: false,
         assumeYes: true,
       }).pipe(
@@ -105,7 +108,7 @@ describe("runUpdate when already current but the target runtime is absent", () =
           logsDir: path.join(home, "logs"),
           serverRuntimeStatePath: path.join(home, "runtime-state.json"),
           channel: undefined,
-          requestedVersion: "0.1.0",
+          requestedVersion: packageJson.version,
           allowDowngrade: false,
           assumeYes: true,
         }).pipe(
@@ -135,7 +138,7 @@ describe("runUpdate when already current but the target runtime is absent", () =
           ),
         ),
       );
-      expect(error).toBeDefined();
+      expect(error).toMatchObject({ _tag: "PinnedRuntimeInstallError" });
       expect(yield* fs.readLink(legacy)).toBe(olderEntry);
       expect(yield* fs.exists(path.join(bin, "cogenly"))).toBe(false);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
@@ -145,7 +148,7 @@ describe("runUpdate when already current but the target runtime is absent", () =
 describe("retireLegacyLauncher", () => {
   it.effect("keeps t3 when the target runtime does not exist", () =>
     Effect.gen(function* () {
-      const { fs, path, versionsDir, oldEntry, bin } = yield* setup;
+      const { fs, path, versionsDir, oldEntry, bin } = yield* setup();
       const legacy = path.join(bin, "t3");
       yield* fs.symlink(oldEntry, legacy);
       const replaced = yield* retire({
@@ -161,7 +164,7 @@ describe("retireLegacyLauncher", () => {
 
   it.effect("replaces our t3 launcher with a cogenly one pointing at the new version", () =>
     Effect.gen(function* () {
-      const { fs, path, versionsDir, oldEntry, newEntry, bin } = yield* setup;
+      const { fs, path, versionsDir, oldEntry, newEntry, bin } = yield* setup();
       const legacy = path.join(bin, "t3");
       yield* fs.symlink(oldEntry, legacy);
 
@@ -179,7 +182,7 @@ describe("retireLegacyLauncher", () => {
 
   it.effect("leaves a t3 that is not a launcher into this home", () =>
     Effect.gen(function* () {
-      const { fs, path, root, versionsDir, newEntry, bin } = yield* setup;
+      const { fs, path, root, versionsDir, newEntry, bin } = yield* setup();
       const foreign = path.join(root, "elsewhere/t3");
       yield* fs.makeDirectory(path.dirname(foreign), { recursive: true });
       yield* fs.writeFileString(foreign, "");
@@ -200,7 +203,7 @@ describe("retireLegacyLauncher", () => {
 
   it.effect("keeps our t3 when a cogenly beside it belongs to something else", () =>
     Effect.gen(function* () {
-      const { fs, path, versionsDir, oldEntry, newEntry, bin } = yield* setup;
+      const { fs, path, versionsDir, oldEntry, newEntry, bin } = yield* setup();
       const legacy = path.join(bin, "t3");
       yield* fs.symlink(oldEntry, legacy);
       yield* fs.writeFileString(path.join(bin, "cogenly"), "#!/bin/sh\n");

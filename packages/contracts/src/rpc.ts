@@ -1,3 +1,9 @@
+import {
+  BrowserCookieImportInput,
+  BrowserCookieImportResult,
+  BrowserCookieImportError,
+} from "./browserCookies.ts";
+import { BrowserImportSource } from "./browserImport.ts";
 import * as RepoMcpTrust from "./repoMcpTrust.ts";
 import * as Search from "./search.ts";
 import * as Facts from "./fact.ts";
@@ -473,6 +479,8 @@ export const WS_METHODS = {
   previewRefresh: "preview.refresh",
   previewClose: "preview.close",
   previewList: "preview.list",
+  browserCookieSources: "browser.cookieSources",
+  browserImportCookies: "browser.importCookies",
   previewClearProfile: "preview.clearProfile",
   previewReportProfiles: "preview.reportProfiles",
   previewReportShown: "preview.reportShown",
@@ -1682,6 +1690,17 @@ const WsPreviewListRpc = Rpc.make(WS_METHODS.previewList, {
   payload: PreviewListInput,
   success: PreviewListResult,
   error: EnvironmentAuthorizationError,
+});
+
+const WsBrowserCookieSourcesRpc = Rpc.make(WS_METHODS.browserCookieSources, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(BrowserImportSource),
+  error: EnvironmentAuthorizationError,
+});
+const WsBrowserImportCookiesRpc = Rpc.make(WS_METHODS.browserImportCookies, {
+  payload: BrowserCookieImportInput,
+  success: BrowserCookieImportResult,
+  error: Schema.Union([BrowserCookieImportError, EnvironmentAuthorizationError]),
 });
 
 const WsPreviewClearProfileRpc = Rpc.make(WS_METHODS.previewClearProfile, {
@@ -3122,6 +3141,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsPreviewRefreshRpc,
   WsPreviewCloseRpc,
   WsPreviewListRpc,
+  WsBrowserCookieSourcesRpc,
+  WsBrowserImportCookiesRpc,
   WsPreviewClearProfileRpc,
   WsPreviewReportProfilesRpc,
   WsPreviewReportShownRpc,

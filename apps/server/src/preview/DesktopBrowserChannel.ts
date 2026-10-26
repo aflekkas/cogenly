@@ -1,3 +1,4 @@
+import type { ImportedCookie } from "@cogenly/shared/browserCookies/CookieDatabase";
 // @effect-diagnostics nodeBuiltinImport:off - Bridges Playwright's WebSocket transport to the desktop's fds.
 /**
  * The server end of the desktop browser channel (see `DesktopBrowserEvent`).
@@ -59,6 +60,13 @@ export class DesktopBrowserChannel extends Context.Service<
   {
     /** False when this server was not started by a desktop app. */
     readonly available: boolean;
+    /** Import into the same-machine desktop through inherited fds, never a remote client. */
+    readonly clearProfile: (environmentId: string, profileId: string) => Effect.Effect<boolean>;
+    readonly importCookie: (
+      environmentId: string,
+      profileId: string,
+      cookie: ImportedCookie,
+    ) => Effect.Effect<boolean>;
     /**
      * Waits for a tab to be attached. Subscribes before it checks, so an
      * attach landing in between is never missed. False after `timeout`.
@@ -110,6 +118,8 @@ const make = Effect.gen(function* () {
   if (inputFd === undefined || controlFd === undefined) {
     return DesktopBrowserChannel.of({
       available: false,
+      importCookie: () => Effect.succeed(false),
+      clearProfile: () => Effect.succeed(false),
       awaitAttached: () => Effect.succeed(false),
       detached: Stream.empty,
       attached: Stream.empty,
@@ -123,6 +133,9 @@ const make = Effect.gen(function* () {
   /** `permission` commands waiting on the desktop's answer, by request id. */
   const permissionWaiters = new Map<string, Deferred.Deferred<SitePermissionChangeResult>>();
   let permissionRequests = 0;
+
+  const storageWaiters = new Map<string, Deferred.Deferred<boolean>>();
+  let storageRequests = 0;
 
   const command = (message: DesktopBrowserCommandType) =>
     writeLock.withPermits(1)(
@@ -150,6 +163,10 @@ const make = Effect.gen(function* () {
     Stream.runForEach((decoded) => {
       if (Option.isNone(decoded)) return Effect.void;
       const event = decoded.value;
+      if (event.type === "browserStorageResult") {
+        const waiter = storageWaiters.get(event.requestId);
+        return waiter ? Deferred.succeed(waiter, event.success).pipe(Effect.asVoid) : Effect.void;
+      }
       const key = { threadId: event.threadId, tabId: event.tabId };
       const id = keyOf(key);
       switch (event.type) {
@@ -237,8 +254,36 @@ const make = Effect.gen(function* () {
       return `ws://127.0.0.1:${address.port}/${secret}`;
     });
 
+  const storageRequest = (message: (requestId: string) => DesktopBrowserCommandType) =>
+    Effect.gen(function* () {
+      const requestId = `cookie-${++storageRequests}`;
+      const waiter = yield* Deferred.make<boolean>();
+      storageWaiters.set(requestId, waiter);
+      yield* command(message(requestId));
+      return yield* Deferred.await(waiter).pipe(
+        Effect.timeoutOption("10 seconds"),
+        Effect.map(Option.getOrElse(() => false)),
+        Effect.ensuring(Effect.sync(() => storageWaiters.delete(requestId))),
+      );
+    }).pipe(Effect.withTracerEnabled(false));
+
   return DesktopBrowserChannel.of({
     available: true,
+    importCookie: (environmentId, profileId, cookie) =>
+      storageRequest((requestId) => ({
+        type: "importCookie",
+        environmentId,
+        profileId,
+        cookie,
+        requestId,
+      })),
+    clearProfile: (environmentId, profileId) =>
+      storageRequest((requestId) => ({
+        type: "clearProfile",
+        environmentId,
+        profileId,
+        requestId,
+      })),
     awaitAttached: (key, timeout) =>
       Effect.scoped(
         Effect.gen(function* () {

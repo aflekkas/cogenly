@@ -16,6 +16,8 @@ import {
   type ThreadAdoptInput,
   type ThreadAdoptResult,
   ThreadHandoffCommit,
+  ThreadHandoffRepository,
+  ThreadMoveBranch,
   ThreadHandoffReceipts,
   ThreadHandoffPreview,
   type ThreadId,
@@ -61,6 +63,21 @@ import * as ThreadReplication from "./ThreadReplication.ts";
 import { ensureLocalCheckout, findLocalCheckout, previewClonePath } from "./localCheckout.ts";
 import * as ThreadRouting from "./ThreadRouting.ts";
 import * as ThreadSync from "./ThreadSync.ts";
+import * as RepositoryHandoff from "./RepositoryHandoff.ts";
+
+const RepositoryJson = Schema.fromJsonString(Schema.NullOr(ThreadHandoffRepository));
+const PreparedJson = Schema.fromJsonString(
+  Schema.Struct({
+    worktreePath: Schema.NullOr(Schema.String),
+    branch: Schema.optional(ThreadMoveBranch),
+  }),
+);
+
+const decodeRepository = Schema.decodeEffect(RepositoryJson);
+const encodeRepository = Schema.encodeEffect(RepositoryJson);
+const decodePrepared = Schema.decodeEffect(PreparedJson);
+const encodePrepared = Schema.encodeEffect(PreparedJson);
+const decodeReceiptTimestamp = Schema.decodeEffect(Schema.DateTimeUtcFromString);
 
 /** Threads per request to another machine, so one request stays well inside its timeout. */
 const MOVE_CHUNK = 25;
@@ -137,6 +154,8 @@ const make = Effect.gen(function* () {
     | ProjectLabelFolders.ProjectLabelFolders
     | Path.Path
   >();
+  const repositoryHandoff = yield* RepositoryHandoff.RepositoryHandoff;
+  const checkout = yield* RepositoryCheckout.RepositoryCheckout;
   const self = replication.environmentId;
   // ManagedProjectFolders keeps "No project" here.
   const scratchRoot = path.resolve(config.baseDir, "scratch");
@@ -270,16 +289,41 @@ const make = Effect.gen(function* () {
     }
   });
 
+  const sourceRepository = Effect.fn("ThreadTransfer.sourceRepository")(function* (
+    entry: OrchestrationV2AppThread,
+    dryRun = false,
+  ) {
+    const project = yield* projects.get(entry.projectId).pipe(Effect.orDie);
+    return yield* repositoryHandoff.source(
+      entry,
+      Option.isSome(project) ? project.value.workspaceRoot : undefined,
+      dryRun,
+    );
+  });
+
   // Phase two from the owner: push what the target lacks, then ask it to take the thread.
   const commit = Effect.fn("ThreadTransfer.commit")(function* (
     threadId: ThreadId,
     target: EnvironmentId,
     epoch: number,
   ) {
+    const saved = yield* sql<{
+      readonly repository_json: string;
+    }>`SELECT repository_json FROM thread_handoff_repositories WHERE thread_id = ${threadId} AND epoch = ${epoch}`.pipe(
+      Effect.orDie,
+    );
+    const repository =
+      saved[0] === undefined
+        ? yield* sourceRepository(yield* thread(threadId))
+        : yield* decodeRepository(saved[0].repository_json).pipe(Effect.orDie);
+    if (saved[0] === undefined)
+      yield* sql`INSERT INTO thread_handoff_repositories(thread_id, epoch, repository_json) VALUES (${threadId}, ${epoch}, ${yield* encodeRepository(repository).pipe(Effect.orDie)})`.pipe(
+        Effect.orDie,
+      );
     yield* sendThread(threadId, hopTo(yield* topology, target));
     const last = yield* lastEvent(threadId);
     yield* copyReceipts(threadId, target, epoch);
-    yield* routing.callMachine(
+    return yield* routing.callMachine(
       target,
       ThreadHandoffCommit,
       {
@@ -287,6 +331,7 @@ const make = Effect.gen(function* () {
         from: self,
         to: target,
         epoch,
+        repository,
         lastEventId: last === undefined ? null : EventId.make(last.event_id),
         eventCount: yield* replication.eventCount(threadId),
         attachmentIds: yield* threadAttachmentIds(threadId),
@@ -300,7 +345,17 @@ const make = Effect.gen(function* () {
     commit(threadId, target, epoch).pipe(
       Effect.tap(() => replication.finish(threadId, target, epoch)),
       Effect.tapError((error) =>
-        isTransient(error) ? Effect.void : replication.release(threadId, target, epoch),
+        isTransient(error)
+          ? Effect.void
+          : replication
+              .release(threadId, target, epoch)
+              .pipe(
+                Effect.andThen(
+                  sql`DELETE FROM thread_handoff_repositories WHERE thread_id = ${threadId} AND epoch = ${epoch}`.pipe(
+                    Effect.orDie,
+                  ),
+                ),
+              ),
       ),
     );
 
@@ -345,9 +400,10 @@ const make = Effect.gen(function* () {
   ) {
     const { agent } = yield* checkMovable(threadId, leaveLocalChanges);
     const { epoch } = yield* replication.fence(threadId, target);
-    yield* settle(threadId, target, epoch);
+    const result = yield* settle(threadId, target, epoch);
     // The agent runs where its conversation runs: it follows, with its schedules.
     if (agent !== undefined) yield* handOffAgent(agent.agentId, target);
+    return result;
   });
 
   /**
@@ -382,14 +438,24 @@ const make = Effect.gen(function* () {
   ) {
     const skipped: Array<ThreadMoveSkip> = [];
     const titles = new Map<ThreadId, string>();
+    const repositories: Array<{ threadId: ThreadId; repository: ThreadHandoffRepository | null }> =
+      [];
     for (const threadId of threadIds) {
       const checked = yield* Effect.result(
-        replication
-          .preflight(threadId)
-          .pipe(Effect.andThen(checkMovable(threadId, leaveLocalChanges))),
+        replication.preflight(threadId).pipe(
+          Effect.andThen(checkMovable(threadId, leaveLocalChanges)),
+          Effect.flatMap((checked) =>
+            sourceRepository(checked.entry, true).pipe(
+              Effect.map((repository) => ({ ...checked, repository })),
+            ),
+          ),
+        ),
       );
       if (checked._tag === "Failure") skipped.push(skip(threadId, checked.failure));
-      else titles.set(threadId, checked.success.entry.title);
+      else {
+        titles.set(threadId, checked.success.entry.title);
+        repositories.push({ threadId, repository: checked.success.repository });
+      }
     }
     const planned: Array<ThreadMovePlanned> = [];
     const ready = [...titles.keys()];
@@ -406,7 +472,11 @@ const make = Effect.gen(function* () {
         routing.callMachine(
           target,
           ThreadHandoffPreview,
-          { threadIds: chunk, to: target },
+          {
+            threadIds: chunk,
+            to: target,
+            repositories: repositories.filter((item) => chunk.includes(item.threadId)),
+          },
           "5 minutes",
         ),
       );
@@ -450,6 +520,7 @@ const make = Effect.gen(function* () {
     const moved: Array<ThreadId> = [];
     const skipped: Array<ThreadMoveSkip> = [];
     const planned: Array<ThreadMovePlanned> = [];
+    const branches: Array<{ threadId: ThreadId } & ThreadMoveBranch> = [];
     const byOwner = new Map<EnvironmentId, Array<ThreadId>>();
     for (const threadId of new Set(input.threadIds)) {
       const owner = yield* replication.owner(threadId);
@@ -468,8 +539,11 @@ const make = Effect.gen(function* () {
     } else
       for (const threadId of byOwner.get(self) ?? []) {
         const result = yield* Effect.result(moveHere(threadId, input.target, leaveLocalChanges));
-        if (result._tag === "Success") moved.push(threadId);
-        else skipped.push(skip(threadId, result.failure));
+        if (result._tag === "Success") {
+          moved.push(threadId);
+          if (result.success.branch !== undefined)
+            branches.push({ threadId, ...result.success.branch });
+        } else skipped.push(skip(threadId, result.failure));
       }
     for (const [owner, threadIds] of byOwner) {
       if (owner === self) continue;
@@ -497,6 +571,7 @@ const make = Effect.gen(function* () {
         );
         if (result._tag === "Success") {
           moved.push(...result.success.moved);
+          branches.push(...(result.success.branches ?? []));
           skipped.push(...result.success.skipped);
           planned.push(...(result.success.planned ?? []));
         } else for (const threadId of chunk) skipped.push(skip(threadId, result.failure));
@@ -506,6 +581,7 @@ const make = Effect.gen(function* () {
       moved,
       skipped,
       ...(dryRun ? { planned } : {}),
+      ...(branches.length > 0 ? { branches } : {}),
     } satisfies ThreadMoveResult;
   });
 
@@ -560,12 +636,14 @@ const make = Effect.gen(function* () {
     threadId: ThreadId,
     epoch: number,
     beforeWrite: Effect.Effect<unknown, ThreadRemoteError> = Effect.void,
+    preparedPath?: string | null,
   ) {
     const entry = yield* projections.getThread(threadId).pipe(Effect.orDie);
     const localProject = Option.isSome(yield* projects.get(entry.projectId).pipe(Effect.orDie))
       ? entry.projectId
       : ((yield* replication.sourceProject(threadId)).projectId ?? entry.projectId);
-    const worktreePath = yield* targetWorktreePath(entry);
+    const worktreePath =
+      preparedPath === undefined ? yield* targetWorktreePath(entry) : preparedPath;
     const changed = localProject !== entry.projectId || worktreePath !== entry.worktreePath;
     // Read-time fields are not part of the stored thread.
     const {
@@ -654,8 +732,39 @@ const make = Effect.gen(function* () {
     return yield* noRepository(source?.remote);
   });
 
+  const prepareRepository = Effect.fn("ThreadTransfer.prepareRepository")(function* (
+    threadId: ThreadId,
+    repository: ThreadHandoffRepository | null,
+  ) {
+    const entry = yield* thread(threadId);
+    const worktreePath = yield* targetWorktreePath(entry);
+    if (repository === null) {
+      if (entry.worktreePath !== null && entry.branch !== null) return yield* noRepository(null);
+      return { worktreePath };
+    }
+    if (repository.branch !== entry.branch) return yield* noRepository(null);
+    const own = yield* projects.get(entry.projectId).pipe(Effect.orDie);
+    const projectId = Option.isSome(own)
+      ? entry.projectId
+      : (yield* replication.sourceProject(threadId)).projectId;
+    const project =
+      projectId === undefined ? Option.none() : yield* projects.get(projectId).pipe(Effect.orDie);
+    if (Option.isNone(project)) return yield* noRepository(null);
+    yield* checkout
+      .ensureCheckout(project.value.projectId)
+      .pipe(Effect.mapError(() => noRepository(null)));
+    return yield* repositoryHandoff.prepare({
+      cwd: project.value.workspaceRoot,
+      worktreePath,
+      repository,
+    });
+  });
+
   /** Where requireProject and rehome would put the thread, changing nothing: a dry run. */
-  const placement = Effect.fn("ThreadTransfer.placement")(function* (threadId: ThreadId) {
+  const placement = Effect.fn("ThreadTransfer.placement")(function* (
+    threadId: ThreadId,
+    repository: ThreadHandoffRepository | null = null,
+  ) {
     const entry = yield* thread(threadId).pipe(
       Effect.mapError(
         () =>
@@ -666,32 +775,53 @@ const make = Effect.gen(function* () {
       ),
     );
     const worktreePath = yield* targetWorktreePath(entry);
-    const placed = (project: string): ThreadMovePlacement => ({ threadId, project, worktreePath });
+    const placed = Effect.fnUntraced(function* (project: string, cwd?: string) {
+      const branch =
+        repository === null
+          ? undefined
+          : cwd === undefined
+            ? {
+                branch: repository.branch,
+                revision: repository.revision,
+                action: "create" as const,
+              }
+            : (yield* repositoryHandoff.prepare({ cwd, worktreePath, repository, dryRun: true }))
+                .branch;
+      return {
+        threadId,
+        project,
+        worktreePath,
+        ...(branch === undefined ? {} : { branch }),
+      } satisfies ThreadMovePlacement;
+    });
     const record = (id: typeof entry.projectId) => projects.get(id).pipe(Effect.orDie);
     const known = yield* record(entry.projectId);
-    if (Option.isSome(known)) return placed(known.value.workspaceRoot);
+    if (Option.isSome(known))
+      return yield* placed(known.value.workspaceRoot, known.value.workspaceRoot);
     const { source, projectId } = yield* replication.sourceProject(threadId);
     const mapped = projectId === undefined ? Option.none() : yield* record(projectId);
-    if (Option.isSome(mapped)) return placed(mapped.value.workspaceRoot);
-    if (source?.kind === "scratch") return placed(`${scratchRoot} (No project, created)`);
+    if (Option.isSome(mapped))
+      return yield* placed(mapped.value.workspaceRoot, mapped.value.workspaceRoot);
+    if (source?.kind === "scratch") return yield* placed(`${scratchRoot} (No project, created)`);
     const labelId = yield* linkedLabel(source?.remote);
     if (labelId !== undefined && source?.remote != null) {
       const found = yield* findLocalCheckout(labelId, source.remote).pipe(
         Effect.provideContext(context),
       );
-      return placed(
+      return yield* placed(
         Option.isSome(found)
           ? `${found.value.workspaceRoot} (filed into the project)`
           : `${yield* previewClonePath(labelId, source.remote).pipe(
               Effect.provideContext(context),
               Effect.mapError(() => noRepository(source.remote)),
             )} (new clone)`,
+        Option.isSome(found) ? found.value.workspaceRoot : undefined,
       );
     }
     return yield* noRepository(source?.remote);
   });
 
-  yield* channels.register(ThreadHandoffPreview, ({ threadIds, to }, caller) =>
+  yield* channels.register(ThreadHandoffPreview, ({ threadIds, to, repositories }, caller) =>
     Effect.gen(function* () {
       if (to !== self) {
         const view = yield* topology;
@@ -701,12 +831,19 @@ const make = Effect.gen(function* () {
         yield* threadSync
           .syncThrough(to, Math.max(0, ...last.map((item) => item?.sequence ?? 0)))
           .pipe(Effect.ignore);
-        return yield* routing.callMachine(to, ThreadHandoffPreview, { threadIds, to }, "5 minutes");
+        return yield* routing.callMachine(
+          to,
+          ThreadHandoffPreview,
+          { threadIds, to, repositories },
+          "5 minutes",
+        );
       }
       const placed: Array<ThreadMovePlacement> = [];
       const skipped: Array<ThreadMoveSkip> = [];
       for (const threadId of threadIds) {
-        const result = yield* Effect.result(placement(threadId));
+        const result = yield* Effect.result(
+          placement(threadId, repositories.find((item) => item.threadId === threadId)?.repository),
+        );
         if (result._tag === "Success") placed.push(result.success);
         else skipped.push(skip(threadId, result.failure));
       }
@@ -741,9 +878,7 @@ const make = Effect.gen(function* () {
               return yield* new ThreadRemoteError({ reason: "not-owner" });
             const last = yield* lastEvent(payload.threadId);
             for (const receipt of payload.receipts) {
-              yield* Schema.decodeUnknownEffect(Schema.DateTimeUtcFromString)(
-                receipt.acceptedAt,
-              ).pipe(
+              yield* decodeReceiptTimestamp(receipt.acceptedAt).pipe(
                 Effect.mapError(
                   () =>
                     new ThreadRemoteError({
@@ -806,6 +941,19 @@ const make = Effect.gen(function* () {
       if (caller.environmentId !== payload.from && !relayed)
         return yield* new ThreadRemoteError({ reason: "not-owner" });
       const owner = yield* replication.owner(payload.threadId);
+      const stored = yield* sql<{
+        readonly repository_json: string;
+        readonly result_json: string | null;
+      }>`SELECT repository_json, result_json FROM thread_handoff_repositories WHERE thread_id = ${payload.threadId} AND epoch = ${payload.epoch}`.pipe(
+        Effect.orDie,
+      );
+      const repositoryJson = yield* encodeRepository(payload.repository).pipe(Effect.orDie);
+      let prepared =
+        stored[0]?.result_json == null || stored[0].repository_json !== repositoryJson
+          ? undefined
+          : yield* decodePrepared(stored[0].result_json).pipe(Effect.orDie);
+      if (owner !== undefined && owner.epoch >= payload.epoch)
+        return prepared?.branch === undefined ? {} : { branch: prepared.branch };
       if (owner === undefined || owner.epoch < payload.epoch) {
         if (
           owner === undefined ||
@@ -846,15 +994,32 @@ const make = Effect.gen(function* () {
               reason: "rejected",
               detail: "A thread attachment is unavailable on its owner.",
             });
+        if (prepared === undefined) {
+          prepared = yield* prepareRepository(payload.threadId, payload.repository);
+          yield* sql`INSERT INTO thread_handoff_repositories(thread_id, epoch, repository_json, result_json)
+            VALUES (${payload.threadId}, ${payload.epoch}, ${repositoryJson}, ${yield* encodePrepared(prepared).pipe(Effect.orDie)})
+            ON CONFLICT(thread_id, epoch) DO UPDATE SET repository_json = excluded.repository_json, result_json = excluded.result_json`.pipe(
+            Effect.orDie,
+          );
+        }
+        if (payload.repository !== null && prepared.worktreePath !== null)
+          yield* repositoryHandoff.verify(prepared.worktreePath, payload.repository).pipe(
+            Effect.tapError(() =>
+              sql`UPDATE thread_handoff_repositories SET result_json = NULL
+              WHERE thread_id = ${payload.threadId} AND epoch = ${payload.epoch}`.pipe(
+                Effect.orDie,
+              ),
+            ),
+          );
       }
       // Ownership and the machine-local paths commit before the sink publishes.
-      if (owner !== undefined && owner.epoch >= payload.epoch && !owner.local) return {};
       yield* rehome(
         payload.threadId,
         payload.epoch,
         replication.take(payload.threadId, payload.from, payload.epoch),
+        prepared?.worktreePath,
       );
-      return {};
+      return prepared?.branch === undefined ? {} : { branch: prepared.branch };
     }),
   );
 
@@ -905,6 +1070,7 @@ const make = Effect.gen(function* () {
     const moved: Array<ThreadId> = [];
     const skipped: Array<ThreadMoveSkip> = [];
     const planned: Array<ThreadMovePlanned> = [];
+    const branches: Array<{ threadId: ThreadId } & ThreadMoveBranch> = [];
     for (let at = 0; at < threadIds.length; at += THREAD_MOVE_MAX_THREADS) {
       const result = yield* moveFrom(
         {
@@ -916,10 +1082,16 @@ const make = Effect.gen(function* () {
         undefined,
       );
       moved.push(...result.moved);
+      branches.push(...(result.branches ?? []));
       skipped.push(...result.skipped);
       planned.push(...(result.planned ?? []));
     }
-    return { moved, skipped, ...(dryRun === true ? { planned } : {}) } satisfies ThreadMoveResult;
+    return {
+      moved,
+      skipped,
+      ...(dryRun === true ? { planned } : {}),
+      ...(branches.length > 0 ? { branches } : {}),
+    } satisfies ThreadMoveResult;
   });
 
   const adoptFrom: ThreadTransfer["Service"]["adoptFrom"] = Effect.fn("ThreadTransfer.adoptFrom")(

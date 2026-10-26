@@ -18,6 +18,8 @@ import { BrowserProfileId } from "./browserProfile.ts";
 
 const BROWSER_IMPORT_SOURCE_IDS = [
   "chrome",
+  "chromium",
+  "dia",
   "edge",
   "brave",
   "vivaldi",

@@ -21,6 +21,7 @@ import { Command } from "effect/cli";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
+import { browserImportCookiesCommand } from "./browserCookies.ts";
 import * as PreviewBrowserHost from "../preview/PreviewBrowserHost.ts";
 import { resolveBaseDir } from "../os-jank.ts";
 import { baseDirFlag } from "./config.ts";
@@ -191,5 +192,5 @@ const browserSetupCommand = Command.make("setup", { baseDir: baseDirFlag }).pipe
 
 export const browserCommand = Command.make("browser").pipe(
   Command.withDescription("Manage Cogenly's headless browser on this host."),
-  Command.withSubcommands([browserSetupCommand]),
+  Command.withSubcommands([browserSetupCommand, browserImportCookiesCommand]),
 );

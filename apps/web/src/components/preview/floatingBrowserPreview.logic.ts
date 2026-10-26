@@ -31,17 +31,44 @@ export function floatingPreviewTabKey(threadKey: string, tabId: string): string 
   return `${threadKey}\u0000${tabId}`;
 }
 
+/** At most this many threads remember a dismissed card; the oldest is forgotten first. */
+export const FLOATING_PREVIEW_MAX_DISMISSED_THREADS = 200;
+
+/** Threads whose card the user closed, by thread key, oldest first. */
+export type FloatingPreviewDismissals = Readonly<Record<string, true>>;
+
+/** Marks a thread's card closed until the user asks for it back. */
+export function dismissFloatingPreviewThread(
+  dismissed: FloatingPreviewDismissals,
+  threadKey: string,
+): FloatingPreviewDismissals {
+  const { [threadKey]: _previous, ...rest } = dismissed;
+  const keys = [...Object.keys(rest), threadKey].slice(-FLOATING_PREVIEW_MAX_DISMISSED_THREADS);
+  return Object.fromEntries(keys.map((key) => [key, true as const]));
+}
+
+/** Lets a thread's card float again. */
+export function restoreFloatingPreviewThread(
+  dismissed: FloatingPreviewDismissals,
+  threadKey: string,
+): FloatingPreviewDismissals {
+  if (!(threadKey in dismissed)) return dismissed;
+  const { [threadKey]: _restored, ...rest } = dismissed;
+  return rest;
+}
+
 /**
  * Whether the floating card shows for the tab a browser panel showed last.
  * It shows only while no panel shows that tab, the tab still has a page, and
- * the user has not dismissed it since they last looked at it.
+ * the user has not closed the thread's card.
  */
 export function shouldShowFloatingPreview(input: {
   /** Key of the tab a browser panel showed last, if any. */
   readonly targetKey: string | null;
   /** Keys of tabs a browser panel shows right now. */
   readonly shownKeys: ReadonlySet<string>;
-  readonly dismissedKey: string | null;
+  /** The user closed this thread's card and has not asked for it back. */
+  readonly dismissed: boolean;
   /** The tab's session list arrived, so a missing tab really is closed. */
   readonly sessionsLoaded: boolean;
   /** The tab's current page; null when the session is gone. */
@@ -55,7 +82,7 @@ export function shouldShowFloatingPreview(input: {
 }): boolean {
   const { targetKey } = input;
   if (targetKey === null || input.poppedOut) return false;
-  if (input.shownKeys.has(targetKey) || input.dismissedKey === targetKey) return false;
+  if (input.shownKeys.has(targetKey) || input.dismissed) return false;
   if (!input.sessionsLoaded || !input.thumbnailAvailable || !input.paneFits) return false;
   return previewTabHasPage(input.navStatus);
 }
@@ -138,27 +165,33 @@ export function nearestFloatingPreviewCorner(
   return `${vertical}-${horizontal}`;
 }
 
-interface PersistedFloatingPosition {
+export interface PersistedFloatingPreview {
   readonly corner: FloatingPreviewCorner | null;
   readonly freePosition: FloatingPreviewPoint | null;
+  readonly width: number | null;
+  readonly dismissedThreads: FloatingPreviewDismissals;
 }
 
 /**
  * Version 1 always stored a corner, "bottom-right" until the card was moved, so
  * that corner with no free position is indistinguishable from the old default.
- * It resets to the new default; every other saved position is one the user chose.
+ * It resets to the new default; every other saved corner is one the user chose.
+ * Before version 3 a free position was in window coordinates; it is now in the
+ * chat pane's, so an old one is dropped and the card docks to its corner.
  */
-export function migratePersistedPosition(
+export function migratePersistedFloatingPreview(
   persisted: unknown,
   version: number,
-): PersistedFloatingPosition {
-  const saved = (persisted ?? {}) as Partial<PersistedFloatingPosition>;
-  const freePosition = saved.freePosition ?? null;
-  const corner = saved.corner ?? null;
-  if (version < 2 && freePosition === null && corner === "bottom-right") {
-    return { corner: null, freePosition };
-  }
-  return { corner, freePosition };
+): PersistedFloatingPreview {
+  const saved = (persisted ?? {}) as Partial<PersistedFloatingPreview>;
+  const freePosition = version < 3 ? null : (saved.freePosition ?? null);
+  const wasDefault = version < 2 && saved.freePosition == null && saved.corner === "bottom-right";
+  return {
+    corner: wasDefault ? null : (saved.corner ?? null),
+    freePosition,
+    width: typeof saved.width === "number" ? saved.width : null,
+    dismissedThreads: saved.dismissedThreads ?? {},
+  };
 }
 
 /** A drop within this distance of a docked corner snaps to it; farther, the card stays put. */
@@ -171,7 +204,23 @@ export interface FloatingPreviewArea {
   readonly bottom: number;
 }
 
-/** Keeps a card fully inside an area, such as the window below its titlebar. */
+/**
+ * Where a card may rest in the chat pane, in pane coordinates: inset like its
+ * docked corners, above the composer and left of the minimap strip.
+ */
+export function floatingPreviewPaneArea(
+  pane: FloatingPreviewSize,
+  insets: { readonly bottom: number; readonly right?: number },
+): FloatingPreviewArea {
+  return {
+    left: FLOATING_PREVIEW_MARGIN,
+    top: FLOATING_PREVIEW_MARGIN,
+    right: pane.width - (insets.right ?? 0) - FLOATING_PREVIEW_MARGIN,
+    bottom: pane.height - insets.bottom - FLOATING_PREVIEW_MARGIN,
+  };
+}
+
+/** Keeps a card fully inside an area, such as the chat pane's resting area. */
 export function clampFloatingPreviewToArea(
   position: FloatingPreviewPoint,
   area: FloatingPreviewArea,
@@ -234,8 +283,17 @@ function floatingPreviewHost(navStatus: PreviewNavStatus): string {
   return new URL(navStatus.url).host || navStatus.url;
 }
 
-/** The card keeps the default card's 16:10 shape at every size. */
-export const FLOATING_PREVIEW_ASPECT = FLOATING_PREVIEW_CARD_HEIGHT / FLOATING_PREVIEW_CARD_WIDTH;
+/** The solid title strip under the page, in CSS px. */
+export const FLOATING_PREVIEW_TITLE_HEIGHT = 28;
+/** The page area's width over height until the tab reports its viewport: 16:10. */
+export const DEFAULT_FLOATING_PREVIEW_PAGE_ASPECT =
+  FLOATING_PREVIEW_CARD_WIDTH / FLOATING_PREVIEW_CARD_HEIGHT;
+/**
+ * The page area follows the tab's viewport shape within these bounds; a page
+ * taller or wider still is letterboxed inside them rather than cropped.
+ */
+export const FLOATING_PREVIEW_MIN_PAGE_ASPECT = 0.75;
+export const FLOATING_PREVIEW_MAX_PAGE_ASPECT = 2;
 export const FLOATING_PREVIEW_MIN_WIDTH = 200;
 export const FLOATING_PREVIEW_MAX_WIDTH = 560;
 /** One arrow-key press on the resize handle. */
@@ -243,30 +301,77 @@ export const FLOATING_PREVIEW_RESIZE_STEP_PX = 24;
 /** A resized card never takes more than this share of the pane's width. */
 const FLOATING_PREVIEW_MAX_PANE_SHARE = 0.6;
 
-export const FLOATING_PREVIEW_MIN_CARD_SIZE: FloatingPreviewSize = {
-  width: FLOATING_PREVIEW_MIN_WIDTH,
-  height: Math.round(FLOATING_PREVIEW_MIN_WIDTH * FLOATING_PREVIEW_ASPECT),
-};
+/** The page area's shape for a tab's viewport: its own, kept within the card's bounds. */
+export function floatingPreviewPageAspect(viewport: FloatingPreviewSize | null): number {
+  if (!viewport || viewport.width <= 0 || viewport.height <= 0) {
+    return DEFAULT_FLOATING_PREVIEW_PAGE_ASPECT;
+  }
+  return Math.min(
+    FLOATING_PREVIEW_MAX_PAGE_ASPECT,
+    Math.max(FLOATING_PREVIEW_MIN_PAGE_ASPECT, viewport.width / viewport.height),
+  );
+}
+
+/** The smallest card for a page shape, which the pane must fit to float it. */
+export function floatingPreviewMinCardSize(
+  pageAspect: number = DEFAULT_FLOATING_PREVIEW_PAGE_ASPECT,
+): FloatingPreviewSize {
+  return {
+    width: FLOATING_PREVIEW_MIN_WIDTH,
+    height: Math.round(FLOATING_PREVIEW_MIN_WIDTH / pageAspect) + FLOATING_PREVIEW_TITLE_HEIGHT,
+  };
+}
 
 /**
  * The card's size for the width the user chose (null: the default), shrunk to
- * fit the pane it floats over. The stored width stays as chosen, so a pane that
- * grows again gets the chosen size back.
+ * fit the pane it floats over: the page area in the page's shape, then the
+ * title strip. The stored width stays as chosen, so a pane that grows again
+ * gets the chosen size back.
  */
 export function floatingPreviewCardSize(
   preferredWidth: number | null,
   pane: FloatingPreviewSize,
   insets: { readonly bottom: number; readonly right?: number },
+  pageAspect: number = DEFAULT_FLOATING_PREVIEW_PAGE_ASPECT,
 ): FloatingPreviewSize {
   const roomWidth = (pane.width - (insets.right ?? 0)) * FLOATING_PREVIEW_MAX_PANE_SHARE;
-  const roomHeight = pane.height - insets.bottom - FLOATING_PREVIEW_MARGIN * 2;
+  const roomHeight =
+    pane.height - insets.bottom - FLOATING_PREVIEW_MARGIN * 2 - FLOATING_PREVIEW_TITLE_HEIGHT;
   const maxWidth = Math.max(
     FLOATING_PREVIEW_MIN_WIDTH,
-    Math.min(FLOATING_PREVIEW_MAX_WIDTH, roomWidth, roomHeight / FLOATING_PREVIEW_ASPECT),
+    Math.min(FLOATING_PREVIEW_MAX_WIDTH, roomWidth, roomHeight * pageAspect),
   );
   const preferred = preferredWidth ?? FLOATING_PREVIEW_CARD_WIDTH;
   const width = Math.round(Math.min(maxWidth, Math.max(FLOATING_PREVIEW_MIN_WIDTH, preferred)));
-  return { width, height: Math.round(width * FLOATING_PREVIEW_ASPECT) };
+  return { width, height: Math.round(width / pageAspect) + FLOATING_PREVIEW_TITLE_HEIGHT };
+}
+
+export interface FloatingPreviewPageFrame {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+  /** Box px per page px. */
+  readonly scale: number;
+}
+
+/**
+ * Where a page draws in the card's page area: its whole viewport, scaled down
+ * (or up) to fit and centred, never cropped. `page` is whatever size the frame
+ * or viewport is reported in; only its shape and the box decide the result.
+ * Null until both have a size, so nothing draws at a guessed scale.
+ */
+export function floatingPreviewPageFrame(
+  page: FloatingPreviewSize | null,
+  box: FloatingPreviewSize,
+): FloatingPreviewPageFrame | null {
+  if (!page || page.width <= 0 || page.height <= 0 || box.width <= 0 || box.height <= 0) {
+    return null;
+  }
+  const scale = Math.min(box.width / page.width, box.height / page.height);
+  const width = page.width * scale;
+  const height = page.height * scale;
+  return { left: (box.width - width) / 2, top: (box.height - height) / 2, width, height, scale };
 }
 
 /**
@@ -302,9 +407,10 @@ export function resizeFloatingPreviewWidth(
   startWidth: number,
   handle: FloatingPreviewCorner,
   delta: { readonly dx: number; readonly dy: number },
+  pageAspect: number = DEFAULT_FLOATING_PREVIEW_PAGE_ASPECT,
 ): number {
   const fromX = (handle.endsWith("right") ? 1 : -1) * delta.dx;
-  const fromY = ((handle.startsWith("bottom") ? 1 : -1) * delta.dy) / FLOATING_PREVIEW_ASPECT;
+  const fromY = (handle.startsWith("bottom") ? 1 : -1) * delta.dy * pageAspect;
   return startWidth + (Math.abs(fromX) >= Math.abs(fromY) ? fromX : fromY);
 }
 
@@ -349,45 +455,4 @@ export function resolveFloatingPreviewDriver(input: {
   if (input.desktopController === "human") return "you";
   if (input.agentDriving || input.desktopController === "agent") return "agent";
   return "none";
-}
-
-export interface FloatingPreviewStatus {
-  /** The chip's label; null keeps the card's title row to itself. */
-  readonly chip: string | null;
-  readonly headline: string;
-  /** What the page is doing right now, in a few words. */
-  readonly activity: string;
-  /**
-   * How you take over: "stream" asks the environment's browser for control
-   * once the panel connects; "page" opens the panel, where using the page
-   * takes over. Null when nobody else drives.
-   */
-  readonly takeOver: "stream" | "page" | null;
-}
-
-/** What the card's driver chip says and offers. */
-export function floatingPreviewStatus(input: {
-  readonly driver: FloatingPreviewDriver;
-  readonly navStatus: PreviewNavStatus;
-  /** The tab streams from the environment's browser, which hands over control explicitly. */
-  readonly streamed: boolean;
-}): FloatingPreviewStatus {
-  const host = floatingPreviewHost(input.navStatus);
-  const activity =
-    input.navStatus._tag === "Loading"
-      ? `Loading ${host}`
-      : input.navStatus._tag === "LoadFailed"
-        ? `Couldn't load ${host}`
-        : `On ${host}`;
-  const takeOver = input.streamed ? "stream" : "page";
-  switch (input.driver) {
-    case "agent":
-      return { chip: "Agent", headline: "Agent is driving", activity, takeOver };
-    case "another-viewer":
-      return { chip: "Viewer", headline: "Another viewer is driving", activity, takeOver };
-    case "you":
-      return { chip: null, headline: "You're driving", activity, takeOver: null };
-    case "none":
-      return { chip: null, headline: "Nobody is driving", activity, takeOver: null };
-  }
 }

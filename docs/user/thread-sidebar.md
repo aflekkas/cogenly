@@ -352,6 +352,11 @@ repositories. A project can hold several repositories, but each repository and e
 thread is in at most one project. Work goes in its repository's project unless you move
 it. Projects are context only; they never change what an agent can access.
 
+**When to make a project.** Make one when work spans several repositories, or is a big effort with its own
+files, instructions and agents. A single repository, a side project or a class repo works
+fine on its own: it stays under **No project**, and agents clone it there too. You can
+always add a project later and move work into it.
+
 If two projects created separately on paired machines have the same name, choose
 **Merge** to move their contents into one project, or **Keep separate** to dismiss the
 suggestion on every machine. Merging removes the source project everywhere and cannot

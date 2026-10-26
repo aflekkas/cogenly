@@ -1,3 +1,4 @@
+import { BrowserCookieImportSettings } from "./BrowserCookieImportSettings";
 import { OverlayPresence, useLastPresent } from "~/components/ui/overlay-presence";
 import { DeviceHostUpdates } from "../device/DeviceHostUpdates";
 import { DeviceToolVersions } from "../device/DeviceToolVersions";
@@ -1524,6 +1525,7 @@ export function IntegrationsSettingsPanel() {
           the preview defaults below are device-local and ignore it. */}
       <ProjectDefaultsSettings category="integrations" />
       <SettingsSection id="browser" title="Browser">
+        <BrowserCookieImportSettings />
         {previewDefaultsDisabled ? (
           <SettingsUnavailableGroup message="Only available in the desktop app.">
             {previewDefaults}

@@ -3,6 +3,10 @@
 // --disable-gpu uses cheaper software compositing while preserving SwiftShader WebGL.
 import {
   BUILT_IN_BROWSER_PROFILES,
+  type BrowserCookieImportInput,
+  type BrowserCookieImportResult,
+  BrowserCookieImportError,
+  type BrowserImportSource,
   DEFAULT_BROWSER_PROFILE_ID,
   FILL_PREVIEW_VIEWPORT,
   findBrowserProfile,
@@ -47,6 +51,7 @@ import {
   type PreviewAppearancePreference,
   type SitePermissionsState,
 } from "@cogenly/contracts";
+import * as LocalBrowserCookies from "@cogenly/shared/browserCookies/LocalBrowserCookies";
 import * as HostProcess from "@cogenly/shared/HostProcess";
 import { normalizePreviewUrl } from "@cogenly/shared/preview";
 import { resolvePreviewViewport } from "@cogenly/shared/previewViewport";
@@ -277,6 +282,10 @@ export class ServerBrowser extends Context.Service<
       readonly downloadId: string;
     }) => Effect.Effect<Option.Option<{ readonly path: string; readonly fileName: string }>>;
     /** Deletes a human profile's server-side storage, closing its open tabs first. */
+    readonly cookieSources: Effect.Effect<ReadonlyArray<BrowserImportSource>>;
+    readonly importCookies: (
+      input: BrowserCookieImportInput,
+    ) => Effect.Effect<BrowserCookieImportResult, BrowserCookieImportError>;
     readonly clearProfile: (profileId: string) => Effect.Effect<void, PreviewClearProfileError>;
     /**
      * Records a client's browser profiles for agents' preview_open. In memory:
@@ -570,6 +579,7 @@ const make = Effect.gen(function* () {
   const isShown = (tab: ServerTab) =>
     Targeting.isTabShown(targetable(tab), { reported: shownReport });
 
+  const cookieReader = yield* LocalBrowserCookies.LocalBrowserCookies;
   const contexts = new ServerBrowserContexts({
     profilesDir: NodePath.join(config.stateDir, "server-browser", "profiles"),
     executable: () => Effect.runPromise(previewBrowser.executable),
@@ -2991,10 +3001,95 @@ const make = Effect.gen(function* () {
     Effect.tryPromise({
       try: () => contexts.clearProfile(profileId),
       catch: (cause) => new PreviewClearProfileError({ profileId, cause }),
-    });
+    }).pipe(
+      Effect.andThen(() =>
+        desktopChannel.available
+          ? desktopChannel.clearProfile(environmentId, profileId).pipe(
+              Effect.flatMap((success) =>
+                success
+                  ? Effect.void
+                  : Effect.fail(
+                      new PreviewClearProfileError({
+                        profileId,
+                        cause: new Error("Desktop profile clear failed"),
+                      }),
+                    ),
+              ),
+            )
+          : Effect.void,
+      ),
+    );
 
   return ServerBrowser.of({
     attachViewer,
+    cookieSources: cookieReader.listSources,
+    importCookies: (input) =>
+      Effect.gen(function* () {
+        const targetProfileId = yield* Effect.try({
+          try: () => resolveOpenProfile(input.targetProfileId ?? "default") ?? "default",
+          catch: () =>
+            new BrowserCookieImportError({
+              message: "Choose an existing Cogenly browser profile from preview_status.",
+            }),
+        });
+        return yield* Effect.suspend(() => {
+          // A blank page supplies a CDP channel for this context only. No existing tab is navigated.
+          let writer: Promise<{ page: Page; cdp: CDPSession }> | undefined;
+          return cookieReader
+            .importCookies({ ...input, targetProfileId }, async (profileId, cookie) => {
+              writer ??= contexts.contextFor(profileId).then(async (context) => {
+                const page = await context.newPage();
+                try {
+                  return { page, cdp: await context.newCDPSession(page) };
+                } catch {
+                  await page.close().catch(constVoid);
+                  throw new Error("Cookie writer unavailable");
+                }
+              });
+              const { cdp } = await writer;
+              // CDP accepts url+path together. Playwright's addCookies derives host-only cookie
+              // paths from the URL's parent directory, losing an exact source path such as /auth.
+              const result = await cdp.send("Network.setCookie", {
+                url: cookie.url,
+                name: cookie.name,
+                value: cookie.value,
+                path: cookie.path,
+                ...(cookie.domain === undefined ? {} : { domain: cookie.domain }),
+                secure: cookie.secure,
+                httpOnly: cookie.httpOnly,
+                ...(cookie.expirationDate === undefined ? {} : { expires: cookie.expirationDate }),
+                ...(cookie.sameSite === "unspecified"
+                  ? {}
+                  : {
+                      sameSite:
+                        cookie.sameSite === "no_restriction"
+                          ? ("None" as const)
+                          : cookie.sameSite === "strict"
+                            ? ("Strict" as const)
+                            : ("Lax" as const),
+                    }),
+              });
+              if (!result.success) throw new Error("Cookie rejected");
+              if (
+                desktopChannel.available &&
+                !(await Effect.runPromise(
+                  desktopChannel.importCookie(environmentId, profileId, cookie),
+                ))
+              ) {
+                throw new Error("Desktop cookie rejected");
+              }
+            })
+            .pipe(
+              Effect.ensuring(
+                Effect.promise(async () => {
+                  const acquired = await writer?.catch(() => undefined);
+                  await acquired?.cdp.detach().catch(constVoid);
+                  await acquired?.page.close().catch(constVoid);
+                }),
+              ),
+            );
+        });
+      }),
     clearProfile,
     reportProfiles,
     reportShown,
@@ -3003,4 +3098,6 @@ const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(ServerBrowser, make);
+export const layer = Layer.effect(ServerBrowser, make).pipe(
+  Layer.provide(LocalBrowserCookies.layer),
+);

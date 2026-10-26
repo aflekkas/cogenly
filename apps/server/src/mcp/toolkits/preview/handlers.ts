@@ -1,3 +1,4 @@
+import * as ServerBrowser from "../../../preview/ServerBrowser.ts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
@@ -190,6 +191,13 @@ export const claimPreviewRecording = Effect.fn("PreviewToolkit.claimRecording")(
 });
 
 const handlers = {
+  browser_cookie_sources: McpToolAccess.readsAsCaller(() =>
+    Effect.flatMap(ServerBrowser.ServerBrowser, (browser) => browser.cookieSources),
+  ),
+  browser_import_cookies: McpToolAccess.actsAsCaller(
+    (input: import("@cogenly/contracts").BrowserCookieImportInput) =>
+      Effect.flatMap(ServerBrowser.ServerBrowser, (browser) => browser.importCookies(input)),
+  ),
   preview_dialog: McpToolAccess.actsAsCaller((input) =>
     invokeTargeted<PreviewAutomationStatus>("dialog", input),
   ),

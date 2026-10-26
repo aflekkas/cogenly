@@ -115,6 +115,9 @@ export function mergeThreadMoveResults(results: ReadonlyArray<ThreadMoveResult>)
   return {
     moved: results.flatMap((result) => result.moved),
     skipped: results.flatMap((result) => result.skipped),
+    ...(results.some((result) => result.branches !== undefined)
+      ? { branches: results.flatMap((result) => result.branches ?? []) }
+      : {}),
   };
 }
 
@@ -150,6 +153,15 @@ export interface ThreadMoveSummary {
   readonly localChanges: ReadonlyArray<ThreadId>;
 }
 
+function describePreservedBranches(result: ThreadMoveResult): string | null {
+  const preserved = (result.branches ?? []).filter(
+    (branch) => branch.preservedBranch !== undefined,
+  );
+  return preserved.length === 0
+    ? null
+    : `Preserved destination work as ${preserved.map((branch) => branch.preservedBranch).join(", ")}.`;
+}
+
 /** The toast a finished thread move shows. */
 export function summarizeThreadMove(
   result: ThreadMoveResult,
@@ -159,7 +171,11 @@ export function summarizeThreadMove(
   const localChanges = result.skipped
     .filter((skip) => skip.reason === "local-changes")
     .map((skip) => skip.threadId);
-  const description = result.skipped.length > 0 ? describeThreadMoveSkips(result.skipped) : null;
+  const preserved = describePreservedBranches(result);
+  const description =
+    [result.skipped.length > 0 ? describeThreadMoveSkips(result.skipped) : null, preserved]
+      .filter(Boolean)
+      .join(" ") || null;
   if (result.skipped.length === 0) {
     return {
       type: "success",
@@ -167,7 +183,7 @@ export function summarizeThreadMove(
         total === 1
           ? `Moved to ${targetName}`
           : `Moved ${plural(total, "thread")} to ${targetName}`,
-      description: `${targetName} runs ${total === 1 ? "it" : "them"} from now on.`,
+      description: preserved ?? `${targetName} runs ${total === 1 ? "it" : "them"} from now on.`,
       localChanges,
     };
   }
@@ -199,7 +215,9 @@ export function summarizeProjectMove(
   const { moved, skipped } = result.threads;
   const failedRepositories = result.repositories.filter((repo) => repo.status === "failed");
   const cloning = result.repositories.filter((repo) => repo.status === "cloning").length;
+  const preserved = describePreservedBranches(result.threads);
   const parts: string[] = [];
+  if (preserved !== null) parts.push(preserved);
   if (cloning > 0) parts.push(`${targetName} is cloning ${plural(cloning, "repository")}.`);
   if (failedRepositories.length === 1) {
     const failed = failedRepositories[0]!;

@@ -1,3 +1,4 @@
+import * as ServerBrowser from "../../preview/ServerBrowser.ts";
 import * as StorageCleanup from "../../storageCleanup.ts";
 import * as Accounts from "../../accounts/Accounts.ts";
 import * as AccountAccess from "../../accounts/AccountAccess.ts";
@@ -357,6 +358,13 @@ const decodeDeniedCall = Schema.decodeEffect(
 
 const smokeCases = [
   {
+    toolkit: "browserCookies",
+    names: [],
+    tool: "browser_import_cookies",
+    args: { sourceId: "firefox", domains: ["github.com"], dryRun: true },
+    expected: { targetProfileId: "default", dryRun: true, available: 2, imported: 0 },
+  },
+  {
     toolkit: "search",
     names: ["search"],
     tool: "search",
@@ -666,6 +674,8 @@ const smokeCases = [
   {
     toolkit: "preview",
     names: [
+      "browser_cookie_sources",
+      "browser_import_cookies",
       "preview_click",
       "preview_dialog",
       "preview_drag",
@@ -899,6 +909,22 @@ it.effect.each(smokeCases)(
                   title: null,
                   loading: false,
                 } as A),
+            }),
+          ),
+          Layer.provide(
+            Layer.mock(ServerBrowser.ServerBrowser)({
+              cookieSources: Effect.succeed([]),
+              importCookies: (input) =>
+                Effect.succeed({
+                  targetProfileId: input.targetProfileId ?? "default",
+                  dryRun: input.dryRun ?? false,
+                  available: 2,
+                  imported: 0,
+                  skipped: 0,
+                  domains: [{ domain: "github.com", count: 2 }],
+                  warnings: [],
+                  reloadRequired: false,
+                }),
             }),
           ),
           Layer.provide(PreviewBrowser.layer),
