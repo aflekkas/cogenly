@@ -531,13 +531,15 @@ export type IntegrationTestResult = typeof IntegrationTestResult.Type;
 
 /** Bounded OAuth diagnostics, without request URLs, codes or credentials. */
 export const IntegrationOAuthFailure = Schema.Struct({
-  stage: Schema.String,
-  host: Schema.String,
+  stage: Schema.String.check(Schema.isMaxLength(32)),
+  host: Schema.String.check(Schema.isMaxLength(260)),
   status: Schema.optional(Schema.Number),
-  error: Schema.optional(Schema.String),
-  description: Schema.optional(Schema.String),
+  error: Schema.optional(Schema.String.check(Schema.isMaxLength(64))),
+  description: Schema.optional(Schema.String.check(Schema.isMaxLength(500))),
 });
 export type IntegrationOAuthFailure = typeof IntegrationOAuthFailure.Type;
+
+const isOAuthFailure = Schema.is(IntegrationOAuthFailure);
 
 export const integrationOAuthFailureMessage = (failure: IntegrationOAuthFailure) =>
   `OAuth ${failure.stage} failed at ${failure.host}${failure.status === undefined ? "" : ` (HTTP ${failure.status})`}${failure.error ? `: ${failure.error}` : ""}${failure.description ? ` (${failure.description})` : ""}.`;
@@ -569,7 +571,8 @@ export class IntegrationError extends Schema.TaggedError<IntegrationError>()("In
   cause: Schema.optional(Schema.Defect()),
 }) {
   override get message(): string {
-    if (this.oauthFailure) return integrationOAuthFailureMessage(this.oauthFailure);
+    const diagnostic = this.oauthFailure ?? (isOAuthFailure(this.cause) ? this.cause : undefined);
+    if (diagnostic) return integrationOAuthFailureMessage(diagnostic);
     return `Could not ${this.operation} integration (${this.reason}).`;
   }
 }

@@ -547,10 +547,129 @@ describe("Integration OAuth sign-in", () => {
           error: "invalid_redirect_uri",
           description: "Register the callback first",
         });
+        expect(error.cause).toEqual(error.oauthFailure);
         expect(error.message).toContain("HTTP 400");
         expect((yield* statusOf(integration.id))?.message).toBe(error.message);
       }),
     ).pipe(Effect.provide(gatewayLayer())),
+  );
+
+  it.effect.each(["stored", "supplied"] as const)(
+    "re-registers a rejected %s client once and completes sign-in",
+    (source) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* runMigrations();
+          const mock = yield* startMockAuthServer;
+          const service = yield* Integrations.Integrations;
+          const { integration } = yield* service.create({
+            ...linearInput(mock, `stale-${source}`),
+            ...(source === "supplied"
+              ? { auth: { type: "oauth" as const, clientId: "stale-client" } }
+              : {}),
+          });
+          if (source === "stored") {
+            yield* signIn(integration.id, "before");
+            mock.clients.clear();
+          }
+          const registrations = mock.registrations;
+          const attempts = mock.authorizationRequests;
+          const link = yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN });
+          expect(mock.registrations).toBe(registrations + 1);
+          expect(mock.authorizationRequests).toBe(attempts + 2);
+          expect(new URL(link.authorizationUrl).searchParams.get("client_id")).toBe(
+            `client-${mock.registrations}`,
+          );
+          expect((yield* statusOf(integration.id))?.integration.auth?.clientId).toBeUndefined();
+          yield* service.completeSignIn(yield* consent(link.authorizationUrl, "after"));
+          expect(yield* whoami(`stale-${source}`)).toContain("account=after");
+        }),
+      ).pipe(Effect.provide(gatewayLayer())),
+  );
+
+  it.effect("does not loop if a replacement client is rejected and surfaces the final detail", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const mock = yield* startMockAuthServer;
+        const service = yield* Integrations.Integrations;
+        const { integration } = yield* service.create({
+          ...linearInput(mock, "twice"),
+          auth: { type: "oauth", clientId: "stale" },
+        });
+        mock.authorizationError = {
+          status: 401,
+          error: "invalid_client",
+          error_description: "Client registration expired",
+        };
+        const error = yield* service
+          .beginSignIn(integration.id, { origin: COGENLY_ORIGIN })
+          .pipe(Effect.flip);
+        expect(mock.registrations).toBe(1);
+        expect(mock.authorizationRequests).toBe(2);
+        expect(error.cause).toEqual({
+          stage: "authorize",
+          host: new URL(mock.base).host,
+          status: 401,
+          error: "invalid_client",
+          description: "Client registration expired",
+        });
+        expect((yield* statusOf(integration.id))?.message).toBe(error.message);
+      }),
+    ).pipe(Effect.provide(gatewayLayer())),
+  );
+
+  it.effect("does not replace a client for a scope failure", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const mock = yield* startMockAuthServer;
+        const integration = yield* addLinear(mock, "scope-error");
+        mock.authorizationError = {
+          status: 400,
+          error: "invalid_scope",
+          error_description: "Choose a supported scope",
+        };
+        const service = yield* Integrations.Integrations;
+        const error = yield* service
+          .beginSignIn(integration.id, { origin: COGENLY_ORIGIN })
+          .pipe(Effect.flip);
+        expect(mock.registrations).toBe(1);
+        expect(mock.authorizationRequests).toBe(1);
+        expect(error.cause).toMatchObject({
+          stage: "authorize",
+          status: 400,
+          error: "invalid_scope",
+        });
+      }),
+    ).pipe(Effect.provide(gatewayLayer())),
+  );
+
+  it.effect(
+    "a loopback agent hands sign-in to the card without recording an upstream failure",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* runMigrations();
+          const mock = yield* startMockAuthServer;
+          const integration = yield* addLinear(mock, "browser-origin");
+          const service = yield* Integrations.Integrations;
+          const result = yield* service.prepareSignIn(integration.id, {
+            origin: "http://localhost:3000",
+            fromAgent: true,
+          });
+          expect(result.setup?.type).toBe("sign_in");
+          const summary = yield* statusOf(integration.id);
+          expect(summary?.status).toBe("needs_sign_in");
+          expect(summary?.message ?? "").not.toContain("invalid_request");
+          expect(summary?.setup?.type).toBe("sign_in");
+          expect(mock.registrations).toBe(0);
+          const link = yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN });
+          expect(new URL(link.authorizationUrl).searchParams.get("redirect_uri")).toBe(
+            `${COGENLY_ORIGIN}${CALLBACK_PATH}`,
+          );
+        }),
+      ).pipe(Effect.provide(gatewayLayer())),
   );
 
   it.effect("uses CIMD on a public HTTPS callback when the AS has no DCR", () =>
@@ -672,6 +791,7 @@ describe("Integration OAuth sign-in", () => {
           },
           { approveCredentials: true },
         );
+        mock.clients.set("manual-client", [`${COGENLY_ORIGIN}${CALLBACK_PATH}`]);
         const link = yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN });
         expect(
           yield* service
