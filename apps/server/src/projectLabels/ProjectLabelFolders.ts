@@ -6,6 +6,7 @@ import {
 } from "@cogenly/contracts";
 import * as HostProcess from "@cogenly/shared/HostProcess";
 import { UNFILED_REPOSITORIES_SEGMENT, sanitizePathSegment } from "@cogenly/shared/path";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Context from "effect/Context";
 import * as FileSystem from "effect/FileSystem";
@@ -22,6 +23,7 @@ import * as ServerConfig from "../config.ts";
 import { resolveProjectsRootDirectory } from "../project/ProjectsRoot.ts";
 import { isWorktreesSegment } from "../worktreesDirectory.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { FolderTrash, type FolderTrashError, removeEmptySkeleton } from "./FolderDisposal.ts";
 
 export const PROJECT_LABEL_ID_FILE = ".cogenly-project.json";
 export const PROJECT_LABEL_RESOURCES_SEGMENT = "Resources";
@@ -100,14 +102,18 @@ export class ProjectLabelFolders extends Context.Service<
     /**
      * Folders directly under the projects root that no project claims: no id
      * file, or one naming a project that no longer exists. `Repositories/`
-     * and worktree folders are never orphans.
+     * and worktree folders are never orphans. A leftover holding only the
+     * empty skeleton is removed instead of listed once it is ten minutes old
+     * (younger, it may be a create in flight, and stays unlisted).
      */
     readonly listOrphans: Effect.Effect<
       ReadonlyArray<ProjectOrphanFolder>,
       ProjectLabelFolderError
     >;
-    /** Deletes an orphan that is only a skeleton; false when it holds anything else. */
-    readonly removeOrphan: (dirName: string) => Effect.Effect<boolean, ProjectLabelFolderError>;
+    /** Moves a listed orphan to the Trash; false when it is no longer an orphan. */
+    readonly trashOrphan: (
+      dirName: string,
+    ) => Effect.Effect<boolean, ProjectLabelFolderError | FolderTrashError>;
     /**
      * Startup pass: folders whose id file matches a label become that
      * label's folder even after a Finder rename, and labels without a
@@ -121,6 +127,13 @@ export class ProjectLabelFolders extends Context.Service<
 >()("cogenly-server/projectLabels/ProjectLabelFolders") {}
 
 const MAX_DIR_NAME_ATTEMPTS = 100;
+const SKELETON_TIDY_GRACE_MS = 10 * 60 * 1000;
+
+// The folders Cogenly makes inside a project folder.
+const isReservedSegment = (entry: string) =>
+  entry === PROJECT_LABEL_RESOURCES_SEGMENT ||
+  entry === PROJECT_REPOSITORIES_SEGMENT ||
+  isWorktreesSegment(entry);
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -129,6 +142,7 @@ const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const home = yield* HostProcess.HomeDirectory;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const trash = yield* FolderTrash;
   // Label id to directory name, from the last reconcile or refresh.
   const folders = yield* Ref.make(new Map<string, string>());
   const mergePermit = yield* Semaphore.make(1);
@@ -284,11 +298,7 @@ const make = Effect.gen(function* () {
       for (const entry of entries) {
         // Finder drops `.DS_Store` into any folder it opens.
         if (entry === PROJECT_LABEL_ID_FILE || entry === ".DS_Store") continue;
-        const reserved =
-          entry === PROJECT_LABEL_RESOURCES_SEGMENT ||
-          entry === PROJECT_REPOSITORIES_SEGMENT ||
-          isWorktreesSegment(entry);
-        if (!reserved) return false;
+        if (!isReservedSegment(entry)) return false;
         const full = path.join(dir, entry);
         if (!(yield* isDirectory(full))) return false;
         const inside = yield* fileSystem
@@ -564,6 +574,19 @@ const make = Effect.gen(function* () {
     return { dir, dirName };
   });
 
+  // Removes a folder holding only the empty skeleton. Each folder goes by
+  // rmdir, so anything else in it, even a file written meanwhile, keeps it.
+  const deleteSkeleton = (dir: string) =>
+    Effect.gen(function* () {
+      if (!(yield* isSkeleton(dir))) return false;
+      const entries = yield* fileSystem.readDirectory(dir).pipe(Effect.orElseSucceed(() => []));
+      return yield* removeEmptySkeleton(
+        dir,
+        PROJECT_LABEL_ID_FILE,
+        entries.filter(isReservedSegment),
+      );
+    });
+
   const removeSkeleton: ProjectLabelFolders["Service"]["removeSkeleton"] = Effect.fn(
     "ProjectLabelFolders.removeSkeleton",
   )(function* (label) {
@@ -571,10 +594,7 @@ const make = Effect.gen(function* () {
     if (!(yield* isDirectory(dir))) return false;
     const id = yield* readIdFile(dir);
     if (Option.isSome(id) && id.value !== label.id) return false;
-    if (!(yield* isSkeleton(dir))) return false;
-    yield* fileSystem
-      .remove(dir, { recursive: true })
-      .pipe(Effect.mapError(fail("remove", label, dir)));
+    if (!(yield* deleteSkeleton(dir))) return false;
     yield* Ref.update(folders, (all) => {
       const next = new Map(all);
       next.delete(label.id);
@@ -582,6 +602,17 @@ const make = Effect.gen(function* () {
     });
     return true;
   });
+
+  // A skeleton this young may be a project's folder mid-create (made, marker
+  // not yet written), so it is neither tidied nor listed until it settles.
+  const isSettled = (dir: string) =>
+    Effect.gen(function* () {
+      const stat = yield* fileSystem.stat(dir).pipe(Effect.option);
+      const modified = Option.flatMap(stat, (info) => info.mtime);
+      if (Option.isNone(modified)) return false;
+      const now = yield* Clock.currentTimeMillis;
+      return now - modified.value.getTime() >= SKELETON_TIDY_GRACE_MS;
+    });
 
   const listOrphans: ProjectLabelFolders["Service"]["listOrphans"] = Effect.gen(function* () {
     const root = yield* projectsRoot;
@@ -604,24 +635,29 @@ const make = Effect.gen(function* () {
       if (!(yield* isDirectory(dir))) continue;
       const id = yield* readIdFile(dir);
       if (Option.isSome(id) && !(yield* isAbandonedMarker(id.value))) continue;
+      // Auto-tidy: an empty leftover is removed rather than shown.
+      if (yield* isSkeleton(dir)) {
+        if (!(yield* isSettled(dir))) continue;
+        if (yield* deleteSkeleton(dir)) {
+          yield* Effect.logInfo("Removed an empty leftover project folder", { dir });
+          continue;
+        }
+      }
       orphans.push({
         dirName: entry,
         path: dir,
         reason: Option.isSome(id) ? "deleted_project" : "no_marker",
-        empty: yield* isSkeleton(dir),
       });
     }
     return orphans;
   });
 
-  const removeOrphan: ProjectLabelFolders["Service"]["removeOrphan"] = Effect.fn(
-    "ProjectLabelFolders.removeOrphan",
+  const trashOrphan: ProjectLabelFolders["Service"]["trashOrphan"] = Effect.fn(
+    "ProjectLabelFolders.trashOrphan",
   )(function* (dirName) {
     const orphan = (yield* listOrphans).find((candidate) => candidate.dirName === dirName);
-    if (orphan === undefined || !orphan.empty) return false;
-    yield* fileSystem
-      .remove(orphan.path, { recursive: true })
-      .pipe(Effect.mapError(fail("remove", undefined, orphan.path)));
+    if (orphan === undefined) return false;
+    yield* trash.moveToTrash(orphan.path);
     return true;
   });
 
@@ -631,7 +667,7 @@ const make = Effect.gen(function* () {
     claimForLabel,
     removeSkeleton,
     listOrphans,
-    removeOrphan,
+    trashOrphan,
     projectsRoot,
     dirForLabel,
     dirNameForLabel,

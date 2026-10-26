@@ -392,6 +392,13 @@ to remove it from this machine or the project, and the page's **⋯** menu to re
 recolor, describe or delete the project. Deleting a project keeps its chats, Work and repositories; they are just no
 longer in a folder. Start one with **New project** on the page or in the command palette.
 
+Deleting a project also removes its folder if it is empty. If you put files in it, the
+folder stays on disk and shows under **Leftover folders** at the bottom of **Settings →
+Projects**, along with any other folder in your projects folder that no project uses.
+Each machine lists its own. Open one to look inside, choose **Turn into project** to keep
+working with it, or **Move to Trash**. You can put it back from the Trash. Cogenly cleans
+up empty leftover folders by itself.
+
 You can also ask an agent in any chat or Work to set a project up or change it: add a
 repository, link GitHub, set the instructions its agents follow, rename or recolor it, or
 archive it.

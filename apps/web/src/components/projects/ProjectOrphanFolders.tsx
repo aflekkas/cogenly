@@ -12,6 +12,8 @@ import type {
 import { useState } from "react";
 
 import { requestConfirmDialog } from "../../confirmDialog";
+import { isElectron } from "../../env";
+import { useServerConfigs } from "../../state/entities";
 import {
   useConnectedEnvironmentIds,
   useEnvironmentIdentities,
@@ -19,16 +21,22 @@ import {
 } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
+import { shellEnvironment } from "../../state/shell";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { SettingsRow, SettingsSection } from "../settings/settingsLayout";
+import {
+  revealInFileExplorerLabelForKind,
+  revealInFileExplorerLabelForOs,
+} from "../preview/fileExplorerLabel";
+import { FoldedSettingsSection } from "../settings/FoldedSettingsSection";
+import { SettingsNote, SettingsRow } from "../settings/settingsLayout";
 import { Button } from "../ui/button";
 import { DisclosurePanel } from "../ui/disclosure";
 
 const NO_PERMISSION = "You don't have permission to change projects here.";
 
-// The section already says no project owns these; only a deleted project adds anything.
+// The fold already says no project uses these; only a deleted project adds anything.
 const REASON_LABEL: Record<ProjectOrphanFolder["reason"], string | null> = {
-  deleted_project: "Left by a deleted project",
+  deleted_project: "From a project you deleted",
   no_marker: null,
 };
 
@@ -52,41 +60,49 @@ function failureMessage(result: AtomCommandResult<unknown, unknown>): string | n
 }
 
 /**
- * Settings → Projects: folders under each connected machine's projects root
- * that no project claims, each adoptable as a project or, when only an empty
- * skeleton, removable. The page's selected machine comes first; a machine
- * with no such folders shows nothing.
+ * Settings → Projects, at the bottom: each connected machine's leftover
+ * folders, the ones in its projects folder that no project uses. The server
+ * tidies away empty ones, so a machine shows a fold only when a leftover
+ * holds something; each can become a project or go to the Trash. The page's
+ * selected machine comes first.
  */
 export function ProjectOrphanFolders(props: {
   readonly environmentId?: EnvironmentId | undefined;
 }) {
   const connected = useConnectedEnvironmentIds();
   const identities = useEnvironmentIdentities();
+  const serverConfigs = useServerConfigs();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const selected = props.environmentId ?? primaryEnvironmentId;
   const ordered =
     selected !== null && connected.includes(selected)
       ? [selected, ...connected.filter((id) => id !== selected)]
       : connected;
-  // The machine only says something when there is more than one.
-  const labelOf = (environmentId: EnvironmentId) =>
-    connected.length > 1
-      ? (identities.find((identity) => identity.environmentId === environmentId)?.label ?? null)
-      : null;
+  // "on this Mac" for the desktop app's own machine; other machines by name
+  // once there is more than one.
+  const whereOf = (environmentId: EnvironmentId) => {
+    if (isElectron && environmentId === primaryEnvironmentId) {
+      return serverConfigs.get(environmentId)?.environment.platform.os === "darwin"
+        ? "on this Mac"
+        : "on this computer";
+    }
+    const label = identities.find((identity) => identity.environmentId === environmentId)?.label;
+    return connected.length > 1 && label !== undefined ? `on ${label}` : null;
+  };
   return (
     <>
       {ordered.map((environmentId) => (
         <EnvironmentOrphanFolders
           key={environmentId}
           environmentId={environmentId}
-          environmentLabel={labelOf(environmentId)}
+          where={whereOf(environmentId)}
         />
       ))}
     </>
   );
 }
 
-type RowAction = "adopt" | "remove";
+type RowAction = "adopt" | "trash";
 
 /** A settled row: fading out, then hidden until `list` is replaced by a refresh. */
 type LeavingRow =
@@ -94,29 +110,33 @@ type LeavingRow =
   | { readonly phase: "closed"; readonly list: ProjectOrphanFoldersResult | null };
 
 /**
- * One machine's orphan folders. A settled row collapses and fades out first,
- * then the list refreshes, so nothing below it jumps.
+ * One machine's leftover folders, folded closed. A settled row collapses and
+ * fades out first, then the list refreshes, so nothing below it jumps.
  */
 function EnvironmentOrphanFolders(props: {
   readonly environmentId: EnvironmentId;
-  readonly environmentLabel: string | null;
+  readonly where: string | null;
 }) {
   const { environmentId } = props;
   const { data, refresh } = useEnvironmentQuery(
     serverEnvironment.projectOrphanFolders({ environmentId, input: {} }),
   );
+  const serverConfig = useServerConfigs().get(environmentId);
   const canAdopt = useAtomValue(
     serverEnvironment.adoptProjectOrphanFolder.permissionAtom(environmentId),
   );
-  const canRemove = useAtomValue(
-    serverEnvironment.removeProjectOrphanFolder.permissionAtom(environmentId),
+  const canTrash = useAtomValue(
+    serverEnvironment.trashProjectOrphanFolder.permissionAtom(environmentId),
   );
   const adopt = useAtomCommand(serverEnvironment.adoptProjectOrphanFolder, {
-    label: "adopt project folder",
+    label: "turn leftover folder into a project",
     reportFailure: false,
   });
-  const remove = useAtomCommand(serverEnvironment.removeProjectOrphanFolder, {
-    label: "remove project folder",
+  const trash = useAtomCommand(serverEnvironment.trashProjectOrphanFolder, {
+    label: "move leftover folder to the Trash",
+    reportFailure: false,
+  });
+  const revealInFileManager = useAtomCommand(shellEnvironment.revealInFileManager, {
     reportFailure: false,
   });
   const [pending, setPending] = useState<ReadonlyMap<string, RowAction>>(() => new Map());
@@ -131,6 +151,13 @@ function EnvironmentOrphanFolders(props: {
 
   const folders = data?.folders ?? [];
   const shown = folders.filter((folder) => !isLeaving(folder.dirName));
+  // Only a machine whose file manager the server can open gets the button.
+  const revealLabel =
+    serverConfig?.shellRevealInFileManager === true
+      ? serverConfig.shellRevealInFileManagerKind === undefined
+        ? revealInFileExplorerLabelForOs(serverConfig.environment.platform.os)
+        : revealInFileExplorerLabelForKind(serverConfig.shellRevealInFileManagerKind)
+      : null;
 
   const settle = (dirNames: ReadonlyArray<string>) => {
     if (dirNames.length === 0) return;
@@ -142,10 +169,18 @@ function EnvironmentOrphanFolders(props: {
     refresh();
   };
 
+  const reveal = async (folder: ProjectOrphanFolder) => {
+    const result = await revealInFileManager({ environmentId, input: { path: folder.path } });
+    const failed = failureMessage(result) !== null;
+    setErrors((current) =>
+      withEntry(current, folder.dirName, failed ? "Could not open the folder." : null),
+    );
+  };
+
   const run = async (folder: ProjectOrphanFolder, action: RowAction) => {
     const { dirName } = folder;
-    if (action === "remove") {
-      const message = `Delete ${dirName}?\nIt holds only the empty folders Cogenly made.`;
+    if (action === "trash") {
+      const message = `Move “${dirName}” to the Trash?\nYou can put it back from the Trash.`;
       const confirmed =
         (await requestConfirmDialog(message, { variant: "destructive" })) ??
         window.confirm(message);
@@ -154,107 +189,101 @@ function EnvironmentOrphanFolders(props: {
     setErrors((current) => withEntry(current, dirName, null));
     setPending((current) => withEntry(current, dirName, action));
     const input = { environmentId, input: { dirName } };
-    let error: string | null;
-    let settled: boolean;
-    if (action === "adopt") {
-      const result = await adopt(input);
-      error = failureMessage(result);
-      settled = result._tag === "Success";
-    } else {
-      const result = await remove(input);
-      error = failureMessage(result);
-      settled = result._tag === "Success" && result.value.removed;
-      // Something landed in it since the list loaded; the refresh shows it kept.
-      if (result._tag === "Success" && !result.value.removed) {
-        error = "It is no longer empty, so it was kept.";
-        refresh();
-      }
-    }
+    // Either way the folder stops being a leftover on success: trashed:false
+    // means something else already claimed or moved it.
+    const result = action === "adopt" ? await adopt(input) : await trash(input);
+    const error = failureMessage(result);
     setPending((current) => withEntry(current, dirName, null));
     if (error !== null) {
-      const message = error;
-      setErrors((current) => withEntry(current, dirName, message));
+      setErrors((current) => withEntry(current, dirName, error));
     }
-    if (settled) {
+    if (result._tag === "Success") {
       setLeaving((current) => withEntry<LeavingRow>(current, dirName, { phase: "closing" }));
     }
   };
 
-  const title = props.environmentLabel
-    ? `Folders without a project on ${props.environmentLabel}`
-    : "Folders without a project";
   return (
     <DisclosurePanel
       open={shown.length > 0}
-      // The last row leaves with the whole section; its own close never reports.
+      // The last row leaves with the whole fold; its own close never reports.
       onExitComplete={() =>
         settle(folders.flatMap((folder) => (isLeaving(folder.dirName) ? [folder.dirName] : [])))
       }
     >
-      <div className="flex min-w-0 flex-col gap-6">
-        <SettingsSection
-          title={title}
-          footer="Folders in the projects folder that no project owns. Make one a project, or remove it if Cogenly left it empty."
-        >
-          {folders.map((folder) => {
-            const action = pending.get(folder.dirName) ?? null;
-            const error = errors.get(folder.dirName) ?? null;
-            const reason = REASON_LABEL[folder.reason];
-            return (
-              <DisclosurePanel
-                key={folder.dirName}
-                open={!isLeaving(folder.dirName)}
-                onExitComplete={() => settle([folder.dirName])}
-              >
-                <SettingsRow
-                  title={folder.dirName}
-                  description={<span className="break-all">{folder.path}</span>}
-                  status={
-                    reason === null && error === null ? undefined : (
-                      <>
-                        {reason}
-                        {error !== null ? (
-                          <span
-                            key={error}
-                            role="alert"
-                            className="reveal-motion block text-destructive-foreground"
-                          >
-                            {error}
-                          </span>
-                        ) : null}
-                      </>
-                    )
-                  }
-                  control={
-                    <>
-                      {folder.empty ? (
-                        <Button
-                          size="sm"
-                          variant="ghost-destructive"
-                          disabled={!canRemove || action !== null}
-                          title={canRemove ? undefined : NO_PERMISSION}
-                          onClick={() => void run(folder, "remove")}
-                        >
-                          {action === "remove" ? "Removing…" : "Remove"}
-                        </Button>
-                      ) : null}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={!canAdopt || action !== null}
-                        title={canAdopt ? undefined : NO_PERMISSION}
-                        onClick={() => void run(folder, "adopt")}
-                      >
-                        {action === "adopt" ? "Making project…" : "Make project"}
+      <FoldedSettingsSection
+        id={`leftover-folders-${environmentId}`}
+        title={`Leftover folders (${shown.length})`}
+        summary={props.where}
+      >
+        <SettingsNote>
+          These folders are in your projects folder but no project uses them. Turn one into a
+          project to keep working with it, or move it to the Trash.
+        </SettingsNote>
+        {folders.map((folder) => {
+          const action = pending.get(folder.dirName) ?? null;
+          const error = errors.get(folder.dirName) ?? null;
+          const reason = REASON_LABEL[folder.reason];
+          return (
+            <DisclosurePanel
+              key={folder.dirName}
+              open={!isLeaving(folder.dirName)}
+              onExitComplete={() => settle([folder.dirName])}
+            >
+              <SettingsRow
+                title={folder.dirName}
+                // Without a file manager to open, the path is how to find it.
+                description={
+                  revealLabel === null ? (
+                    <span className="break-all">
+                      {reason === null ? folder.path : `${reason} · ${folder.path}`}
+                    </span>
+                  ) : (
+                    (reason ?? undefined)
+                  )
+                }
+                status={
+                  error === null ? undefined : (
+                    <span
+                      key={error}
+                      role="alert"
+                      className="reveal-motion block text-destructive-foreground"
+                    >
+                      {error}
+                    </span>
+                  )
+                }
+                control={
+                  <>
+                    {revealLabel !== null ? (
+                      <Button size="sm" variant="ghost" onClick={() => void reveal(folder)}>
+                        {revealLabel}
                       </Button>
-                    </>
-                  }
-                />
-              </DisclosurePanel>
-            );
-          })}
-        </SettingsSection>
-      </div>
+                    ) : null}
+                    <Button
+                      size="sm"
+                      variant="ghost-destructive"
+                      disabled={!canTrash || action !== null}
+                      title={canTrash ? undefined : NO_PERMISSION}
+                      onClick={() => void run(folder, "trash")}
+                    >
+                      {action === "trash" ? "Moving to Trash…" : "Move to Trash"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!canAdopt || action !== null}
+                      title={canAdopt ? undefined : NO_PERMISSION}
+                      onClick={() => void run(folder, "adopt")}
+                    >
+                      {action === "adopt" ? "Turning into project…" : "Turn into project"}
+                    </Button>
+                  </>
+                }
+              />
+            </DisclosurePanel>
+          );
+        })}
+      </FoldedSettingsSection>
     </DisclosurePanel>
   );
 }

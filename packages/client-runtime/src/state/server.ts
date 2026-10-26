@@ -1235,9 +1235,9 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.projectLabelsAdoptOrphanFolder,
     }),
     /** Delete an orphan folder that holds only an empty skeleton. */
-    removeProjectOrphanFolder: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:projectLabels:removeProjectOrphanFolder",
-      tag: WS_METHODS.projectLabelsRemoveOrphanFolder,
+    trashProjectOrphanFolder: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:trashProjectOrphanFolder",
+      tag: WS_METHODS.projectLabelsTrashOrphanFolder,
     }),
     moveThreadProjectFolder: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projectLabels:moveThreadProjectFolder",

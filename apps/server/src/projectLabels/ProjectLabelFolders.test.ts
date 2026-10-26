@@ -2,6 +2,7 @@ import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProjectLabelId } from "@cogenly/contracts";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -12,14 +13,34 @@ import * as ServerConfig from "../config.ts";
 import * as Events from "../persistence/OrchestrationEventStore.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { FolderTrash, removeEmptySkeleton } from "./FolderDisposal.ts";
 import * as Folders from "./ProjectLabelFolders.ts";
 import * as Labels from "./ProjectLabelService.ts";
 
 const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
 const persistence = Events.layer.pipe(Layer.provideMerge(database));
 
+// Beside the projects root, never the developer's own Trash.
+const trashOf = (root: string) => `${root}-trash`;
+const testTrash = Layer.effect(
+  FolderTrash,
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    return {
+      moveToTrash: (target: string) =>
+        Effect.gen(function* () {
+          const trash = trashOf(path.dirname(target));
+          yield* fs.makeDirectory(trash, { recursive: true });
+          yield* fs.rename(target, path.join(trash, path.basename(target)));
+        }).pipe(Effect.orDie),
+    };
+  }),
+);
+
 const foldersLayer = (prefix: string) =>
   Folders.layer.pipe(
+    Layer.provide(testTrash),
     Layer.provideMerge(database),
     Layer.provideMerge(ServerConfig.layerTest("/tmp", { prefix })),
     Layer.provideMerge(ServerSettings.layerTest({})),
@@ -212,7 +233,7 @@ describe("project label folders", () => {
       expect(yield* fs.readFileString(path.join(keptDir, "Resources", "brief.md"))).toBe("keep\n");
       // What stays is an orphan, listed for the user to adopt.
       expect((yield* labels.listOrphanFolders()).folders).toEqual([
-        { dirName: "Kept", path: keptDir, reason: "deleted_project", empty: false },
+        { dirName: "Kept", path: keptDir, reason: "deleted_project" },
       ]);
     }).pipe(Effect.provide(labelsLayer("label-folders-delete"))),
   );
@@ -235,7 +256,7 @@ describe("project label folders", () => {
     }).pipe(Effect.provide(labelsLayer("label-folders-abandoned"))),
   );
 
-  it.effect("lists orphan folders, adopts one as a project, and removes only empty ones", () =>
+  it.effect("lists leftover folders, adopts one as a project, and trashes another", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -243,29 +264,111 @@ describe("project label folders", () => {
       const folders = yield* Folders.ProjectLabelFolders;
       const root = yield* folders.projectsRoot;
       yield* fs.makeDirectory(path.join(root, "Old Client", "repos", "site"), { recursive: true });
-      yield* fs.makeDirectory(path.join(root, "Leftover", "Resources"), { recursive: true });
-      // Finder's `.DS_Store` does not make a skeleton hold anything.
-      yield* fs.writeFileString(path.join(root, "Leftover", ".DS_Store"), "");
-      // Never orphans: unfiled repositories and worktree containers.
+      yield* fs.makeDirectory(path.join(root, "Old Notes"), { recursive: true });
+      yield* fs.writeFileString(path.join(root, "Old Notes", "notes.md"), "mine\n");
+      // Never leftovers: unfiled repositories and worktree containers.
       yield* fs.makeDirectory(path.join(root, "Repositories"), { recursive: true });
       yield* fs.makeDirectory(path.join(root, ".worktrees"), { recursive: true });
-      expect(
-        (yield* labels.listOrphanFolders()).folders.map((folder) => [folder.dirName, folder.empty]),
-      ).toEqual([
-        ["Leftover", true],
-        ["Old Client", false],
+      expect((yield* labels.listOrphanFolders()).folders.map((folder) => folder.dirName)).toEqual([
+        "Old Client",
+        "Old Notes",
       ]);
-      // A folder with work in it is never removed, only adopted.
-      expect(yield* labels.removeOrphanFolder({ dirName: "Old Client" })).toEqual({
-        removed: false,
+      // Trash moves the folder whole, so it can be put back.
+      expect(yield* labels.trashOrphanFolder({ dirName: "Old Notes" })).toEqual({ trashed: true });
+      expect(yield* fs.exists(path.join(root, "Old Notes"))).toBe(false);
+      expect(yield* fs.readFileString(path.join(trashOf(root), "Old Notes", "notes.md"))).toBe(
+        "mine\n",
+      );
+      expect(yield* labels.trashOrphanFolder({ dirName: "Old Notes" })).toEqual({
+        trashed: false,
       });
-      expect(yield* labels.removeOrphanFolder({ dirName: "Leftover" })).toEqual({ removed: true });
-      expect(yield* fs.exists(path.join(root, "Leftover"))).toBe(false);
       const { label } = yield* labels.adoptOrphanFolder({ dirName: "Old Client" });
       expect(label.name).toBe("Old Client");
       expect((yield* folders.dirForLabel(label)).dir).toBe(path.join(root, "Old Client"));
       expect(yield* fs.exists(path.join(root, "Old Client", "repos", "site"))).toBe(true);
+      // A project's own folder is never trashed.
+      expect(yield* labels.trashOrphanFolder({ dirName: "Old Client" })).toEqual({
+        trashed: false,
+      });
       expect((yield* labels.listOrphanFolders()).folders).toEqual([]);
     }).pipe(Effect.provide(labelsLayer("label-folders-orphans"))),
+  );
+
+  it.live("auto-tidies settled empty leftovers and never deletes one holding anything", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const folders = yield* Folders.ProjectLabelFolders;
+      const root = yield* folders.projectsRoot;
+      const goneMarker = `{"id":"label:deleted"}\n`;
+      const make = (name: string, files: Record<string, string>, dirs: ReadonlyArray<string>) =>
+        Effect.gen(function* () {
+          const dir = path.join(root, name);
+          yield* fs.makeDirectory(dir, { recursive: true });
+          for (const sub of dirs) yield* fs.makeDirectory(path.join(dir, sub), { recursive: true });
+          for (const [file, text] of Object.entries(files))
+            yield* fs.writeFileString(path.join(dir, file), text);
+          return dir;
+        });
+      const settle = (dir: string) =>
+        Effect.gen(function* () {
+          // utimes takes seconds.
+          const anHourAgo = ((yield* Clock.currentTimeMillis) - 60 * 60 * 1000) / 1000;
+          yield* fs.utimes(dir, anHourAgo, anHourAgo);
+        });
+      // Only what Cogenly made, plus Finder's `.DS_Store`: tidied.
+      const empty = yield* make(
+        "Athens Racing",
+        { ".cogenly-project.json": goneMarker, ".DS_Store": "", "Resources/.DS_Store": "" },
+        ["Resources", "repos"],
+      );
+      yield* settle(empty);
+      const unmarked = yield* make("Failed Create", {}, ["Resources"]);
+      yield* settle(unmarked);
+      // Anything else keeps the folder: a file in Resources, or beside it.
+      const notes = yield* make(
+        "Athens Racing (2)",
+        { ".cogenly-project.json": goneMarker, "Resources/brief.md": "keep\n" },
+        ["Resources"],
+      );
+      yield* settle(notes);
+      const draft = yield* make("Drafts", { "draft.txt": "keep\n" }, []);
+      yield* settle(draft);
+      // Too new to tell from a create in flight: kept and not listed.
+      const fresh = yield* make("Just Made", {}, ["Resources"]);
+
+      expect((yield* folders.listOrphans).map((folder) => [folder.dirName, folder.reason])).toEqual(
+        [
+          ["Athens Racing (2)", "deleted_project"],
+          ["Drafts", "no_marker"],
+        ],
+      );
+      expect(yield* fs.exists(empty)).toBe(false);
+      expect(yield* fs.exists(unmarked)).toBe(false);
+      expect(yield* fs.readFileString(path.join(notes, "Resources", "brief.md"))).toBe("keep\n");
+      expect(yield* fs.readFileString(idFileOf(notes))).toBe(goneMarker);
+      expect(yield* fs.readFileString(path.join(draft, "draft.txt"))).toBe("keep\n");
+      expect(yield* fs.exists(path.join(fresh, "Resources"))).toBe(true);
+    }).pipe(Effect.provide(foldersLayer("label-folders-tidy"))),
+  );
+
+  it.effect("skeleton removal stops at a file that appeared after the check", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const folders = yield* Folders.ProjectLabelFolders;
+      const dir = path.join(yield* folders.projectsRoot, "Racing");
+      yield* fs.makeDirectory(path.join(dir, "Resources"), { recursive: true });
+      yield* fs.makeDirectory(path.join(dir, "repos"), { recursive: true });
+      yield* fs.writeFileString(idFileOf(dir), `{"id":"label:deleted"}\n`);
+      // Written into the skeleton between the emptiness check and the removal.
+      yield* fs.writeFileString(path.join(dir, "late.md"), "keep\n");
+      expect(yield* removeEmptySkeleton(dir, ".cogenly-project.json", ["Resources", "repos"])).toBe(
+        false,
+      );
+      expect(yield* fs.readFileString(path.join(dir, "late.md"))).toBe("keep\n");
+      // The marker is put back, so the folder still reads as the deleted project's.
+      expect(yield* fs.readFileString(idFileOf(dir))).toBe(`{"id":"label:deleted"}\n`);
+    }).pipe(Effect.provide(foldersLayer("label-folders-tidy-race"))),
   );
 });

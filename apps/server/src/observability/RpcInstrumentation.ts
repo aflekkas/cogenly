@@ -109,7 +109,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.projectLabelsAdoptRepository]: "projectLabels",
   [WS_METHODS.projectLabelsListOrphanFolders]: "projectLabels",
   [WS_METHODS.projectLabelsAdoptOrphanFolder]: "projectLabels",
-  [WS_METHODS.projectLabelsRemoveOrphanFolder]: "projectLabels",
+  [WS_METHODS.projectLabelsTrashOrphanFolder]: "projectLabels",
   [WS_METHODS.projectLabelsListResources]: "projectLabels",
   [WS_METHODS.projectLabelsSubscribeResources]: "projectLabels",
   [WS_METHODS.projectLabelsAddResource]: "projectLabels",

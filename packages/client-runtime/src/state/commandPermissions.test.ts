@@ -644,7 +644,7 @@ it.effect(
         ].map((method) => createCommandPermissions(runtime, method));
         const operate = [
           WS_METHODS.projectLabelsAdoptOrphanFolder,
-          WS_METHODS.projectLabelsRemoveOrphanFolder,
+          WS_METHODS.projectLabelsTrashOrphanFolder,
         ].map((method) => createCommandPermissions(runtime, method));
         const holding = (
           scope: typeof AuthOrchestrationOperateScope | typeof AuthSourceControlWriteScope,

@@ -63,7 +63,7 @@ function deleteProjectMessage(name: string): string {
     `Delete ${name}?\n` +
     `This removes the project on every machine, along with its instructions, description and GitHub links. ` +
     `Its chats, Work and repositories are kept, just no longer in a project. ` +
-    `Its folder may stay on disk, listed in Settings → Projects under Folders without a project.\n` +
+    `An empty project folder is removed. One with files in it stays, under Leftover folders in Settings → Projects.\n` +
     `To hide it and bring it back later, archive it instead.`
   );
 }

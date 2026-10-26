@@ -289,8 +289,8 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
           </SettingsList>
         )}
       </SettingsSection>
-      <ProjectOrphanFolders environmentId={props.environmentId} />
       <ProjectFoldersSettings />
+      <ProjectOrphanFolders environmentId={props.environmentId} />
       <OverlayPresence when={renaming}>
         {(entry) => (
           <ProjectLabelEditorDialog
