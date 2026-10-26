@@ -473,7 +473,7 @@ function SidebarProviderStack(props: {
       displayName={currentEntry.displayName}
       accentColor={currentEntry.accentColor}
       showBadge={showInstanceBadge}
-      iconClassName="size-3.5"
+      size="sm"
       indicatorBackground="var(--provider-stack-ring)"
     />
   );
@@ -495,7 +495,7 @@ function SidebarProviderStack(props: {
           <ProviderInstanceIcon
             driverKind={entry.driverKind}
             displayName={entry.displayName}
-            iconClassName="size-3"
+            size="xs"
           />
         ),
       },

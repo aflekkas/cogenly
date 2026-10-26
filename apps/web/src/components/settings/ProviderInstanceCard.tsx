@@ -736,7 +736,8 @@ export function ProviderInstanceCard({
       accentColor={markColor ?? accentColor}
       showBadge={Boolean(markColor ?? accentColor)}
       className="size-5"
-      iconClassName="size-4 text-foreground/80"
+      size="md"
+        iconClassName="text-foreground/80"
     />
   );
 

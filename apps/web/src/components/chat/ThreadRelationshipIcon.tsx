@@ -33,6 +33,7 @@ export function ThreadRelationshipIcon({
           displayName={provider?.displayName ?? driver}
           accentColor={accentColor}
           showBadge={accentColor !== undefined}
+          size="md"
           iconClassName={THREAD_DETAILS_PANEL_ICON_CLASS}
           className="z-auto"
         />

@@ -25,23 +25,46 @@ export function providerTextColor(driverKind: ProviderDriverKind): {
   };
 }
 
+export type ProviderInstanceIconSize = "xs" | "sm" | "md" | "lg";
+
+// The glyph and its instance dot scale together, so a 12px glyph doesn't wear
+// the dot made for a 20px one.
+const iconSizeClassName: Record<ProviderInstanceIconSize, string> = {
+  xs: "size-3",
+  sm: "size-3.5",
+  md: "size-4",
+  lg: "size-5",
+};
+const badgeSizeClassName: Record<ProviderInstanceIconSize, string> = {
+  xs: "size-1.25",
+  sm: "size-1.5",
+  md: "size-1.5",
+  lg: "size-2",
+};
+const badgeRingWidth: Record<ProviderInstanceIconSize, string> = {
+  xs: "1px",
+  sm: "1px",
+  md: "1.5px",
+  lg: "1.5px",
+};
+
 /**
  * A provider's glyph for one configured instance. With `showBadge`, a small
  * dot in the instance's accent color sits on the glyph's lower-right corner so
  * several instances of one provider read apart without recoloring the brand mark.
+ * `size` sets the glyph and the dot together; `iconClassName` is for colour.
  */
 export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
   driverKind: ProviderDriverKind;
   displayName: string;
   accentColor?: string | undefined;
   showBadge?: boolean;
+  size?: ProviderInstanceIconSize;
   className?: string;
   iconClassName?: string;
-  /** Positions or sizes the instance dot; it is `size-2` at the icon's corner by default. */
-  badgeClassName?: string;
-  statusDotClassName?: string;
   indicatorBackground?: string;
 }) {
+  const size = props.size ?? "lg";
   const packageIcon = providerClients.get(props.driverKind)?.icon;
   const indicatorBackground = props.indicatorBackground ?? "var(--card)";
   const accentStyle = props.accentColor
@@ -60,7 +83,7 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
       {packageIcon ? (
         <ProviderPackageIcon
           icon={packageIcon}
-          className={cn("size-5 shrink-0", props.iconClassName)}
+          className={cn(iconSizeClassName[size], "shrink-0", props.iconClassName)}
           aria-hidden
         />
       ) : (
@@ -68,25 +91,15 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
           {providerInstanceInitials(props.displayName)}
         </span>
       )}
-      {props.statusDotClassName ? (
-        <span
-          className={cn(
-            "pointer-events-none absolute -left-0.5 -top-0.5 z-10 size-2 rounded-full",
-            props.statusDotClassName,
-          )}
-          style={{ boxShadow: `0 0 0 2px ${indicatorBackground}` }}
-          aria-hidden
-        />
-      ) : null}
       {props.showBadge ? (
         <span
           data-provider-instance-mark=""
           className={cn(
-            "pointer-events-none absolute -right-0.5 -bottom-0.5 z-10 size-2 rounded-full transition-[background-color,box-shadow] duration-(--motion-duration-fast) ease-standard motion-reduce:transition-none",
+            "pointer-events-none absolute -right-0.5 -bottom-0.5 z-10 rounded-full transition-[background-color,box-shadow] duration-(--motion-duration-fast) ease-standard motion-reduce:transition-none",
+            badgeSizeClassName[size],
             props.accentColor ? "bg-(--provider-accent)" : "bg-muted-foreground",
-            props.badgeClassName,
           )}
-          style={{ boxShadow: `0 0 0 1.5px ${indicatorBackground}` }}
+          style={{ boxShadow: `0 0 0 ${badgeRingWidth[size]} ${indicatorBackground}` }}
           aria-hidden
         />
       ) : null}

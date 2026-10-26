@@ -311,7 +311,7 @@ export function AddProviderInstanceDialog({
                       <ProviderInstanceIcon
                         driverKind={option.driverKind}
                         displayName={option.label}
-                        iconClassName="size-4"
+                        size="md"
                       />
                       <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
                         {option.label}
