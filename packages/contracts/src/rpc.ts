@@ -325,13 +325,6 @@ import {
   ProviderConsumeResetCreditInput,
   ProviderConsumeResetCreditResult,
 } from "./providerUsageLimits.ts";
-import {
-  UsageLimitHandoffAcceptInput,
-  UsageLimitHandoffAcceptResult,
-  UsageLimitHandoffError,
-  UsageLimitHandoffRecommendation,
-  UsageLimitHandoffRecommendInput,
-} from "./usageLimitHandoff.ts";
 import { UsagePricing, UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
 import {
   StorageCleanupReport,
@@ -1860,24 +1853,6 @@ const WsOrchestrationV2StopWorkflowRpc = Rpc.make(ORCHESTRATION_V2_WS_METHODS.st
   error: Schema.Union([OrchestrationV2StopWorkflowError, EnvironmentAuthorizationError]),
 });
 
-const WsOrchestrationV2RecommendUsageLimitHandoffRpc = Rpc.make(
-  ORCHESTRATION_V2_WS_METHODS.recommendUsageLimitHandoff,
-  {
-    payload: UsageLimitHandoffRecommendInput,
-    success: Schema.NullOr(UsageLimitHandoffRecommendation),
-    error: Schema.Union([UsageLimitHandoffError, EnvironmentAuthorizationError]),
-  },
-);
-
-const WsOrchestrationV2AcceptUsageLimitHandoffRpc = Rpc.make(
-  ORCHESTRATION_V2_WS_METHODS.acceptUsageLimitHandoff,
-  {
-    payload: UsageLimitHandoffAcceptInput,
-    success: UsageLimitHandoffAcceptResult,
-    error: Schema.Union([UsageLimitHandoffError, EnvironmentAuthorizationError]),
-  },
-);
-
 const WsOrchestrationV2GetWorkflowScriptRpc = Rpc.make(
   ORCHESTRATION_V2_WS_METHODS.getWorkflowScript,
   {
@@ -3174,8 +3149,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2DispatchCommandRpc,
   WsOrchestrationV2GetWorkflowScriptRpc,
   WsOrchestrationV2StopWorkflowRpc,
-  WsOrchestrationV2RecommendUsageLimitHandoffRpc,
-  WsOrchestrationV2AcceptUsageLimitHandoffRpc,
   WsOrchestrationV2GetTurnItemRpc,
   WsOrchestrationV2GetTurnDiffRpc,
   WsOrchestrationV2GetFullThreadDiffRpc,

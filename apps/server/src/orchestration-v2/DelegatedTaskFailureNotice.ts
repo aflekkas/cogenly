@@ -96,10 +96,10 @@ const KIND_LABEL: Record<OrchestrationV2DelegatedTaskFailure["kind"], string> = 
 function suggestedAction(failure: OrchestrationV2DelegatedTaskFailure): string {
   switch (failure.kind) {
     case "rate_limit":
-      return `Cogenly retried it and no other provider instance could take it. Continue it on another instance with thread_limit_handoff (threadId ${failure.childThreadId}) once one has headroom, or retry it later. Ask the user before switching accounts.`;
+      return `Cogenly retried it. Retry it later on the same account.`;
     case "usage_limit":
       return failure.resetAt
-        ? `No other provider instance had headroom. Continue it with thread_limit_handoff (threadId ${failure.childThreadId}) when one does, or resume it after ${failure.resetAt}, when the limit resets. Ask the user before resuming.`
+        ? `Resume it after ${failure.resetAt}, when the limit resets. Ask the user before resuming.`
         : "Resume it once the usage limit resets. Ask the user before resuming.";
     case "interrupted_by_restart":
       return "Check its thread for partial work, then retry or continue it if the work is still needed.";
@@ -259,7 +259,7 @@ function recoveryLine(
     case "handed_off":
       return `${stop} Cogenly handed it off to provider instance ${recovery.providerInstanceId} (${recovery.model}) with its context and re-ran the stopped request. It is still running; no action is needed.`;
     case "resuming_at_reset":
-      return `${stop} No other provider instance had headroom, so Cogenly will resume it automatically at ${recovery.at}, when the limit resets. It is still pending; do not retry or re-delegate it.`;
+      return `${stop} Cogenly will resume it automatically at ${recovery.at}, when the limit resets. It is still pending; do not retry or re-delegate it.`;
     case "retrying":
       return `${stop} Cogenly retries it automatically at ${recovery.at} (attempt ${recovery.attempt}). No action is needed.`;
     case "resuming_after_restart":

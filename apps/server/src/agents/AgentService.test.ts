@@ -1,3 +1,5 @@
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
+import { ProviderDriverKind } from "@cogenly/contracts";
 import { ProjectRepositoryMismatchError } from "@cogenly/contracts";
 import * as SharedState from "../sync/SharedState.ts";
 import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
@@ -100,6 +102,19 @@ const makeHarness = Effect.sync(() => {
     contextHandoffId: null,
   });
   const boundaries = Layer.mergeAll(
+    Layer.mock(ProviderRegistry.ProviderRegistry)({
+      getProviders: Effect.succeed([
+        { instanceId: ProviderInstanceId.make("codex"), driver: ProviderDriverKind.make("codex") },
+        {
+          instanceId: ProviderInstanceId.make("codex-school"),
+          driver: ProviderDriverKind.make("codex"),
+        },
+        {
+          instanceId: ProviderInstanceId.make("claude-backup"),
+          driver: ProviderDriverKind.make("claudeAgent"),
+        },
+      ] as import("@cogenly/contracts").ServerProvider[]),
+    }),
     Layer.mock(Folders.ManagedProjectFolders)({
       namedProjectsRoot: Effect.succeed("/unused"),
       scratchRoot: Effect.succeed(Option.none()),
@@ -819,71 +834,126 @@ it.effect("keeps running jobs after repeated provider failures once each backoff
   }),
 );
 
-it.effect("a usage-limited run makes the next run use the next fallback entry", () =>
-  Effect.gen(function* () {
-    const h = yield* makeHarness;
-    yield* Effect.gen(function* () {
-      const store = yield* Store.AgentStore;
-      const agents = yield* Agents.AgentService;
-      const schedules = yield* Schedules.ScheduledTaskService;
-      const sql = yield* SqlClient.SqlClient;
-      const fallback = { instanceId: ProviderInstanceId.make("claude-backup"), model: "opus" };
-      yield* store.save({ ...h.fixture, dailyRunCap: 100, fallbackChain: [fallback] });
-      const { task } = yield* schedules.upsert(h.triggerInput);
-      expect(yield* agents.trigger(task, "fallback:first", task.prompt)).toBe(true);
-      expect(h.launches.at(-1)?.modelSelection).toEqual(h.fixture.modelSelection);
-      const first = h.launches.at(-1)!;
-      const projection = h.projections.get(first.threadId!)!;
-      const run = projection.runs[0]!;
-      h.projections.set(first.threadId!, {
-        ...projection,
-        runs: [{ ...run, status: "failed" }],
-        messages: [],
-        turnItems: [
-          {
-            id: TurnItemId.make(`failure:${first.threadId}`),
-            threadId: first.threadId!,
-            runId: run.id,
-            nodeId: null,
-            providerThreadId: null,
-            providerTurnId: null,
-            nativeItemRef: null,
-            parentItemId: null,
-            ordinal: 0,
-            status: "failed",
-            title: "Usage limit reached",
-            startedAt: null,
-            completedAt: null,
-            updatedAt: DateTime.makeUnsafe(h.fixture.createdAt),
-            type: "error",
-            failure: {
-              class: "usage_limit",
-              message: "You've hit your weekly limit",
-              code: "api_error_429",
-              retryable: true,
-              resetAt: "2099-01-01T00:00:00.000Z",
+it.effect(
+  "a usage-limited run skips a same-provider account and uses its cross-provider fallback",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const agents = yield* Agents.AgentService;
+        const schedules = yield* Schedules.ScheduledTaskService;
+        const sql = yield* SqlClient.SqlClient;
+        const fallback = { instanceId: ProviderInstanceId.make("claude-backup"), model: "opus" };
+        yield* store.save({
+          ...h.fixture,
+          dailyRunCap: 100,
+          fallbackChain: [
+            { instanceId: ProviderInstanceId.make("codex-school"), model: "gpt-5" },
+            fallback,
+          ],
+        });
+        const { task } = yield* schedules.upsert(h.triggerInput);
+        expect(yield* agents.trigger(task, "fallback:first", task.prompt)).toBe(true);
+        expect(h.launches.at(-1)?.modelSelection).toEqual(h.fixture.modelSelection);
+        const first = h.launches.at(-1)!;
+        const projection = h.projections.get(first.threadId!)!;
+        const run = projection.runs[0]!;
+        h.projections.set(first.threadId!, {
+          ...projection,
+          runs: [{ ...run, status: "failed" }],
+          messages: [],
+          turnItems: [
+            {
+              id: TurnItemId.make(`failure:${first.threadId}`),
+              threadId: first.threadId!,
+              runId: run.id,
+              nodeId: null,
+              providerThreadId: null,
+              providerTurnId: null,
+              nativeItemRef: null,
+              parentItemId: null,
+              ordinal: 0,
+              status: "failed",
+              title: "Usage limit reached",
+              startedAt: null,
+              completedAt: null,
+              updatedAt: DateTime.makeUnsafe(h.fixture.createdAt),
+              type: "error",
+              failure: {
+                class: "usage_limit",
+                message: "You've hit your weekly limit",
+                code: "api_error_429",
+                retryable: true,
+                resetAt: "2099-01-01T00:00:00.000Z",
+              },
             },
-          },
-        ],
-      });
-      yield* agents.reconcile();
-      const after = yield* store.get(h.fixture.id);
-      expect(after.fallbackIndex).toBe(1);
-      expect(after.fallbackReason).toBe("usage_limit");
-      expect(after.fallbackUntil).toBe("2099-01-01T00:00:00.000Z");
-      const runs = yield* store.runs(h.fixture.id);
-      expect(runs[0]?.modelSelection).toEqual(h.fixture.modelSelection);
-      expect(runs[0]?.fallbackReason).toBe("usage_limit");
-      expect(runs[0]?.fallbackResetAt).toBe("2099-01-01T00:00:00.000Z");
-      yield* sql`UPDATE agents SET backoff_until = NULL WHERE agent_id = ${h.fixture.id}`;
-      expect(yield* agents.trigger(task, "fallback:second", task.prompt)).toBe(true);
-      expect(h.launches.at(-1)?.modelSelection).toEqual(fallback);
-      const secondRuns = yield* store.runs(h.fixture.id);
-      const secondRun = secondRuns.find((run) => run.id === "agent-work:fallback:second");
-      expect(secondRun?.modelSelection).toEqual(fallback);
-      expect(secondRun?.fallbackReason).toBe("usage_limit");
-    }).pipe(Effect.provide(h.layer));
-  }),
+          ],
+        });
+        yield* agents.reconcile();
+        const after = yield* store.get(h.fixture.id);
+        expect(after.fallbackIndex).toBe(2);
+        expect(after.fallbackChain).toHaveLength(2);
+        expect(after.fallbackReason).toBe("usage_limit");
+        expect(after.fallbackUntil).toBe("2099-01-01T00:00:00.000Z");
+        const runs = yield* store.runs(h.fixture.id);
+        expect(runs[0]?.modelSelection).toEqual(h.fixture.modelSelection);
+        expect(runs[0]?.fallbackReason).toBe("usage_limit");
+        expect(runs[0]?.fallbackResetAt).toBe("2099-01-01T00:00:00.000Z");
+        yield* sql`UPDATE agents SET backoff_until = NULL WHERE agent_id = ${h.fixture.id}`;
+        expect(yield* agents.trigger(task, "fallback:second", task.prompt)).toBe(true);
+        expect(h.launches.at(-1)?.modelSelection).toEqual(fallback);
+        const secondRuns = yield* store.runs(h.fixture.id);
+        const secondRun = secondRuns.find((run) => run.id === "agent-work:fallback:second");
+        expect(secondRun?.modelSelection).toEqual(fallback);
+        expect(secondRun?.fallbackReason).toBe("usage_limit");
+      }).pipe(Effect.provide(h.layer));
+    }),
+);
+
+it.effect(
+  "owner sends skip a stored same-provider fallback and restore the primary after reset",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const agents = yield* Agents.AgentService;
+        const school = { instanceId: ProviderInstanceId.make("codex-school"), model: "gpt-5" };
+        const crossProvider = {
+          instanceId: ProviderInstanceId.make("claude-backup"),
+          model: "opus",
+        };
+        yield* store.save({
+          ...h.fixture,
+          fallbackChain: [school, crossProvider],
+          fallbackIndex: 1,
+          fallbackReason: "usage_limit",
+          fallbackUntil: "2099-01-01T00:00:00.000Z",
+        });
+        yield* agents.send({
+          id: h.fixture.id,
+          commandId: CommandId.make("send:fallback"),
+          messageId: MessageId.make("message:fallback"),
+          text: "Continue",
+        });
+        expect(h.calls.at(-1)?.modelSelection).toEqual(crossProvider);
+        expect((yield* store.get(h.fixture.id)).fallbackChain).toEqual([school, crossProvider]);
+        yield* store.setFallback(h.fixture.id, {
+          index: 2,
+          reason: "usage_limit",
+          until: "1970-01-01T00:00:00.000Z",
+        });
+        yield* agents.send({
+          id: h.fixture.id,
+          commandId: CommandId.make("send:restored"),
+          messageId: MessageId.make("message:restored"),
+          text: "Continue",
+        });
+        expect(h.calls.at(-1)?.modelSelection).toEqual(h.fixture.modelSelection);
+        expect((yield* store.get(h.fixture.id)).fallbackIndex).toBe(0);
+      }).pipe(Effect.provide(h.layer));
+    }),
 );
 
 it.effect("deleting an agent stops active work and removes triggers and memory", () =>

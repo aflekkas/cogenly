@@ -1,3 +1,4 @@
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { ProjectRepositoryMismatchError } from "@cogenly/contracts";
 import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
 import { isReplayedCommandId } from "../orchestration-v2/ReplayedCommandIds.ts";
@@ -122,6 +123,7 @@ export class AgentService extends Context.Service<
 >()("cogenly-server/agents/AgentService") {}
 
 const make = Effect.gen(function* () {
+  const providers = yield* ProviderRegistry.ProviderRegistry;
   const crypto = yield* Crypto.Crypto;
   const shared = yield* SharedState.SharedState;
   const remoteLaunch = yield* Effect.serviceOption(RemoteLaunch.RemoteThreadLaunch);
@@ -375,7 +377,8 @@ const make = Effect.gen(function* () {
           const advance =
             failureItem?.type === "error"
               ? advanceFallback({
-                  chainLength: fallbackChainOf(agent).length,
+                  chain: fallbackChainOf(agent),
+                  providers: yield* providers.getProviders,
                   failedIndex: chainIndexOf(fallbackChainOf(agent), record.modelSelection),
                   reason: classifyProviderFailure(failureItem.failure),
                   resetAt: failureItem.failure.resetAt,
@@ -736,6 +739,13 @@ const make = Effect.gen(function* () {
         // Backoff and daily caps govern background reservations only.
         // An owner text always reaches the provider. Intake claims its pending
         // uploads into the conversation, as it does for a chat send.
+        const fallback = decideFallback(
+          agent,
+          DateTime.toEpochMillis(yield* DateTime.now),
+          yield* providers.getProviders,
+        );
+        if (fallback.restored)
+          yield* store.setFallback(agent.id, { index: 0, reason: null, until: null });
         const result = yield* ThreadMessageIntake.sendToThread({
           projectId: yield* workspace(agent),
           commandId: input.commandId,
@@ -743,7 +753,7 @@ const make = Effect.gen(function* () {
           threadId: agent.conversationThreadId,
           text: input.text,
           attachments: input.attachments ?? [],
-          modelSelection: agent.modelSelection,
+          modelSelection: fallback.selection,
           mode: input.mode ?? "auto",
           createdBy: "user",
           creationSource: "web",
@@ -796,7 +806,11 @@ const make = Effect.gen(function* () {
               if (prior.length) return false;
             }
             if (!(yield* store.reserve(agent.id))) return false;
-            const decision = decideFallback(agent, DateTime.toEpochMillis(yield* DateTime.now));
+            const decision = decideFallback(
+              agent,
+              DateTime.toEpochMillis(yield* DateTime.now),
+              yield* providers.getProviders,
+            );
             if (decision.restored)
               yield* store.setFallback(agent.id, { index: 0, reason: null, until: null });
             usedSelection = decision.selection;

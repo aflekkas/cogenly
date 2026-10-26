@@ -73,6 +73,7 @@ const AgentFields = {
   /**
    * Ordered provider instance + model pairs to try after the primary
    * `modelSelection` when it hits a usage limit or is not signed in.
+   * Runtime skips same-provider accounts while preserving the stored entries.
    * Absent in agents saved before fallback chains; decodes to no chain.
    */
   fallbackChain: Schema.optional(Schema.Array(ModelSelection)).pipe(

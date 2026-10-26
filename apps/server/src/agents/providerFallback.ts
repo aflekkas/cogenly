@@ -1,7 +1,9 @@
+import { agentFallbackEntries } from "@cogenly/contracts";
 import type {
   Agent,
   AgentFallbackReason,
   ModelSelection,
+  ProviderInstanceRef,
   OrchestrationV2ProviderFailure,
 } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
@@ -71,6 +73,7 @@ export const decideFallback = (
     "modelSelection" | "fallbackChain" | "fallbackIndex" | "fallbackReason" | "fallbackUntil"
   >,
   nowMs: number,
+  providers: ReadonlyArray<ProviderInstanceRef>,
 ): FallbackDecision => {
   const chain = fallbackChainOf(agent);
   const primary = chain[0]!;
@@ -80,8 +83,15 @@ export const decideFallback = (
   const untilMs = agent.fallbackUntil == null ? null : Date.parse(agent.fallbackUntil);
   if (untilMs !== null && Number.isFinite(untilMs) && nowMs >= untilMs)
     return { index: 0, selection: primary, reason: null, restored: true };
-  const index = Math.min(storedIndex, chain.length - 1);
-  return { index, selection: chain[index]!, reason: agent.fallbackReason ?? null, restored: false };
+  const entries = agentFallbackEntries(chain, providers);
+  const entry = entries.find((entry) => entry.index >= storedIndex && entry.skipReason === null);
+  if (entry === undefined) return { index: 0, selection: primary, reason: null, restored: true };
+  return {
+    index: entry.index,
+    selection: entry.selection,
+    reason: agent.fallbackReason ?? null,
+    restored: false,
+  };
 };
 
 export interface FallbackAdvance {
@@ -99,7 +109,8 @@ export interface FallbackAdvance {
  * Returns null for other failures or agents without a chain.
  */
 export const advanceFallback = (input: {
-  readonly chainLength: number;
+  readonly chain: ReadonlyArray<ModelSelection>;
+  readonly providers: ReadonlyArray<ProviderInstanceRef>;
   readonly failedIndex: number;
   readonly reason: AgentFallbackReason | null;
   readonly resetAt: string | null | undefined;
@@ -107,7 +118,14 @@ export const advanceFallback = (input: {
   /** Return-to-primary time already stored; only a primary failure moves it. */
   readonly existingUntil?: string | null;
 }): FallbackAdvance | null => {
-  if (input.reason === null || input.chainLength < 2) return null;
+  if (input.reason === null || input.chain.length < 2) return null;
+  const entries = agentFallbackEntries(input.chain, input.providers).filter(
+    (entry) => entry.index > 0 && entry.skipReason === null,
+  );
+  const next =
+    entries.find((entry) => entry.index > input.failedIndex) ??
+    entries.find((entry) => entry.index === input.failedIndex);
+  if (next === undefined) return null;
   const resetMs = input.resetAt == null ? Number.NaN : Date.parse(input.resetAt);
   const hasReset = Number.isFinite(resetMs);
   // Only the primary entry's failure sets when the primary is retried. A
@@ -122,7 +140,7 @@ export const advanceFallback = (input: {
         ? resetMs
         : input.nowMs + FALLBACK_COOLDOWN_MS;
     return {
-      index: Math.min(input.failedIndex + 1, input.chainLength - 1),
+      index: next.index,
       reason: input.reason,
       until: DateTime.formatIso(DateTime.makeUnsafe(untilMs)),
       resetAt: null,
@@ -130,7 +148,7 @@ export const advanceFallback = (input: {
   }
   const untilMs = hasReset ? resetMs : input.nowMs + FALLBACK_COOLDOWN_MS;
   return {
-    index: Math.min(input.failedIndex + 1, input.chainLength - 1),
+    index: next.index,
     reason: input.reason,
     until: DateTime.formatIso(DateTime.makeUnsafe(untilMs)),
     resetAt: hasReset ? DateTime.formatIso(DateTime.makeUnsafe(resetMs)) : null,

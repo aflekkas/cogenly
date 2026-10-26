@@ -33,7 +33,6 @@ import * as AgentMcpPolicy from "../agents/AgentMcpPolicy.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as Agents from "../agents/AgentService.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
-import * as UsageLimitHandoff from "./UsageLimitHandoff.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as Layer from "effect/Layer";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -640,16 +639,8 @@ const layerProductionBase = Layer.mergeAll(
   layerCliCredentialsProvided,
   layerAccountConnectionsProvided,
   UsageLimitRecoveryWorker.layer.pipe(
-    Layer.provide(AgentStore.layer),
-    Layer.provide(
-      Layer.mergeAll(
-        ProjectionStore.layer,
-        layerThreadManagementProvided,
-        UsageLimitHandoff.layer.pipe(Layer.provide(layerThreadManagementProvided)),
-      ),
-    ),
+    Layer.provide(Layer.mergeAll(ProjectionStore.layer, layerThreadManagementProvided)),
   ),
-  UsageLimitHandoff.layer.pipe(Layer.provide(layerThreadManagementProvided)),
   layerProviderContinuationWorkerProvided,
   layerAgentSessionImporterProvided,
   layerT3ImportProvided,

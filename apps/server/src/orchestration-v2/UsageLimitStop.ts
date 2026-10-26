@@ -18,16 +18,6 @@ import {
 } from "@cogenly/shared/orchestrationV2ThreadError";
 import * as DateTime from "effect/DateTime";
 
-/**
- * Prefix of the command a handoff uses to cancel a scheduled resume before it
- * continues the thread elsewhere. That cancel is not the end of a delegated
- * child's recovery, so the parent is not handed the limit as its result.
- */
-export const LIMIT_HANDOFF_CANCEL_COMMAND_PREFIX = "limit-handoff-cancel:";
-
-/** Prefix of the message a handoff continues a stopped thread on another instance with. */
-export const LIMIT_HANDOFF_COMMAND_PREFIX = "limit-handoff:";
-
 /** Prefix of the command the recovery sweep arms a stop with, before any choice for it. */
 export const LIMIT_ARM_COMMAND_PREFIX = "limit-arm:";
 

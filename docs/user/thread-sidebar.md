@@ -81,7 +81,10 @@ waits a little longer before the next one. To stop a trigger, turn it off under
 behavior.
 
 An agent can also have a fallback chain: an ordered list of other provider
-instances and models to run on when its main one stops it. If a background run
+instances and models to run on when its main one stops it. Only explicitly configured
+cross-provider fallbacks run, such as Claude → Codex. Entries for another account
+of the same provider stay saved but are skipped; **Details** labels them
+**skipped: same provider account**. No accounts are added automatically. If a background run
 hits a usage limit ("You've hit your weekly limit") or finds that provider
 signed out, the next run uses the next entry in the chain instead of waiting
 on the same provider, and **Recent activity** shows which instance the run

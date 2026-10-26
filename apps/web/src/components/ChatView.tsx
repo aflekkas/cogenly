@@ -3,7 +3,6 @@ import { RepoMcpTrustPrompt } from "./chat/RepoMcpTrustPrompt";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
-import { useUsageLimitHandoff } from "./chat/UsageLimitHandoffActions";
 import {
   resolveBackgroundDraftWorkspaceOptions,
   resolveDraftHeroState,
@@ -5990,32 +5989,11 @@ export default function ChatView(props: ChatViewProps) {
   // onResume is declared below and published here after commit; the banner only calls it from a click.
   const onResumeNowRef = useRef<(() => Promise<void>) | null>(null);
   const onResumeNowStable = useStableCallback(() => void onResumeNowRef.current?.());
-  const stoppedOnUsageLimit =
-    serverRuntime?.status === "failed" && serverRuntime.lastErrorClass === "usage_limit";
-  const usageLimitHandoff = useUsageLimitHandoff({
-    environmentId,
-    threadId: activeThreadShell?.id ?? null,
-    runId: stoppedOnUsageLimit ? (activeThreadShell?.latestRun?.runId ?? null) : null,
-    onAccepted: (modelSelection) => {
-      // The continuation moved the thread; the composer follows, or its own
-      // pick would send the next turn back to the limited instance.
-      if (activeThreadShell) {
-        setComposerDraftModelSelection(
-          scopeThreadRef(environmentId, activeThreadShell.id),
-          modelSelection,
-          { explicit: true, replaceOptions: true },
-        );
-      }
-      clearUsageLimitsFor(routeThreadKey);
-      scrollToEnd();
-    },
-  });
   const limitRecoveryBanner =
     serverRuntime?.status === "failed" &&
     serverRuntime.lastErrorClass === "usage_limit" &&
     activeThreadShell?.latestRun
       ? usageLimitRecoveryBannerItem({
-          handoff: usageLimitHandoff,
           stop: {
             runId: activeThreadShell.latestRun.runId,
             resetAt: serverRuntime.usageLimitResetAt ?? null,

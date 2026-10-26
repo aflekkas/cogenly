@@ -1,16 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
-import {
-  MAX_RATE_LIMIT_RETRIES,
-  ProviderInstanceId,
-  RunId,
-  ThreadId,
-  type UsageLimitHandoffCandidate,
-} from "@cogenly/contracts";
+import { MAX_RATE_LIMIT_RETRIES, RunId, ThreadId } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 
 import {
   decideLimitStop,
-  handoffTargets,
   limitAutoResumeUpdate,
   limitRecoveryCommand,
   limitRecoveryStatus,
@@ -220,11 +213,11 @@ describe("decideLimitStop", () => {
       retryAttempt: MAX_RATE_LIMIT_RETRIES,
     };
     expect(decideLimitStop(rateLimited({ limitRecovery: exhausted, delegated: true }))).toEqual({
-      type: "hand-off-or-resume",
+      type: "delegated-resume",
       resume: false,
     });
     expect(decideLimitStop(limitedThread({ limitKind: "quota", delegated: true }))).toEqual({
-      type: "hand-off-or-resume",
+      type: "delegated-resume",
       resume: true,
     });
     // A legacy stop recorded before the split reads as a quota.
@@ -276,34 +269,6 @@ describe("decideLimitStop", () => {
       usageLimitContinuationOfRunId: runId,
       notification: { summary: `Rate limited: retrying (attempt 2 of ${MAX_RATE_LIMIT_RETRIES})` },
     });
-  });
-});
-
-describe("handoffTargets", () => {
-  const candidate = (instanceId: string) =>
-    ({ instanceId: ProviderInstanceId.make(instanceId) }) as UsageLimitHandoffCandidate;
-  const ranked = [candidate("claude-personal"), candidate("codex"), candidate("claude-work")];
-
-  it("keeps the shared ranking when no agent chain applies", () => {
-    expect(handoffTargets(ranked, null).map((target) => target.candidate.instanceId)).toEqual([
-      "claude-personal",
-      "codex",
-      "claude-work",
-    ]);
-  });
-
-  it("keeps an agent to its fallback chain, in its order, with each entry's model", () => {
-    const chain = [
-      { instanceId: ProviderInstanceId.make("claude-uchicago"), model: "claude-opus-5-5" },
-      { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
-      { instanceId: ProviderInstanceId.make("claude-personal"), model: "claude-sonnet-5-5" },
-    ];
-    expect(
-      handoffTargets(ranked, chain).map((target) => [target.candidate.instanceId, target.model]),
-    ).toEqual([
-      ["codex", "gpt-5"],
-      ["claude-personal", "claude-sonnet-5-5"],
-    ]);
   });
 });
 

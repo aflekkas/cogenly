@@ -19,7 +19,7 @@ export * from "./providerInstance.ts";
 export * from "./providerSetup.ts";
 export * from "./providerRuntime.ts";
 export * from "./providerUsageLimits.ts";
-export * from "./usageLimitHandoff.ts";
+export * from "./providerUsageHeadroom.ts";
 export * from "./providerPolicy.ts";
 export * from "./modelSelection.ts";
 export * from "./chatAttachment.ts";
@@ -102,3 +102,5 @@ export * from "./projectRepositoryMembership.ts";
 export * from "./repoMcpTrust.ts";
 
 export * from "./browserCookies.ts";
+
+export * from "./agentFallback.ts";
