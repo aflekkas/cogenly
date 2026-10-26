@@ -22,7 +22,7 @@ export const SETTINGS_PAGE_NEEDS_ATTENTION_LABEL = "needs attention";
 /** An open alert as the dots need it. */
 export type SettingsAttentionAlert = Pick<
   MachineHealthAlert,
-  "originEnvironmentId" | "checkId" | "status" | "target"
+  "originEnvironmentId" | "checkId" | "itemKey" | "status" | "target"
 >;
 
 /** A dot's colour for a health status, or null when it needs no dot. */
@@ -91,8 +91,12 @@ function owningSettingsPage(alert: SettingsAttentionAlert): SettingsPath | null 
     case "scheduled-tasks":
       return "/settings/scheduled-tasks";
     case "disk":
-    case "database":
       return "/settings/storage";
+    case "database":
+      // A degraded writer worker is a runtime fault, not a space problem.
+      return alert.itemKey === "database:writer-worker"
+        ? "/settings/diagnostics"
+        : "/settings/storage";
     // Machine-wide: version skew, sync quarantine, orphaned agent processes and the rest
     // are fixed from the machine's own health list.
     case "server":

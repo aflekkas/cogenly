@@ -17,6 +17,7 @@ const vps = EnvironmentId.make("env-vps");
 const alert = (overrides: Partial<SettingsAttentionAlert> = {}): SettingsAttentionAlert => ({
   originEnvironmentId: mac,
   checkId: "server",
+  itemKey: "server",
   status: "fail",
   target: null,
   ...overrides,
@@ -46,6 +47,42 @@ describe("settingsPagesForAlert", () => {
     ]);
     expect(pages({ checkId: "disk" })).toEqual(["/settings/machines", "/settings/storage"]);
     expect(pages({ checkId: "database" })).toEqual(["/settings/machines", "/settings/storage"]);
+  });
+
+  it("routes the newer health items to the page that fixes them", () => {
+    const pages = (overrides: Partial<SettingsAttentionAlert>) =>
+      settingsPagesForAlert(alert(overrides));
+    // Discarding a quarantined thread is a machine-wide sync fix.
+    expect(
+      pages({
+        checkId: "sync",
+        itemKey: "sync:quarantined-thread:thread-1",
+        target: { _tag: "thread", threadId: ThreadId.make("thread-1") },
+      }),
+    ).toEqual(["/settings/machines"]);
+    // A degraded writer worker is a runtime fault, not a space problem.
+    expect(
+      pages({ checkId: "database", itemKey: "database:writer-worker", status: "warn" }),
+    ).toEqual(["/settings/machines", "/settings/diagnostics"]);
+    // AppArmor blocking the sandbox is fixed from the machine's own health list.
+    expect(pages({ checkId: "chat-terminal-sandbox", itemKey: "chat-terminal-sandbox" })).toEqual([
+      "/settings/machines",
+    ]);
+    // An integration to set up on this machine, and a provider to sign in here.
+    expect(
+      pages({
+        checkId: "integrations",
+        itemKey: "integrations:linear",
+        target: { _tag: "integration", name: "linear" },
+      }),
+    ).toEqual(["/settings/machines", "/settings/integrations"]);
+    expect(
+      pages({
+        checkId: "providers",
+        itemKey: "providers:codex:auth",
+        target: { _tag: "provider", instanceId: ProviderInstanceId.make("codex") },
+      }),
+    ).toEqual(["/settings/machines", "/settings/providers"]);
   });
 
   it("keeps machine-wide checks on Machines alone", () => {
