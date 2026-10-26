@@ -1,3 +1,4 @@
+import { AgentBuilderConversation } from "../agents/AgentBuilder";
 import { AgentConversation } from "../agents/AgentConversation";
 import { useAgents, useAgentConversation } from "../agents/agentsClient";
 import { scopedThreadKey } from "@cogenly/client-runtime/environment";
@@ -279,6 +280,25 @@ function ThreadRouteContent({
       <AgentConversation
         key={`${agentConversation.environmentId}:${agentConversation.id}`}
         agent={agentConversation}
+      />
+    );
+  } else if (
+    target.kind === "server" &&
+    serverThreadShell?.source.surface === "builder" &&
+    serverThreadShell.deletedAt === null
+  ) {
+    // A builder thread opened by its link (an agent's start_agent_builder) is the
+    // builder, live header and proposal card included, not a plain chat of it.
+    view = (
+      <AgentBuilderConversation
+        key={scopedThreadKey(target.threadRef)}
+        resume={{
+          environmentId: serverThreadShell.environmentId,
+          projectId: serverThreadShell.projectId,
+          threadId: serverThreadShell.id,
+          projectFolderId: serverThreadShell.source.projectFolderId ?? null,
+          modelSelection: serverThreadShell.modelSelection,
+        }}
       />
     );
   } else if (target.kind === "draft") {

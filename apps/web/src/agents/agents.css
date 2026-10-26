@@ -141,6 +141,14 @@
   flex: none;
   opacity: 0.6;
 }
+/* While its width eases (AgentIdentity's usePillWidthMotion) the pill clips the
+   new text rather than ellipsizing it. */
+.agent-identity-name[data-resizing] {
+  overflow: hidden;
+}
+.agent-identity-name[data-resizing] > * {
+  flex-shrink: 0;
+}
 /* The status, inline after the name while there is one ("Running", "Needs
    you"); idle shows nothing. */
 @utility agent-identity-status {
