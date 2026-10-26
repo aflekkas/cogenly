@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
-import { IntegrationSaveOAuthClientInput } from "./integration.ts";
+import { IntegrationSaveOAuthClientInput, IntegrationUpdateByNameInput } from "./integration.ts";
+import { INTEGRATION_CATALOG, integrationIcon } from "./integrationCatalog.ts";
 import { describe, expect, it } from "vite-plus/test";
 import { AuthStandardClientScopes } from "./auth.ts";
 import { clientRpcRequiredScopes } from "./clientRpcPermissions.ts";
@@ -50,5 +51,50 @@ describe("private OAuth client targets", () => {
     });
     expect(decode({ ...fields, catalogId: "slack" })).toMatchObject({ catalogId: "slack" });
     expect(() => decode(fields)).toThrow();
+  });
+});
+
+describe("integration icons", () => {
+  it("keeps catalog marks on both complete endpoints and old origin-only definitions", () => {
+    for (const entry of INTEGRATION_CATALOG) {
+      if (entry.kind !== "remote") continue;
+      for (const url of [entry.url, `${new URL(entry.url).origin}/`])
+        expect(integrationIcon({ transport: "http", url, icon: "github" })).toEqual({
+          icon: entry.icon,
+        });
+    }
+  });
+
+  it("uses custom marks or images, then the server favicon without copying private URL parts", () => {
+    const custom = {
+      transport: "http" as const,
+      url: "https://example.com/mcp/private?token=secret",
+    };
+    expect(integrationIcon(custom)).toEqual({
+      icon: null,
+      iconUrl: "https://example.com/favicon.ico",
+    });
+    expect(integrationIcon({ ...custom, iconUrl: "https://example.com/brand.png" })).toEqual({
+      icon: null,
+      iconUrl: "https://example.com/brand.png",
+    });
+    expect(integrationIcon({ ...custom, icon: "linear" })).toEqual({ icon: "linear" });
+    expect(integrationIcon({ transport: "stdio", url: "https://localhost" })).toEqual({
+      icon: null,
+    });
+  });
+
+  it("accepts an agent's public icon override and rejects URLs carrying credentials", () => {
+    const decode = Schema.decodeUnknownSync(IntegrationUpdateByNameInput);
+    expect(decode({ name: "custom", iconUrl: "https://example.com/brand.png" })).toMatchObject({
+      iconUrl: "https://example.com/brand.png",
+    });
+    for (const iconUrl of [
+      "javascript:alert(1)",
+      "https://user:secret@example.com/icon",
+      "https://example.com/icon?token=secret",
+      "http://example.com/icon",
+    ])
+      expect(() => decode({ name: "custom", iconUrl })).toThrow();
   });
 });

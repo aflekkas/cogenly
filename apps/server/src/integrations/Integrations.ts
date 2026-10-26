@@ -6,6 +6,8 @@ import {
   IntegrationId,
   integrationCatalogEntry,
   integrationCatalogEntryFor,
+  integrationIcon,
+  INTEGRATION_CATALOG,
   type IntegrationNativeImportPreview,
   type IntegrationNativeImportResult,
   type IntegrationCallResult,
@@ -157,8 +159,11 @@ const redactIntegration = (integration: Integration | StoredIntegration): Integr
     syncedFrom: _synced,
     ...rest
   } = integration as StoredIntegration;
+  const identity = integrationIcon(integration);
   return {
     ...rest,
+    ...(identity.icon === null ? {} : { icon: identity.icon }),
+    ...(identity.iconUrl === undefined ? {} : { iconUrl: identity.iconUrl }),
     headers: redactHeaders(integration.headers),
     ...(integration.command === undefined
       ? {}
@@ -528,7 +533,7 @@ export const integrationSource = (summary: IntegrationSummary): IntegrationSourc
     id: integration.id,
     name: integration.name,
     displayName: integration.displayName,
-    icon: entry?.icon ?? null,
+    ...integrationIcon(integration),
     serviceName: entry?.name ?? integration.displayName,
     accountLabel: integration.accountLabel?.trim() || null,
     status,
@@ -625,6 +630,7 @@ const signInAttachment = (
     url: integration.url,
     scope: integration.scope,
     ...(integration.auth?.scope === undefined ? {} : { oauthScope: integration.auth.scope }),
+    ...(integration.auth?.clientId === undefined ? {} : { clientId: integration.auth.clientId }),
   },
   server: state.server,
   ...(state.registration === undefined ? {} : { registration: state.registration }),
@@ -642,13 +648,20 @@ const adoptable = (
   integration: StoredIntegration,
   signIn: Tokens.AttachedSignIn,
   nowMs: number,
+  alreadySignedIn = false,
 ): boolean => {
   const { attachment } = signIn;
   const authorization = attachment.authorization;
   if (
     authorization === undefined ||
     authorization.url !== integration.url ||
-    authorization.oauthScope !== integration.auth?.scope
+    authorization.oauthScope !== integration.auth?.scope ||
+    (authorization.clientId !== integration.auth?.clientId &&
+      !(
+        alreadySignedIn &&
+        authorization.clientId === undefined &&
+        attachment.registration === undefined
+      ))
   )
     return false;
   if (
@@ -785,7 +798,18 @@ const make = (options: IntegrationsOptions = {}) =>
       Effect.gen(function* () {
         if (integration.transport !== "http") return integration;
         const url = new URL(integration.url);
-        if (isPublicIntegrationPath(url.pathname)) return integration;
+        if (
+          url.username ||
+          url.password ||
+          url.hash ||
+          (url.search && integration.auth !== undefined)
+        )
+          return integration;
+        if (
+          !url.search &&
+          (isPublicIntegrationPath(url.pathname) || integrationCatalogEntryFor(integration))
+        )
+          return integration;
         const item = `integration-endpoint:${integration.id.replace(/^integration:/, "")}`;
         yield* saveSecret({
           item,
@@ -863,14 +887,49 @@ const make = (options: IntegrationsOptions = {}) =>
     const readStored = (payload: string) =>
       Effect.gen(function* () {
         const current = yield* decode(payload).pipe(Effect.mapError(failure("read", "storage")));
-        const protectedValue = yield* protectLiterals(yield* protectEndpoint(current));
+        let repaired = current;
+        const catalogEndpoint =
+          current.transport === "http" && current.endpointRef !== undefined
+            ? INTEGRATION_CATALOG.find(
+                (entry) =>
+                  entry.kind === "remote" &&
+                  new URL(entry.url).origin === new URL(current.url).origin,
+              )
+            : undefined;
+        if (catalogEndpoint?.kind === "remote" && current.endpointRef !== undefined) {
+          // Older versions vaulted even public catalog paths (notably Wispr's /v1/mcp).
+          // Restore only an exact catalog endpoint, never infer a credential destination.
+          const endpoint = yield* credentials
+            .resolve(current.endpointRef, {
+              host: new URL(current.url).hostname,
+              approvedItems: [],
+            })
+            .pipe(Effect.orElseSucceed(() => Option.none<string>()));
+          if (Option.isSome(endpoint) && endpoint.value === catalogEndpoint.url) {
+            const { endpointRef: _, ...rest } = current;
+            repaired = { ...rest, url: catalogEndpoint.url, icon: catalogEndpoint.icon };
+          }
+        }
+        const identity = integrationIcon(repaired);
+        const withIcon = {
+          ...repaired,
+          ...(identity.icon === null ? {} : { icon: identity.icon }),
+        };
+        const protectedValue = yield* protectLiterals(yield* protectEndpoint(withIcon));
         const encoded = yield* encode(protectedValue).pipe(
           Effect.mapError(failure("write", "storage")),
         );
-        if (encoded !== (yield* encode(current).pipe(Effect.mapError(failure("read", "storage")))))
+        if (
+          encoded !== (yield* encode(current).pipe(Effect.mapError(failure("read", "storage"))))
+        ) {
           yield* sql`UPDATE integrations SET payload_json=${encoded} WHERE id=${current.id} AND payload_json=${payload}`.pipe(
             Effect.mapError(failure("write", "storage")),
           );
+          if (Option.isSome(sync))
+            yield* sync.value
+              .publish(protectedValue, current)
+              .pipe(Effect.mapError(failure("upgrade definition", "storage")));
+        }
         return protectedValue;
       }).pipe(sql.withTransaction, Effect.mapError(failure("migrate credentials", "storage")));
 
@@ -2005,7 +2064,11 @@ const make = (options: IntegrationsOptions = {}) =>
             )
               return false;
             const next =
-              pointed !== undefined && adoptable(integration, pointed, nowMs)
+              // Preserve a local legacy manual-client grant until its owner refreshes
+              // with client identity metadata. A changed definition has cleared this
+              // state already; a peer without a local grant cannot use this exception.
+              pointed !== undefined &&
+              adoptable(integration, pointed, nowMs, state?.signedIn === true)
                 ? pointed
                 : attached.find((signIn) => adoptable(integration, signIn, nowMs));
             if (next === undefined) {
@@ -2323,6 +2386,8 @@ const make = (options: IntegrationsOptions = {}) =>
             ),
             name: input.name,
             displayName: input.displayName,
+            ...(input.icon === undefined ? {} : { icon: input.icon }),
+            ...(input.iconUrl === undefined ? {} : { iconUrl: input.iconUrl }),
             transport: input.transport,
             ...(input.local ? { local: input.local } : {}),
             ...(input.command ? { command: input.command } : {}),
@@ -2511,6 +2576,8 @@ const make = (options: IntegrationsOptions = {}) =>
             ...rest,
             ...(endpointRef === undefined ? {} : { endpointRef }),
             ...(input.displayName === undefined ? {} : { displayName: input.displayName }),
+            ...(input.icon === undefined ? {} : { icon: input.icon }),
+            ...(input.iconUrl === undefined ? {} : { iconUrl: input.iconUrl }),
             ...(input.transport === undefined ? {} : { transport: input.transport }),
             ...(input.url === undefined ? {} : { url: input.url }),
             ...(input.headers === undefined ? {} : { headers: input.headers }),

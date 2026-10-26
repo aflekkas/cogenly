@@ -87,6 +87,24 @@ export type IntegrationAuth = typeof IntegrationAuth.Type;
 const IntegrationAccountLabel = Schema.String.check(Schema.isMaxLength(200));
 
 const integrationFields = {
+  /** Catalog mark, or a public image URL for a custom integration. */
+  icon: Schema.optional(IntegrationCatalogId),
+  iconUrl: Schema.optional(
+    Schema.String.check(
+      Schema.isMaxLength(2000),
+      Schema.makeFilter((value) => {
+        const url = URL.parse(value);
+        return (
+          url !== null &&
+          url.protocol === "https:" &&
+          !url.username &&
+          !url.password &&
+          !url.search &&
+          !url.hash
+        );
+      }),
+    ),
+  ),
   name: IntegrationName,
   displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   transport: IntegrationTransport,
@@ -180,6 +198,8 @@ export type IntegrationCatalogConnectInput = typeof IntegrationCatalogConnectInp
  * `catalogId` is set, otherwise as `IntegrationAddInput`.
  */
 export const IntegrationAddToolInput = Schema.Struct({
+  icon: integrationFields.icon,
+  iconUrl: integrationFields.iconUrl,
   catalogId: Schema.optional(IntegrationCatalogId),
   apiKey: IntegrationCatalogInputs.fields.apiKey,
   clientId: IntegrationCatalogInputs.fields.clientId,
@@ -203,6 +223,8 @@ export const IntegrationAddToolInput = Schema.Struct({
 export type IntegrationAddToolInput = typeof IntegrationAddToolInput.Type;
 
 export const IntegrationUpdateInput = Schema.Struct({
+  icon: integrationFields.icon,
+  iconUrl: integrationFields.iconUrl,
   id: IntegrationId,
   command: Schema.optional(IntegrationCommand),
   displayName: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
@@ -437,6 +459,7 @@ export const IntegrationSource = Schema.Struct({
   name: IntegrationName,
   displayName: Schema.String,
   icon: Schema.NullOr(IntegrationCatalogId),
+  iconUrl: integrationFields.iconUrl,
   /** The catalog service's name, or the display name of a custom server. */
   serviceName: Schema.String,
   accountLabel: Schema.NullOr(Schema.String),
@@ -552,6 +575,8 @@ export const IntegrationCallResult = Schema.Struct({
 export type IntegrationCallResult = typeof IntegrationCallResult.Type;
 
 export const IntegrationUpdateByNameInput = Schema.Struct({
+  icon: integrationFields.icon,
+  iconUrl: integrationFields.iconUrl,
   command: Schema.optional(IntegrationCommand),
   name: IntegrationName,
   callbackOrigin: GoogleWorkspaceAddInput.fields.callbackOrigin,

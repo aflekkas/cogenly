@@ -6,6 +6,7 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   INTEGRATION_CATALOG,
   integrationCatalogEntryFor,
+  integrationIcon,
   type EnvironmentId,
   type IntegrationNativeImportPreview,
   type IntegrationSummary,
@@ -366,10 +367,12 @@ function AccountRow({
   const { integration } = summary;
   const { labels } = useEnvironmentProjectLabels(environmentId);
   // Why an account stays on this machine only matters once there is another one.
-  const paired =
-    useEnvironmentMachineList(environmentId)?.machines.some(
-      (machine) => machine.pairing === "paired",
-    ) ?? false;
+  const peers =
+    useEnvironmentMachineList(environmentId)?.machines.filter(
+      (machine) => machine.pairing === "paired" && machine.environmentId !== environmentId,
+    ) ?? [];
+  const paired = peers.length > 0;
+  const openAgentChat = useOpenAgentChat();
   const update = useOrchestrationCommand(integrationsRpc.update, { reportFailure: false });
   const remove = useOrchestrationCommand(integrationsRpc.remove, { reportFailure: false });
   const test = useOrchestrationCommand(integrationsRpc.testConnection, { reportFailure: false });
@@ -382,7 +385,7 @@ function AccountRow({
   const [error, setError] = useState<string | null>(null);
   const status = integrationStatus(summary, undefined);
   const statusRef = useStatusFade<HTMLSpanElement>(status.label);
-  const entry = integrationCatalogEntryFor(integration);
+  const icon = integrationIcon(integration);
   const report = (result: Awaited<ReturnType<typeof update>>) => {
     if (result._tag === "Success") return true;
     if (!isAtomCommandInterrupted(result))
@@ -438,7 +441,7 @@ function AccountRow({
     <SettingsRow
       title={
         <span className="flex items-center gap-2">
-          <IntegrationSourceIcon icon={entry?.icon ?? null} />
+          <IntegrationSourceIcon {...icon} />
           <span>{integrationTitle(integration)}</span>
         </span>
       }
@@ -452,6 +455,25 @@ function AccountRow({
       }
       control={
         <div className="flex items-center justify-end gap-1">
+          {summary.notSyncedReason &&
+            peers.map((machine) => (
+              <Button
+                key={machine.environmentId}
+                size="sm"
+                variant="outline"
+                disabled={pending || !canWrite}
+                onClick={() =>
+                  void run(async () => {
+                    await openAgentChat(
+                      machine.environmentId,
+                      `Set up ${integration.displayName}${integration.accountLabel ? ` (${integration.accountLabel})` : ""} on this machine. It is already connected on another machine but its local runtime or endpoint cannot sync. Read integration_setup_guide, connect it here, include its logo, and verify it with integration_test.`,
+                    );
+                  })
+                }
+              >
+                Set up on {machine.name}
+              </Button>
+            ))}
           {needsReconnect ? (
             <Button
               size="sm"

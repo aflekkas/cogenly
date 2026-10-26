@@ -7,6 +7,11 @@ and `integration_call`. Setup knowledge is repository data exposed by
 `integration_setup_guide`; Settings manages accounts rather than reproducing
 vendor setup flows. Add service knowledge there without adding a client wizard.
 
+Keep these gateway tools stable: providers may cache the MCP tool catalog at
+session startup. Integration names and upstream schemas resolve on each call,
+so a connection added locally or received through sync works mid-turn without
+provider-specific tool-list notifications.
+
 Native CLI servers, plugins and hosted connectors otherwise bypass Cogenly's
 scope, status and credential handling and duplicate its tools. They are suppressed
 by default, whether or not the native-definition import offer was reviewed. The

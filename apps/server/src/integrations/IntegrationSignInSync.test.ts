@@ -4,6 +4,8 @@ import {
   IntegrationName,
   ProjectLabelId,
   VaultItemId,
+  ProviderInstanceId,
+  ThreadId,
   type IntegrationId,
 } from "@cogenly/contracts";
 import * as Context from "effect/Context";
@@ -15,6 +17,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Stream from "effect/Stream";
+import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 import * as Tracer from "effect/Tracer";
 import { FetchHttpClient } from "effect/http";
@@ -25,6 +28,7 @@ import {
   expectAbsent,
   settle,
   share,
+  push,
   startNode,
   storedText,
 } from "../vault/vaultSync.testkit.ts";
@@ -34,6 +38,14 @@ import * as Integrations from "./Integrations.ts";
 import * as IntegrationSyncPeers from "./IntegrationSyncPeers.ts";
 import * as Tokens from "./IntegrationTokens.ts";
 import { IntegrationEndpointPolicy } from "./RemoteEndpoint.ts";
+import * as DefinitionSync from "../sync/IntegrationSync.ts";
+import * as Invocation from "../mcp/McpInvocationContext.ts";
+import * as Access from "../mcp/McpToolAccess.ts";
+import { liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
+import { IntegrationsToolkit } from "../mcp/toolkits/integrations/tools.ts";
+import * as Handlers from "../mcp/toolkits/integrations/handlers.ts";
+import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
+import * as AgentStore from "../agents/AgentStore.ts";
 import {
   COGENLY_ORIGIN,
   type MockAuthServer,
@@ -53,6 +65,7 @@ const startGateway = (node: VaultNode) =>
       Layer.provideMerge(Tokens.layer),
       Layer.provideMerge(IntegrationSyncPeers.layerFor(node.environmentId)),
       Layer.provide(FetchHttpClient.layer),
+      Layer.provideMerge(DefinitionSync.layerWithoutWatch),
       Layer.provide(Layer.succeedContext(node.context)),
     );
     const context = yield* Layer.build(layer);
@@ -70,6 +83,7 @@ const startGateway = (node: VaultNode) =>
       integrations: Context.get(context, Integrations.Integrations),
       tokens: Context.get(context, Tokens.IntegrationTokens),
       peers,
+      definitions: Context.get(context, DefinitionSync.IntegrationSync),
     };
   });
 const startMachine = (network: Network, name: string) =>
@@ -164,8 +178,177 @@ const awaitStatus = (machine: Machine, id: IntegrationId, status: string) =>
   );
 
 const http = Effect.provide(FetchHttpClient.layer);
+const encodeSignInAttachment = Schema.encodeEffect(Tokens.SignInAttachment);
 
 describe("web integration sign-ins across paired machines", () => {
+  it.effect(
+    "a manually configured OAuth client signs in on its peer without setup and cannot adopt another client's old grant",
+    () =>
+      Effect.gen(function* () {
+        const { hub, spoke } = yield* sharedPair;
+        const mock = yield* startMockAuthServer;
+        mock.clients.set("manual-a", [`${COGENLY_ORIGIN}/oauth/integrations/callback`]);
+        const { integration } = yield* spoke.integrations.create({
+          ...linearInput(mock, "linear"),
+          auth: { type: "oauth", clientId: "manual-a" },
+        });
+        yield* signIn(spoke, integration.id, "work");
+        yield* settle(hub, [spoke]);
+        yield* hub.definitions.reconcile;
+        yield* hub.integrations.adoptSyncedSignIns();
+        expect((yield* oauthStateOf(hub, integration.id))?.signedIn).toBe(true);
+        yield* whoami(hub);
+        const itemId = (yield* oauthStateOf(hub, integration.id))!.tokenItemId!;
+        const attachment = Option.getOrThrow(yield* hub.tokens.read(itemId)).attachment!;
+        const { clientId: _, ...authorization } = attachment.authorization!;
+        const legacyAttachment = yield* encodeSignInAttachment({ ...attachment, authorization });
+        yield* hub.vault.setSyncAttachment(
+          VaultItemId.make(itemId),
+          legacyAttachment as Record<string, Schema.Json>,
+        );
+        yield* hub.integrations.adoptSyncedSignIns();
+        expect((yield* oauthStateOf(hub, integration.id))?.signedIn).toBe(true);
+        yield* spoke.integrations.update({
+          id: integration.id,
+          auth: { type: "oauth", clientId: "manual-b" },
+        });
+        // Deliver the definition before projecting the vault removal. The old token
+        // must not be adopted under the new client, even while it still exists here.
+        yield* push(spoke, hub, false);
+        yield* hub.definitions.reconcile;
+        yield* hub.integrations.adoptSyncedSignIns();
+        expect((yield* summaryOf(hub, integration.id))?.status).toBe("needs_sign_in");
+        expect((yield* oauthStateOf(hub, integration.id))?.signedIn).not.toBe(true);
+      }).pipe(Effect.scoped, http),
+  );
+
+  it.effect.each(["claude", "codex"])(
+    "%s's existing gateway sees a peer's new integration, credential, updates, disable and removal",
+    (provider) =>
+      Effect.gen(function* () {
+        const { hub, spoke } = yield* sharedPair;
+        const hubDefinitions = hub.definitions;
+        const spokeDefinitions = spoke.definitions;
+        const threadId = ThreadId.make(`thread:${provider}`);
+        const instance = ProviderInstanceId.make(provider);
+        const dependencies = Layer.mergeAll(
+          Layer.succeed(Integrations.Integrations, hub.integrations),
+          Layer.succeed(Invocation.McpInvocationContext, {
+            environmentId: hub.environmentId,
+            requestNamespace: `provider:${provider}`,
+            thread: {
+              threadId,
+              providerSessionId: `session:${provider}`,
+              providerInstanceId: instance,
+            },
+            client: undefined,
+            capabilities: new Set(["orchestration"] as const),
+            issuedAt: 0,
+          }),
+          Layer.mock(Threads.ThreadManagementService)({
+            getThreadShell: () =>
+              Effect.succeed({
+                ...liveThreadShell(threadId),
+                providerInstanceId: instance,
+                modelSelection: { instanceId: instance, model: "test" },
+              }),
+          }),
+          Layer.mock(AgentStore.AgentStore)({ forThread: () => Effect.succeed(null) }),
+        );
+        // Construct the provider-facing tool catalog once, before the integration exists.
+        const toolkit = yield* IntegrationsToolkit.pipe(
+          Effect.provide(
+            Access.HandlersLayer.layer(Handlers.layer).pipe(Layer.provide(dependencies)),
+          ),
+        );
+        const list = () =>
+          toolkit.handle("integrations_list", {}).pipe(
+            Stream.unwrap,
+            Stream.runCollect,
+            Effect.provide(dependencies),
+            Effect.map((results) => results.at(-1)?.result),
+          );
+        const name = IntegrationName.make("live-source");
+        const call = () =>
+          toolkit.handle("integration_call", { name, tool: "whoami", arguments: {} }).pipe(
+            Stream.unwrap,
+            Stream.runCollect,
+            Effect.provide(dependencies),
+            Effect.map((results) => results.at(-1)?.result),
+          );
+        expect(yield* list()).toEqual({ integrations: [] });
+        expect(yield* call()).toMatchObject({ code: "invalid_request" });
+        const mock = yield* startMockAuthServer;
+        mock.accessTokens.set("api-key-shared-secret", "work");
+        const { integration } = yield* spoke.integrations.create({
+          name,
+          displayName: "Live source",
+          transport: "http",
+          url: `${mock.base}/mcp`,
+          headers: { authorization: "Bearer api-key-shared-secret" },
+          accountLabel: "Work",
+          scope: { type: "all" },
+          hint: "",
+        });
+        const sync = Effect.gen(function* () {
+          yield* spokeDefinitions.reconcile;
+          yield* settle(hub, [spoke]);
+          yield* hubDefinitions.reconcile;
+          yield* hub.integrations.adoptSyncedSignIns();
+        });
+        yield* sync;
+        expect(yield* list()).toMatchObject({
+          integrations: [{ integration: { name, accountLabel: "Work" } }],
+        });
+        const tools = yield* toolkit
+          .handle("integration_tools", { name })
+          .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+        expect(tools.at(-1)?.result).toMatchObject({ tools: [{ name: "whoami" }] });
+        expect(yield* call()).toMatchObject({
+          content: [{ type: "text", text: expect.stringContaining("account=") }],
+        });
+        expect(mock.bearers.at(-1)).toBe("api-key-shared-secret");
+        const second = yield* startMockAuthServer;
+        second.accessTokens.set("api-key-shared-secret", "other");
+        yield* spoke.integrations.update({
+          id: integration.id,
+          url: `${second.base}/mcp`,
+          displayName: "Changed",
+        });
+        yield* sync;
+        expect(yield* call()).toMatchObject({
+          content: [{ type: "text", text: expect.stringContaining("account=") }],
+        });
+        expect(second.bearers.at(-1)).toBe("api-key-shared-secret");
+        yield* spoke.integrations.update({ id: integration.id, enabled: false });
+        yield* sync;
+        expect(yield* call()).toMatchObject({ code: "invalid_request" });
+        yield* spoke.integrations.update({ id: integration.id, enabled: true });
+        yield* sync;
+        expect(yield* call()).toMatchObject({
+          content: [{ type: "text", text: expect.stringContaining("account=") }],
+        });
+        yield* spoke.integrations.remove(integration.id);
+        yield* sync;
+        expect(yield* call()).toMatchObject({ code: "invalid_request" });
+        expect(JSON.stringify(yield* hub.state.get("integration", integration.id))).not.toContain(
+          "api-key-shared-secret",
+        );
+        yield* hub.integrations.create({
+          name,
+          displayName: "Added here",
+          transport: "http",
+          url: `${mock.base}/mcp`,
+          headers: { authorization: "Bearer api-key-shared-secret" },
+          scope: { type: "all" },
+          hint: "",
+        });
+        expect(yield* call()).toMatchObject({
+          content: [{ type: "text", text: expect.stringContaining("account=work") }],
+        });
+      }).pipe(Effect.scoped, http),
+  );
+
   it.effect("a sign-in on the spoke signs the hub in once it syncs, and the hub refreshes it", () =>
     Effect.gen(function* () {
       const network = new Network();
