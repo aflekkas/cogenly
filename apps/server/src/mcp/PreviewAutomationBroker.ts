@@ -75,6 +75,12 @@ export class PreviewAutomationBroker extends Context.Service<
       host: PreviewAutomationHost,
       options?: PreviewAutomationConnectOptions,
     ) => Effect.Effect<Stream.Stream<PreviewAutomationStreamEvent>>;
+    /** Maintains a host registration after eviction, without replaying requests. */
+    readonly serve: (
+      host: PreviewAutomationHost,
+      handle: (event: PreviewAutomationStreamEvent) => Effect.Effect<void>,
+      options?: PreviewAutomationConnectOptions,
+    ) => Effect.Effect<never>;
     readonly focusHost: (host: PreviewAutomationHostFocus) => Effect.Effect<void>;
     readonly respond: (
       response: PreviewAutomationResponse,
@@ -186,6 +192,9 @@ const hostAssignmentKey = (scope: McpInvocationContext.McpThreadInvocationScope)
 
 const isPreviewTabId = Schema.is(PreviewTabId);
 const decodeControlReason = Schema.decodeUnknownOption(PreviewAutomationControlReason);
+const decodeTimeoutTabState = Schema.decodeUnknownOption(
+  PreviewAutomationTimeoutError.fields.tabState,
+);
 
 const readResultTabId = (result: unknown): PreviewTabId | null | undefined => {
   if (typeof result !== "object" || result === null || !("tabId" in result)) return undefined;
@@ -264,11 +273,14 @@ const classifyResponseError = (
         ...context,
         ...remoteDiagnostics,
       });
-    case "PreviewAutomationTimeoutError":
+    case "PreviewAutomationTimeoutError": {
+      const tabState = decodeTimeoutTabState(error.detail);
       return new PreviewAutomationTimeoutError({
         ...context,
         ...remoteDiagnostics,
+        ...(Option.isSome(tabState) ? { tabState: tabState.value } : {}),
       });
+    }
     case "PreviewAutomationControlInterruptedError": {
       const reason = decodeControlReason(error.detail);
       return new PreviewAutomationControlInterruptedError({
@@ -714,7 +726,17 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
         onSome: (value) => Effect.succeed(value as A),
       });
     });
-    const result = yield* awaitResponse().pipe(Effect.ensuring(removePending));
+    const result = yield* awaitResponse().pipe(
+      Effect.onInterrupt(() =>
+        Effect.logInfo("preview automation request cancelled by caller", {
+          operation: input.operation,
+          clientId: connection.clientId,
+          requestId,
+          ...(requestContext.tabId === undefined ? {} : { tabId: requestContext.tabId }),
+        }),
+      ),
+      Effect.ensuring(removePending),
+    );
     if (input.updateCurrentTab === false) return result;
     const responseTabId = readResultTabId(result);
     const resultTabId = responseTabId === undefined ? input.tabId : responseTabId;
@@ -746,7 +768,24 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
     return result;
   });
 
-  return PreviewAutomationBroker.of({ connect, focusHost, respond, invoke });
+  const serve: PreviewAutomationBroker["Service"]["serve"] = (host, handle, options) =>
+    connect(host, options).pipe(
+      Effect.flatMap((events) =>
+        events.pipe(
+          Stream.runForEach((event) =>
+            event.type === "connected"
+              ? handle(event)
+              : handle(event).pipe(Effect.forkScoped, Effect.asVoid),
+          ),
+        ),
+      ),
+      Effect.scoped,
+      Effect.exit,
+      Effect.andThen(Effect.sleep("1 second")),
+      Effect.forever,
+    );
+
+  return PreviewAutomationBroker.of({ connect, serve, focusHost, respond, invoke });
 }).pipe(Effect.withSpan("PreviewAutomationBroker.make"));
 
 export const layer = Layer.effect(PreviewAutomationBroker, make);

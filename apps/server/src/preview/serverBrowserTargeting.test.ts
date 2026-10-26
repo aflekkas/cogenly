@@ -5,7 +5,6 @@ import {
   isTabShown,
   pickDefaultTab,
   revealBeforeAttach,
-  shouldMoveToDesktop,
   tabBacking,
   tabRenderingStatus,
   targetKey,
@@ -151,10 +150,10 @@ describe("session mismatch", () => {
     expect(tabRenderingStatus(tab({ tabId: "a" }), false)).toEqual({ rendering: "background" });
   });
 
-  it("moves a headless tab to the desktop page when it attaches", () => {
-    expect(shouldMoveToDesktop({ rendersOnDesktop: false })).toBe(true);
-    expect(shouldMoveToDesktop({ rendersOnDesktop: true })).toBe(false);
-    expect(shouldMoveToDesktop(undefined)).toBe(false);
+  it("reports a streamed headless page as the panel's own page", () => {
+    expect(tabRenderingStatus(tab({ tabId: "a", viewerCount: 1 }), true)).toEqual({
+      rendering: "panel",
+    });
   });
 
   it("names the tab the user is looking at when the target is another one", () => {
