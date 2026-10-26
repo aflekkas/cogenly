@@ -320,7 +320,18 @@ export const make = Effect.gen(function* () {
   const getByWorkspaceRoot: ProjectService["Service"]["getByWorkspaceRoot"] = Effect.fn(
     "ProjectService.getByWorkspaceRoot",
   )(function* (workspaceRoot, options) {
-    const normalized = yield* normalizeWorkspaceRoot({ workspaceRoot });
+    // A lookup, not a claim: a folder that is not there yet (a clone's
+    // destination) or not any more (a removed checkout) is looked up by the
+    // path it resolves to, never refused.
+    const normalized = yield* workspacePaths.normalizeWorkspaceRoot(workspaceRoot).pipe(
+      Effect.catchTag("WorkspaceRootNotExistsError", (missing) =>
+        Effect.succeed(missing.normalizedWorkspaceRoot),
+      ),
+      Effect.mapError(
+        (cause) =>
+          new ProjectOperationError({ operation: "normalize-workspace", workspaceRoot, cause }),
+      ),
+    );
     const row = yield* (
       options?.includeDeleted === true
         ? projects

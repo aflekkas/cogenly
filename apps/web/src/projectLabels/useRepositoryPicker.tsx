@@ -1,7 +1,8 @@
 import { useAtomValue } from "@effect/atom-react";
 import { isAtomCommandInterrupted } from "@cogenly/client-runtime/state/runtime";
 import type { EnvironmentProject } from "@cogenly/client-runtime/state/models";
-import { type EnvironmentId, ProjectId } from "@cogenly/contracts";
+import { type EnvironmentId, ProjectId, isRemoteRepositoryPlaceholder } from "@cogenly/contracts";
+import { useNavigate } from "@tanstack/react-router";
 import { ChevronLeftIcon, FolderPlusIcon } from "lucide-react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
@@ -21,6 +22,7 @@ import {
 } from "../components/ui/combobox";
 import { requestConfirmDialog } from "../confirmDialog";
 import { useProjects, useServerConfigs } from "../state/entities";
+import { useEnvironments } from "../state/environments";
 import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
 import {
@@ -34,18 +36,20 @@ import { isPickableRepository } from "./projectMeta.logic";
 import { linkedGitHubOwners, type OwnerSearchState } from "./projectSourceLinks.logic";
 import {
   addRepositoryOptions,
+  cloneFailureLine,
   linkedRepositoryRows,
   machineRepositoryRows,
+  projectRepositoryLinks,
   repositoryRowAction,
   type AddRepositoryOption,
   type RepositoryListRow,
+  type RepositoryRowView,
 } from "./repositoryPicker.logic";
 import {
   GitHubRepositoryRow,
   GitHubSearchStatus,
   PickerRowContent,
   RepositoryPickerRow,
-  RepositoryRowError,
   RepositoryRowIcon,
   RepositoryRowMenu,
   RepositoryRowStatus,
@@ -124,6 +128,14 @@ export function useRepositoryPicker(input: {
   /** Show only "Add repository" (the project page's add button). */
   readonly addOnly?: boolean;
   readonly leadRepositoryId?: ProjectId | null;
+  /** The repository the host has chosen, which its row checks. */
+  readonly chosenRepositoryId?: ProjectId | null;
+  /**
+   * Another machine the host runs on (the composer's "Run on" pick), when it
+   * is not `environmentId`: a row it lacks says "Not on <it>", cloned there
+   * on send.
+   */
+  readonly runOn?: { readonly environmentId: EnvironmentId; readonly name: string } | null;
   /** A repository was picked, linked, or cloned and is ready here. */
   readonly onPick: (repository: EnvironmentProject) => void;
   /** A launch service can resolve a remote-only row after choosing its machine. */
@@ -136,6 +148,13 @@ export function useRepositoryPicker(input: {
   const { environmentId, open, query } = input;
   const trimmed = query.trim();
   const projects = useProjects();
+  const navigate = useNavigate();
+  const { environments } = useEnvironments();
+  const machineName =
+    environments.find((environment) => environment.environmentId === environmentId)?.label ?? null;
+  const runOn = input.runOn && input.runOn.environmentId !== environmentId ? input.runOn : null;
+  const runOnIds = useMemo(() => (runOn === null ? [] : [runOn.environmentId]), [runOn]);
+  const runOnDirectory = useProjectLabelDirectory(runOnIds);
   const scratchRoot =
     useServerConfigs().get(environmentId ?? ("" as EnvironmentId))?.scratchWorkspaceRoot ?? null;
   const environmentIds = useMemo(
@@ -310,6 +329,39 @@ export function useRepositoryPicker(input: {
 
   const checkouts = useRepositoryCheckouts(environmentId);
   const rowActions = useRepositoryRowActions(environmentId, checkouts);
+  // The project as the "Run on" machine has it, for what that machine lacks.
+  const runOnProject = useMemo(() => {
+    if (runOn === null || project === null) return null;
+    const entry = runOnDirectory.byKey.get(projectLabelKey(runOn.environmentId, project.label.id));
+    return entry ? projectLabelOn(entry, runOn.environmentId) : null;
+  }, [project, runOn, runOnDirectory.byKey]);
+  /** A row's state, and the machine it is stated for. */
+  const viewOf = (row: RepositoryRow): { view: RepositoryRowView; machine: string | null } => {
+    const view = checkouts.viewOf(row);
+    if (runOn === null || project === null || view.kind !== "ready" || row.remote === null)
+      return { view, machine: machineName };
+    const remote = row.remote.toLowerCase();
+    const link = runOnProject
+      ? projectRepositoryLinks(runOnProject.label).find(
+          (candidate) => candidate.remote?.toLowerCase() === remote,
+        )
+      : undefined;
+    const held =
+      link !== undefined &&
+      !isRemoteRepositoryPlaceholder(link.repositoryId) &&
+      (link.checkout ?? "ready") === "ready";
+    return held
+      ? { view, machine: machineName }
+      : { view: { kind: "needs-clone", cloneable: false, onSend: true }, machine: runOn.name };
+  };
+  /** Opens GitHub sign-in for the listed machine, where a clone needs it. */
+  const openSignIn = () => {
+    input.onClose();
+    void navigate({
+      to: "/settings/source-control",
+      search: environmentId === null ? {} : { machine: environmentId },
+    });
+  };
   const canLink = useAtomValue(
     serverEnvironment.linkProjectLabelRepository.permissionAtom(environmentId),
   );
@@ -409,6 +461,16 @@ export function useRepositoryPicker(input: {
           return false;
         }
         if (
+          view.kind === "failed" &&
+          view.cloneable &&
+          cloneFailureLine(view.message, row.name, row.remote).action === "sign-in"
+        ) {
+          openSignIn();
+          return false;
+        }
+        // Not here yet: picking it clones it, shows the clone on the row, and
+        // picks it once it lands.
+        if (
           (view.kind === "needs-clone" || view.kind === "failed") &&
           view.cloneable &&
           row.project !== null
@@ -456,6 +518,17 @@ export function useRepositoryPicker(input: {
         const target = { project, repository: option.repository };
         const view = remoteClone.isFor(target) ? remoteClone.view : null;
         if (view?.phase === "starting" || view?.phase === "running") return true;
+        if (
+          view?.phase === "failed" &&
+          cloneFailureLine(
+            view.message,
+            option.repository.nameWithOwner,
+            `github.com/${option.repository.nameWithOwner}`,
+          ).action === "sign-in"
+        ) {
+          openSignIn();
+          return false;
+        }
         pickAfterCloneRef.current = true;
         if (view?.phase === "failed" || view?.phase === "cancelled") {
           void remoteClone.retry();
@@ -472,7 +545,7 @@ export function useRepositoryPicker(input: {
     switch (item.kind) {
       case "repository": {
         const { row } = item;
-        const view = checkouts.viewOf(row);
+        const { view, machine } = viewOf(row);
         return (
           <RepositoryPickerRow
             key={item.value}
@@ -488,7 +561,19 @@ export function useRepositoryPicker(input: {
             name={row.name}
             tooltip={row.remote ?? row.name}
             detail={row.detail}
-            trailing={<RepositoryRowStatus view={view} />}
+            trailing={
+              <RepositoryRowStatus
+                view={view}
+                name={row.name}
+                remote={row.remote}
+                machineName={machine}
+              />
+            }
+            chosen={
+              row.local !== null &&
+              input.chosenRepositoryId != null &&
+              row.local.id === input.chosenRepositoryId
+            }
             menu={
               <RepositoryRowMenu
                 label={`${row.name} actions`}
@@ -499,7 +584,6 @@ export function useRepositoryPicker(input: {
                 })}
               />
             }
-            below={<RepositoryRowError view={view} name={row.name} />}
           />
         );
       }

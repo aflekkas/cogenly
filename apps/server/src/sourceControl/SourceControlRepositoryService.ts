@@ -7,6 +7,7 @@ import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 
 import {
+  SourceControlProviderError,
   SourceControlRepositoryError,
   type SourceControlCloneRepositoryInput,
   type SourceControlCloneRepositoryResult,
@@ -31,6 +32,7 @@ import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 import * as HostProcess from "@cogenly/shared/HostProcess";
 const isSourceControlRepositoryError = Schema.is(SourceControlRepositoryError);
+const isSourceControlProviderError = Schema.is(SourceControlProviderError);
 
 export class SourceControlRepositoryService extends Context.Service<
   SourceControlRepositoryService,
@@ -146,7 +148,10 @@ function mapRepositoryError(operation: string, provider: SourceControlProviderKi
       : new SourceControlRepositoryError({
           operation,
           provider,
-          detail: "The source control operation could not be completed.",
+          // The provider's own words say what to fix ("Repository not found…").
+          detail: isSourceControlProviderError(cause)
+            ? cause.detail
+            : "The source control operation could not be completed.",
           cause,
         }),
   );
@@ -224,7 +229,7 @@ export function cloneFailureDetail(stderrTail: ReadonlyArray<string>): string {
     return `The host refused this machine's SSH key. Add an SSH key to your account, or sign in over HTTPS (for GitHub, \`gh auth login\`), then retry. Git said: ${raw}`;
   }
   if (/authentication failed|could not read username|terminal prompts disabled/i.test(raw)) {
-    return `The host asked for a login this machine does not have. Sign in (for GitHub, \`gh auth login\`), then retry. Git said: ${raw}`;
+    return `The host asked for a login this machine does not have. Sign in on this machine (for GitHub, Settings → Source control → GitHub: save a token, or run \`gh auth login\` there), then retry. Git said: ${raw}`;
   }
   return raw;
 }

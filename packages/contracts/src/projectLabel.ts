@@ -434,6 +434,26 @@ export const ProjectFoldersReconcileResult = Schema.Struct({
 });
 export type ProjectFoldersReconcileResult = typeof ProjectFoldersReconcileResult.Type;
 
+/** What a failed clone comes down to, which decides what the user is offered to do about it. */
+export type CloneFailureKind = "sign_in" | "folder_taken" | "not_found" | "network" | "other";
+
+/** Classifies a clone failure from git's or the server's own words. */
+export function cloneFailureKind(message: string): CloneFailureKind {
+  if (/already exists and is not (?:empty|a directory)|already holds other files/i.test(message))
+    return "folder_taken";
+  // Before "not found": an SSH key refusal also says it could not read from the remote.
+  if (
+    /permission denied|authentication failed|could not read username|terminal prompts disabled|publickey|asked for a login|not signed in|gh auth login|\b403\b/i.test(
+      message,
+    )
+  )
+    return "sign_in";
+  if (/not found|could not read from remote/i.test(message)) return "not_found";
+  if (/could not resolve host|timed out|network|connection (?:refused|reset)/i.test(message))
+    return "network";
+  return "other";
+}
+
 export class RepositoryCheckoutError extends Schema.TaggedError<RepositoryCheckoutError>()(
   "RepositoryCheckoutError",
   {
@@ -445,6 +465,7 @@ export class RepositoryCheckoutError extends Schema.TaggedError<RepositoryChecko
       "no_remote",
       "destination_taken",
       "clone_failed",
+      "sign_in_required",
       "has_worktrees",
       "uncommitted_changes",
       "unpushed_commits",
@@ -469,7 +490,9 @@ export class RepositoryCheckoutError extends Schema.TaggedError<RepositoryChecko
       case "destination_taken":
         return `${this.detail ?? "The destination folder"} already holds other files; move them away, then clone ${this.repositoryName} again.`;
       case "clone_failed":
-        return `${this.repositoryName} could not be cloned${this.detail ? `: ${this.detail}` : ""}.`;
+        return `${this.repositoryName} could not be cloned${this.detail ? `: ${this.detail.replace(/\.+$/, "")}` : ""}.`;
+      case "sign_in_required":
+        return `${this.repositoryName} could not be cloned: this machine is not signed in to GitHub with access to it. Sign in on this machine under Settings → Source control → GitHub (save a token, or run \`gh auth login\` there), then retry.${this.detail ? ` Git said: ${this.detail}` : ""}`;
       case "has_worktrees":
         return `${this.repositoryName} has worktrees on this machine; remove them first.`;
       case "uncommitted_changes":
@@ -485,7 +508,7 @@ export class RepositoryCheckoutError extends Schema.TaggedError<RepositoryChecko
       case "protected_folder":
         return `${this.repositoryName}'s record points at ${this.detail ?? "a folder"}, which holds more than this repository; it is never deleted.`;
       case "storage":
-        return `The checkout for ${this.repositoryName} could not be inspected.`;
+        return `Cogenly could not read or prepare ${this.repositoryName}'s folder on this machine${this.detail ? `: ${this.detail}` : ""}. Retry; if it keeps failing, the server log has the cause.`;
     }
   }
 }

@@ -321,6 +321,16 @@ export function DraftHeroHeadline({
     open: pickerOpen,
     query: pickerQuery,
     leadRepositoryId: isScratchDraft ? null : (activeProject?.id ?? null),
+    chosenRepositoryId: isScratchDraft ? null : (activeProject?.id ?? null),
+    // Run on another connected machine: rows say what it lacks, set up on send.
+    // A machine reached only through pairing has no projects here to read.
+    runOn:
+      draftThread?.launchMachine && environmentLabelById.has(draftThread.launchMachine)
+        ? {
+            environmentId: draftThread.launchMachine,
+            name: environmentLabelById.get(draftThread.launchMachine) ?? "",
+          }
+        : null,
     onPick: (repository) => pickRepositoryRef.current(repository),
     onClose: closePicker,
   });

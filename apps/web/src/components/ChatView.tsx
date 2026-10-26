@@ -294,6 +294,9 @@ import {
 } from "../machines/launchMachine.logic";
 import { threadOwnerMachine } from "../machines/machines.logic";
 import { useEnvironmentMachineList } from "../machines/useMachines";
+import { machineMoveTargets } from "../machines/machines.logic";
+import { modelOnMachine } from "../machines/machineSwitch.logic";
+import { useDraftMachineSwitch } from "../machines/useDraftMachineSwitch";
 import { resolveThreadOrigin } from "./chat/threadLineage.logic";
 import { isEditableFocused } from "../lib/editableFocus";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@cogenly/shared/keybindings";
@@ -3816,6 +3819,7 @@ export default function ChatView(props: ChatViewProps) {
           : "Auto balance"
     : undefined;
 
+  const machineSwitch = useDraftMachineSwitch();
   // The machine an in-flight switch is heading to; a newer switch replaces it.
   const environmentChangeRef = useRef<{ readonly environmentId: EnvironmentId } | null>(null);
   const [isEnvironmentChanging, setIsEnvironmentChanging] = useState(false);
@@ -3846,6 +3850,54 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
     const target = pick.option;
+    const targetName = target.label;
+    // Keep the project, repository and model wherever the target can hold
+    // them; what it cannot is left as it was here, for the way back.
+    const switched = machineSwitch.plan({
+      threadId: originalDraft.threadId,
+      here: originalDraft.environmentId,
+      repository: activeProject !== null && !activeProjectIsScratch ? activeProject : null,
+      target: target.environmentId,
+      targetRecordId: activeProjectIsScratch ? null : target.projectId,
+      canLaunchThere: machineMoveTargets(runOnMachineList).some(
+        (machine) => machine.environmentId === target.environmentId,
+      ),
+    });
+    const keepModel = () => {
+      const draft = useComposerDraftStore.getState().getComposerDraft(draftId);
+      const selection = draft?.activeProvider
+        ? (draft.modelSelectionByProvider[draft.activeProvider] ?? null)
+        : null;
+      const targetConfig = environmentById.get(target.environmentId)?.serverConfig;
+      if (!targetConfig || !draft?.modelSelectionExplicit) return;
+      const kept = modelOnMachine({
+        selection,
+        here: providerInstanceEntries,
+        there: applyProviderInstanceSettings(
+          deriveProviderInstanceEntries(targetConfig.providers),
+          targetConfig.settings,
+        ),
+        machineName: targetName,
+      });
+      if (kept === null) return;
+      setComposerDraftModelSelection(draftId, kept.selection, { replaceOptions: true });
+      if (kept.note) toastManager.add({ type: "info", title: kept.note });
+    };
+    if (switched.plan.kind === "launch-there") {
+      // The draft keeps its project and repository; the target files its
+      // own checkout of the repository, or clones it, when the draft is sent.
+      environmentChangeRef.current = null;
+      setIsEnvironmentChanging(false);
+      setDraftThreadContext(draftId, {
+        launchMachine: target.environmentId,
+        environmentSelection: "manual",
+        loadBalancedEnvironmentId: null,
+        worktreePath: null,
+      });
+      keepModel();
+      return;
+    }
+    const plan = switched.plan;
     const request = { environmentId: target.environmentId };
     environmentChangeRef.current = request;
     setIsEnvironmentChanging(false);
@@ -3877,6 +3929,15 @@ export default function ChatView(props: ChatViewProps) {
           launchMachine: null,
         });
       }
+      if (plan.keepProject && switched.projectId !== null) {
+        machineSwitch.carryProject(
+          originalDraft.threadId,
+          switched.projectId,
+          target.environmentId,
+          activeThreadSurface === "work" ? (plan.repositoryId ?? null) : undefined,
+        );
+      }
+      keepModel();
     };
     const finish = () => {
       if (environmentChangeRef.current === request) {
@@ -3884,10 +3945,13 @@ export default function ChatView(props: ChatViewProps) {
         setIsEnvironmentChanging(false);
       }
     };
-    if (target.projectId !== null) {
+    // The repository the plan landed on, else the target's own copy of it.
+    const landingId = activeProjectIsScratch
+      ? target.projectId
+      : (plan.repositoryId ?? (plan.keepProject ? null : target.projectId));
+    if (landingId !== null) {
       const project = allProjects.find(
-        (project) =>
-          project.environmentId === target.environmentId && project.id === target.projectId,
+        (project) => project.environmentId === target.environmentId && project.id === landingId,
       );
       if (project) retarget(project);
       finish();

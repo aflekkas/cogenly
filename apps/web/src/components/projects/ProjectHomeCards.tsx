@@ -22,7 +22,7 @@ import {
   PlusIcon,
   SquarePenIcon,
 } from "lucide-react";
-import { Fragment, useMemo, useRef, useState, type DragEvent as ReactDragEvent } from "react";
+import { useMemo, useRef, useState, type DragEvent as ReactDragEvent } from "react";
 
 import { useAgents, useAgentsClient } from "../../agents/agentsClient";
 import type { AgentContact } from "../../agents/agents.types";
@@ -48,11 +48,11 @@ import {
   sortProjectSourceLinks,
 } from "../../projectLabels/projectSourceLinks.logic";
 import {
+  cloneFailureLine,
   gitHubRepositoryOf,
   repositoryRowAction,
 } from "../../projectLabels/repositoryPicker.logic";
 import {
-  RepositoryRowError,
   RepositoryRowIcon,
   RepositoryRowMenu,
   RepositoryRowStatus,
@@ -63,6 +63,7 @@ import {
   useRepositoryRowActions,
 } from "../../projectLabels/useRepositoryCheckout";
 import type { RepositoryRow } from "../../projectLabels/useRepositoryPicker";
+import { useEnvironments } from "../../state/environments";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { buildThreadRouteParams } from "../../threadRoutes";
@@ -115,8 +116,8 @@ async function confirmRemoval(message: string): Promise<boolean> {
 
 /**
  * Every repository the project links, as the pickers list it, with its state
- * on the selected machine: one not cloned there reads "Clone to set up" and
- * clicking it clones it; a cloned one opens its settings. Its ⋯ menu moves
+ * on the selected machine: one not cloned there reads "Not on <machine>" and
+ * clicking it clones it, a failed clone retries or opens GitHub sign-in; a cloned one opens its settings. Its ⋯ menu moves
  * it into the project folder, removes it from that machine, or takes it out
  * of the project. A project on several machines switches between them.
  */
@@ -139,6 +140,13 @@ export function RepositoriesCard(props: {
   );
   const checkouts = useRepositoryCheckouts(environmentId);
   const rowActions = useRepositoryRowActions(environmentId, checkouts);
+  const navigate = useNavigate();
+  const machineName =
+    useEnvironments().environments.find(
+      (environment) => environment.environmentId === environmentId,
+    )?.label ?? null;
+  const openSignIn = () =>
+    void navigate({ to: "/settings/source-control", search: { machine: environmentId } });
   const arrived = useArrivedKeys(
     rows.map((row) => row.key),
     true,
@@ -195,39 +203,51 @@ export function RepositoriesCard(props: {
           const { project, repositoryId } = row;
           const cloneable =
             (view.kind === "needs-clone" || view.kind === "failed") && view.cloneable;
+          // A clone that needs a GitHub sign-in on this machine opens it.
+          const signIn =
+            view.kind === "failed" &&
+            view.cloneable &&
+            cloneFailureLine(view.message, row.name, row.remote).action === "sign-in";
           const onOpen =
             action === "select" && repositoryId !== null && view.kind === "ready"
               ? () => props.onOpenRepository(repositoryId)
-              : cloneable && project !== null
-                ? () => void checkouts.start({ ...row, project })
-                : undefined;
+              : signIn
+                ? openSignIn
+                : cloneable && project !== null
+                  ? () => void checkouts.start({ ...row, project })
+                  : undefined;
           return (
-            <Fragment key={row.key}>
-              <ProjectCardRow
-                icon={rowIcon(row)}
-                title={row.name}
-                meta={
-                  // Once cloned, the GitHub repository it came from, as before.
-                  view.kind === "ready" ? (
-                    (row.detail ?? gitHubRepositoryOf(row.local?.repositoryIdentity) ?? undefined)
-                  ) : (
-                    <RepositoryRowStatus view={view} />
-                  )
-                }
-                arrived={arrived.has(row.key)}
-                removing={view.kind === "working" && view.work === "unlinking"}
-                {...(onOpen ? { onOpen } : {})}
-                ariaLabel={
-                  cloneable
-                    ? `Clone ${row.name} to this machine`
+            <ProjectCardRow
+              key={row.key}
+              icon={rowIcon(row)}
+              title={row.name}
+              meta={
+                // Once cloned, the GitHub repository it came from, as before.
+                view.kind === "ready" ? (
+                  (row.detail ?? gitHubRepositoryOf(row.local?.repositoryIdentity) ?? undefined)
+                ) : (
+                  <RepositoryRowStatus
+                    view={view}
+                    name={row.name}
+                    remote={row.remote}
+                    machineName={machineName}
+                  />
+                )
+              }
+              arrived={arrived.has(row.key)}
+              removing={view.kind === "working" && view.work === "unlinking"}
+              {...(onOpen ? { onOpen } : {})}
+              ariaLabel={
+                signIn
+                  ? `Sign in to GitHub on ${machineName ?? "this machine"} to clone ${row.name}`
+                  : cloneable
+                    ? `Clone ${row.name} to ${machineName ?? "this machine"}`
                     : view.kind === "ready"
                       ? `Repository settings for ${row.name}`
                       : row.name
-                }
-                menu={<RepositoryRowMenu label={`${row.name} actions`} actions={rowActions(row)} />}
-              />
-              <RepositoryRowError view={view} name={row.name} className="ps-7" />
-            </Fragment>
+              }
+              menu={<RepositoryRowMenu label={`${row.name} actions`} actions={rowActions(row)} />}
+            />
           );
         })}
       </div>

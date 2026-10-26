@@ -298,8 +298,13 @@ the project there or in the composer's project control, and the task moves to th
 project's most recently used repository, or to the project's folder when it has none.
 The repository menu lists every repository in the project, on the machine the task runs on
 (with **No project**, that machine's repositories). A repository the project has but this
-machine doesn't reads **Clone to set up**: pick it to clone it here, and the task moves to it
-once the clone lands. The command palette's **New thread in...** lists the same repositories
+machine doesn't reads **Not on** _machine_: pick it to clone it here; the row shows the clone's
+progress and the task moves to it once the clone lands. A clone that fails says why on its row;
+picking it again retries, or, when the machine needs a GitHub sign-in, opens
+**Settings → Source control** for that machine. Hover the reason for git's own words.
+Switching the composer's machine keeps the task's project and repository: when the other
+machine doesn't have the repository yet, the task stays as it is and that machine sets it up
+(its own checkout, or a fresh clone) when you send. The command palette's **New thread in...** lists the same repositories
 under **Not cloned here**; picking one clones it. A repository not cloned here still shows
 its icon once any machine with a checkout has found it, or its owner's GitHub avatar until
 then. A repository's **⋯** menu can remove it from this machine (the project
@@ -315,7 +320,7 @@ repositories, recent chats and Work, agents, files and GitHub org. The GitHub or
 button beside the project's name) is where agents and the repository picker look for its
 repositories; **Sources** lists any other repositories it reaches. Use **Add repository** to bring one in
 from this machine or GitHub (a repository already in another project asks before it moves),
-click a **Clone to set up** row to clone it on this machine, a repository row's **⋯** menu
+click a **Not on** _machine_ row to clone it there, a repository row's **⋯** menu
 to remove it from this machine or the project, and the page's **⋯** menu to rename,
 recolor, describe or delete the project. Deleting a project keeps its chats, Work and repositories; they are just no
 longer in a folder. Start one with **New project** on the page or in the command palette.

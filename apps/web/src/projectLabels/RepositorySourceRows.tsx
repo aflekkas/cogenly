@@ -6,6 +6,7 @@ import {
 } from "@cogenly/contracts";
 import {
   ChevronDownIcon,
+  CircleAlertIcon,
   FolderGit2Icon,
   FolderIcon,
   FolderInputIcon,
@@ -39,14 +40,13 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "~/components/ui/menu";
 import { Spinner } from "~/components/ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import type { OwnerSearchState } from "./projectSourceLinks.logic";
-import { describeCloneFailure, type RepositoryRowView } from "./repositoryPicker.logic";
+import { cloneFailureLine, type RepositoryRowView } from "./repositoryPicker.logic";
 import type { RemoteCloneView, useRemoteRepositoryClone } from "./useRemoteRepositoryClone";
 
 /*
  * The pieces every repository row is built from, in the pickers (composer,
  * Start Work, "Add repository") and on the project page: the icon, the
- * state on the selected machine, the failure under the row, and the row
- * menu. `RepositoryPickerRow` puts them in a picker row; the project page
+ * one-line state on the selected machine, and the row menu. `RepositoryPickerRow` puts them in a picker row; the project page
  * passes them to its card row.
  */
 
@@ -97,81 +97,136 @@ export function RepositoryRowIcon(props: {
   return remoteIcon;
 }
 
-/** The text a row's state reads as at its end. */
-function repositoryRowStatusText(view: RepositoryRowView): string | null {
+/** What a row reads at its end, on the machine it lists for, and what explains it on hover. */
+interface RepositoryRowStatusLine {
+  /** Swaps fade only between different states; clone progress updates in place. */
+  readonly key: string;
+  readonly text: string;
+  /** The one thing picking the row does about it, after the text. */
+  readonly action: string | null;
+  readonly busy: boolean;
+  readonly alert: boolean;
+  readonly tooltip: ReactNode | null;
+}
+
+/** A row's state as its end reads it; null once it is cloned there. */
+export function repositoryRowStatusLine(input: {
+  readonly view: RepositoryRowView;
+  readonly name: string;
+  readonly remote: string | null;
+  /** The machine the list is for, named in "Not on …"; null reads "this machine". */
+  readonly machineName: string | null;
+}): RepositoryRowStatusLine | null {
+  const { view } = input;
+  const machine = input.machineName ?? "this machine";
   switch (view.kind) {
     case "ready":
       return null;
     case "needs-clone":
-      // Only promise a clone where picking the row starts one.
-      return view.cloneable ? "Clone to set up" : "Not on this machine";
+      return {
+        key: "needs-clone",
+        text: `Not on ${machine}`,
+        action: null,
+        busy: false,
+        alert: false,
+        // Only promise a clone where picking the row, or sending, starts one.
+        tooltip: view.onSend
+          ? `${machine} sets it up when you send: its own checkout, or a fresh clone`
+          : view.cloneable
+            ? `Pick it to clone it onto ${machine}`
+            : null,
+      };
     case "starting":
-      return "Starting clone…";
-    case "cloning":
-      return view.progress ?? "Cloning…";
-    case "failed":
-      return view.cloneable ? "Clone failed · Retry" : "Clone failed";
+    case "cloning": {
+      const percent = view.kind === "cloning" ? view.percent : null;
+      return {
+        key: "cloning",
+        text: percent === null ? "Cloning…" : `Cloning… ${percent}%`,
+        action: null,
+        busy: true,
+        alert: false,
+        tooltip: view.kind === "cloning" ? view.progress : null,
+      };
+    }
+    case "failed": {
+      const failure = cloneFailureLine(view.message, input.name, input.remote);
+      return {
+        key: "failed",
+        text: failure.reason,
+        action: view.cloneable ? (failure.action === "sign-in" ? "Sign in" : "Retry") : null,
+        busy: false,
+        alert: true,
+        tooltip: (
+          <span className="block max-w-72 space-y-1 select-text">
+            <span className="block">{failure.summary}</span>
+            {failure.detail ? (
+              <span className="block whitespace-pre-wrap break-words font-mono text-2xs opacity-80">
+                {failure.detail}
+              </span>
+            ) : null}
+          </span>
+        ),
+      };
+    }
     case "working":
-      return view.work === "removing"
-        ? "Removing from this machine…"
-        : view.work === "moving"
-          ? "Moving…"
-          : null;
+      return view.work === "unlinking"
+        ? null
+        : {
+            key: `working:${view.work}`,
+            text: view.work === "removing" ? `Removing from ${machine}…` : "Moving…",
+            action: null,
+            busy: true,
+            alert: false,
+            tooltip: null,
+          };
   }
 }
 
 /**
- * A row's state on the selected machine, at its end: nothing once cloned,
- * "Clone to set up", the clone's own progress while it runs (a spinner only
- * while the server reports it running, or while a removal or move this
- * client asked for is in flight), or the failure. Each change fades.
+ * A row's state on the machine it lists for, on one line at its end: nothing
+ * once cloned, "Not on <machine>" (picking it clones it), "Cloning… 40%"
+ * with a spinner while the server reports the clone running, or a failure's
+ * short reason and the one thing picking the row does about it ("Retry",
+ * "Sign in"), with the full account in a tooltip. A change of state fades;
+ * progress updates in place, in tabular figures so nothing shifts.
  */
-export function RepositoryRowStatus(props: { readonly view: RepositoryRowView }) {
-  const text = repositoryRowStatusText(props.view);
-  if (text === null) return null;
-  const { kind } = props.view;
-  const busy = kind === "cloning" || kind === "working";
-  return (
-    <span
-      key={kind}
-      role={busy || kind === "starting" ? "status" : undefined}
-      className={cn(
-        // A fixed cap: the row's trailing slot sizes to its content, so a
-        // share of it would clip even "Clone to set up". Clone progress
-        // truncates at the cap; the name gives way first.
-        "swap-motion flex min-w-0 max-w-40 shrink-0 items-center gap-1 text-2xs tabular-nums",
-        kind === "failed" ? "text-destructive-foreground" : "text-muted-foreground",
-      )}
-    >
-      {busy ? <Spinner size="xs" tone="muted" /> : null}
-      <span className="truncate">{text}</span>
-    </span>
-  );
-}
-
-/** A failed clone's reason under its row, in full and selectable: advice first, then git's words. */
-export function RepositoryRowError(props: {
+export function RepositoryRowStatus(props: {
   readonly view: RepositoryRowView;
   readonly name: string;
-  readonly className?: string;
+  readonly remote: string | null;
+  readonly machineName: string | null;
 }) {
-  if (props.view.kind !== "failed" || props.view.message === null) return null;
-  const failure = describeCloneFailure(props.view.message, props.name);
-  return (
-    <div
-      role="alert"
+  const line = repositoryRowStatusLine(props);
+  if (line === null) return null;
+  const content = (
+    <span
+      key={line.key}
+      role={line.busy ? "status" : line.alert ? "alert" : undefined}
       className={cn(
-        "reveal-motion select-text space-y-0.5 break-words py-1 pe-2 text-xs",
-        props.className ?? "ps-8",
+        // A fixed cap: the row's trailing slot sizes to its content. The
+        // name gives way first; the status truncates only past the cap.
+        "swap-motion flex min-w-0 max-w-44 shrink-0 items-center gap-1 text-2xs tabular-nums text-muted-foreground",
       )}
     >
-      <p className="text-destructive-foreground">{failure.summary}</p>
-      {failure.detail ? (
-        <p className="whitespace-pre-wrap font-mono text-2xs text-muted-foreground">
-          {failure.detail}
-        </p>
+      {line.busy ? <Spinner size="xs" tone="muted" /> : null}
+      {line.alert ? (
+        <CircleAlertIcon aria-hidden className="size-3 shrink-0 text-destructive-foreground" />
       ) : null}
-    </div>
+      <span className="truncate">{line.text}</span>
+      {line.action ? (
+        <>
+          <span aria-hidden>·</span>
+          <span className="shrink-0 font-medium text-foreground">{line.action}</span>
+        </>
+      ) : null}
+    </span>
+  );
+  if (line.tooltip === null) return content;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={content} />
+      <TooltipPopup side="top">{line.tooltip}</TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -231,9 +286,9 @@ export function RepositoryRowMenu(props: {
 }
 
 /**
- * One picker row: icon, the repository's name (its full text in a tooltip),
- * secondary text where needed, its state, and its menu, with any status line
- * (a clone's failure) under it.
+ * One picker row, on one line like every picker row: icon, the repository's
+ * name (its full text in a tooltip), secondary text where needed, its state,
+ * its menu, and the check while it is the chosen one.
  */
 export function RepositoryPickerRow<Item>(props: {
   readonly item: Item;
@@ -243,36 +298,34 @@ export function RepositoryPickerRow<Item>(props: {
   readonly detail?: string | null;
   readonly trailing?: ReactNode;
   readonly menu?: ReactNode;
-  readonly below?: ReactNode;
+  readonly chosen?: boolean;
   readonly tone?: "default" | "action";
   readonly divider?: boolean;
 }) {
   return (
-    <>
-      <ComboboxItem
-        hideIndicator
-        value={props.item}
-        tone={props.tone ?? "default"}
-        divider={props.divider ?? false}
-      >
-        <SearchListRowIcon>{props.icon}</SearchListRowIcon>
-        <SearchListRowText layout="inline">
-          <TruncatedWithTooltip
-            part="label"
-            text={props.name}
-            tooltip={props.tooltip ?? props.name}
-          />
-          {props.detail ? <TruncatedWithTooltip part="description" text={props.detail} /> : null}
-        </SearchListRowText>
-        {props.trailing || props.menu ? (
-          <SearchListRowTrailing>
-            {props.trailing}
-            {props.menu}
-          </SearchListRowTrailing>
-        ) : null}
-      </ComboboxItem>
-      {props.below}
-    </>
+    <ComboboxItem
+      hideIndicator
+      value={props.item}
+      tone={props.tone ?? "default"}
+      divider={props.divider ?? false}
+    >
+      <SearchListRowIcon>{props.icon}</SearchListRowIcon>
+      <SearchListRowText layout="inline">
+        <TruncatedWithTooltip
+          part="label"
+          text={props.name}
+          tooltip={props.tooltip ?? props.name}
+        />
+        {props.detail ? <TruncatedWithTooltip part="description" text={props.detail} /> : null}
+      </SearchListRowText>
+      {props.trailing || props.menu || props.chosen ? (
+        <SearchListRowTrailing>
+          {props.trailing}
+          {props.menu}
+          {props.chosen ? <SearchListRowCheck /> : null}
+        </SearchListRowTrailing>
+      ) : null}
+    </ComboboxItem>
   );
 }
 
@@ -311,10 +364,30 @@ export function GitHubSearchStatus(props: {
   return null;
 }
 
+/** A GitHub repository's clone as its row reads it, the same as a linked repository's. */
+function remoteCloneRowView(view: RemoteCloneView | null): RepositoryRowView {
+  switch (view?.phase) {
+    case "starting":
+      return { kind: "starting" };
+    case "running":
+      return { kind: "cloning", progress: view.summary, percent: percentOf(view.summary) };
+    case "failed":
+      return { kind: "failed", message: view.message, cloneable: true };
+    default:
+      return { kind: "ready" };
+  }
+}
+
+function percentOf(summary: string): number | null {
+  const match = /(\d{1,3})%/.exec(summary);
+  return match?.[1] === undefined ? null : Number(match[1]);
+}
+
 /**
  * A GitHub repository "Add repository" offers: picking it clones it into the
- * project. While this row's clone runs the status line under it shows
- * progress, then the failure with Retry and Dismiss.
+ * project, then picks it. The clone shows at the row's end like any
+ * repository's ("Cloning… 40%", or a failure's reason with Retry or Sign in);
+ * its ⋯ menu cancels a running clone or dismisses a failed one.
  */
 export function GitHubRepositoryRow<Item>(props: {
   readonly item: Item;
@@ -328,39 +401,50 @@ export function GitHubRepositoryRow<Item>(props: {
   readonly environmentId: EnvironmentId | null;
 }) {
   const { repository, view, clone } = props;
-  const busy = view?.phase === "starting" || view?.phase === "running";
+  const remote = `github.com/${repository.nameWithOwner}`;
+  const rowView = remoteCloneRowView(view);
+  const actions: RepositoryRowMenuAction[] =
+    view?.phase === "running"
+      ? [
+          {
+            key: "cancel-clone",
+            label: "Cancel clone",
+            icon: <XIcon />,
+            onSelect: () => void clone.cancel(),
+          },
+        ]
+      : view?.phase === "failed" || view?.phase === "cancelled"
+        ? [
+            {
+              key: "dismiss",
+              label: "Dismiss",
+              icon: <XIcon />,
+              onSelect: () => void clone.dismiss(),
+            },
+          ]
+        : [];
   return (
     <RepositoryPickerRow
       item={props.item}
-      icon={
-        busy ? (
-          <Spinner size="xs" tone="muted" />
+      icon={<RepositoryRowIcon local={null} remote={remote} environmentId={props.environmentId} />}
+      name={props.name}
+      tooltip={`Clone ${repository.nameWithOwner} into this project`}
+      detail={rowView.kind === "ready" ? repository.description : null}
+      trailing={
+        rowView.kind === "ready" ? (
+          repository.private ? (
+            <LockIcon aria-label="Private" className="size-3 shrink-0" />
+          ) : null
         ) : (
-          <RepositoryRowIcon
-            local={null}
-            remote={`github.com/${repository.nameWithOwner}`}
-            environmentId={props.environmentId}
+          <RepositoryRowStatus
+            view={rowView}
+            name={repository.nameWithOwner}
+            remote={remote}
+            machineName={null}
           />
         )
       }
-      name={props.name}
-      tooltip={`Clone ${repository.nameWithOwner} into this project`}
-      detail={repository.description}
-      trailing={
-        repository.private ? <LockIcon aria-label="Private" className="size-3 shrink-0" /> : null
-      }
-      below={
-        view ? (
-          <RemoteCloneStatus
-            key={view.phase}
-            view={view}
-            repository={repository.nameWithOwner}
-            onCancel={() => void clone.cancel()}
-            onRetry={() => void clone.retry()}
-            onDismiss={() => void clone.dismiss()}
-          />
-        ) : null
-      }
+      menu={<RepositoryRowMenu label={`${props.name} clone`} actions={actions} />}
     />
   );
 }
@@ -422,66 +506,6 @@ function TruncatedWithTooltip(props: {
       </TooltipTrigger>
       <TooltipPopup side="top">{props.tooltip ?? props.text}</TooltipPopup>
     </Tooltip>
-  );
-}
-
-/** The clone of a picked GitHub repository, under its row: progress, then the way on. */
-function RemoteCloneStatus(props: {
-  readonly view: RemoteCloneView;
-  readonly repository: string;
-  readonly onCancel: () => void;
-  readonly onRetry: () => void;
-  readonly onDismiss: () => void;
-}) {
-  const { view } = props;
-  if (view.phase === "done") return null;
-  if (view.phase === "failed" || view.phase === "cancelled") {
-    const failure =
-      view.phase === "failed" ? describeCloneFailure(view.message, props.repository) : null;
-    return (
-      <div
-        role={failure ? "alert" : "status"}
-        // Lines up with the row's name. A failure wraps in full and can be
-        // selected and copied: the advice first, then git's own words.
-        className="reveal-motion flex flex-col gap-1 py-1 ps-8 pe-1 text-xs"
-      >
-        {failure ? (
-          <div className="select-text space-y-0.5 break-words">
-            <p className="text-destructive-foreground">{failure.summary}</p>
-            {failure.detail ? (
-              <p className="whitespace-pre-wrap font-mono text-2xs text-muted-foreground">
-                {failure.detail}
-              </p>
-            ) : null}
-          </div>
-        ) : (
-          <p className="text-muted-foreground">Clone cancelled. Nothing was added.</p>
-        )}
-        <div className="flex gap-1">
-          <Button size="xs" variant="outline" onClick={props.onRetry}>
-            Retry
-          </Button>
-          <Button size="xs" variant="ghost" onClick={props.onDismiss}>
-            Dismiss
-          </Button>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div
-      role="status"
-      className="reveal-motion flex min-h-7 items-center gap-1 py-0.5 ps-8 pe-1 text-xs text-muted-foreground"
-    >
-      <span className="min-w-0 flex-1 truncate">
-        {view.phase === "starting" ? "Starting clone…" : view.summary}
-      </span>
-      {view.phase === "running" ? (
-        <Button size="xs" variant="ghost" onClick={props.onCancel}>
-          Cancel
-        </Button>
-      ) : null}
-    </div>
   );
 }
 
