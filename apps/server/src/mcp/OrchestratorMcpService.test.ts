@@ -15,6 +15,9 @@ import {
   VaultItemId,
 } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Deferred from "effect/Deferred";
+import { TestClock } from "effect/testing";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Orchestrator from "./OrchestratorMcpService.ts";
@@ -422,7 +425,10 @@ it.effect("remote delegation retries without clientRequestId reuse their command
   }).pipe(Effect.provide(Orchestrator.layer.pipe(Layer.provideMerge(dependencies))));
 });
 
-const loginFixture = (answer: (login: Record<string, unknown>) => Record<string, unknown>) => {
+const loginFixture = (
+  answer: (login: Record<string, unknown>) => Record<string, unknown>,
+  onPending = () => {},
+) => {
   const threadId = ThreadId.make("login-request");
   const projection = idleThreadProjection(liveThreadShell(threadId));
   const records = {
@@ -445,6 +451,7 @@ const loginFixture = (answer: (login: Record<string, unknown>) => Record<string,
         Effect.sync(() => {
           if (command.type === "secret_request.record") {
             recorded.push(command as never);
+            onPending();
             // The user answers as soon as the card appears.
             if (command.secretStatus === "pending")
               records.turnItems = [
@@ -583,3 +590,28 @@ it.effect("a native background caller can delegate after its parent settles", ()
     }),
   );
 });
+
+it.effect("a bounded login wait leaves its card answerable for a late answer", () =>
+  Effect.gen(function* () {
+    const appeared = yield* Deferred.make<void>();
+    const fixture = loginFixture(
+      () => ({ secretStatus: "pending" }),
+      () => Deferred.doneUnsafe(appeared, Effect.void),
+    );
+    const request = fixture.provide(
+      Effect.gen(function* () {
+        const service = yield* Orchestrator.OrchestratorMcpService;
+        return yield* service.requestLogin(fixture.scope, {
+          site: "example.test",
+          reason: "Sign in",
+          timeoutMs: 1000,
+        });
+      }),
+    );
+    const fiber = yield* request.pipe(Effect.forkChild);
+    yield* Deferred.await(appeared);
+    yield* TestClock.adjust("1 second");
+    expect(yield* Fiber.join(fiber)).toEqual({ status: "timed_out" });
+    expect(fixture.recorded.some((card) => card.secretStatus === "cancelled")).toBe(false);
+  }),
+);

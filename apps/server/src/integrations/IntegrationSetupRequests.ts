@@ -1,6 +1,5 @@
 import {
   CommandId,
-  MessageId,
   ThreadId,
   type IntegrationSummary,
   type IntegrationListResult,
@@ -26,6 +25,7 @@ import * as Deferred from "effect/Deferred";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import type { McpInvocationScope } from "../mcp/McpInvocationContext.ts";
+import * as InlineCardNotifications from "../orchestration-v2/InlineCardNotifications.ts";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import * as Workspace from "../agents/AgentWorkspaceService.ts";
 import * as ApprovalChanges from "../agents/ApprovalChanges.ts";
@@ -79,6 +79,7 @@ const make = Effect.gen(function* () {
   const changes = yield* ApprovalChanges.ApprovalChanges;
   const crypto = yield* Crypto.Crypto;
   const sql = yield* SqlClient.SqlClient;
+  const cards = yield* InlineCardNotifications.optional;
   const waitingCalls = new Map<string, Deferred.Deferred<boolean>>();
 
   /** A callback can arrive after the provider's tool timeout or after a server restart. */
@@ -115,16 +116,10 @@ const make = Effect.gen(function* () {
           if (!connected) continue;
           const waiting = waitingCalls.get(item.id);
           if (waiting === undefined || !(yield* Deferred.await(waiting))) {
-            yield* threads.sendToThread({
-              projectId: records.thread.projectId,
+            yield* cards.answered({
               threadId,
-              commandId: CommandId.make(`integration-connected:${item.id}`),
-              messageId: MessageId.make(`message:integration-connected:${item.id}`),
-              text: `${connected.integration.displayName} (${connected.integration.name}) is connected. Continue the integration setup request: run integration_test and list its tools.`,
-              attachments: [],
-              mode: "auto",
-              createdBy: "system",
-              creationSource: "server",
+              key: `integration-connected:${item.id}`,
+              summary: `${connected.integration.displayName} (${connected.integration.name}) is connected; run integration_test and list its tools`,
             });
           }
           yield* threads.dispatch({

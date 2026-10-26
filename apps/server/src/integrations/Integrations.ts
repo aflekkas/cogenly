@@ -45,6 +45,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import { integrationSetupGuide } from "./IntegrationSetupGuides.ts";
 import { redactUpstream, toolErrorMessage, upstreamErrorMessage } from "./UpstreamResult.ts";
+import * as InlineCardEvents from "../orchestration-v2/InlineCardEvents.ts";
 import { selectCallbackOrigin, type SignInOrigin } from "./SignInOrigin.ts";
 import { hostMatchesAnyDomain } from "../vault/VaultPolicy.ts";
 import { redactValue } from "../vault/VaultRedactor.ts";
@@ -702,6 +703,7 @@ const tokenItemName = (integration: Integration) =>
 
 const make = (options: IntegrationsOptions = {}) =>
   Effect.gen(function* () {
+    const cardEvents = yield* InlineCardEvents.optional;
     const sql = yield* SqlClient.SqlClient;
     const sync = yield* Effect.serviceOption(IntegrationSync.IntegrationSync);
     const crypto = yield* Crypto.Crypto;
@@ -742,6 +744,7 @@ const make = (options: IntegrationsOptions = {}) =>
         {
           readonly integrationId: IntegrationId;
           readonly fromAgent: boolean;
+          readonly threadId?: import("@cogenly/contracts").ThreadId | undefined;
           readonly url: string;
           readonly definition: string;
           readonly server: OAuth.OAuthServer;
@@ -2825,6 +2828,7 @@ const make = (options: IntegrationsOptions = {}) =>
             return next.set(state, {
               integrationId: integration.id,
               fromAgent: from.fromAgent === true,
+              threadId: from.threadId,
               url: integration.url,
               definition: definitionKey(integration),
               server,
@@ -2903,6 +2907,13 @@ const make = (options: IntegrationsOptions = {}) =>
               },
             });
             yield* recordCheck(integration, error);
+            // A denial leaves the setup card pending; tell its thread what happened.
+            if (pending.threadId)
+              yield* cardEvents.answered({
+                threadId: pending.threadId,
+                key: InlineCardEvents.signInAnswerKey(state),
+                summary: `Integration sign-in denied or cancelled: ${integrationTitle(integration)}`,
+              });
             return yield* error;
           }
           const previous = integration.oauthState;
@@ -3023,6 +3034,7 @@ const make = (options: IntegrationsOptions = {}) =>
               ),
               Effect.ignore,
             );
+          // The setup card completes and notifies its thread (IntegrationSetupRequests).
           yield* notify;
           return { integration: redactIntegration(signedIn) };
         }).pipe(

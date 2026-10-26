@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 
 import {
   BACKGROUND_TAB_NOTICE,
+  openHandoffStatus,
   isTabShown,
   pickDefaultTab,
   revealBeforeAttach,
@@ -163,5 +164,19 @@ describe("session mismatch", () => {
     expect(targetNotice(target, [target, user], true, shown)).toContain("user");
     expect(targetNotice(target, [target, user], true, shown)).toContain("https://grok.com/");
     expect(targetNotice(user, [target, user], true, shown)).toBeUndefined();
+  });
+});
+
+it("reports a panel handoff as pending while preserving the tab for retry", () => {
+  const result = openHandoffStatus({
+    tabId: "tab:setup",
+    url: "https://accounts.google.com/login",
+    sessionMismatch: true,
+  });
+  expect(result).toMatchObject({ tabId: "tab:setup", status: "pending_panel" });
+  expect(result.notice).toContain("do not treat a background sign-in page");
+  expect(openHandoffStatus({ tabId: "tab:panel", sessionMismatch: false })).toEqual({
+    tabId: "tab:panel",
+    sessionMismatch: false,
   });
 });

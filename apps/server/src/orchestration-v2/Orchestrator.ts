@@ -5051,6 +5051,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         command.dispatchMode,
         command.deliveryIntent,
       );
+      const inlineCardAnswer =
+        command.createdBy === "agent" &&
+        command.creationSource === "server" &&
+        String(command.commandId).startsWith("inline-card:");
+      const inlineCardStopped =
+        inlineCardAnswer && latestExecutedRun(projection.runs)?.status === "interrupted";
+      const inlineCardHeld =
+        inlineCardAnswer && (inlineCardStopped || queueIsHeld(projection.runs));
       if (dispatchMode.type === "steer_active") {
         const targetRunId = dispatchMode.targetRunId;
         const target = projection.runs.find((run) => run.id === targetRunId);
@@ -5150,6 +5158,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       // Route durable mailbox deliveries under the thread lock, using the live
       // session's capabilities. Never interrupt/restart a turn for a notification.
       if (
+        (inlineCardAnswer && !inlineCardHeld) ||
         delegatedCompletion !== undefined ||
         command.notification?.source.kind === "delegated_task"
       ) {
@@ -5298,7 +5307,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         queueBehindRun === undefined && nativeSubagentWorkActive(projection);
       const pendingMergeBackTransfers = pendingMergeBackTransfersForThread(projection);
       const shouldQueue =
-        (queueBehindRun !== undefined || queueBehindNativeWork) &&
+        (inlineCardHeld || queueBehindRun !== undefined || queueBehindNativeWork) &&
         (dispatchMode.type === "defer_start" ||
           dispatchMode.type === "start_immediately" ||
           dispatchMode.type === "queue_after_active");
@@ -5413,12 +5422,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           rootNodeId,
           activeAttemptId: attemptId,
           status: "queued",
-          ...(worktreeMissingRun !== undefined ||
+          ...(inlineCardHeld ||
+          worktreeMissingRun !== undefined ||
           usageLimitHeldRun !== undefined ||
           queueIsHeld(projection.runs)
             ? {
                 queueHeld: true,
-                ...(projection.runs.some(
+                ...(inlineCardStopped ||
+                projection.runs.some(
                   (run) =>
                     run.status === "queued" &&
                     run.queueHeld === true &&
@@ -8041,7 +8052,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           cause: `Turn item ${command.turnItemId} is not a secret request.`,
         });
       }
-      if (existing !== undefined && existing.runId !== command.runId) {
+      // Re-awaiting a durable card in a later turn keeps its original ownership and target.
+      if (
+        existing !== undefined &&
+        existing.runId !== command.runId &&
+        command.secretStatus !== "pending"
+      ) {
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
           commandType: command.type,
@@ -8058,6 +8074,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       // A close that does not restate the sign-in card keeps what it asked.
       const login =
         command.login ?? (existing?.type === "secret_request" ? existing.login : undefined);
+      const secretVault =
+        command.secretVault ??
+        (existing?.type === "secret_request" ? existing.secretVault : undefined);
       const turnItem: OrchestrationV2TurnItem = unchanged
         ? existing
         : {
@@ -8087,6 +8106,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               ? {}
               : { integrationSetup: command.integrationSetup }),
             secretStatus: command.secretStatus,
+            ...(secretVault === undefined ? {} : { secretVault }),
             ...(login === undefined ? {} : { login }),
           };
       yield* emit(
@@ -8095,9 +8115,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       )({
         type: "turn-item.updated",
         threadId: command.threadId,
-        runId: command.runId,
-        nodeId: command.nodeId,
-        providerInstanceId: run.providerInstanceId,
+        runId: turnItem.runId ?? command.runId,
+        nodeId: turnItem.nodeId ?? command.nodeId,
+        providerInstanceId:
+          projection.runs.find((candidate) => candidate.id === turnItem.runId)
+            ?.providerInstanceId ?? run.providerInstanceId,
         occurredAt: now,
         payload: turnItem,
       });
@@ -8130,7 +8152,18 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           cause: `Runtime request ${command.requestId} is ${runtimeRequest.status}.`,
         });
       }
-      if (runtimeRequest.responseCapability.type === "not_resumable") {
+      const answerProjection =
+        runtimeRequest.kind !== "user_input"
+          ? yield* getProjectionWithPendingEvents(command.threadId, events)
+          : undefined;
+      const requestRun = answerProjection?.runs.find((run) => run.id === context.node?.runId);
+      const lateApproval =
+        runtimeRequest.kind !== "user_input" &&
+        requestRun !== undefined &&
+        ["completed", "failed", "interrupted", "cancelled", "rolled_back"].includes(
+          requestRun.status,
+        );
+      if (runtimeRequest.responseCapability.type === "not_resumable" && !lateApproval) {
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
           commandType: command.type,
@@ -8142,7 +8175,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ? runtimeRequest.responseCapability.providerSessionId
           : null;
       const providerSession = context.session;
-      if (providerSessionId !== null && providerSession === undefined) {
+      if (providerSessionId !== null && providerSession === undefined && !lateApproval) {
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
           commandType: command.type,
@@ -8310,6 +8343,25 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             createdBy: "user",
             creationSource: "server",
             dispatchMode,
+          },
+          events,
+          effects,
+        );
+      }
+      if (lateApproval) {
+        const summary = `Tool approval ${command.decision === "decline" || command.decision === "cancel" ? "denied" : "granted"}. Retry the tool if still needed`;
+        return yield* dispatchMessage(
+          {
+            type: "message.dispatch",
+            commandId: CommandId.make(`inline-card:tool:${command.requestId}`),
+            threadId: command.threadId,
+            messageId: MessageId.make(`message:inline-card:tool:${command.requestId}`),
+            text: summary,
+            notification: { source: { kind: "command" }, outcome: "updated", summary },
+            attachments: [],
+            createdBy: "agent",
+            creationSource: "server",
+            dispatchMode: { type: "queue_after_active" },
           },
           events,
           effects,

@@ -49,6 +49,9 @@ import * as Vault from "../vault/Vault.ts";
 import * as Credentials from "./IntegrationCredentials.ts";
 import * as OAuth from "./IntegrationOAuth.ts";
 import { CALLBACK_PATH } from "./IntegrationOAuth.ts";
+import * as InlineCardEvents from "../orchestration-v2/InlineCardEvents.ts";
+import * as InlineCardNotifications from "../orchestration-v2/InlineCardNotifications.ts";
+import * as Queue from "effect/Queue";
 import * as Integrations from "./Integrations.ts";
 import * as IntegrationOAuthHttp from "./integrationOAuthHttp.ts";
 import * as IntegrationSyncPeers from "./IntegrationSyncPeers.ts";
@@ -72,6 +75,7 @@ const gatewayLayer = (
 ) => {
   const stored = new Map<string, Uint8Array>();
   return Integrations.layer.pipe(
+    Layer.provideMerge(InlineCardEvents.layer),
     // The mock servers listen on loopback, which production refuses.
     Layer.provide(Layer.succeed(IntegrationEndpointPolicy, loopbackHttpsPolicy)),
     Layer.provideMerge(Credentials.layer),
@@ -165,6 +169,12 @@ describe("Integration OAuth sign-in", () => {
                   Layer.mock(Work.WorkHandoffService)({}),
                   Layer.mock(Schedules.ScheduledTaskService)({}),
                   Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+                  Layer.succeed(
+                    InlineCardNotifications.InlineCardNotifications,
+                    InlineCardNotifications.InlineCardNotifications.of({
+                      answered: (input) => Effect.sync(() => void sent.push(input.summary)),
+                    }),
+                  ),
                   Layer.mock(ThreadManagement.ThreadManagementService)({
                     getThreadShell: () =>
                       Effect.succeed(liveThreadShell(threadId, { activeRunId: null })),
@@ -216,6 +226,12 @@ describe("Integration OAuth sign-in", () => {
               Layer.mergeAll(
                 Layer.succeed(Integrations.Integrations, service),
                 ApprovalChanges.layer,
+                Layer.succeed(
+                  InlineCardNotifications.InlineCardNotifications,
+                  InlineCardNotifications.InlineCardNotifications.of({
+                    answered: (input) => Effect.sync(() => void sent.push(input.summary)),
+                  }),
+                ),
                 Layer.mock(AgentWorkspace.AgentWorkspaceService)({}),
                 Layer.mock(ThreadManagement.ThreadManagementService)({
                   getThreadRecords: () =>
@@ -1252,3 +1268,32 @@ describe("Integration OAuth sign-in", () => {
     ).pipe(Effect.provide(gatewayLayer())),
   );
 });
+
+it.effect.each([false, true])(
+  "OAuth denial notifies its originating thread; success is left to its setup card (denied: %s)",
+  (denied) =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const mock = yield* startMockAuthServer;
+      const integration = yield* addLinear(mock, "notify-linear");
+      const service = yield* Integrations.Integrations;
+      const events = yield* InlineCardEvents.InlineCardEvents;
+      const threadId = ThreadId.make("thread:oauth-answer");
+      const link = yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN, threadId });
+      const callback = yield* consent(link.authorizationUrl, "spawn");
+      const result = yield* service
+        .completeSignIn(
+          denied ? { ...callback, code: undefined, error: "access_denied" } : callback,
+        )
+        .pipe(Effect.result);
+      expect(result._tag).toBe(denied ? "Failure" : "Success");
+      if (denied) {
+        const answer = yield* Queue.take(events.answers);
+        expect(answer.threadId).toBe(threadId);
+        expect(answer.summary).toContain("denied");
+        expect(answer.key.includes(callback.state!)).toBe(false);
+      }
+      yield* service.completeSignIn(callback).pipe(Effect.ignore);
+      expect(yield* Queue.size(events.answers)).toBe(0);
+    }).pipe(Effect.scoped, Effect.provide(gatewayLayer())),
+);

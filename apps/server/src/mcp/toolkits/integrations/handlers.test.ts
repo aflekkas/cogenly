@@ -152,7 +152,12 @@ it.effect("integration_add hands an agent the sign-in link for an OAuth server",
     expect(signIns).toEqual([
       {
         id: "integration:linear",
-        origin: { origin: "http://127.0.0.1:3773", fromAgent: true },
+        origin: {
+          origin: "http://127.0.0.1:3773",
+          fromAgent: true,
+          callbackOrigin: undefined,
+          threadId: "thread:live",
+        },
       },
     ]);
 
@@ -222,7 +227,11 @@ it.effect("integration_add connects a catalog entry and relays its sign-in link"
       [
         { catalogId: "notion", accountLabel: "work", inputs: {} },
         {
-          origin: { origin: "https://cogenly.example.com", fromAgent: true },
+          origin: {
+            origin: "https://cogenly.example.com",
+            fromAgent: true,
+            threadId: "thread:live",
+          },
           addedByAgent: { id: "thread:live", name: "Coding agent" },
           fromAgent: true,
         },

@@ -10,6 +10,7 @@ import {
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeCrypto } from "@effect/platform-node";
+import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
@@ -30,12 +31,32 @@ import { VAULT_WITHHELD } from "./VaultRedactor.ts";
 import { totp } from "./VaultTotp.ts";
 
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
+import * as CardNotifications from "../orchestration-v2/InlineCardNotifications.ts";
 import * as Workspace from "../agents/AgentWorkspaceService.ts";
 import * as ApprovalChanges from "../agents/ApprovalChanges.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as Agents from "../agents/AgentService.ts";
 import * as Work from "../work/WorkHandoffService.ts";
 import * as Schedules from "../scheduledTasks/ScheduledTaskService.ts";
+
+class Decisions extends Context.Service<
+  Decisions,
+  Array<{ threadId: ThreadId; summary: string }>
+>()("cogenly-server/vault/Vault.test/Decisions") {}
+const decisionsLayer = Layer.unwrap(
+  Effect.sync(() => {
+    const decisions: Array<{ threadId: ThreadId; summary: string }> = [];
+    return Layer.mergeAll(
+      Layer.succeed(Decisions, decisions),
+      Layer.succeed(CardNotifications.InlineCardNotifications, {
+        answered: (input) =>
+          Effect.sync(() => {
+            decisions.push(input);
+          }),
+      }),
+    );
+  }),
+);
 
 const memoryStore = () => {
   const values = new Map<string, Uint8Array>();
@@ -372,6 +393,7 @@ describe("Vault service", () => {
       const vault = yield* Vault.Vault;
       const workspace = yield* Workspace.AgentWorkspaceService;
       const sql = yield* SqlClient.SqlClient;
+      const decisions = yield* Decisions;
       const other = ThreadId.make("thread:other");
       const settled = ThreadId.make("thread:settled");
       for (const [id, payload] of [
@@ -423,6 +445,8 @@ describe("Vault service", () => {
 
       // Denying keeps the fill refused; asking again raises a fresh card that says so.
       yield* workspace.reject(asked.approvalId);
+      expect(decisions.at(-1)?.summary).toContain("Approval denied");
+      expect(decisions.at(-1)?.threadId).toBe(threadId);
       expect(yield* pendingIds(threadId)).toEqual([]);
       const again = yield* fill(threadId);
       if (again.status !== "approval_required" || !again.approvalId)
@@ -431,6 +455,8 @@ describe("Vault service", () => {
       expect(again.message).toContain("declined");
 
       yield* workspace.approve(again.approvalId);
+      expect(decisions.at(-1)?.summary).toContain("Approval granted");
+      expect(decisions.at(-1)?.summary).toContain("github.com");
       expect(yield* pendingIds()).toEqual([]);
       expect(yield* fill(threadId)).toMatchObject({ status: "allowed", value: "github-password" });
       expect((yield* fill(other)).status).toBe("approval_required");
@@ -442,6 +468,7 @@ describe("Vault service", () => {
     }).pipe(
       Effect.provide(
         Workspace.layer.pipe(
+          Layer.provideMerge(decisionsLayer),
           Layer.provideMerge(layer),
           Layer.provide(
             Layer.mergeAll(

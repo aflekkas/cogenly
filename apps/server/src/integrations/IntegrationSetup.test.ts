@@ -268,7 +268,7 @@ describe("agentNextStep", () => {
     expect(googleText.indexOf("Reuse it if it exists")).toBeLessThan(
       googleText.indexOf("https://console.cloud.google.com/projectcreate"),
     );
-    expect(googleText).toContain('vault_save {name: "google-oauth-client"');
+    expect(googleText).toContain('vault_capture {name: "google-oauth-client"');
     expect(googleText).toContain("cogenly-");
   });
 

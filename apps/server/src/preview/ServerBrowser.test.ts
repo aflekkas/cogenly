@@ -23,6 +23,7 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as NodeEvents from "node:events";
 import type { BrowserContext, Page } from "playwright-core";
+import * as Vault from "../vault/Vault.ts";
 import * as Config from "../config.ts";
 import * as Environment from "../environment/ServerEnvironment.ts";
 import * as Broker from "../mcp/PreviewAutomationBroker.ts";
@@ -99,6 +100,7 @@ const rig = (native = false, autoOpen = true) =>
         visibleText: "Signed in",
         interactiveElements: [],
       }),
+      locator: () => ({ evaluateAll: async () => [] }),
       ariaSnapshot: vi.fn(async () => '- document "Signed in"'),
       close: vi.fn(async () => {}),
     });
@@ -121,6 +123,7 @@ const rig = (native = false, autoOpen = true) =>
     const dependencies = yield* Layer.build(
       Layer.mergeAll(
         Manager.layer,
+        Layer.mock(Vault.Vault)({}),
         Broker.layer,
         Config.layerTest(process.cwd(), { prefix: "v033-browser-" }),
         Layer.mock(Environment.ServerEnvironment)({
@@ -177,7 +180,10 @@ const rig = (native = false, autoOpen = true) =>
       broker.invoke<A>({
         scope,
         operation,
-        input,
+        input:
+          operation === "snapshot"
+            ? { output: "full", ...(typeof input === "object" && input !== null ? input : {}) }
+            : input,
         ...(backgroundRead ? { updateCurrentTab: false } : {}),
         ...(timeoutMs === undefined ? {} : { timeoutMs }),
         ...(tabId ? { tabId: PreviewTabId.make(tabId) } : {}),
@@ -503,4 +509,20 @@ it.effect(
         yield* Scope.close(viewerScope, Exit.void);
       }),
     ),
+);
+
+it.effect("keeps an unseen agent tab and its login alive across days of inactivity", () =>
+  Effect.gen(function* () {
+    const r = yield* rig();
+    vi.spyOn(Date, "now").mockReturnValue(Number.MAX_SAFE_INTEGER);
+    yield* TestClock.adjust("7 days");
+    expect((yield* r.manager.list({ threadId })).sessions.map((tab) => tab.tabId)).toContain(
+      r.tabId,
+    );
+    expect(yield* r.invoke("evaluate", r.tabId, { expression: "sessionStorage.login" })).toBe(
+      "signed-in-session",
+    );
+    expect(r.context.newPage).toHaveBeenCalledTimes(1);
+    expect(r.page.close).not.toHaveBeenCalled();
+  }).pipe(Effect.scoped),
 );

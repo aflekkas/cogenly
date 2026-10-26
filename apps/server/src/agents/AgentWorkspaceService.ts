@@ -37,6 +37,7 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
+import * as InlineCardNotifications from "../orchestration-v2/InlineCardNotifications.ts";
 import * as ApprovalChanges from "./ApprovalChanges.ts";
 import * as Store from "./AgentStore.ts";
 import * as Agents from "./AgentService.ts";
@@ -201,6 +202,10 @@ const make = Effect.gen(function* () {
   const threads = yield* Effect.serviceOption(Threads.ThreadManagementService);
   const approvalChanges = yield* ApprovalChanges.optional;
   const notifyApprovals = approvalChanges.notify;
+  // Inline card answers (vault use, integration approval) wake their thread
+  // through the one late-answer path; the command key dedupes repeats.
+  const cardNotifications = yield* InlineCardNotifications.optional;
+  const approvalKey = (approval: AgentApproval) => `approval:${approval.id}`;
   const lock = yield* Semaphore.make(1);
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const uuid = (prefix: string) =>
@@ -388,8 +393,9 @@ const make = Effect.gen(function* () {
         yield* notifyApprovals;
         return { approval: yield* getApproval(id) };
       }).pipe(Effect.mapError(wrap));
-  const threadManagement = yield* Effect.serviceOption(Threads.ThreadManagementService);
-  const notifyDecision = ({ approval }: { approval: AgentApproval }) =>
+  const threadManagement = threads;
+  /** A persistent agent's decision goes to its conversation thread, on its fallback model. */
+  const notifyAgentDecision = (approval: AgentApproval) =>
     Effect.gen(function* () {
       if (approval.agentId === null || threadManagement._tag === "None") return;
       const agent = yield* store.get(approval.agentId);
@@ -411,9 +417,53 @@ const make = Effect.gen(function* () {
         createdBy: "agent",
         creationSource: "server",
       });
+    });
+  /** True once the provider call that waited for this approval has ended. */
+  const threadIdle = (threadId: ThreadId) =>
+    threads._tag === "None"
+      ? Effect.succeed(false)
+      : threads.value
+          .getThreadShell(threadId)
+          .pipe(
+            Effect.map(
+              (shell) =>
+                shell !== undefined &&
+                shell !== null &&
+                shell.activeRunId === null &&
+                shell.deletedAt === null &&
+                shell.archivedAt === null,
+            ),
+          );
+  const notifyDecision = ({ approval }: { approval: AgentApproval }) =>
+    Effect.gen(function* () {
+      const action = approval.action;
+      if (action.actionKind === "vault_use" && action.payload.threadId) {
+        // vault_fill returns at once, so every decision is a late answer.
+        yield* cardNotifications.answered({
+          threadId: action.payload.threadId,
+          key: approvalKey(approval),
+          summary: `Approval ${approval.status === "approved" ? "granted" : "denied"}: use vault credential on ${action.payload.domain ?? "the approved destination"}; retry vault_fill if still needed`,
+        });
+        return;
+      }
+      if (
+        (action.actionKind === "integration_add" || action.actionKind === "integration_update") &&
+        action.threadId
+      ) {
+        // An approval is announced where it is applied, with the integration's name.
+        // A rejection only needs a message once the waiting call has ended.
+        if (approval.status !== "approved" && (yield* threadIdle(action.threadId)))
+          yield* cardNotifications.answered({
+            threadId: action.threadId,
+            key: approvalKey(approval),
+            summary: `Approval denied: ${action.actionKind.replaceAll("_", " ")}`,
+          });
+        return;
+      }
+      yield* notifyAgentDecision(approval);
     }).pipe(
       Effect.catch((cause) =>
-        Effect.logWarning("Could not deliver an agent approval decision", {
+        Effect.logWarning("Could not deliver an approval decision", {
           approvalId: approval.id,
           cause,
         }),
@@ -724,35 +774,12 @@ const make = Effect.gen(function* () {
                 }),
               );
               // An owner can approve after the provider has ended its waiting call.
-              if (action.threadId && threads._tag === "Some") {
-                const shell = yield* threads.value.getThreadShell(action.threadId);
-                if (
-                  shell &&
-                  shell.activeRunId === null &&
-                  shell.deletedAt === null &&
-                  shell.archivedAt === null
-                ) {
-                  yield* threads.value
-                    .sendToThread({
-                      projectId: shell.projectId,
-                      threadId: action.threadId,
-                      commandId: CommandId.make(`integration-approved:${id}`),
-                      messageId: MessageId.make(`message:integration-approved:${id}`),
-                      text: `The owner approved ${connected.displayName}. Continue setup with integration_update name ${connected.name}; use the inline sign-in card, then integration_test and list the tools.`,
-                      attachments: [],
-                      mode: "auto",
-                      createdBy: "system",
-                      creationSource: "server",
-                    })
-                    .pipe(
-                      Effect.catch((error) =>
-                        Effect.logWarning("Could not resume approved integration setup", {
-                          errorTag: error._tag,
-                        }),
-                      ),
-                    );
-                }
-              }
+              if (action.threadId && (yield* threadIdle(action.threadId)))
+                yield* cardNotifications.answered({
+                  threadId: action.threadId,
+                  key: `approval:${id}`,
+                  summary: `The owner approved ${connected.displayName}. Continue setup with integration_update name ${connected.name}; use the inline sign-in card, then integration_test and list the tools`,
+                });
               return { approval: yield* getApproval(id) };
             }
             if (approval.agentId === null) return yield* fail("An agent approval needs an agent.");

@@ -67,6 +67,8 @@ const presentationFields = {
 
 const PreviewActionResult = Schema.Struct({
   ...presentationFields,
+  clicked: Schema.optional(Schema.String),
+  strategy: Schema.optional(Schema.String),
   dialog: Schema.optional(Schema.Struct({ type: Schema.String, message: Schema.String })),
 }).annotate({
   description: "The preview action completed successfully.",
@@ -233,7 +235,7 @@ const PreviewPermissionTool = safeBrowserTool(
 export const PreviewSnapshotTool = safeBrowserTool(
   Tool.make("preview_snapshot", {
     description:
-      "Inspect a collaborative browser tab without taking control. If a new thread message cancels this call before a result arrives, retry the snapshot on the same tab; cancellation alone does not mean its browser connection or login was lost. Defaults to compact JSON elements with stable refs, roles, names, values, and states in the viewport. Target refs with locator=aria-ref=<ref>; refs survive snapshots but expire on navigation or control handoff. Use scope for a selector/ref subtree and viewportOnly=false for the document. output=full returns the accessibility tree and diagnostics; output=none skips inspection. output=changes compares with the last compact view in this session and scope, or returns the current view if no baseline exists. Diffs over about 1,000 tokens return only counts (summary), URL, title and errors; call preview_snapshot for the details. Use preview_extract for data and preview_evaluate for custom JSON. No screenshot is captured unless includeImage=true or save=true. Request includeImage=true for visual checks, canvas, images, or an empty/ambiguous structured view. Images are downscaled JPEG; save=true writes a PNG and returns screenshotPath for embedding in replies. Screenshot failure returns screenshotError alongside structured data. Pass tabId to read a particular tab, including the user's tab.",
+      "Inspect a collaborative browser tab without taking control. If a new thread message cancels this call, retry it on the same tab; cancellation does not mean the browser connection or login was lost. Defaults to compact JSON elements with stable refs, roles, names, values, and states in the viewport. Target refs with locator=aria-ref=<ref>; refs survive snapshots but expire on navigation or control handoff. Use scope for a selector/ref subtree and viewportOnly=false for the document. output=full returns the accessibility tree and diagnostics; output=none skips inspection. output=changes compares with the last compact view in this session and scope, or returns the current view if no baseline exists. Diffs over about 1,000 tokens return only counts (summary), URL, title and errors; call preview_snapshot for the details. Use preview_extract for data and preview_evaluate for custom JSON. No screenshot is captured unless includeImage=true or save=true. Request includeImage=true for visual checks, canvas, images, or an empty/ambiguous structured view. Images are downscaled JPEG; save=true writes a PNG and returns screenshotPath for embedding in replies. Screenshot failure returns screenshotError alongside structured data. Pass tabId to read a particular tab, including the user's tab.",
     parameters: PreviewAutomationSnapshotInput,
     success: PreviewAutomationSnapshotResult,
     failure: PreviewToolFailure,
@@ -244,7 +246,7 @@ export const PreviewSnapshotTool = safeBrowserTool(
 const PreviewClickTool = browserTool(
   Tool.make("preview_click", {
     description:
-      "Click exactly one target in the tab selected by tabId, or this agent session's current tab when omitted. Prefer a Playwright locator; selector accepts legacy CSS; x and y must be supplied together. Set button=right for a context menu or clickCount=2 for a double-click; server browser tabs only. Returns changes by default; output selects detail. Screenshots: preview_snapshot includeImage=true.",
+      "Click exactly one target in the tab selected by tabId, or this agent session's current tab when omitted. Prefer a Playwright locator; selector accepts legacy CSS; x and y must be supplied together. Set button=right for a context menu or clickCount=2 for a double-click; server browser tabs only. Returns what was clicked and its strategy, plus changes by default. Checkbox/radio clicks fall back to the input click only if their state did not change. CSS selector lists are supported; snapshot aria-ref and role/text locators must be used individually. Screenshots: preview_snapshot includeImage=true.",
     parameters: PreviewAutomationClickInput,
     success: PreviewActionResult,
     failure: PreviewToolFailure,

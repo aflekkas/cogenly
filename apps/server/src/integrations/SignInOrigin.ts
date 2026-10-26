@@ -1,10 +1,11 @@
-import { IntegrationError } from "@cogenly/contracts";
+import { IntegrationError, type ThreadId } from "@cogenly/contracts";
 import { isLoopbackHost } from "@cogenly/shared/preview";
 import * as Effect from "effect/Effect";
 
 export interface SignInOrigin {
   readonly origin: string | undefined;
   readonly fromAgent?: boolean;
+  readonly threadId?: ThreadId | undefined;
   /** A reachable browser origin, supplied explicitly by an agent. */
   readonly callbackOrigin?: string | undefined;
 }

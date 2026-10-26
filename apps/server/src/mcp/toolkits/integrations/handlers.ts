@@ -196,7 +196,7 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
       if (request !== undefined) {
         const connected = yield* service
           .connectFromCatalog(request, {
-            origin: { origin: scope.httpOrigin, fromAgent: true },
+            origin: { origin: scope.httpOrigin, fromAgent: true, threadId: scope.thread?.threadId },
             addedByAgent: yield* addedByAgent(fail),
             fromAgent: true,
           })
@@ -228,6 +228,7 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
           origin: scope.httpOrigin,
           fromAgent: true,
           callbackOrigin: input.callbackOrigin,
+          threadId: scope.thread?.threadId,
         })
         .pipe(Effect.mapError(fail));
       return withAgentNextStep(yield* finishSetup(scope, prepared, input.accountLabel), context);
@@ -288,6 +289,7 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
           origin: scope.httpOrigin,
           fromAgent: true,
           callbackOrigin: input.callbackOrigin,
+          threadId: scope.thread?.threadId,
         })
         .pipe(Effect.mapError(fail));
       return withAgentNextStep(yield* finishSetup(scope, prepared));

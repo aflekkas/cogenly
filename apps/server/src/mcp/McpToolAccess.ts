@@ -18,6 +18,7 @@ import {
   type DispatchModeRefusal,
 } from "../orchestration-v2/DispatchModeLimit.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
+import { redactPreview } from "../preview/PreviewRedactor.ts";
 import * as Vault from "../vault/Vault.ts";
 import { resolveInteractionMode, resolveRuntimeMode } from "./OrchestratorMcpService.ts";
 import {
@@ -101,6 +102,9 @@ export class Declaration<out Handler> {
       const declaration = new Declaration(builtHere, (params: Parameters<typeof handle>[0]) =>
         handle(params).pipe(
           NodeSqliteClient.interactive,
+          Effect.map((result) =>
+            declaration.#toolName?.startsWith("preview_") ? redactPreview(result) : result,
+          ),
           // Second layer: scrub exact vault values from every tool result
           // before serialization. Transformed values need source-level
           // protection, such as the broker's evaluation seal after vault_fill.

@@ -7,6 +7,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
+import * as ServerBrowser from "../../../preview/ServerBrowser.ts";
 import * as AgentStore from "../../../agents/AgentStore.ts";
 import * as Vault from "../../../vault/Vault.ts";
 import * as VaultSync from "../../../vault/VaultSync.ts";
@@ -39,6 +40,28 @@ export const layer = McpToolAccess.toLayer(VaultToolkit, {
       Effect.flatMap((sync) => sync.setPeerSharing(input)),
       Effect.mapError(toFailure),
     ),
+  ),
+  vault_capture: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.requireThreadMcpCapability("preview").pipe(
+        Effect.mapError(() => failure("Preview capability is unavailable.")),
+      );
+      const browser = yield* ServerBrowser.ServerBrowser;
+      return yield* browser
+        .capture({
+          ...input,
+          threadId: scope.thread.threadId,
+          agentSessionId: `${scope.environmentId}\u0000${scope.thread.providerSessionId}`,
+        })
+        .pipe(
+          Effect.mapError(() =>
+            failure(
+              "Could not capture the credential. Check the tab, locator and attribute.",
+              "orchestration_error",
+            ),
+          ),
+        );
+    }),
   ),
   vault_list: McpToolAccess.readsAsCaller((input) =>
     Effect.gen(function* () {

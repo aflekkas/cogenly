@@ -1,9 +1,11 @@
+import * as InlineCardEvents from "../../orchestration-v2/InlineCardEvents.ts";
+import * as Queue from "effect/Queue";
 import * as GoogleTokens from "./GoogleTokenStore.ts";
 import { loopbackHttpsPolicy } from "../https.testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import { NodeCrypto, NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { EnvironmentId, IntegrationName, ProjectLabelId } from "@cogenly/contracts";
+import { EnvironmentId, IntegrationName, ProjectLabelId, ThreadId } from "@cogenly/contracts";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -149,6 +151,7 @@ const testLayer = (
     }),
   ).pipe(Layer.provide(Runner.layerWith({ restartDelayMs: 10, requestTimeoutMs: 2000 })));
   const infrastructure = Layer.mergeAll(
+    InlineCardEvents.layer,
     Layer.succeed(GoogleTokens.GoogleTokenStore, tokenStore),
     NodeServices.layer,
     NodeCrypto.layer,
@@ -1108,3 +1111,41 @@ it.live("connection tests cannot reuse another project's credentialed stdio proc
     ),
   );
 });
+
+it.live.each([false, true])(
+  "Google sign-in answer notifies its originating thread (denied: %s)",
+  (denied) => {
+    const callbacks: string[] = [];
+    return Effect.gen(function* () {
+      yield* runMigrations();
+      const gateway = yield* Integrations.Integrations;
+      const local = yield* Local.LocalIntegrations;
+      const events = yield* InlineCardEvents.InlineCardEvents;
+      const { integration } = yield* gateway.create({
+        preset: "google-workspace",
+        accountLabel: "notify",
+        callbackOrigin: "https://cogenly.example.com",
+      });
+      const threadId = ThreadId.make("thread:google-answer");
+      const link = yield* gateway.beginSignIn(integration.id, {
+        origin: "https://cogenly.example.com",
+        threadId,
+      });
+      const auth = yield* local.authorize(
+        new URL(link.authorizationUrl).searchParams.get("ticket")!,
+      );
+      const state = new URL(auth.url!).searchParams.get("state")!;
+      const query = `state=${encodeURIComponent(state)}&${denied ? "error=access_denied" : "code=fake"}`;
+      expect(yield* local.callback(query)).toBe(!denied);
+      const answer = yield* Queue.take(events.answers);
+      expect(answer.threadId).toBe(threadId);
+      expect(answer.summary).toContain(denied ? "denied" : "signed in");
+      expect(answer.key.includes(state)).toBe(false);
+      yield* local.callback(query);
+      expect(yield* Queue.size(events.answers)).toBe(0);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(testLayer([], false, "json", false, false, undefined, callbacks)),
+    );
+  },
+);

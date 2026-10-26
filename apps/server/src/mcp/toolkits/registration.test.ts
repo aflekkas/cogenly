@@ -860,6 +860,7 @@ const smokeCases = [
   {
     toolkit: "vault",
     names: [
+      "vault_capture",
       "vault_list",
       "vault_save",
       "vault_fill",
