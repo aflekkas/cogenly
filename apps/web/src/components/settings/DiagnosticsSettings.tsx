@@ -6,7 +6,7 @@ import { environmentSession } from "../../state/session";
 import { AuthOrchestrationOperateScope } from "@cogenly/contracts";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { AuthEnvironmentMaintainScope } from "@cogenly/contracts";
-import { AlertTriangleIcon, FolderOpenIcon, InfoIcon } from "lucide-react";
+import { FolderOpenIcon, InfoIcon } from "lucide-react";
 import { ChevronDown, ChevronRight } from "lucide";
 import {
   isAtomCommandInterrupted,
@@ -51,6 +51,7 @@ import {
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { TelemetryExportSettings } from "./TelemetryExportSettings";
+import { FoldedSettingsSection } from "./FoldedSettingsSection";
 
 const NUMBER_FORMAT = new Intl.NumberFormat();
 
@@ -164,6 +165,21 @@ function StatsGrid({ children }: { children: ReactNode }) {
 
 function EmptyRows({ label }: { label: string }) {
   return <SettingsNote>{label}</SettingsNote>;
+}
+
+/** A section's load failures, one plain line each, under its summary numbers. */
+function DiagnosticsErrors({ messages }: { messages: ReadonlyArray<string | null> }) {
+  const shown = messages.filter((message): message is string => message !== null);
+  if (shown.length === 0) return null;
+  return (
+    <div className="border-t border-border/60">
+      {shown.map((message) => (
+        <SettingsNote key={message} tone="destructive">
+          {message}
+        </SettingsNote>
+      ))}
+    </div>
+  );
 }
 
 function DiagnosticsTable({
@@ -905,10 +921,10 @@ export function DiagnosticsSettingsPanel() {
     );
   }
 
-  return (
+  // The server's own process sampling. Shown only when the native resource monitor can't run,
+  // since the monitor covers the same processes in more detail.
+  const serverProcessSections = (
     <>
-      <ResourceTelemetryDiagnostics environmentId={environmentId} />
-
       <SettingsSection
         title="Live processes"
         headerAction={
@@ -940,22 +956,7 @@ export function DiagnosticsSettingsPanel() {
             value={processData ? String(processData.serverPid) : "..."}
           />
         </StatsGrid>
-        {processDiagnosticsError || processError ? (
-          <div className="space-y-2 border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:px-5">
-            {processDiagnosticsError ? (
-              <div className="flex items-start gap-2 text-destructive">
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>{processDiagnosticsError.message}</span>
-              </div>
-            ) : null}
-            {processError ? (
-              <div className="flex items-start gap-2 text-destructive">
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>{processError}</span>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+        <DiagnosticsErrors messages={[processDiagnosticsError?.message ?? null, processError]} />
         <ProcessDiagnosticsTable
           processes={processData?.processes ?? []}
           canMaintainEnvironment={canMaintainEnvironment}
@@ -1012,22 +1013,7 @@ export function DiagnosticsSettingsPanel() {
             value={resourceData ? formatCount(resourceData.topProcesses.length) : "..."}
           />
         </StatsGrid>
-        {processResourceError || resourceError ? (
-          <div className="space-y-2 border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:px-5">
-            {processResourceError ? (
-              <div className="flex items-start gap-2 text-destructive">
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>{processResourceError.message}</span>
-              </div>
-            ) : null}
-            {resourceError ? (
-              <div className="flex items-start gap-2 text-destructive">
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>{resourceError}</span>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+        <DiagnosticsErrors messages={[processResourceError?.message ?? null, resourceError]} />
         <ProcessResourceHistoryChart buckets={resourceData?.buckets ?? []} />
         <ProcessResourceHistoryTable
           processes={resourceData?.topProcesses ?? []}
@@ -1038,9 +1024,13 @@ export function DiagnosticsSettingsPanel() {
           }
         />
       </SettingsSection>
+    </>
+  );
 
+  return (
+    <>
       <SettingsSection
-        title="Trace diagnostics"
+        title="Traces"
         headerAction={
           <>
             <Tooltip>
@@ -1095,37 +1085,17 @@ export function DiagnosticsSettingsPanel() {
             tone={data && data.parseErrorCount > 0 ? "warning" : "default"}
           />
         </StatsGrid>
-        {openLogsDirectoryError || traceDiagnosticsError || error ? (
-          <div className="space-y-2 border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:px-5">
-            {openLogsDirectoryError ? (
-              <div className="flex items-start gap-2 text-destructive">
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>{openLogsDirectoryError}</span>
-              </div>
-            ) : null}
-            {traceDiagnosticsError ? (
-              <div
-                className={cn(
-                  "flex items-start gap-2",
-                  traceDiagnosticsPartialFailure ? "text-warning-foreground" : "text-destructive",
-                )}
-              >
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>
-                  {traceDiagnosticsPartialFailure
-                    ? `Some trace files could not be read, so diagnostics may be incomplete. ${traceDiagnosticsError.message}`
-                    : traceDiagnosticsError.message}
-                </span>
-              </div>
-            ) : null}
-            {error ? (
-              <div className="flex items-start gap-2 text-destructive">
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>{error}</span>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+        <DiagnosticsErrors
+          messages={[
+            openLogsDirectoryError,
+            traceDiagnosticsError
+              ? traceDiagnosticsPartialFailure
+                ? `Some trace files couldn't be read, so these numbers may be incomplete. ${traceDiagnosticsError.message}`
+                : traceDiagnosticsError.message
+              : null,
+            error,
+          ]}
+        />
       </SettingsSection>
 
       <SettingsSection title="Latest failures">
@@ -1153,66 +1123,7 @@ export function DiagnosticsSettingsPanel() {
         )}
       </SettingsSection>
 
-      <SettingsSection title="Most common failures">
-        {data && data.commonFailures.length > 0 ? (
-          <DiagnosticsTable
-            headers={["Span", "Count", "Cause", "Last Seen"]}
-            minTableWidth="min-w-[760px]"
-          >
-            {data.commonFailures.map((failure) => (
-              <tr key={`${failure.name}:${failure.cause}`}>
-                <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
-                  {failure.name}
-                </td>
-                <td className="px-4 py-3 align-top font-mono tabular-nums">
-                  {formatCount(failure.count)}
-                </td>
-                <td className="max-w-[360px] px-4 py-3 align-top text-muted-foreground">
-                  <ExpandableText text={failure.cause} />
-                </td>
-                <td className="w-px whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums text-muted-foreground last:sm:pr-5">
-                  {formatRelativeNoWrap(failure.lastSeenAt)}
-                </td>
-              </tr>
-            ))}
-          </DiagnosticsTable>
-        ) : (
-          <EmptyRows
-            label={isInitialLoading ? "Loading failure groups..." : "No repeated failures found."}
-          />
-        )}
-      </SettingsSection>
-
-      <SettingsSection title="Slowest spans">
-        {data && data.slowestSpans.length > 0 ? (
-          <DiagnosticsTable
-            headers={["Span", "Duration", "Ended", "Trace"]}
-            minTableWidth="min-w-[900px]"
-            columnWidths={["w-[44%]", "w-[14%]", "w-[12%]", "w-[30%]"]}
-          >
-            {data.slowestSpans.map((span) => (
-              <tr key={`${span.traceId}:${span.spanId}`}>
-                <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
-                  {span.name}
-                </td>
-                <td className="px-4 py-3 align-top font-mono tabular-nums">
-                  {formatDuration(span.durationMs)}
-                </td>
-                <td className="w-px whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums text-muted-foreground">
-                  {formatRelativeNoWrap(span.endedAt)}
-                </td>
-                <td className="min-w-0 whitespace-nowrap px-4 py-3 align-top text-muted-foreground last:sm:pr-5">
-                  <TraceIdCell traceId={span.traceId} />
-                </td>
-              </tr>
-            ))}
-          </DiagnosticsTable>
-        ) : (
-          <EmptyRows label={isInitialLoading ? "Loading slow spans..." : "No spans found."} />
-        )}
-      </SettingsSection>
-
-      <SettingsSection title="Span logs">
+      <SettingsSection title="Recent warnings and errors">
         {data && data.latestWarningAndErrorLogs.length > 0 ? (
           <ScrollArea
             radius="none"
@@ -1277,7 +1188,83 @@ export function DiagnosticsSettingsPanel() {
         )}
       </SettingsSection>
 
-      <SettingsSection title="Top span names">
+      <ResourceTelemetryDiagnostics
+        environmentId={environmentId}
+        fallback={serverProcessSections}
+      />
+
+      <FoldedSettingsSection
+        id="diagnostics-repeated-failures"
+        title="Repeated failures"
+        headerPlacement="outside"
+      >
+        {data && data.commonFailures.length > 0 ? (
+          <DiagnosticsTable
+            headers={["Span", "Count", "Cause", "Last Seen"]}
+            minTableWidth="min-w-[760px]"
+          >
+            {data.commonFailures.map((failure) => (
+              <tr key={`${failure.name}:${failure.cause}`}>
+                <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
+                  {failure.name}
+                </td>
+                <td className="px-4 py-3 align-top font-mono tabular-nums">
+                  {formatCount(failure.count)}
+                </td>
+                <td className="max-w-[360px] px-4 py-3 align-top text-muted-foreground">
+                  <ExpandableText text={failure.cause} />
+                </td>
+                <td className="w-px whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums text-muted-foreground last:sm:pr-5">
+                  {formatRelativeNoWrap(failure.lastSeenAt)}
+                </td>
+              </tr>
+            ))}
+          </DiagnosticsTable>
+        ) : (
+          <EmptyRows
+            label={isInitialLoading ? "Loading failure groups..." : "No repeated failures found."}
+          />
+        )}
+      </FoldedSettingsSection>
+
+      <FoldedSettingsSection
+        id="diagnostics-slowest-spans"
+        title="Slowest spans"
+        headerPlacement="outside"
+      >
+        {data && data.slowestSpans.length > 0 ? (
+          <DiagnosticsTable
+            headers={["Span", "Duration", "Ended", "Trace"]}
+            minTableWidth="min-w-[900px]"
+            columnWidths={["w-[44%]", "w-[14%]", "w-[12%]", "w-[30%]"]}
+          >
+            {data.slowestSpans.map((span) => (
+              <tr key={`${span.traceId}:${span.spanId}`}>
+                <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
+                  {span.name}
+                </td>
+                <td className="px-4 py-3 align-top font-mono tabular-nums">
+                  {formatDuration(span.durationMs)}
+                </td>
+                <td className="w-px whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums text-muted-foreground">
+                  {formatRelativeNoWrap(span.endedAt)}
+                </td>
+                <td className="min-w-0 whitespace-nowrap px-4 py-3 align-top text-muted-foreground last:sm:pr-5">
+                  <TraceIdCell traceId={span.traceId} />
+                </td>
+              </tr>
+            ))}
+          </DiagnosticsTable>
+        ) : (
+          <EmptyRows label={isInitialLoading ? "Loading slow spans..." : "No spans found."} />
+        )}
+      </FoldedSettingsSection>
+
+      <FoldedSettingsSection
+        id="diagnostics-frequent-spans"
+        title="Most frequent spans"
+        headerPlacement="outside"
+      >
         {data && data.topSpansByCount.length > 0 ? (
           <DiagnosticsTable
             headers={["Span", "Count", "Failures", "Average", "Max"]}
@@ -1307,7 +1294,7 @@ export function DiagnosticsSettingsPanel() {
         ) : (
           <EmptyRows label={isInitialLoading ? "Loading span names..." : "No spans found."} />
         )}
-      </SettingsSection>
+      </FoldedSettingsSection>
       {exportFormEnvironmentId === environmentId && <TelemetryExportSettings />}
     </>
   );

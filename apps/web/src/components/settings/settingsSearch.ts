@@ -255,10 +255,10 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "storage-delete-now",
-    title: "Preview cleanup and clean up now",
+    title: "Clean up now",
     to: "/settings/storage",
     searchTerms: [
-      "storage cleanup dry run preview run now results report removed kept failed unsaved agent worktrees",
+      "storage cleanup free up space preview cleanup dry run run now last run results report removed kept failed unsaved agent worktrees",
     ],
   },
   {
@@ -291,9 +291,11 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "storage-artifacts",
-    title: "Artifacts and logs",
+    title: "Build files, captures and logs",
     to: "/settings/storage",
-    searchTerms: ["disk storage browser screenshots captures rotated logs cleanup retention"],
+    searchTerms: [
+      "artifacts and logs disk storage browser artifacts screenshots captures rotated logs cleanup retention",
+    ],
   },
   {
     id: "project-defaults",
@@ -334,7 +336,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "data-export",
     title: "Export",
     to: "/settings/data",
-    searchTerms: ["export backup download portable data jsonl validate bundle"],
+    searchTerms: [
+      "export backup download portable data jsonl validate check bundle recent exports",
+    ],
   },
   {
     id: "t3-import",
@@ -613,7 +617,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "diagnostics",
     title: "Diagnostics",
     to: "/settings/diagnostics",
-    searchTerms: ["logs traces live processes resource history failures spans cpu memory"],
+    searchTerms: [
+      "logs traces trace diagnostics live processes resource monitor resource history failures repeated failures slowest spans span logs warnings errors top span names most frequent cpu memory",
+    ],
   },
   {
     id: "open-source-licenses",
@@ -897,7 +903,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "network-access",
     title: "Network access",
     to: "/settings/connections",
-    targetId: "connections-environment",
+    targetId: "connections-remote-access",
     searchTerms: ["expose backend remote pairing local machine interfaces host restart"],
     localBackendManagementOnly: true,
   },
@@ -918,7 +924,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     localEnvironmentOnly: true,
     title: "Cogenly Connect",
     to: "/settings/connections",
-    targetId: "connections-environment",
+    targetId: "connections-remote-access",
     searchTerms: ["managed tunnel cloud other devices remote"],
     desktopOnly: true,
     cloudOnly: true,
@@ -928,7 +934,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     localEnvironmentOnly: true,
     title: "Hold webhooks while offline",
     to: "/settings/connections",
-    targetId: "connections-environment",
+    targetId: "connections-remote-access",
     searchTerms: ["webhook automations offline queue mailbox cogenly connect"],
     cloudOnly: true,
     managedTunnelOnly: true,
@@ -938,7 +944,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     localEnvironmentOnly: true,
     title: "Publish agent activity",
     to: "/settings/connections",
-    targetId: "connections-environment",
+    targetId: "connections-remote-access",
     searchTerms: ["mobile push notifications live activities cloud tunnel"],
     cloudOnly: true,
   },
@@ -947,7 +953,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "This machine",
     to: "/settings/connections",
     searchTerms: [
-      "connections server backend local remote access administrative permissions scope pairing links qr code authorized clients sessions revoke endpoint",
+      "connections server backend local remote access administrative permissions scope pairing links pair a device qr code authorized clients devices with access sessions revoke endpoint",
     ],
   },
   {
@@ -1019,7 +1025,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "archive",
     title: "Archived threads",
     to: "/settings/archived",
-    searchTerms: ["restore reopen deleted history projects"],
+    searchTerms: ["archive unarchive restore reopen delete deleted history projects"],
   },
   {
     id: "project-folders",

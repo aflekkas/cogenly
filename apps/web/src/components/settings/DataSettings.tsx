@@ -18,8 +18,10 @@ import { exportRpc } from "../../rpc/exports";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
+import { CopyButton } from "../ui/copy-button";
 import { Checkbox } from "../ui/checkbox";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { toastManager } from "../ui/toast";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { SettingsEmpty, SettingsRow, SettingsSection } from "./settingsLayout";
 
@@ -64,10 +66,22 @@ export function DataSettings() {
   const { environment } = useSettingsScope();
   const environmentId = environment?.environmentId ?? null;
   // Keyed so results and recent exports never carry over to another environment.
-  return <DataSettingsPanel key={environmentId ?? "none"} environmentId={environmentId} />;
+  return (
+    <DataSettingsPanel
+      key={environmentId ?? "none"}
+      environmentId={environmentId}
+      environmentLabel={environment?.label ?? null}
+    />
+  );
 }
 
-function DataSettingsPanel({ environmentId }: { environmentId: EnvironmentId | null }) {
+function DataSettingsPanel({
+  environmentId,
+  environmentLabel,
+}: {
+  environmentId: EnvironmentId | null;
+  environmentLabel: string | null;
+}) {
   const canExport = useAtomValue(exportRpc.exportCreate.permissionAtom(environmentId));
   const { labels } = useEnvironmentProjectLabels(environmentId);
   const sortedLabels = useMemo(
@@ -82,7 +96,6 @@ function DataSettingsPanel({ environmentId }: { environmentId: EnvironmentId | n
   );
   const [labelId, setLabelId] = useState<string>(ALL);
   const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<ExportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [recent, setRecent] = useState<ReadonlyArray<ExportResult> | null>(null);
   const [recentError, setRecentError] = useState<string | null>(null);
@@ -117,7 +130,11 @@ function DataSettingsPanel({ environmentId }: { environmentId: EnvironmentId | n
         },
       });
       if (created._tag === "Success") {
-        setResult(created.value);
+        toastManager.add({
+          type: "success",
+          title: `Exported ${formatBytes(created.value.bytes)}`,
+          description: summarizeExportCounts(created.value.counts),
+        });
         await refreshRecent();
       } else if (!isAtomCommandInterrupted(created)) {
         setError(failureMessage(created));
@@ -141,17 +158,22 @@ function DataSettingsPanel({ environmentId }: { environmentId: EnvironmentId | n
 
   const disabledReason =
     environmentId === null
-      ? "Choose a machine to export."
+      ? "Choose a machine to export from."
       : !canExport
-        ? "This connection needs permission to change settings to export."
+        ? "This connection can't export. Reconnect with permission to change settings."
         : null;
+  const machine = environmentLabel ?? "that machine";
 
   return (
     <>
-      <SettingsSection id="data-export" title="Export">
+      <SettingsSection
+        id="data-export"
+        title="Export"
+        footer="Secrets, provider sign-ins and connection tokens are never exported."
+      >
         <SettingsRow
           title="What to include"
-          description="Threads include their messages and runs. Secrets, provider sign-ins and connection tokens are never exported."
+          description="Threads come with their messages and runs."
         >
           <div className="flex flex-wrap gap-x-4 gap-y-2 pt-2" role="group" aria-label="Include">
             {SECTIONS.map((section) => (
@@ -175,18 +197,18 @@ function DataSettingsPanel({ environmentId }: { environmentId: EnvironmentId | n
         </SettingsRow>
         <SettingsRow
           title="Project"
-          description="Limit the export to one project's chats, Work, open items and memory."
+          description="Export everything, or only one project's chats, Work, open items and memory."
           control={
             <Select value={labelId} onValueChange={(value) => setLabelId(value ?? ALL)}>
-              <SelectTrigger size="sm" aria-label="Project">
+              <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Project">
                 <SelectValue>
                   {labelId === ALL
-                    ? "Everything"
+                    ? "All projects"
                     : (labels.find((label) => label.id === labelId)?.name ?? "Project")}
                 </SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem value={ALL}>Everything</SelectItem>
+                <SelectItem value={ALL}>All projects</SelectItem>
                 {sortedLabels.map((label) => (
                   <SelectItem key={label.id} value={label.id}>
                     {label.name}
@@ -197,29 +219,18 @@ function DataSettingsPanel({ environmentId }: { environmentId: EnvironmentId | n
           }
         />
         <SettingsRow
-          title={
-            error
-              ? "Export failed"
-              : result
-                ? `Exported ${formatBytes(result.bytes)}`
-                : "Write an export bundle"
-          }
+          title="Export now"
           description={
-            error ??
-            (result ? (
-              <>
-                <span className="block break-all select-all">{result.path}</span>
-                <span className="block">{summarizeExportCounts(result.counts)}</span>
-              </>
-            ) : (
-              (disabledReason ?? "Saved as JSON Lines in the exports folder on that machine.")
-            ))
+            disabledReason ??
+            (include.size === 0
+              ? "Pick at least one thing to include."
+              : `Saves one file to the exports folder on ${machine}.`)
           }
+          status={error ? <span className="block text-destructive">{error}</span> : null}
           control={
             <Button
               size="sm"
               disabled={disabledReason !== null || include.size === 0 || running}
-              title={disabledReason ?? undefined}
               onClick={() => void run()}
             >
               {running ? "Exporting…" : "Export"}
@@ -228,61 +239,76 @@ function DataSettingsPanel({ environmentId }: { environmentId: EnvironmentId | n
         />
       </SettingsSection>
 
-      <SettingsSection
-        id="data-exports-recent"
-        title="Recent exports"
-        footer="Validate reads a bundle back and checks every record without changing anything. Importing a bundle isn't available yet."
-      >
-        {disabledReason !== null ? (
-          <SettingsRow title={disabledReason} />
-        ) : recentError !== null ? (
-          <SettingsRow title="Could not list exports" description={recentError} />
-        ) : recent === null ? (
-          <SettingsRow title="Loading exports…" role="status" />
-        ) : recent.length === 0 ? (
-          <SettingsEmpty size="sm" title="No exports yet" />
-        ) : (
-          recent.map((entry) => {
-            const createdAt = exportCreatedAt(entry.path);
-            const validation = validations.get(entry.path);
-            return (
-              <SettingsRow
-                key={entry.path}
-                title={`${createdAt ? formatRelativeTimeLabel(createdAt) : "Export"} · ${formatBytes(entry.bytes)}`}
-                description={
-                  <>
-                    <span className="block break-all select-all">{entry.path}</span>
-                    <span className="block">{summarizeExportCounts(entry.counts)}</span>
-                    {validation === undefined || validation === "running" ? null : "failed" in
+      {disabledReason === null ? (
+        <SettingsSection
+          id="data-exports-recent"
+          title="Recent exports"
+          footer="Check reads an export back and confirms every record is intact. It changes nothing. Cogenly can't import exports yet."
+        >
+          {recentError !== null ? (
+            <SettingsRow title="Couldn't list exports" description={recentError} />
+          ) : recent === null ? (
+            <SettingsRow title="Loading exports…" role="status" />
+          ) : recent.length === 0 ? (
+            <SettingsEmpty
+              size="sm"
+              title="No exports yet"
+              description="Exports you make appear here."
+            />
+          ) : (
+            recent.map((entry) => {
+              const createdAt = exportCreatedAt(entry.path);
+              const validation = validations.get(entry.path);
+              return (
+                <SettingsRow
+                  key={entry.path}
+                  title={`${createdAt ? formatRelativeTimeLabel(createdAt) : "Export"} · ${formatBytes(entry.bytes)}`}
+                  description={
+                    <>
+                      <span className="block">{summarizeExportCounts(entry.counts)}</span>
+                      <span className="block break-all select-all">{entry.path}</span>
+                    </>
+                  }
+                  status={
+                    validation === undefined || validation === "running" ? null : "failed" in
                       validation ? (
                       <span className="block text-destructive">{validation.failed}</span>
                     ) : validation.errors.length > 0 ? (
                       <span className="block text-destructive">
-                        {validation.errors.length} problem
-                        {validation.errors.length === 1 ? "" : "s"}: {validation.errors[0]}
+                        {validation.errors.length === 1
+                          ? "1 problem"
+                          : `${validation.errors.length} problems`}
+                        : {validation.errors[0]}
                       </span>
                     ) : (
-                      <span className="block text-success-foreground">
-                        Valid · {summarizeExportCounts(validation.counts)}
-                      </span>
-                    )}
-                  </>
-                }
-                control={
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={validation === "running"}
-                    onClick={() => void validate(entry.path)}
-                  >
-                    {validation === "running" ? "Checking…" : "Validate"}
-                  </Button>
-                }
-              />
-            );
-          })
-        )}
-      </SettingsSection>
+                      <span className="block text-success-foreground">Every record is intact.</span>
+                    )
+                  }
+                  control={
+                    <div className="flex items-center gap-1.5">
+                      <CopyButton
+                        label="Copy path"
+                        size="icon-sm"
+                        target="export path"
+                        value={entry.path}
+                        variant="ghost-muted"
+                      />
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={validation === "running"}
+                        onClick={() => void validate(entry.path)}
+                      >
+                        {validation === "running" ? "Checking…" : "Check"}
+                      </Button>
+                    </div>
+                  }
+                />
+              );
+            })
+          )}
+        </SettingsSection>
+      ) : null}
     </>
   );
 }

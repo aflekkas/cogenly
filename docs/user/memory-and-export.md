@@ -34,8 +34,8 @@ where it came from.
 
 **Settings → Data** writes a portable export of chats, Work, agents, open items, projects, and
 memory, optionally limited to one project. The export is saved on the machine running that
-environment, and the page shows its location, size, and record counts. **Validate** reads an export
-back and reports any problems without changing it.
+environment, and **Recent exports** lists each one with its size, record counts, and location.
+**Check** reads an export back and reports any problems without changing it.
 
 Secrets, provider sign-ins, and connection tokens are never exported. Importing an export isn't
 available yet; to keep a full recovery copy, see [Keeping a recovery copy](./thread-migration.md#keeping-a-recovery-copy).
