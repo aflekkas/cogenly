@@ -302,6 +302,47 @@ const make = Effect.gen(function* () {
       yield* changed;
       return { deleted };
     }).pipe(Effect.mapError(failure));
+  const retryFallback = Effect.fn("AgentService.retryFallback")(function* (
+    agent: Agent,
+    threadId: ThreadId,
+    projection: ProjectionStore.ProjectionRecords<"runs" | "messages" | "turnItems">,
+  ) {
+    const run = projection.runs.at(-1);
+    if (run?.status !== "failed" || run.userMessageId?.startsWith("agent-fallback:")) return false;
+    const error = projection.turnItems.find(
+      (item) => item.type === "error" && item.runId === run.id,
+    );
+    if (error?.type !== "error") return false;
+    const chain = fallbackChainOf(agent);
+    const failedIndex = chainIndexOf(chain, run.modelSelection);
+    const advance = advanceFallback({
+      chain,
+      providers: yield* providers.getProviders,
+      failedIndex,
+      reason: classifyProviderFailure(error.failure),
+      resetAt: error.failure.resetAt,
+      nowMs: DateTime.toEpochMillis(yield* DateTime.now),
+      existingUntil: agent.fallbackUntil ?? null,
+    });
+    if (advance === null) return false;
+    yield* store.setFallback(agent.id, advance);
+    const message = projection.messages.find((message) => message.id === run.userMessageId);
+    if (!message || advance.index <= failedIndex) return false;
+    const key = `agent-fallback:${run.id}`;
+    yield* threads.sendToThread({
+      projectId: projection.thread.projectId,
+      threadId,
+      commandId: CommandId.make(key),
+      messageId: MessageId.make(key),
+      text: message.text,
+      attachments: message.attachments,
+      modelSelection: chain[advance.index]!,
+      mode: "queue",
+      createdBy: "agent",
+      creationSource: "server",
+    });
+    return true;
+  });
   const reconcile: AgentService["Service"]["reconcile"] = (options) =>
     Effect.gen(function* () {
       const deletions = yield* sql<{
@@ -309,6 +350,24 @@ const make = Effect.gen(function* () {
       }>`SELECT d.id FROM shared_documents d JOIN agents a ON a.agent_id=d.id WHERE d.kind='agent' AND d.tombstone_json IS NOT NULL`;
       for (const document of deletions) yield* removeAgent(AgentId.make(document.id));
       const runs = yield* store.runs();
+      for (const agent of yield* store.list()) {
+        if (agent.ownerMachine !== undefined && agent.ownerMachine !== shared.environmentId)
+          continue;
+        const work = yield* sql<{
+          thread_id: string;
+        }>`SELECT thread_id FROM agent_run_threads WHERE agent_id = ${agent.id}`;
+        const ids = new Set([
+          agent.conversationThreadId,
+          ...work.map((row) => ThreadId.make(row.thread_id)),
+        ]);
+        for (const threadId of ids) {
+          if (runs.some((record) => record.workThreadId === threadId)) continue;
+          yield* projections.getThreadRecords(threadId, ["runs", "messages", "turnItems"]).pipe(
+            Effect.flatMap((projection) => retryFallback(agent, threadId, projection)),
+            Effect.ignore,
+          );
+        }
+      }
       for (const record of runs) {
         yield* Effect.gen(function* () {
           const agent = yield* store.get(record.agentId);
@@ -362,6 +421,7 @@ const make = Effect.gen(function* () {
               .length > 0
           )
             return;
+          if (yield* retryFallback(agent, record.workThreadId, projection)) return;
           const succeeded = run.status === "completed";
           const response = projection.messages
             .filter((m) => m.role === "assistant" && m.runId === run.id)

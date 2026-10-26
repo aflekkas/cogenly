@@ -2359,3 +2359,113 @@ describe("event-driven agent triggers", () => {
       }),
   );
 });
+
+it.effect.each(["conversation", "work"] as const)(
+  "retries a failed %s past a same-provider account with an unknown fallback driver",
+  (kind) =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const agents = yield* Agents.AgentService;
+        const sql = yield* SqlClient.SqlClient;
+        const fallback = { instanceId: ProviderInstanceId.make("claude"), model: "opus" };
+        yield* store.save({
+          ...h.fixture,
+          fallbackChain: [
+            { instanceId: ProviderInstanceId.make("codex-school"), model: "gpt-5" },
+            fallback,
+          ],
+        });
+        const threadId =
+          kind === "conversation" ? h.fixture.conversationThreadId : ThreadId.make("governed:work");
+        if (kind === "work")
+          yield* sql`INSERT INTO agent_run_threads(thread_id, agent_id, trigger_kind) VALUES (${threadId}, ${h.fixture.id}, 'work')`;
+        const base = h.projections.get(h.fixture.conversationThreadId)!;
+        const at = DateTime.makeUnsafe(h.fixture.createdAt);
+        const run = {
+          id: RunId.make("fallback:failed"),
+          threadId,
+          ordinal: 1,
+          providerInstanceId: h.fixture.modelSelection.instanceId,
+          modelSelection: h.fixture.modelSelection,
+          providerThreadId: null,
+          userMessageId: MessageId.make("fallback:original"),
+          rootNodeId: null,
+          activeAttemptId: null,
+          status: "failed" as const,
+          requestedAt: at,
+          startedAt: at,
+          completedAt: at,
+          checkpointId: null,
+          contextHandoffId: null,
+        };
+        const projection = {
+          ...base,
+          thread: { ...base.thread, id: threadId },
+          runs: [run],
+          messages: [
+            {
+              id: run.userMessageId,
+              threadId,
+              runId: run.id,
+              nodeId: null,
+              role: "user" as const,
+              text: "Check CI",
+              attachments: [],
+              streaming: false,
+              createdAt: at,
+              updatedAt: at,
+              createdBy: "user" as const,
+              creationSource: "web" as const,
+            },
+          ],
+          turnItems: [
+            {
+              id: TurnItemId.make("fallback:error"),
+              threadId,
+              runId: run.id,
+              nodeId: null,
+              providerThreadId: null,
+              providerTurnId: null,
+              nativeItemRef: null,
+              parentItemId: null,
+              ordinal: 0,
+              status: "failed" as const,
+              title: "Usage limit",
+              startedAt: at,
+              completedAt: at,
+              updatedAt: at,
+              type: "error" as const,
+              failure: {
+                class: "usage_limit" as const,
+                message: "Limit reached",
+                code: "429",
+                retryable: true,
+              },
+            },
+          ],
+        };
+        h.projections.set(threadId, projection);
+        yield* agents.reconcile();
+        expect(h.calls.at(-1)?.modelSelection).toEqual(fallback);
+        expect((yield* store.get(h.fixture.id)).fallbackIndex).toBe(2);
+        expect(h.calls.at(-1)?.text).toBe("Check CI");
+        const retry = h.calls.at(-1)!;
+        h.projections.set(threadId, {
+          ...projection,
+          runs: [
+            {
+              ...run,
+              id: RunId.make("fallback:retry"),
+              modelSelection: fallback,
+              userMessageId: retry.messageId,
+            },
+          ],
+        });
+        const count = h.calls.length;
+        yield* agents.reconcile();
+        expect(h.calls).toHaveLength(count);
+      }).pipe(Effect.provide(h.layer));
+    }),
+);
