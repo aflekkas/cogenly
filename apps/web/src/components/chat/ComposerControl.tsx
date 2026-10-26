@@ -29,7 +29,7 @@ function composerControlClassName(size: ComposerControlSize, className?: string)
     // A narrow glyph (the plug) has twice the side bearing of the rest of the set; pulling its
     // box in keeps its ink as far from the label and the previous control as theirs.
     size === "xs"
-      ? "h-7 px-1.75 font-normal text-muted-foreground/70 text-sm hover:text-foreground/80 sm:h-6 sm:text-xs [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3.5 [&_svg[data-composer-control-chevron]]:ms-0 [&_svg[data-composer-control-chevron]]:-me-1 [&_svg[data-composer-control-icon=narrow]]:-mx-0.5!"
+      ? "h-7 px-1.75 font-normal text-muted-foreground/70 text-sm hover:text-foreground/80 sm:h-6 sm:text-xs [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3.5 [&_svg[data-composer-control-chevron]]:-ms-0.5 [&_svg[data-composer-control-chevron]]:-me-1 [&_svg[data-composer-control-icon=narrow]]:-mx-0.5!"
       : "h-7 px-2.5 font-medium text-secondary-label [&_svg:not([class*='text-'])]:text-muted-foreground hover:text-foreground sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg[data-composer-control-icon=narrow]]:-mx-0.75!",
     "aria-pressed:state-selected",
     className,

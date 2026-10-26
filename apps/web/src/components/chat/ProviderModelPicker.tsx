@@ -316,13 +316,15 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           </TooltipTrigger>
           <TooltipPopup side="top">{triggerTooltipContent}</TooltipPopup>
         </Tooltip>
+        {/* The chevron's optical margins sit on the frame, outside its clip, so they
+          match the other controls' chevrons without cutting off the glyph. */}
         <span
           aria-hidden="true"
-          className={COLLAPSIBLE_FRAME_CLASS}
+          className={cn(COLLAPSIBLE_FRAME_CLASS, size === "xs" ? "-ms-0.5 -me-1" : "-mx-0.5")}
           data-chat-provider-model-picker-chevron="true"
         >
           <span className="flex min-w-0 items-center overflow-hidden">
-            <ComposerControlChevron size={size} />
+            <ComposerControlChevron size={size} className="m-0!" />
           </span>
         </span>
       </PopoverTrigger>
