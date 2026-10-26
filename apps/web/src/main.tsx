@@ -12,6 +12,7 @@ import { getRouter } from "./router";
 import { installNavigationHistoryTracker } from "./navigationHistory";
 import { installDocumentVisibilityAttribute } from "./lib/documentVisibility";
 import { installInputModalityAttribute } from "./lib/inputModality";
+import { installScrollFadeFallback } from "./lib/scrollFadeFallback";
 import { installAppearancePreferences } from "./appearancePreferences";
 import {
   syncDocumentElectronPlatformClasses,
@@ -29,6 +30,7 @@ const history = isElectron ? createHashHistory() : createBrowserHistory();
 installNavigationHistoryTracker(history);
 installDocumentVisibilityAttribute();
 installInputModalityAttribute();
+installScrollFadeFallback();
 installAppearancePreferences();
 
 const router = getRouter(history);
