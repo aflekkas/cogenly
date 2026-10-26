@@ -14,6 +14,8 @@ shows Connected and the agent carries on. **Fix** shows the setting that needs
 changing, and changes that need your approval show **Approve integration** above
 the composer. Persistent agents ask the same way, in their own conversation.
 
+![An agent setting up Linear and waiting on the Sign in card](../images/integration-sign-in.webp)
+
 Anything an agent creates for you, such as a Google Cloud project, an OAuth
 client or a Slack app, is named **Cogenly**, so you can recognize it in the
 service's console. When one already exists, the agent reuses it instead of

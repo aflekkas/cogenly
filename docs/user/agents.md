@@ -12,6 +12,8 @@ choose **Create**. Review its responsibility, permissions, triggers, and **Runs 
 machine before creating it. If this machine cannot offer a No project workspace,
 the builder uses an existing repository; open a repository first if there is none.
 
+![The agent builder proposing a Release Notes agent with its responsibility, schedule and machine](../images/agent-builder.webp)
+
 Open the agent to give it direction or ask it to start Work. **Details** holds its
 standing instructions, permissions, triggers, open items, memory, and recent activity.
 An agent can suggest changes that need your approval, and learns when you approve or

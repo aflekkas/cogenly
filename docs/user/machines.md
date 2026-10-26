@@ -53,6 +53,8 @@ repository unless you pick another. A machine without the repository clones it
 first. If the machine you picked is offline, nothing starts and your draft
 stays as it was; the notice offers to run it on this machine instead.
 
+![The Run on control under the composer, listing MacBook and Cloud server](../images/machine-picker.webp)
+
 Start Work asks which machine to use after you choose its repository. You can
 also choose a machine when creating an agent or editing a schedule. A schedule
 bound to an existing conversation follows that conversation instead. A fresh
