@@ -445,7 +445,7 @@ function BrowserZoomSetting({ disabled }: { readonly disabled: boolean }) {
   );
 }
 
-export function BrowserAppearanceSettingRow({ disabled }: { readonly disabled: boolean }) {
+function BrowserAppearanceSettingRow({ disabled }: { readonly disabled: boolean }) {
   const appearance = useClientSettings((settings) => settings.browserDefaultAppearance);
   const updateSettings = useUpdatePrimarySettings();
 

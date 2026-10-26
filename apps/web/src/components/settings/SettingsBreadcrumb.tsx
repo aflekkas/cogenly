@@ -7,7 +7,7 @@ import { SETTINGS_DETAIL_PARENTS, SETTINGS_SECTION_LABELS } from "./settingsSear
 
 const SETTINGS_BREADCRUMB_LABELS: Readonly<Record<string, string>> = {
   ...SETTINGS_SECTION_LABELS,
-  "/settings/open-source-licenses": "Open source licenses",
+  "/settings/open-source-licenses": "Open-source licenses",
 };
 
 function settingsBreadcrumbLabel(pathname: string): string | null {

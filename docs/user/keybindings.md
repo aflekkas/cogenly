@@ -95,6 +95,10 @@ Join modifiers and a key with `+`, such as `mod+shift+d` or `ctrl+l`.
 
 ## When conditions
 
+In **Settings → Keybindings**, each binding shows its condition beside the command
+name, or **Always** when it has none. Click it to edit the condition as text or
+with the condition builder.
+
 Available context keys are `terminalFocus`, `previewFocus`,
 `previewOpen`, `modelPickerOpen`, `usagePageOpen`, `composerFocus`, `composerDraft`,
 `turnRunning`, `editableFocus`, `isWeb`, and `isDesktop`.
@@ -178,10 +182,10 @@ Keep that condition when remapping them if you want the same behavior.
 
 ## Desktop quit shortcut
 
-Use `Cmd+Q` on macOS or `Ctrl+Q` on Windows and Linux. In the default **Hold** mode,
+Use `Cmd+Q` on macOS or `Ctrl+Q` on Windows and Linux. In the default **Hold to quit** mode,
 hold for 1.2 seconds or press twice within 500 milliseconds. Holding requires
 keyboard repeat; if repeat is disabled, use two presses or the application menu.
 
-Change **Settings → General → Confirmations → Quit shortcut** to **Direct** for a
-single press or **Double press** for two presses only. Choosing **Quit** from the
+Change **Settings → General → Confirmations → Quit shortcut** to **Quit right away**
+for a single press or **Press twice** for two presses only. Choosing **Quit** from the
 application menu always quits immediately.

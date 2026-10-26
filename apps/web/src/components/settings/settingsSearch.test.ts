@@ -316,6 +316,10 @@ describe("searchSettings", () => {
     ["automatically pull", "automatic-pull", "/settings/source-control"],
     ["actions", "project-actions", "/settings/projects"],
     ["project overview", "project-overview", "/settings/projects"],
+    ["time format", "time-format", "/settings/appearance"],
+    ["chat width", "chat-width", "/settings/appearance"],
+    ["color blind", "diff-colors", "/settings/appearance"],
+    ["auto-resume limited threads", "auto-resume-limited-threads", "/settings/general"],
   ])("routes %s to its owning category", (query, id, to) => {
     expect(searchSettings(query)[0]).toMatchObject({ id, to });
   });
@@ -380,6 +384,7 @@ describe("settings navigation", () => {
     ["projects-folder", "/settings/new-threads"],
     ["project-actions", "/settings/projects"],
     ["diagnostics", "/settings/diagnostics"],
+    ["#time-format", "/settings/appearance"],
     ["send-shortcut", null],
     ["", null],
   ])("sends the old General anchor %s to %s", (hash, expected) => {
