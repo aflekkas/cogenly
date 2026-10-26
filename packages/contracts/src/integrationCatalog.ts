@@ -211,6 +211,29 @@ export function integrationCatalogEntryFor(
   );
 }
 
+/** Visual identity only: a private endpoint may have been reduced to its origin. */
+export function integrationIcon(
+  integration: Pick<Integration, "transport" | "url" | "local" | "icon" | "iconUrl">,
+) {
+  const entry = integrationCatalogEntryFor(integration);
+  const url = URL.parse(integration.url);
+  const known =
+    entry ??
+    INTEGRATION_CATALOG.find(
+      (candidate) =>
+        candidate.kind === "remote" && URL.parse(candidate.url)?.hostname === url?.hostname,
+    );
+  const icon = known?.icon ?? integration.icon ?? null;
+  const iconUrl =
+    icon !== null
+      ? undefined
+      : (integration.iconUrl ??
+        (integration.transport === "http" && url?.protocol === "https:"
+          ? `${url.origin}/favicon.ico`
+          : undefined));
+  return { icon, ...(iconUrl === undefined ? {} : { iconUrl }) };
+}
+
 /** What a catalog entry asks for with one auth mode, in the order Settings shows it. */
 export function integrationCatalogInputs(
   entry: IntegrationCatalogEntry,

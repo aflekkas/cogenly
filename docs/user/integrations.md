@@ -96,3 +96,13 @@ shares the vault with you, otherwise the machine you signed in on. If that
 machine is offline when the sign-in runs out, the others show that they are
 waiting for it; signing in again on any machine also works. Google and other
 local integrations sign in on each machine separately.
+
+Web connections also share account labels, enabled state and project access.
+API keys and private endpoints work on the other machine once their vault items
+arrive. Settings explains when a connection cannot sync and offers **Set up on
+<machine>** for your other paired machines. Local programs, their installed
+packages and Google's local sign-ins need setup on each machine.
+
+Claude and Codex can use integrations connected during a running chat, including
+ones arriving from another machine, without restarting the chat. Ask the agent
+to check your current integrations if it has not noticed the new connection.

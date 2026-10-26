@@ -133,6 +133,101 @@ const paired = Effect.gen(function* () {
 });
 
 describe("integration definitions between paired machines", () => {
+  it.live("only the originating machine upgrades an old document's missing credential fields", () =>
+    Effect.gen(function* () {
+      const { hub, spoke } = yield* paired;
+      const original = definition("integration:upgrade");
+      yield* hub.store({
+        ...original,
+        accountLabel: "Work",
+        headers: { Authorization: "Bearer {{credential:work.value}}" },
+      });
+      yield* hub.state.write("integration", original.id, {
+        name: original.name,
+        displayName: original.displayName,
+        hint: original.hint,
+        transport: "http",
+        url: original.url,
+        auth: { type: "oauth" },
+        scope: { type: "all" },
+        enabled: true,
+        createdAt: at,
+      });
+      yield* spoke.sync.sync(hub.environmentId);
+      yield* spoke.reconcile;
+      yield* spoke.reconcile;
+      expect((yield* spoke.state.get("integration", original.id))?.fields.headers).toBeUndefined();
+      yield* exchange(hub, spoke);
+      expect(yield* spoke.read(original.id)).toMatchObject({
+        accountLabel: "Work",
+        headers: { Authorization: "Bearer {{credential:work.value}}" },
+      });
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("changing the shared OAuth client retires a peer's previous client grant", () =>
+    Effect.gen(function* () {
+      const { hub, spoke } = yield* paired;
+      const original = {
+        ...definition("integration:client-change"),
+        auth: { type: "oauth" as const, clientId: "client-a" },
+      };
+      yield* hub.store(original);
+      yield* exchange(hub, spoke);
+      yield* spoke.store({
+        ...(yield* spoke.read(original.id))!,
+        oauthState: { signedIn: true, tokenItemId: "old-grant" },
+      });
+      yield* hub.integrations.update({
+        id: original.id,
+        auth: { type: "oauth", clientId: "client-b" },
+      });
+      yield* exchange(hub, spoke);
+      const current = yield* spoke.read(original.id);
+      expect(current?.auth?.clientId).toBe("client-b");
+      expect(current?.oauthState).toBeUndefined();
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("syncs account identity, scope and credential references, including clearing them", () =>
+    Effect.gen(function* () {
+      const { hub, spoke } = yield* paired;
+      const { auth: _, ...input } = definition("integration:unused", "custom");
+      const { integration } = yield* hub.integrations.create({
+        ...input,
+        url: "https://custom.example/mcp",
+        accountLabel: "Work",
+        enabled: false,
+        iconUrl: "https://custom.example/logo.png",
+        endpointRef: "private-endpoint.value",
+        headers: { Authorization: "Bearer {{credential:custom-key.value}}" },
+        scope: { type: "projects", labelIds: [ProjectLabelId.make("label:shared")] },
+      });
+      yield* exchange(hub, spoke);
+      expect(yield* spoke.read(integration.id)).toMatchObject({
+        accountLabel: "Work",
+        enabled: false,
+        iconUrl: "https://custom.example/logo.png",
+        endpointRef: "private-endpoint.value",
+        headers: { Authorization: "Bearer {{credential:custom-key.value}}" },
+        scope: { type: "projects", labelIds: ["label:shared"] },
+      });
+      yield* hub.integrations.update({
+        id: integration.id,
+        accountLabel: "",
+        headers: {},
+        endpointRef: null,
+        enabled: true,
+      });
+      yield* exchange(hub, spoke);
+      const cleared = yield* spoke.read(integration.id);
+      expect(cleared?.accountLabel).toBeUndefined();
+      expect(cleared?.endpointRef).toBeUndefined();
+      expect(cleared?.headers).toEqual({});
+      expect(cleared?.enabled).toBe(true);
+    }).pipe(Effect.scoped),
+  );
+
   it.live(
     "private paths never enter shared documents, from direct creation or legacy rows",
     () =>
@@ -153,7 +248,7 @@ describe("integration definitions between paired machines", () => {
             "bearer-PRIVATE",
           );
         }
-        expect(yield* spoke.read(legacy.id)).toBeUndefined();
+        expect((yield* spoke.read(legacy.id))?.endpointRef).toBeDefined();
         expect(JSON.stringify(yield* hub.state.get("integration", legacy.id))).not.toContain(
           "bearer-PRIVATE",
         );
@@ -162,7 +257,7 @@ describe("integration definitions between paired machines", () => {
   );
 
   it.live(
-    "URL credentials and unrecognized query parameters never publish or bootstrap",
+    "private query endpoints sync by vault reference; OAuth query URLs stay local",
     () =>
       Effect.gen(function* () {
         const { hub, spoke } = yield* paired;
@@ -187,7 +282,10 @@ describe("integration definitions between paired machines", () => {
             scope: { type: "all" },
             hint: "",
           })).integration;
-          expect(yield* hub.state.get("integration", created.id)).toBeUndefined();
+          expect(created.endpointRef).toBeDefined();
+          expect(JSON.stringify(yield* hub.state.get("integration", created.id))).not.toContain(
+            query,
+          );
           const existing = {
             ...definition(`integration:bootstrap-${index}`, `bootstrap-${index}`),
             url,
@@ -195,15 +293,12 @@ describe("integration definitions between paired machines", () => {
           yield* hub.store(existing);
           yield* exchange(hub, spoke);
           expect(yield* hub.state.get("integration", existing.id)).toBeUndefined();
-          expect(yield* spoke.read(created.id)).toBeUndefined();
+          expect((yield* spoke.read(created.id))?.endpointRef).toBe(created.endpointRef);
           expect(yield* spoke.read(existing.id)).toBeUndefined();
           const summary = (yield* hub.integrations.list()).integrations.find(
             (item) => item.integration.id === created.id,
           )!;
-          expect(summary).toHaveProperty(
-            "notSyncedReason",
-            "Not synced: URL query parameters may contain credentials.",
-          );
+          expect(summary.notSyncedReason).toBeUndefined();
         }
         // A previously shared endpoint can become local without exporting its new URL
         // or having the old shared document overwrite the local edit on reconciliation.
@@ -281,7 +376,7 @@ describe("integration definitions between paired machines", () => {
   );
 
   it.live(
-    "web definitions need local sign-in; cosmetic edits preserve the local grant and never send it",
+    "web definitions share credential references; cosmetic edits preserve local grants without sending them",
     () =>
       Effect.gen(function* () {
         const { hub, spoke } = yield* paired;
@@ -303,11 +398,16 @@ describe("integration definitions between paired machines", () => {
         yield* exchange(hub, spoke);
         const received = (yield* spoke.integrations.list()).integrations[0]!;
         expect(received.status).toBe("needs_sign_in");
-        expect(received.syncedFrom).toEqual({ machineLabel: "integrations-hub" });
+        expect(received.syncedFrom).toBeUndefined();
         expect(received.setup?.type).toBe("sign_in");
-        expect(received.setup?.title).toBe("Sign in on this machine");
-        expect(received.integration.headers).toEqual({});
-        expect(received.integration.auth).toEqual({ type: "oauth", scope: "read" });
+        expect(received.setup?.title).toBe("Sign in to Linear");
+        expect((yield* spoke.read(id))?.headers.authorization).toContain("{{credential:");
+        expect(received.integration.auth).toEqual({
+          type: "oauth",
+          scope: "read",
+          clientId: "local-client",
+          clientSecret: "{{credential:linear-client.secret}}",
+        });
         expect(received.integration.approvedCredentialItems).toEqual([]);
         const local = (yield* spoke.read(id))!;
         yield* spoke.store({
@@ -321,13 +421,13 @@ describe("integration definitions between paired machines", () => {
         expect((yield* hub.read(id))?.enabled).toBe(false);
         expect((yield* spoke.read(id))?.oauthState?.signedIn).toBe(true);
         expect(JSON.stringify((yield* spoke.state.get("integration", id))?.fields)).not.toMatch(
-          /local-token|private-literal|clientId|clientSecret|headers|approvedCredential/,
+          /local-token|private-literal|approvedCredential/,
         );
         // Peer URL edits discard this machine's grant and cannot retarget its headers.
         yield* hub.integrations.update({ id, url: "https://mcp.linear.app/sse" });
         yield* exchange(hub, spoke);
         expect((yield* spoke.read(id))?.oauthState).toBeUndefined();
-        expect((yield* spoke.read(id))?.headers).toEqual({});
+        expect((yield* spoke.read(id))?.headers.authorization).toContain("{{credential:");
         yield* spoke.integrations.remove(id);
         yield* exchange(hub, spoke);
         expect((yield* hub.read(id))?.deletedAt).not.toBeNull();

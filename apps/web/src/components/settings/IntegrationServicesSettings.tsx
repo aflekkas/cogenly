@@ -4,7 +4,7 @@ import {
 } from "@cogenly/client-runtime/state/runtime";
 import { useAtomValue } from "@effect/atom-react";
 import {
-  integrationCatalogEntryFor,
+  integrationIcon,
   type EnvironmentId,
   type IntegrationId,
   type IntegrationSummary,
@@ -12,6 +12,7 @@ import {
 import { PlusIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 import { integrationSetupRequest, useConnectIntegration } from "~/hooks/useConnectIntegration";
+import { useStartAgentChat } from "~/hooks/useStartAgentChat";
 import { AnimatedHeight } from "~/components/AnimatedHeight";
 import { cn } from "~/lib/utils";
 import { DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
@@ -170,7 +171,7 @@ function IntegrationListRow({
   const [pending, setPending] = useState(false);
   const status = integrationStatus(summary, undefined);
   const statusRef = useStatusFade<HTMLSpanElement>(status.label);
-  const entry = integrationCatalogEntryFor(integration);
+  const icon = integrationIcon(integration);
   const account = integration.accountLabel?.trim();
   const attention = integrationAttentionTone(
     useOpenMachineHealthAlerts(),
@@ -199,7 +200,7 @@ function IntegrationListRow({
       selectLabel={`Select ${integrationTitle(integration)}`}
       icon={
         <span className="flex size-5 shrink-0 items-center justify-center">
-          <IntegrationSourceIcon icon={entry?.icon ?? null} className="size-4" />
+          <IntegrationSourceIcon {...icon} className="size-4" />
         </span>
       }
       title={
@@ -243,10 +244,12 @@ function IntegrationDetail({
   const { integration } = summary;
   const { labels } = useEnvironmentProjectLabels(environmentId);
   // Why an account stays on this machine only matters once there is another one.
-  const paired =
-    useEnvironmentMachineList(environmentId)?.machines.some(
-      (machine) => machine.pairing === "paired",
-    ) ?? false;
+  const peers =
+    useEnvironmentMachineList(environmentId)?.machines.filter(
+      (machine) => machine.pairing === "paired" && machine.environmentId !== environmentId,
+    ) ?? [];
+  const paired = peers.length > 0;
+  const startAgentChat = useStartAgentChat();
   const update = useOrchestrationCommand(integrationsRpc.update, { reportFailure: false });
   const remove = useOrchestrationCommand(integrationsRpc.remove, { reportFailure: false });
   const test = useOrchestrationCommand(integrationsRpc.testConnection, { reportFailure: false });
@@ -259,7 +262,7 @@ function IntegrationDetail({
   const [error, setError] = useState<string | null>(null);
   const status = integrationStatus(summary, undefined);
   const statusRef = useStatusFade<HTMLSpanElement>(status.label);
-  const entry = integrationCatalogEntryFor(integration);
+  const icon = integrationIcon(integration);
   const report = (result: Awaited<ReturnType<typeof update>>) => {
     if (result._tag === "Success") return true;
     if (!isAtomCommandInterrupted(result))
@@ -333,7 +336,7 @@ function IntegrationDetail({
   return (
     <SettingsSection
       title={integrationTitle(integration)}
-      icon={<IntegrationSourceIcon icon={entry?.icon ?? null} className="size-4" />}
+      icon={<IntegrationSourceIcon {...icon} className="size-4" />}
       headerAction={
         <Button
           size="icon-xs"
@@ -403,6 +406,30 @@ function IntegrationDetail({
             {scopeLabel(integration.scope, labels)}
             {paired && summary.notSyncedReason ? ` · ${summary.notSyncedReason}` : ""}
           </>
+        }
+        control={
+          summary.notSyncedReason && paired ? (
+            <div className="flex flex-wrap items-center justify-end gap-1">
+              {peers.map((machine) => (
+                <Button
+                  key={machine.environmentId}
+                  size="sm"
+                  variant="outline"
+                  disabled={pending || !canWrite}
+                  onClick={() =>
+                    void run(async () => {
+                      await startAgentChat(machine.environmentId, {
+                        title: `Set up ${integration.displayName}`,
+                        prompt: `Set up ${integration.displayName}${integration.accountLabel ? ` (${integration.accountLabel})` : ""} on this machine. It is already connected on another machine but its local runtime or endpoint cannot sync. Read integration_setup_guide, connect it here, include its logo, and verify it with integration_test.`,
+                      });
+                    })
+                  }
+                >
+                  Set up on {machine.name}
+                </Button>
+              ))}
+            </div>
+          ) : undefined
         }
       />
     </SettingsSection>

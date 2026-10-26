@@ -7,6 +7,11 @@ and `integration_call`. Setup knowledge is repository data exposed by
 `integration_setup_guide`; Settings manages accounts rather than reproducing
 vendor setup flows. Add service knowledge there without adding a client wizard.
 
+Keep these gateway tools stable: providers may cache the MCP tool catalog at
+session startup. Integration names and upstream schemas resolve on each call,
+so a connection added locally or received through sync works mid-turn without
+provider-specific tool-list notifications.
+
 Native CLI servers, plugins and hosted connectors would bypass Cogenly's scope,
 status and credential handling and duplicate its tools, so every Claude and
 Codex session turns them off. There is no setting to restore them and no import:

@@ -65,14 +65,26 @@ export function useComposerSources(
   return { all, sources, isLoaded: query.data !== null, error: query.error };
 }
 
-/** A service's brand mark, or a plug for a custom server. */
+/** Shared icon source for Settings and Sources, including custom server favicons. */
 export function IntegrationSourceIcon(props: {
   icon: IntegrationCatalogId | null;
+  iconUrl?: string | undefined;
   className?: string;
 }) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const Logo = props.icon === null ? null : INTEGRATION_LOGOS[props.icon];
   return Logo ? (
     <Logo className={props.className} />
+  ) : props.iconUrl && props.iconUrl !== failedUrl ? (
+    <img
+      src={props.iconUrl}
+      alt=""
+      width={16}
+      height={16}
+      className={props.className}
+      referrerPolicy="no-referrer"
+      onError={() => setFailedUrl(props.iconUrl ?? null)}
+    />
   ) : (
     <PlugIcon aria-hidden="true" className={props.className} />
   );
@@ -88,7 +100,11 @@ export function IntegrationSourceRowContent(props: { source: IntegrationSource }
   return (
     <>
       <SearchListRowIcon>
-        <IntegrationSourceIcon icon={props.source.icon} className="size-4" />
+        <IntegrationSourceIcon
+          icon={props.source.icon}
+          iconUrl={props.source.iconUrl}
+          className="size-4"
+        />
       </SearchListRowIcon>
       <SearchListRowText layout="inline">
         <SearchListRowLabel>{label}</SearchListRowLabel>

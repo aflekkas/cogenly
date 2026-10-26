@@ -38,6 +38,9 @@ export class IntegrationSync extends Context.Service<
 const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(StoredIntegration));
 const encode = Schema.encodeSync(Schema.fromJsonString(StoredIntegration));
 const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const decodeAppliedVersion = Schema.decodeOption(
+  Schema.fromJsonString(Schema.Struct({ clocks: Schema.Record(Schema.String, Schema.Unknown) })),
+);
 const storage = (cause: unknown) => new SharedStateError({ reason: "storage", cause });
 type Alias = { shared_name: string; local_name: string; applied_version: string };
 
@@ -64,7 +67,9 @@ const make = Effect.gen(function* () {
       const changed = Object.fromEntries(
         Object.entries(fields).filter(
           ([key, value]) =>
-            before === undefined || json(value) !== json(before[key as keyof typeof before]),
+            before === undefined ||
+            !(key in before) ||
+            json(value) !== json(before[key as keyof typeof before]),
         ),
       );
       // A delete is an irreversible shared tombstone, even after a local grant.
@@ -96,6 +101,11 @@ const make = Effect.gen(function* () {
     // Partially deferred definitions wait until every required safe field is readable.
     if (Option.isNone(parsed) || current?.deletedAt) return false;
     const fields = parsed.value;
+    const previousVersion =
+      mapping === undefined ? Option.none() : decodeAppliedVersion(mapping.applied_version);
+    const changedField = (key: string) =>
+      Option.isNone(previousVersion) ||
+      JSON.stringify(previousVersion.value.clocks[key]) !== JSON.stringify(document.clocks[key]);
     const clashes = (name: string) =>
       sql<{
         id: string;
@@ -125,19 +135,31 @@ const make = Effect.gen(function* () {
       scopeDoesNotWiden &&
       current.url === fields.url &&
       current.auth?.type === fields.auth?.type &&
-      current.auth?.scope === fields.auth?.scope;
+      current.auth?.scope === fields.auth?.scope &&
+      (!changedField("auth") ||
+        (current.auth?.clientId === fields.auth?.clientId &&
+          current.auth?.clientSecret === fields.auth?.clientSecret));
     const origin = document.clocks.createdAt?.node ?? document.updatedBy;
     const registry = yield* machines.list;
     const machineLabel =
       registry.machines.find((machine) => machine.environmentId === origin)?.name ??
       "another machine";
-    // Local secrets and approvals survive cosmetic edits and scope narrowing. A peer cannot
-    // retarget any grant, static header, or manually registered OAuth client.
+    // Local grants and approvals survive cosmetic edits and scope narrowing.
+    // Shared references still resolve against each vault item's destination policy.
     const local = sameDestination && current ? current : undefined;
+    const headers = changedField("headers")
+      ? (fields.headers ?? local?.headers ?? {})
+      : (local?.headers ?? fields.headers ?? {});
+    const endpointRef = changedField("endpointRef")
+      ? fields.endpointRef
+      : (local?.endpointRef ?? fields.endpointRef);
+    const accountLabel = fields.accountLabel ?? current?.accountLabel;
     const integration: StoredIntegration = {
       id: IntegrationId.make(document.id),
       name,
       displayName: fields.displayName,
+      ...(fields.icon === undefined ? {} : { icon: fields.icon }),
+      ...(fields.iconUrl === undefined ? {} : { iconUrl: fields.iconUrl }),
       hint: fields.hint,
       url: fields.url,
       transport: "http",
@@ -146,14 +168,14 @@ const make = Effect.gen(function* () {
       createdAt: fields.createdAt,
       updatedAt: at,
       deletedAt: null,
-      headers: local?.headers ?? {},
-      ...(local?.endpointRef === undefined ? {} : { endpointRef: local.endpointRef }),
+      headers,
+      ...(endpointRef == null ? {} : { endpointRef }),
       approvedCredentialItems: local?.approvedCredentialItems ?? [],
       ...(local?.credentialOrigin === undefined
         ? {}
         : { credentialOrigin: local.credentialOrigin }),
       ...(local?.provenance === undefined ? {} : { provenance: local.provenance }),
-      ...(current?.accountLabel === undefined ? {} : { accountLabel: current.accountLabel }),
+      ...(accountLabel ? { accountLabel } : {}),
       // Setup notes record this machine's setup (its redirect URIs, its client); they stay local.
       ...(current?.setupNotes === undefined
         ? {}
@@ -177,12 +199,23 @@ const make = Effect.gen(function* () {
     for (const row of rows) {
       const current = yield* decode(row.payload_json);
       const fields = integrationFields(current);
-      if (
-        fields !== undefined &&
-        Option.isSome(decodeIntegrationFields(fields)) &&
-        !(yield* shared.get("integration", current.id))
-      )
+      const document = yield* shared.get("integration", current.id);
+      if (fields !== undefined && Option.isSome(decodeIntegrationFields(fields)) && !document)
         yield* publish(current);
+      else if (
+        fields !== undefined &&
+        document &&
+        !document.tombstone &&
+        (document.clocks.createdAt?.node ?? document.updatedBy) === shared.environmentId
+      ) {
+        // Only the original machine backfills fields: an old replica may hold empty
+        // credentials or its own account label and must not win an upgrade race.
+        const missing = Object.fromEntries(
+          Object.entries(fields).filter(([key]) => !(key in document.fields)),
+        );
+        if (Object.keys(missing).length > 0)
+          yield* shared.write("integration", current.id, missing);
+      }
     }
     const documents = yield* sql<{
       id: string;
