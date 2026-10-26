@@ -4,7 +4,13 @@ import * as AgentStore from "../agents/AgentStore.ts";
 import * as CliCredentials from "../accounts/CliCredentials.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { EnvironmentId, ProjectLabelId, ProviderInstanceId, ThreadId } from "@cogenly/contracts";
+import {
+  defaultAgentPermissions,
+  EnvironmentId,
+  ProjectLabelId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -106,7 +112,7 @@ it.effect(
       };
       let agent = {
         ...agentFixture(),
-        permissions: { ...agentFixture().permissions, deploy: false },
+        permissions: { ...defaultAgentPermissions },
       };
       const dependencies = Layer.mergeAll(
         Layer.succeed(ReadOnlySandbox.ReadOnlySandbox, sandbox),
@@ -169,22 +175,19 @@ it.effect(
         }
         expect(spawnedIn).toEqual([]);
         expect(inputs).toEqual([]);
-        const grantRefusal = yield* as(
-          "persistent",
-          tools.run({ command: "echo blocked", background: true }),
-        ).pipe(Effect.flip);
-        expect(grantRefusal.message).toContain("all sensitive agent grants");
-        agent = { ...agent, permissions: { ...agent.permissions, deploy: true } };
         const agentTerminal = yield* as(
           "persistent",
-          tools.run({ command: "cat", background: true }),
+          tools.run({ command: "cat README", background: true }),
         );
-        agent = { ...agent, permissions: { ...agent.permissions, deploy: false } };
+        expect(agentTerminal.sandbox).toBe("read-only");
+        expect(launches.at(-1)?.shell).toBe("/usr/bin/sandbox-exec");
+        expect(launches.at(-1)?.args).toContain("cat README");
+        agent = { ...agent, permissions: { ...agent.permissions, execute: false } };
         const revoked = yield* as(
           "persistent",
           tools.write({ terminalId: agentTerminal.terminalId, input: "blocked" }),
         ).pipe(Effect.flip);
-        expect(revoked.message).toContain("all sensitive agent grants");
+        expect(revoked.message).toContain("read and execute grants");
         expect(inputs).toEqual([]);
         yield* as("persistent", tools.kill({ terminalId: agentTerminal.terminalId }));
         signals.length = 0;
@@ -226,7 +229,7 @@ it.effect(
         expect(launches.at(-1)?.shell).toBe("/usr/bin/sandbox-exec");
         expect(launches.at(-1)?.args).toContain("git log --oneline");
         expect(launches.at(-1)?.env.TMPDIR).toBe("/terminal-private-temp");
-        expect(launches[0]?.shell).toBe("/bin/sh");
+        expect(launches[0]?.shell).toBe("/usr/bin/sandbox-exec");
         const count = launches.length;
         sandboxAvailable = false;
         const refused = yield* as("chat", tools.run({ command: "ls" })).pipe(Effect.flip);
