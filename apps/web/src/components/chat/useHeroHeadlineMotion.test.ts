@@ -20,6 +20,8 @@ vi.mock("~/lib/observeResize", () => ({
 }));
 vi.mock("~/panelAnimations", () => ({ LAYOUT_MOTION_DURATION: 220 }));
 vi.mock("./StateTransition", () => ({ settleFadeSwap: effects.settle }));
+// The headline component pulls in the UI kit; this hook only needs its group name.
+vi.mock("./HeroHeadline", () => ({ HERO_HEADING_GROUP: "draft-heading" }));
 
 import { useHeroHeadlineMotion as mountHeadline } from "./useHeroHeadlineMotion";
 
