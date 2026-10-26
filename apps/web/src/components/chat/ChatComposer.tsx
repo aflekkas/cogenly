@@ -6680,8 +6680,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     isComposerPrimaryActionsCompact ? "true" : "false"
                   }
                   // Dictation and attach sit as one tight pair; the larger send/stop button
-                  // gets more room so the pair reads as evenly spaced next to it.
-                  className="flex shrink-0 flex-nowrap items-center justify-end gap-2.5"
+                  // gets a little more room so it still reads as its own action.
+                  className="flex shrink-0 flex-nowrap items-center justify-end gap-1.5"
                 >
                   {(settings.dictationEnabled && !isChoiceOnlyPendingQuestion) ||
                   showComposerAttachAction ? (
