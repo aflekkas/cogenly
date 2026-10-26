@@ -522,7 +522,7 @@ export function useThreadActions() {
       let shouldDeleteWorktree = false;
       const environmentSettings = environmentConfig?.settings;
       const automaticWorktreeCleanup = environmentSettings
-        ? resolveWorktreeCleanup(environmentSettings, thread.projectId).worktreeOnDelete
+        ? resolveWorktreeCleanup(environmentSettings).worktreeOnDelete
         : false;
       if (canDeleteWorktree && localApi && !automaticWorktreeCleanup) {
         const confirmationResult = await settlePromise(() =>

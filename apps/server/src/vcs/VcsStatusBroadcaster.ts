@@ -23,7 +23,6 @@ import type {
 } from "@cogenly/contracts";
 import { mergeGitStatusParts } from "@cogenly/shared/git";
 import * as KeyedLock from "@cogenly/shared/KeyedLock";
-import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
@@ -161,7 +160,7 @@ export const layerAutoPullPolicy = Layer.effect(
           const project = yield* projects.findActiveByWorkspaceRoot(cwd);
           if (project._tag === "None") return false;
           const settings = yield* serverSettings.getSettings;
-          return resolveProjectSettings(settings, project.value.projectId).settings.defaultAutoPull;
+          return settings.defaultAutoPull;
         },
         Effect.orElseSucceed(() => false),
       ),

@@ -4,41 +4,21 @@ import { readLocalApi } from "../../localApi";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { Button } from "../ui/button";
 import { DraftInput } from "../ui/draft-input";
-import { ProjectActionsSettings } from "./ProjectActionsSettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { ProjectScopeMenu } from "./SettingsScopeSentence";
 import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
-import {
-  useScopedSettings,
-  useScopedSettingsMixed,
-  useUpdateScopedSettings,
-} from "./useScopedSettings";
+import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
 /**
- * Settings → New threads: where new threads and worktrees start, where added
- * repositories go, and a project's actions.
+ * Settings → New threads: where new threads and worktrees start, and where
+ * added repositories go. A repository's actions are on its Repository page.
  */
 export function NewThreadsSettingsPanel() {
-  const { scope } = useSettingsScope();
   return (
     <>
       <ProjectDefaultsSettings category="new-threads" />
       <AddingRepositoriesSettings />
-      {scope.kind === "project" ? (
-        <ProjectActionsSettings />
-      ) : (
-        // Actions belong to one project; outside one, the row stays reachable
-        // from search and points at a project instead of disappearing.
-        <SettingsSection id={searchableSetting("project-actions").id} title="Actions">
-          <SettingsRow
-            title="Project actions"
-            description="Each project has its own actions. Choose a project to edit them."
-            control={<ProjectScopeMenu />}
-          />
-        </SettingsSection>
-      )}
     </>
   );
 }
@@ -46,17 +26,14 @@ export function NewThreadsSettingsPanel() {
 function AddingRepositoriesSettings() {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
-  const { scope, environment } = useSettingsScope();
+  const { environment } = useSettingsScope();
   // The projects folder is machine-local, so it edits the representative machine.
   const environmentId = environment?.environmentId ?? null;
-  const isEnvironmentScope = scope.kind !== "project" && environmentId !== null;
-  const mixedAddProjectBaseDirectory = useScopedSettingsMixed(["addProjectBaseDirectory"]);
-  const mixedProjectsRoot = useScopedSettingsMixed(["projectsRoot"]);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   // The native folder picker browses this device, so it only offers a path
   // when the settings being edited are this device's server.
   const canPickProjectsRoot =
-    isEnvironmentScope &&
+    environmentId !== null &&
     environmentId === primaryEnvironmentId &&
     typeof window !== "undefined" &&
     window.desktopBridge !== undefined;
@@ -95,9 +72,9 @@ function AddingRepositoriesSettings() {
           <DraftInput
             size="sm"
             className="w-full sm:w-72"
-            value={mixedAddProjectBaseDirectory ? "" : settings.addProjectBaseDirectory}
+            value={settings.addProjectBaseDirectory}
             onCommit={(next) => updateSettings({ addProjectBaseDirectory: next })}
-            placeholder={mixedAddProjectBaseDirectory ? "Mixed" : "~/"}
+            placeholder="~/"
             spellCheck={false}
             aria-label="Add repository base directory"
           />
@@ -123,12 +100,10 @@ function AddingRepositoriesSettings() {
             <DraftInput
               size="sm"
               className="w-full sm:w-56"
-              value={mixedProjectsRoot ? "" : settings.projectsRoot}
+              value={settings.projectsRoot}
               onCommit={(next) => updateSettings({ projectsRoot: next })}
               placeholder={
-                mixedProjectsRoot
-                  ? "Mixed"
-                  : (environment?.serverConfig?.defaultProjectsRoot ?? "<Cogenly home>/projects")
+                environment?.serverConfig?.defaultProjectsRoot ?? "<Cogenly home>/projects"
               }
               spellCheck={false}
               aria-label="Projects folder"

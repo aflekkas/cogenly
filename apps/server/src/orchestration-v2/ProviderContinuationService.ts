@@ -144,7 +144,7 @@ export const layer = Layer.effectDiscard(
               },
             })
             .pipe(
-              // The project turned the target instance off between the cohort
+              // The machine turned the target instance off between the cohort
               // read above and this dispatch. The finalize that claimed this
               // delivery already wrote the children's results to the parent's
               // history unconditionally, so nothing is lost: acknowledge each

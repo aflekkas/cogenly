@@ -239,7 +239,6 @@ import {
   resolveDefaultProviderModelSelection,
   sortProviderInstanceEntries,
 } from "~/providerInstances";
-import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 import { ProviderModelPicker } from "~/components/chat/ProviderModelPicker";
 import { TraitsPicker } from "~/components/chat/TraitsPicker";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -1094,15 +1093,12 @@ export function useAgentConversation(agent: AgentContact | null): AgentContact |
 
 /** The chat composer's own pickers over the same live catalog, limited to Claude and Codex. */
 function LiveAgentModelControls({ agent, ...props }: AgentModelControlsProps) {
-  return (
-    <LiveModelControls environmentId={agent.environmentId} projectId={agent.projectId} {...props} />
-  );
+  return <LiveModelControls environmentId={agent.environmentId} {...props} />;
 }
 
 /** The same pickers for a conversation that has no agent yet, such as the builder. */
 export function LiveModelControls({
   environmentId,
-  projectId,
   selection,
   disabled,
   unavailable,
@@ -1111,7 +1107,6 @@ export function LiveModelControls({
   onChange,
 }: Omit<AgentModelControlsProps, "agent"> & {
   environmentId: EnvironmentId;
-  projectId: ProjectId | null;
 }) {
   const settings = useEnvironmentSettings(environmentId);
   const providers =
@@ -1119,13 +1114,9 @@ export function LiveModelControls({
   const instanceEntries = useMemo(
     () =>
       sortProviderInstanceEntries(
-        applyProviderInstanceSettings(
-          deriveProviderInstanceEntries(providers),
-          settings,
-          projectId,
-        ),
+        applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), settings),
       ).filter(isProviderInstancePickerVisible),
-    [providers, settings, projectId],
+    [providers, settings],
   );
   const modelOptionsByInstance = useMemo(
     () =>
@@ -1193,23 +1184,16 @@ export function useAgentCreationContext(target: EnvironmentId | null) {
 }
 
 /**
- * The model a new chat in this workspace starts with: the project or environment
- * default, else the first ready provider's default. Agents start on it and then
- * follow whatever their chat composer picks.
+ * The model a new chat on this machine starts with: the default model, else the
+ * first ready provider's default. Agents start on it and then follow whatever
+ * their chat composer picks.
  */
-export function useDefaultAgentModel(
-  environmentId: EnvironmentId | null,
-  projectId: ProjectId | null,
-): ModelSelection | null {
+export function useDefaultAgentModel(environmentId: EnvironmentId | null): ModelSelection | null {
   const configs = useServerConfigs();
   const config = environmentId ? configs.get(environmentId) : undefined;
-  const projects = useProjects();
   if (!config) return null;
-  const project = projects.find(
-    (candidate) => candidate.environmentId === environmentId && candidate.id === projectId,
-  );
   return resolveDefaultProviderModelSelection(
     config.providers,
-    resolveProjectSettings(config.settings, projectId, project).settings.defaultModelSelection,
+    config.settings.defaultModelSelection,
   );
 }

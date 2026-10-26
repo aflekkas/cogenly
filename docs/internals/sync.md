@@ -138,13 +138,13 @@ reconciles the file with the documents after the fact. It keeps the last agreed
 value per key, so a changed local value is an edit to publish and a changed
 shared value is a peer edit to apply. Before the first agreement, a key still at
 its default adopts the peer's value instead of publishing the default. Only
-`UNIVERSAL_SERVER_SETTING_KEYS` and project overrides travel. Paths, provider
-instances, resource limits, machine identity and credentials stay local by
-omission. Adding a key to the universal list follows the rule for any new synced
-field: an older machine keeps it unread until it updates. Project overrides are stored per local repository
-because every resolver reads them that way. Their `project-settings`
-document is keyed by the project folder ID, and every repository in that folder carries the same
-entry.
+`UNIVERSAL_SERVER_SETTING_KEYS` travel. Paths, provider instances, resource
+limits, machine identity and credentials stay local by omission. Adding a key to
+the universal list follows the rule for any new synced field: an older machine
+keeps it unread until it updates. Builds before 0.3.2 also synced per-project
+overrides in `project-settings` documents. This build knows the kind but none of
+its fields, so an older machine's documents are stored and relayed unread, and
+nothing here writes one.
 
 Web integration documents carry only their HTTP definition and project scope.
 [IntegrationSync](../../apps/server/src/sync/IntegrationSync.ts) publishes definition

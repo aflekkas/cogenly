@@ -40,7 +40,7 @@ import {
 import { openSignInPage } from "./openIntegrationSignIn";
 import { useStatusFade } from "./integrationStatusMotion";
 import { useEnvironmentMachineList } from "../../machines/useMachines";
-import { ScopedSwitch } from "./ScopedSwitch";
+import { Switch } from "../ui/switch";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
@@ -181,8 +181,7 @@ function ProviderConnectorsSettingRow({
         description="Agents use the integrations connected here, not the MCP servers, connectors and plugins set up in Claude or Codex. MCP servers checked into a repo, such as its .mcp.json, still load. Servers your organization manages for Claude stay on. Turn off to let agents use both. Applies to new agent sessions."
         settingKeys={["useProviderConnectors"]}
         control={
-          <ScopedSwitch
-            settingKeys={["useProviderConnectors"]}
+          <Switch
             checked={!settings.useProviderConnectors}
             onCheckedChange={(checked) => updateSettings({ useProviderConnectors: !checked })}
             aria-label="Use only Cogenly integrations"

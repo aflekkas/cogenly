@@ -23,8 +23,8 @@ permissions for that terminal app, and the prompt names it.
 
 ## Turn it off
 
-Turn off **Computer use** in **Settings → Integrations → Agent access**, for all projects or for
-one project. It applies when an agent session next starts.
+Turn off **Computer use** in **Settings → Integrations → Agent access**. It applies when an agent
+session next starts.
 
 Persistent agents can look, click and type with their default permissions. Computer actions require
 the execute permission; the browser's permission rules stay the same.

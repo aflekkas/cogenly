@@ -40,7 +40,7 @@ describe("shared configuration schemas", () => {
         ).toBe("Failure");
     }),
   );
-  it.effect("a local settings write carries only universal keys and project overrides", () =>
+  it.effect("a local settings write carries only universal keys", () =>
     Effect.gen(function* () {
       const write = (
         kind: "settings" | "project-settings",
@@ -50,23 +50,13 @@ describe("shared configuration schemas", () => {
       expect((yield* write("settings", "universal", { branchNamePrefix: "feat" }))._tag).toBe(
         "Success",
       );
-      expect(
-        (yield* write("project-settings", "label-one", {
-          defaultAutoPull: { value: true },
-          branchNamePrefix: null,
-        }))._tag,
-      ).toBe("Success");
-      for (const [kind, fields] of [
+      for (const [kind, id, fields] of [
         // Machine-local keys never travel.
-        ["settings", { projectsRoot: "/srv/projects" }],
-        ["project-settings", { projectsRoot: { value: "/srv" } }],
-        // Overrides are `null` or `{ value }`, with values the schema accepts.
-        ["project-settings", { defaultAutoPull: true }],
-        ["project-settings", { defaultAutoPull: { value: "yes" } }],
+        ["settings", "universal", { projectsRoot: "/srv/projects" }],
+        // Settings are global: this build writes no project overrides.
+        ["project-settings", "label-one", { defaultAutoPull: { value: true } }],
       ] as const)
-        expect(
-          (yield* write(kind, kind === "settings" ? "universal" : "label-one", fields))._tag,
-        ).toBe("Failure");
+        expect((yield* write(kind, id, fields))._tag).toBe("Failure");
       expect(
         (yield* Effect.result(
           validateChange({
@@ -80,18 +70,28 @@ describe("shared configuration schemas", () => {
   );
   it("a newer build's settings keep their unknown keys and hold values this build cannot read", () => {
     const { accepted, deferred } = splitChange({
-      ...change("project-settings", {
-        defaultAutoPull: { value: true },
-        branchNamingMode: { value: "lunar" },
-        accentTheme: { value: "dark" },
+      ...change("settings", {
+        branchNamePrefix: "feat",
+        branchNamingMode: "lunar",
+        accentTheme: "dark",
       }),
-      id: "label-one",
+      id: "universal",
     });
     expect(deferred).toBe(true);
-    expect(accepted?.fields).toEqual({
+    expect(accepted?.fields).toEqual({ branchNamePrefix: "feat", accentTheme: "dark" });
+  });
+  it("an older machine's project overrides are kept and relayed, never held back", () => {
+    const fields = {
       defaultAutoPull: { value: true },
-      accentTheme: { value: "dark" },
+      branchNamePrefix: null,
+      worktreeCleanup: { value: { mode: "custom", rules: { worktreeAfterDays: 8 } } },
+    };
+    const { accepted, deferred } = splitChange({
+      ...change("project-settings", fields),
+      id: "label-one",
     });
+    expect(deferred).toBe(false);
+    expect(accepted?.fields).toEqual(fields);
   });
   it.effect.each(["bad%id", "has space", "x".repeat(201)])(
     "rejects invalid new document id %s",

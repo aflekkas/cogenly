@@ -11,7 +11,7 @@ export function ProjectsSettings() {
         <ProjectSettingsPanel projectKey={search.repository} />
       ) : (
         <SettingsScopeNotice target="repository">
-          Choose a repository to manage its name, icon and checkouts.
+          Choose a repository to manage its name, icon, actions and checkouts.
         </SettingsScopeNotice>
       )}
     </div>

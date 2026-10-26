@@ -1446,29 +1446,23 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         failedRun?.id === options?.endedRunId &&
         failedRun?.workspacePreparation?.type === "worktree" &&
         projection.thread.worktreePath === null;
-      // A project can turn a provider off while a message waits in the queue,
-      // including between a run ending and this check, or while the queue is
-      // held and someone clicks resume. Neither path may start that run. Only
-      // an explicit turn-off holds the queue: an instance with no settings
-      // entry was already admitted when the message was queued.
+      // The machine can turn a provider off while a message waits in the
+      // queue, including between a run ending and this check, or while the
+      // queue is held and someone clicks resume. Neither path may start that
+      // run. Only an explicit turn-off holds the queue: an instance with no
+      // settings entry was already admitted when the message was queued.
       const settings = yield* serverSettings.getSettings.pipe(Effect.orDie);
-      const projectOverride =
-        settings.projectSettingsOverrides[projection.thread.projectId]?.providerInstances?.[
-          queuedRun.providerInstanceId
-        ]?.enabled;
       const machineInstance = Object.hasOwn(
         settings.providerInstances,
         queuedRun.providerInstanceId,
       )
         ? settings.providerInstances[queuedRun.providerInstanceId]
         : undefined;
-      const instanceDisabledForProject =
-        projectOverride !== undefined
-          ? !projectOverride
-          : machineInstance !== undefined && !resolveProviderInstanceEnabled(machineInstance);
+      const instanceDisabled =
+        machineInstance !== undefined && !resolveProviderInstanceEnabled(machineInstance);
       if (
         worktreeMissing ||
-        instanceDisabledForProject ||
+        instanceDisabled ||
         (failureClass !== undefined &&
           failureClass !== "validation_error" &&
           failedRun?.providerInstanceId === queuedRun.providerInstanceId)

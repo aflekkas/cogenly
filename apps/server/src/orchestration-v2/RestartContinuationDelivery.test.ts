@@ -9,8 +9,6 @@ import * as ThreadManagementService from "./ThreadManagementService.ts";
 
 const SETTINGS = {
   getSettings: Effect.succeed({
-    projectSettingsOverrides: {},
-    projectSettingsFolded: true,
     continueThreadsAfterServerUpdate: true,
   }),
 } as never;

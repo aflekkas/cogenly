@@ -989,14 +989,6 @@ const make = Effect.gen(function* () {
           yield* sql`INSERT OR IGNORE INTO label_source_links(label_id,kind,owner,repo,created_at) SELECT ${target.id},kind,owner,repo,created_at FROM label_source_links WHERE label_id=${source.id}`;
           yield* sql`UPDATE project_labels SET instructions=${instructions},description=${target.description?.trim() ? target.description : (source.description ?? target.description ?? null)},updated_at=${yield* now} WHERE label_id=${target.id}`;
           yield* shared.capture("project", target.id);
-          const sourceSettings = yield* shared.get("project-settings", source.id);
-          const targetSettings = yield* shared.get("project-settings", target.id);
-          if (sourceSettings && !sourceSettings.tombstone) {
-            const fields = { ...sourceSettings.fields };
-            for (const [key, value] of Object.entries(targetSettings?.fields ?? {}))
-              if (value !== null) fields[key] = value;
-            yield* shared.write("project-settings", target.id, fields);
-          }
           yield* shared.write(
             "project",
             source.id,

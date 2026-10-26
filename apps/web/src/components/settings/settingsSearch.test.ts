@@ -314,7 +314,7 @@ describe("searchSettings", () => {
     ["private access", "machines", "/settings/machines"],
     ["orphan folders", "project-folders", "/settings/project-tags"],
     ["automatically pull", "automatic-pull", "/settings/source-control"],
-    ["actions", "project-actions", "/settings/new-threads"],
+    ["actions", "project-actions", "/settings/projects"],
     ["project overview", "project-overview", "/settings/projects"],
   ])("routes %s to its owning category", (query, id, to) => {
     expect(searchSettings(query)[0]).toMatchObject({ id, to });
@@ -378,7 +378,7 @@ describe("settings navigation", () => {
     ["text-generation-model", "/settings/models"],
     ["project-defaults", "/settings/new-threads"],
     ["projects-folder", "/settings/new-threads"],
-    ["project-actions", "/settings/new-threads"],
+    ["project-actions", "/settings/projects"],
     ["diagnostics", "/settings/diagnostics"],
     ["send-shortcut", null],
     ["", null],

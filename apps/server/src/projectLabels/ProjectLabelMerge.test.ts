@@ -207,13 +207,6 @@ describe("project merge", () => {
           yield* sql`INSERT INTO commitment_labels(commitment_id,label_id) VALUES ('commitment:merge',${source.id})`;
         }
       }
-      yield* shared.write("project-settings", source.id, {
-        defaultRuntimeMode: { value: "approval-required" },
-        enableAgentBrowserAccess: { value: false },
-      });
-      yield* shared.write("project-settings", target.id, {
-        defaultRuntimeMode: { value: "full-access" },
-      });
       const merged = (yield* labels.merge({ sourceId: source.id, targetId: target.id })).label;
       expect(
         (yield* labels.merge({ sourceId: source.id, targetId: target.id })).label.instructions,
@@ -247,9 +240,6 @@ describe("project merge", () => {
       expect(tombstone?.tombstone).not.toBeNull();
       expect(tombstone?.fields.mergedInto).toBe(target.id);
       expect((yield* shared.get("project", target.id))?.fields.repositories).toHaveLength(2);
-      expect((yield* shared.get("project-settings", target.id))?.fields.defaultRuntimeMode).toEqual(
-        { value: "full-access" },
-      );
       expect(yield* sql`SELECT * FROM orchestration_v2_events`).toHaveLength(0);
     }).pipe(Effect.provide(makeLayer("local"))),
   );

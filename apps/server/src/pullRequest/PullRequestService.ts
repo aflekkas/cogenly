@@ -74,7 +74,6 @@ import {
   SourceControlProviderKind,
   type ThreadPullRequestKey,
 } from "@cogenly/contracts";
-import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 import { detectSourceControlProviderFromRemoteUrl } from "@cogenly/shared/sourceControl";
 
 import * as ProjectService from "../project/ProjectService.ts";
@@ -2098,11 +2097,7 @@ export const make = Effect.gen(function* () {
               input.stackNumber === undefined &&
               (input.action === "merge" || input.action === "enable-auto-merge")
                 ? serverSettings.getSettings.pipe(
-                    Effect.map(
-                      (settings) =>
-                        resolveProjectSettings(settings, project.project.id).settings
-                          .removeAgentCreditsOnMerge,
-                    ),
+                    Effect.map((settings) => settings.removeAgentCreditsOnMerge),
                     Effect.mapError(
                       () =>
                         new PullRequestOperationError({

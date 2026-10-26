@@ -1,11 +1,10 @@
 import { describe, expect, it } from "@effect/vitest";
-import { DEFAULT_SERVER_SETTINGS, ProjectId, type ServerSettings } from "@cogenly/contracts";
+import { DEFAULT_SERVER_SETTINGS, type ServerSettings } from "@cogenly/contracts";
 
-import { projectSettingsDocumentId, UNIVERSAL_SETTINGS_DOCUMENT_ID } from "./settingsDocument.ts";
+import { UNIVERSAL_SETTINGS_DOCUMENT_ID } from "./settingsDocument.ts";
 import {
   canonicalJson,
   planSettingsReconcile,
-  reconcileProjectSettingsField,
   reconcileSettingsField,
   settingsBaseKey,
 } from "./settingsReconcile.ts";
@@ -65,61 +64,19 @@ describe("reconcileSettingsField", () => {
   });
 });
 
-describe("reconcileProjectSettingsField", () => {
-  it("publishes the first repository's edit and the others follow it", () => {
-    const result = reconcileProjectSettingsField({
-      remote: { value: "old" },
-      repositories: [
-        { local: { value: "old" }, base: { value: "old" } },
-        { local: { value: "new" }, base: { value: "old" } },
-      ],
-    });
-    expect(result.publish).toEqual({ value: "new" });
-    expect(result.repositories).toEqual([
-      { _tag: "apply", value: { value: "new" } },
-      { _tag: "settle", value: { value: "new" } },
-    ]);
-  });
-
-  it("a reset on a peer clears every local repository", () => {
-    const result = reconcileProjectSettingsField({
-      remote: null,
-      repositories: [
-        { local: { value: true }, base: { value: true } },
-        { local: { value: true }, base: { value: true } },
-      ],
-    });
-    expect(result.publish).toBeUndefined();
-    expect(result.repositories).toEqual([
-      { _tag: "apply", value: null },
-      { _tag: "apply", value: null },
-    ]);
-  });
-
-  it("a repository newly filed in the project takes the project's overrides", () => {
-    const result = reconcileProjectSettingsField({
-      remote: { value: "feat" },
-      repositories: [{ local: null, base: undefined }],
-    });
-    expect(result.repositories).toEqual([{ _tag: "apply", value: { value: "feat" } }]);
-  });
-});
-
 describe("planSettingsReconcile", () => {
   const settings = (patch: Partial<ServerSettings>): ServerSettings => ({
     ...DEFAULT_SERVER_SETTINGS,
     ...patch,
   });
-  const repository = ProjectId.make("repo-1");
   const universalBase = (input: ServerSettings) =>
     planSettingsReconcile({
       settings: input,
       base: new Map(),
       documents: new Map(),
-      projects: new Map(),
     }).base;
 
-  it("ignores lifecycle scripts in older peer documents and preserves local overrides", () => {
+  it("ignores lifecycle scripts and project overrides in older peer documents", () => {
     const scripts = [
       {
         id: "setup",
@@ -130,19 +87,12 @@ describe("planSettingsReconcile", () => {
         runOnSettle: true,
       },
     ];
-    const local = {
-      ...DEFAULT_SERVER_SETTINGS,
-      projectSettingsOverrides: {
-        [repository]: { defaultProjectScripts: [] },
-      },
-    };
     const plan = planSettingsReconcile({
-      settings: local,
+      settings: DEFAULT_SERVER_SETTINGS,
       base: new Map(),
-      projects: new Map([["label:app", [repository]]]),
       documents: new Map([
         [UNIVERSAL_SETTINGS_DOCUMENT_ID, { defaultProjectScripts: scripts }],
-        [projectSettingsDocumentId("label:app"), { defaultProjectScripts: { value: scripts } }],
+        ["project:label:app", { branchNamePrefix: { value: "proj" } }],
       ]),
     });
     expect(plan.settings).toBeNull();
@@ -156,7 +106,6 @@ describe("planSettingsReconcile", () => {
       settings: settings({ projectsRoot: "/srv/projects", worktreesDirectory: "/mnt/wt" }),
       base: new Map(),
       documents: new Map(),
-      projects: new Map(),
     });
     expect(plan.publish.size).toBe(0);
     expect(plan.settings).toBeNull();
@@ -175,7 +124,6 @@ describe("planSettingsReconcile", () => {
       settings: local,
       base,
       documents: new Map([[UNIVERSAL_SETTINGS_DOCUMENT_ID, { branchNamePrefix: "feat" }]]),
-      projects: new Map(),
     });
     expect(plan.settings?.branchNamePrefix).toBe("feat");
     expect(plan.settings?.projectsRoot).toBe("/Users/me/Cogenly");
@@ -187,39 +135,7 @@ describe("planSettingsReconcile", () => {
       settings: settings({ defaultAutoPull: true }),
       base: new Map(),
       documents: new Map(),
-      projects: new Map(),
     });
     expect(plan.publish.get(UNIVERSAL_SETTINGS_DOCUMENT_ID)).toEqual({ defaultAutoPull: true });
-  });
-
-  it("writes a project's override into every local repository in it", () => {
-    const other = ProjectId.make("repo-2");
-    const plan = planSettingsReconcile({
-      settings: settings({}),
-      base: new Map(),
-      documents: new Map([
-        [projectSettingsDocumentId("label-1"), { branchNamePrefix: { value: "proj" } }],
-      ]),
-      projects: new Map([["label-1", [repository, other]]]),
-    });
-    expect(plan.settings?.projectSettingsOverrides[repository]).toEqual({
-      branchNamePrefix: "proj",
-    });
-    expect(plan.settings?.projectSettingsOverrides[other]).toEqual({ branchNamePrefix: "proj" });
-  });
-
-  it("publishes an override set on one repository and keeps a null override", () => {
-    const plan = planSettingsReconcile({
-      settings: settings({
-        projectSettingsOverrides: { [repository]: { defaultModelSelection: null } },
-      }),
-      base: new Map(),
-      documents: new Map(),
-      projects: new Map([["label-1", [repository]]]),
-    });
-    expect(plan.publish.get(projectSettingsDocumentId("label-1"))).toEqual({
-      defaultModelSelection: { value: null },
-    });
-    expect(plan.settings).toBeNull();
   });
 });

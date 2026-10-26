@@ -195,7 +195,6 @@ describe("workPrefersNewWorktree", () => {
     expect(workPrefersNewWorktree({ ...base, inWorkMode: false })).toBe(false);
     expect(workPrefersNewWorktree({ ...base, isScratch: true })).toBe(false);
     expect(workPrefersNewWorktree({ ...base, environmentDefault: "local" })).toBe(false);
-    expect(workPrefersNewWorktree({ ...base, resolvedSource: "project" })).toBe(false);
     expect(workPrefersNewWorktree({ ...base, resolvedSource: "cogenly.json" })).toBe(false);
   });
 });

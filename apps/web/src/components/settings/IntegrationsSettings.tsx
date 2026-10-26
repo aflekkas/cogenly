@@ -2,8 +2,7 @@ import { BrowserCookieImportSettings } from "./BrowserCookieImportSettings";
 import { OverlayPresence, useLastPresent } from "~/components/ui/overlay-presence";
 import { DeviceHostUpdates } from "../device/DeviceHostUpdates";
 import { DeviceToolVersions } from "../device/DeviceToolVersions";
-import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
-import { ScopedSwitch } from "./ScopedSwitch";
+import { useScopedSettings } from "./useScopedSettings";
 import { DeviceHostsSettings } from "./DeviceHostsSettings";
 /**
  * Integrations settings - outside services agents reach through Cogenly (see
@@ -657,9 +656,7 @@ function DeviceIntegrationControls({
 }) {
   const canConfigure = useEnvironmentScope(environmentId, AuthSettingsWriteScope);
   const { state, loaded } = useDeviceState(environmentId);
-  const { scope, environments, connectedEnvironments } = useSettingsScope();
-  const updateSettings = useUpdateScopedSettings();
-  const projectScope = scope.kind === "project";
+  const { environments, connectedEnvironments } = useSettingsScope();
   const anyHubEnabled = connectedEnvironments.some(
     (environment) => environment.serverConfig?.settings.enableDeviceSupport,
   );
@@ -801,17 +798,9 @@ function DeviceIntegrationControls({
               tools={state.hosts.find((host) => host.kind === "local")?.tools}
             />
             {pending === "hub" ? <DeviceHubSetupStatus state={state} pending compact /> : null}
-            <ScopedSwitch
-              settingKeys={["enableDeviceSupport"]}
+            <Switch
               checked={enabled}
-              disabled={
-                !canConfigure ||
-                projectScope ||
-                !loaded ||
-                !environmentId ||
-                busy ||
-                pending !== null
-              }
+              disabled={!canConfigure || !loaded || !environmentId || busy || pending !== null}
               aria-label="Device hub"
               onCheckedChange={(checked) =>
                 // Agent access stays as set: the server already refuses agents
@@ -871,20 +860,19 @@ function DeviceIntegrationControls({
               tools={state.hosts.find((host) => host.kind === "local")?.tools}
             />
             {pending === "agent" ? <AgentDeviceSetupStatus state={state} pending compact /> : null}
-            <ScopedSwitch
-              settingKeys={["enableAgentDeviceAccess"]}
+            <Switch
               checked={agentAccessEnabled}
               disabled={
                 !canConfigure ||
                 connectedEnvironments.length === 0 ||
-                (!projectScope && (!loaded || !anyHubEnabled || busy)) ||
+                !loaded ||
+                !anyHubEnabled ||
+                busy ||
                 pending !== null
               }
               aria-label="Agent device access"
               onCheckedChange={(checked) =>
-                projectScope
-                  ? updateSettings({ enableAgentDeviceAccess: Boolean(checked) })
-                  : void update("agent", { agentAccessEnabled: Boolean(checked) })
+                void update("agent", { agentAccessEnabled: Boolean(checked) })
               }
             />
           </>

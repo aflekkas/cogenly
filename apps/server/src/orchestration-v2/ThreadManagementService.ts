@@ -28,8 +28,8 @@ import {
   type OrchestrationV2TurnItem,
   ProjectId,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+  isProviderInstanceIdEnabled,
   ProviderInstanceId,
-  resolveProjectProviderInstanceEnabled,
   RunId,
   type ScheduledTaskId,
   ThreadId,
@@ -298,7 +298,7 @@ export class ThreadManagementProviderInstanceDisabledError extends Schema.Tagged
   },
 ) {
   override get message(): string {
-    return `Provider instance "${this.instanceId}" is disabled for project ${this.projectId}.`;
+    return `Provider instance "${this.instanceId}" is turned off on this machine.`;
   }
 }
 
@@ -407,7 +407,7 @@ export interface ThreadManagementServiceShape {
     input: ThreadManagementSendInput,
   ) => Effect.Effect<ThreadManagementSendResult, ThreadManagementFailure>;
   /**
-   * Refuses a new turn on an instance the project has effectively disabled.
+   * Refuses a new turn on an instance this machine has turned off.
    * A command that already has a receipt was let through before, so its
    * retry replays instead of being refused under newer settings.
    */
@@ -420,16 +420,15 @@ export interface ThreadManagementServiceShape {
    * Effective enablement for candidate selection, without the receipt-replay
    * exemption `assertProviderInstanceEnabled` grants an accepted command.
    */
-  readonly isProviderInstanceEnabledForProject: (input: {
-    readonly projectId: ProjectId;
+  readonly isProviderInstanceEnabled: (input: {
     readonly instanceId: ProviderInstanceId;
   }) => Effect.Effect<boolean>;
   /**
    * Whether `commandId` already has a receipt. A caller resolving a target
    * ahead of a dispatch under this same command id can use it to skip
-   * project-enablement filtering: the dispatch will only replay the recorded
+   * enablement filtering: the dispatch will only replay the recorded
    * result, never start anything new, so the filter would just refuse a
-   * retry the project's settings no longer allow fresh.
+   * retry the settings no longer allow fresh.
    */
   readonly hasReceipt: (commandId: CommandId) => Effect.Effect<boolean>;
   readonly waitForThread: (
@@ -617,7 +616,7 @@ const make = Effect.gen(function* () {
             : serverSettings.getSettings.pipe(
                 Effect.orDie,
                 Effect.flatMap((current) =>
-                  resolveProjectProviderInstanceEnabled(current, input.projectId, input.instanceId)
+                  isProviderInstanceIdEnabled(current, input.instanceId)
                     ? Effect.void
                     : new ThreadManagementProviderInstanceDisabledError({
                         projectId: input.projectId,
@@ -628,14 +627,13 @@ const make = Effect.gen(function* () {
         ),
       );
 
-  const isProviderInstanceEnabledForProject: ThreadManagementServiceShape["isProviderInstanceEnabledForProject"] =
-    (input) =>
-      serverSettings.getSettings.pipe(
-        Effect.orDie,
-        Effect.map((current) =>
-          resolveProjectProviderInstanceEnabled(current, input.projectId, input.instanceId),
-        ),
-      );
+  const isProviderInstanceEnabled: ThreadManagementServiceShape["isProviderInstanceEnabled"] = (
+    input,
+  ) =>
+    serverSettings.getSettings.pipe(
+      Effect.orDie,
+      Effect.map((current) => isProviderInstanceIdEnabled(current, input.instanceId)),
+    );
 
   const hasReceipt: ThreadManagementServiceShape["hasReceipt"] = (commandId) =>
     receipts.getByCommandId(commandId).pipe(
@@ -1355,7 +1353,7 @@ const make = Effect.gen(function* () {
     listProjectThreads,
     sendToThread,
     assertProviderInstanceEnabled,
-    isProviderInstanceEnabledForProject,
+    isProviderInstanceEnabled,
     hasReceipt,
     waitForThread,
     settleAfterRun,

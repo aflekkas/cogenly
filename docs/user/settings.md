@@ -1,29 +1,19 @@
-# Settings and project overrides
+# Settings
 
-Settings apply to every machine you have paired: change one on your laptop and your server
-gets it too. The "Settings for …" sentence at the top of a Settings page starts at
-**All projects**. Choose a project there to override a setting for that project only; the
-override covers every repository in the project, on every machine. Pages that only hold device
-preferences, such as Appearance, don't show the sentence. The choice stays selected as you move
-between categories or search for a setting.
+Settings are global and apply to every machine you have paired: change one on your laptop and
+your server gets it too. Projects group your work; they don't have settings of their own. What
+belongs to one project, such as its instructions, repositories and links, is on the project's page.
 
-A layers icon beside a row's title shows where the value comes from: the built-in default, the
-value for all projects, the repository's `cogenly.json`, or the project's override. With a project
-selected, an overridden row says **Overrides All projects** and its reset arrow returns it to the
-value for all projects. Settings a project cannot override are shown read-only while a project is
-selected.
+A layers icon beside a row's title shows whether the value is the built-in default or one you set.
 
-Changing a value for all projects never touches a project's own override. When projects override
-the setting you are editing, the layers icon counts them and lists each one with its value: click a
-project to open it, or **Reset all** to make them follow All projects again.
-
-Some settings belong to one machine, such as project actions, where its projects folder is,
-its background activity, or its device hub. On a page with other settings these rows say which machine they change, such
+Some settings belong to one machine, such as where its projects folder is, its background activity,
+or its device hub. On a page with other settings these rows say which machine they change, such
 as "on MacBook", and you can switch the machine there. Pages about one machine's own state,
-Providers, Machines, Storage and Diagnostics, ask for a machine instead of a project: they show
-your primary machine until you pick another. If projects still have their own provider switch or
-worktree cleanup, a layers icon beside the provider's switch or the Worktrees heading lists them,
-and **Reset all** returns them to the machine's setting.
+Providers, Machines, Storage and Diagnostics, start with "Settings for" and a machine: they show
+your primary machine until you pick another.
+
+Before 0.3.2 a setting could be overridden for one project. Those overrides no longer apply:
+every project now uses the global value. A repository's own actions moved to its Repository page.
 
 ## Worktree branch names
 
@@ -39,8 +29,7 @@ are replaced with hyphens. Custom instructions are appended to
 the naming prompt and can specify issue IDs, namespaces, and casing.
 
 These settings apply when a client names a worktree branch with a temporary
-name and Cogenly renames it. Select a project
-to override them for it. Worktree directories keep their original names.
+name and Cogenly renames it. Worktree directories keep their original names.
 If generation fails, or a custom name is invalid or already taken, the temporary
 branch name remains.
 
@@ -77,34 +66,30 @@ returns. Leave it off if you don't want request bodies stored outside your
 machine. To skip requests that waited too long, set **Skip requests older
 than** on the task.
 
-## Defaults and inheritance
+## Defaults
 
 Models holds the default model for new threads and the text generation model. New threads holds
 the workspace, submodules and start-from-origin defaults, and where added repositories go.
 Integrations controls agent browser access and computer use. Source control contains automatic pull, the default
-pull request merge method and the model that writes commit messages and pull requests. The same rows
-edit the value for all projects or a project's override, depending on the project chosen at the top.
-
-With a project selected, New threads also holds the project's actions. Editing them gives the
-project its own list on the selected machine's repositories, and reset returns to that machine's
-list for all projects. Actions never sync between machines; configure them separately on each one.
-A repository's `cogenly.json` actions can be imported there.
+pull request merge method and the model that writes commit messages and pull requests.
 
 The Repository page, opened from a repository in the sidebar, sits under Projects and holds that
-repository's name, icon, checkouts and removal.
+repository's name, icon, actions, checkouts and removal. Actions are commands that run in the
+repository or its worktrees, with optional shortcuts. Editing them updates every checkout of the
+repository, so connect each machine that has one first. A repository's `cogenly.json` actions can
+be imported there.
 
 Settings a repository can also declare in `cogenly.json`, such as the workspace for new threads,
-resolve in one order: a project override, then the value for all projects, then `cogenly.json`,
-then the built-in default. Leave a setting on **Inherit** to let the next tier decide. A repository
-that still has a `t3.json` and no `cogenly.json` is read the same way; rename the file when
-convenient. Browser access and computer use changes apply when an agent session next starts.
+use your setting when you set one, then `cogenly.json`, then the built-in default. Reset a setting
+to let the repository's file decide. A repository that still has a `t3.json` and no
+`cogenly.json` is read the same way; rename the file when convenient. Browser access and computer
+use changes apply when an agent session next starts.
 
 New worktrees initialize git submodules recursively. If that step is slow because the repository
-declares many nested submodules, set **Submodules** in **Settings → New threads** (with a project
-selected to override it there) to **Top level only** to stop at the ones the repository declares
-itself, or **Skip** to leave them for a setup script. It resolves in the same order as the
-workspace default: a `"worktreeSubmodules"` value in the `cogenly.json` of the branch being checked out
-applies when the project and All projects are both on **Inherit**.
+declares many nested submodules, set **Submodules** in **Settings → New threads** to **Top level
+only** to stop at the ones the repository declares itself, or **Skip** to leave them for a setup
+script. It resolves in the same order as the workspace default: a `"worktreeSubmodules"` value in
+the `cogenly.json` of the branch being checked out applies while the setting is unset.
 
 ## Worktree location
 
@@ -136,7 +121,7 @@ so removing them may reclaim little disk space. Project setup runs before the ne
 
 Cleanup runs at startup, hourly, when its rules change, and after delegated task completion.
 Choose **Preview cleanup**, review eligible items and blockers, then **Clean up now**. Execution
-checks safety again. Project cleanup overrides still apply to Work thread retention.
+checks safety again.
 
 Nightly backups keep the newest two complete snapshots by default. Storage shows backup files and the database file size; **Clean up now** uses the same backup retention. Cleanup keeps conversation history and does not compact the database.
 
@@ -161,7 +146,7 @@ from the icon palette, derived from the saved repository name. For example, `Neb
 ## Keep the default branch current
 
 In Source control, enable **Automatically pull** to keep the default-branch checkout up to date
-with its configured upstream. Leave **All projects** to set the default or choose a project to override it.
+with its configured upstream.
 Cogenly only pulls when it can fast-forward and the checkout has no changed files, untracked files,
 or local commits. It skips checkouts on another branch or without an upstream. If a checkout has
 local work, resolve it yourself before automatic pulls can resume.

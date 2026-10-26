@@ -43,20 +43,13 @@ import { FoldedSettingsSection } from "./FoldedSettingsSection";
 import { SettingsGroup } from "./SettingsGroup";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { searchableSetting } from "./settingsSearch";
-import {
-  useScopedSettings,
-  useScopedSettingsMixed,
-  useUpdateScopedSettings,
-  useWorktreeCleanupOverrides,
-} from "./useScopedSettings";
-import { ProjectOverridesPopover } from "./SettingInheritance";
+import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 import { settingsScopeEnvironmentLabel } from "./settingsScopeAxis";
 
 function WorktreesDirectoryRow() {
   const { connectedEnvironments, targets } = useSettingsScope();
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
-  const mixed = useScopedSettingsMixed(["worktreesDirectory"]);
   const edited = useRef(false);
   if (
     connectedEnvironments.some(
@@ -76,7 +69,7 @@ function WorktreesDirectoryRow() {
       serverScoped
       settingKeys={["worktreesDirectory"]}
       resetAction={
-        mixed || settings.worktreesDirectory !== "" ? (
+        settings.worktreesDirectory !== "" ? (
           <SettingResetButton
             label="worktree location"
             onClick={() => updateSettings({ worktreesDirectory: "" })}
@@ -85,18 +78,18 @@ function WorktreesDirectoryRow() {
       }
       control={
         <Input
-          key={`${scopeKey}:${mixed}:${settings.worktreesDirectory}`}
+          key={`${scopeKey}:${settings.worktreesDirectory}`}
           aria-label="Worktree location"
           autoCapitalize="none"
           spellCheck={false}
-          placeholder={mixed ? "Mixed" : "Default"}
-          defaultValue={mixed ? "" : settings.worktreesDirectory}
+          placeholder="Default"
+          defaultValue={settings.worktreesDirectory}
           onChange={() => {
             edited.current = true;
           }}
           onBlur={(event) => {
             const value = event.target.value.trim();
-            if (edited.current && (mixed || value !== settings.worktreesDirectory))
+            if (edited.current && value !== settings.worktreesDirectory)
               updateSettings({ worktreesDirectory: value });
             edited.current = false;
           }}
@@ -310,11 +303,7 @@ function CleanupSection() {
       settings.storageCleanup.browserArtifactsAfterDays !== null ||
       settings.storageCleanup.logsAfterDays !== null ||
       settings.storageCleanup.dependenciesAfterDays !== null ||
-      enabled(resolveWorktreeCleanup(settings, null)) ||
-      Object.values(settings.projectSettingsOverrides).some(
-        (override) =>
-          override.worktreeCleanup?.mode === "custom" && enabled(override.worktreeCleanup.rules),
-      )
+      enabled(resolveWorktreeCleanup(settings))
     );
   });
   if (supported.length === 0) return null;
@@ -596,10 +585,9 @@ export function StorageSettingsPanel() {
   const scopedSettings = useScopedSettings();
   const settings = {
     ...scopedSettings.storageCleanup,
-    ...resolveWorktreeCleanup(scopedSettings, null),
+    ...resolveWorktreeCleanup(scopedSettings),
   };
   const updateSettings = useUpdateScopedSettings();
-  const worktreeCleanupOverrides = useWorktreeCleanupOverrides();
   const update = (patch: Partial<StorageCleanupSettings>) =>
     updateSettings({ storageCleanup: patch });
 
@@ -649,12 +637,7 @@ export function StorageSettingsPanel() {
             label={environment.label}
           />
         ))}
-      <SettingsSection
-        id="storage-worktrees"
-        title="Worktrees"
-        // Projects with their own cleanup ignore these rules on every machine.
-        titleAction={<ProjectOverridesPopover {...worktreeCleanupOverrides} />}
-      >
+      <SettingsSection id="storage-worktrees" title="Worktrees">
         <WorktreesDirectoryRow />
         <SettingsRow
           title="Delete worktrees with deleted threads"

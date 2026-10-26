@@ -224,7 +224,7 @@ const makeSweep = Effect.gen(function* () {
 
   // A delegated child has no user to pick an instance: it takes the best
   // candidate it has not already stopped on in this streak, the same ranking
-  // thread_limit_handoff_options shows. An instance the project turned off
+  // thread_limit_handoff_options shows. An instance the machine turned off
   // refuses the dispatch, and the next candidate is tried.
   const handOff = (thread: ProjectionStore.ProjectionLimitRecoveryCandidate) =>
     Effect.gen(function* () {

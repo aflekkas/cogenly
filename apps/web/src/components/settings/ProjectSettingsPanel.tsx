@@ -45,6 +45,7 @@ import {
   ProjectFaviconPickerDialog,
 } from "./ProjectFaviconPickerDialog";
 import { projectGroupTitleNeedsUpdate } from "./ProjectSettingsPanel.logic";
+import { RepositoryActionsSettings } from "./RepositoryActionsSettings";
 import { useSettingsProjectGroups } from "./useSettingsProjectGroups";
 import { settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
 
@@ -59,8 +60,8 @@ function memberKey(member: { environmentId: string; id: string }): string {
 }
 
 /**
- * One repository group's identity and checkouts. Its settings live on the
- * other pages, scoped to the project folder that holds it.
+ * One repository group's identity, actions and checkouts. Settings are global
+ * and live on the other pages.
  */
 export function ProjectSettingsPanel({
   projectKey,
@@ -591,6 +592,7 @@ function ProjectDetail({
             }
           />
         </SettingsSection>
+        <RepositoryActionsSettings members={group.memberProjects} canEdit={canEditGroup} />
         {hasMultipleCheckouts ? checkoutChoices : null}
         <SettingsSection title="Danger">
           <SettingsRow

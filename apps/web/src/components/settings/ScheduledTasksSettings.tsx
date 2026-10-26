@@ -418,8 +418,8 @@ function ScheduledTaskEnvironmentList({
             return {
               environment,
               connected,
-              tasks: data?.tasks.filter((task) =>
-                matchesScheduledTaskScope(scope, environment.environmentId, task.projectId),
+              tasks: data?.tasks.filter(() =>
+                matchesScheduledTaskScope(scope, environment.environmentId),
               ),
               error: query?._tag === "Failure" ? formatEnvironmentQueryError(query.cause) : null,
             };
@@ -505,7 +505,7 @@ function ScheduledTaskEnvironmentList({
       {taskId && linkedState?.tasks && linkedState.error === null && !linkedTask ? (
         <SettingsRow
           title="Task unavailable"
-          description="This task no longer exists or is outside the selected repository scope."
+          description="This task no longer exists or is outside the selected machine."
           role="status"
         />
       ) : null}
@@ -554,8 +554,8 @@ function ScheduledTaskEnvironmentSection({
         })
       : null,
   );
-  const tasks = tasksQuery.data?.tasks.filter((task) =>
-    matchesScheduledTaskScope(scope, environment.environmentId, task.projectId),
+  const tasks = tasksQuery.data?.tasks.filter(() =>
+    matchesScheduledTaskScope(scope, environment.environmentId),
   );
   const linkedTask = tasks?.find((task) => task.id === taskId);
   const openedLink = useRef(false);
@@ -582,7 +582,7 @@ function ScheduledTaskEnvironmentSection({
           {taskId && !linkedTask ? (
             <SettingsRow
               title="Task unavailable"
-              description="This task no longer exists or is outside the selected repository scope."
+              description="This task no longer exists or is outside the selected machine."
               role="status"
             />
           ) : null}
@@ -1044,7 +1044,7 @@ function ScheduledTaskEditorDialog({
       allProjects.filter(
         (project) =>
           project.environmentId === environmentId &&
-          matchesScheduledTaskScope(scope, environmentId, project.id),
+          matchesScheduledTaskScope(scope, environmentId),
       ),
     [allProjects, environmentId, scope],
   );
@@ -1081,18 +1081,12 @@ function ScheduledTaskEditorDialog({
     : task;
   const selectedProjectId = draft.projectId || projects[0]?.id || "";
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
-  // The task runs in selectedProject, so its model picker should reflect that
-  // project's effective enablement, not just the machine's.
   const instanceEntries = useMemo(
     () =>
       sortProviderInstanceEntries(
-        applyProviderInstanceSettings(
-          deriveProviderInstanceEntries(providers),
-          settings,
-          selectedProject?.id ?? null,
-        ),
+        applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), settings),
       ),
-    [providers, settings, selectedProject?.id],
+    [providers, settings],
   );
 
   // The real model picker is keyed by a `${instanceId}:${model}` string, which
@@ -1103,7 +1097,7 @@ function ScheduledTaskEditorDialog({
     draftSelection &&
     instanceEntries.some((entry) => entry.instanceId === draftSelection.instanceId && entry.enabled)
       ? draftSelection
-      : scheduledTaskDefaultModel(settings, selectedProject ?? null, instanceEntries);
+      : scheduledTaskDefaultModel(settings, instanceEntries);
   const activeInstanceId =
     activeSelection?.instanceId ?? firstInstance?.instanceId ?? ("" as ProviderInstanceId);
   const activeModel = activeSelection?.model ?? "";
