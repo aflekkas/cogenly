@@ -360,7 +360,11 @@ export const PeerPush = Schema.Union([
     channel: TrimmedNonEmptyString,
     payload: Schema.Json,
   }),
-  Schema.TaggedStruct("Machines", { machines: Schema.Array(MachineInfo) }),
+  Schema.TaggedStruct("Machines", {
+    machines: Schema.Array(MachineInfo),
+    // Optional for peers released before route refresh was supported.
+    hubRoutes: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  }),
   Schema.TaggedStruct("Unpaired", {}),
 ]);
 export type PeerPush = typeof PeerPush.Type;

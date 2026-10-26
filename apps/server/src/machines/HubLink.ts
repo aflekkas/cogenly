@@ -45,6 +45,7 @@ import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as Schema from "effect/Schema";
+import * as Random from "effect/Random";
 import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
@@ -469,7 +470,38 @@ const make = Effect.gen(function* () {
     if (expectedGeneration !== generation) return Effect.void;
     switch (push._tag) {
       case "Machines":
-        return setState({ machines: push.machines });
+        return Effect.gen(function* () {
+          if (push.hubRoutes !== undefined && push.hubRoutes.length > 0) {
+            yield* linkWrites
+              .withPermit(
+                Effect.gen(function* () {
+                  if (expectedGeneration !== generation) return;
+                  const current = yield* withSecrets(readHubLink);
+                  if (Option.isNone(current)) return;
+                  const advertised = normalizePeerRoutes(push.hubRoutes!);
+                  // Once TLS is advertised, do not fall back to a plaintext SSH forward.
+                  const routes = normalizePeerRoutes([
+                    ...advertised,
+                    ...current.value.routes.filter(
+                      (route) =>
+                        !advertised.some((entry) => entry.startsWith("https:")) ||
+                        route.startsWith("https:"),
+                    ),
+                  ]);
+                  if (
+                    routes.length === current.value.routes.length &&
+                    routes.every((route, index) => route === current.value.routes[index])
+                  )
+                    return;
+                  yield* withSecrets(writeHubLink({ ...current.value, routes }));
+                }),
+              )
+              .pipe(
+                Effect.catchCause(() => Effect.logWarning("Could not save advertised hub routes")),
+              );
+          }
+          yield* setState({ machines: push.machines });
+        });
       case "Unpaired":
         // The hub closes the socket right after this; forgetting must finish
         // even when that close interrupts the inbox.
@@ -776,7 +808,11 @@ const make = Effect.gen(function* () {
           ? retry.refused
           : Duration.min(Duration.times(retry.base, 2 ** Math.min(failures, 6)), retry.max);
       if (Duration.isZero(delay)) continue;
-      yield* Effect.raceFirst(Effect.sleep(delay), Queue.take(kick));
+      const jitter = yield* Random.next;
+      yield* Effect.raceFirst(
+        Effect.sleep(Duration.times(delay, 0.75 + jitter * 0.5)),
+        Queue.take(kick),
+      );
     }
   });
 
