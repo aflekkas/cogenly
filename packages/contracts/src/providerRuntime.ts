@@ -514,7 +514,7 @@ export type UserInputResolvedPayload = typeof UserInputResolvedPayload.Type;
 /**
  * Typed per-task usage rollup. Field names match the orchestration-v2 subagent
  * usage vocabulary (#4779) so the eventual migration is a rename, not a remap.
- * Claude reports per-activation deltas; Codex reports cumulative totals — the
+ * Claude reports per-activation deltas; Codex reports cumulative totals, so the
  * merge strategy is provider-specific and lives in client-runtime.
  */
 export const RuntimeTaskUsage = Schema.Struct({
@@ -538,7 +538,7 @@ export const TaskRunHandles = Schema.Struct({
   runId: Schema.optional(TrimmedNonEmptyStringSchema),
   scriptPath: Schema.optional(TrimmedNonEmptyStringSchema),
   transcriptDir: Schema.optional(TrimmedNonEmptyStringSchema),
-  /** Only http/https URLs may be stored here — sanitized at the adapter. */
+  /** Only http/https URLs may be stored here, sanitized at the adapter. */
   sessionUrl: Schema.optional(TrimmedNonEmptyStringSchema),
 });
 export type TaskRunHandles = typeof TaskRunHandles.Type;

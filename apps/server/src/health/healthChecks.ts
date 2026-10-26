@@ -19,12 +19,15 @@ import {
   type MachineInfo,
   type MachineLinkState,
   type MachineSetupStatus,
+  type ProviderInstanceId,
   type ScheduledTask,
   type ServerProvider,
   type ThreadId,
 } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
+
+import { compareExactServiceVersions, isExactServiceVersion } from "../cloud/serviceProtocol.ts";
 
 import type { SandboxStatus } from "../terminal/ReadOnlySandbox.ts";
 
@@ -58,6 +61,8 @@ export const SCHEDULED_TASK_STUCK_AFTER_MS = 60 * 60_000;
 
 /** A turn or subagent still running after this long is stuck, not slow. */
 export const STUCK_RUN_AFTER_MS = 6 * 60 * 60_000;
+/** Missing provider activity warrants attention well before the absolute run limit. */
+export const RUN_INACTIVITY_AFTER_MS = 5 * 60_000;
 /** Stuck runs listed per report; the summary counts them all. */
 const STUCK_RUN_ITEM_LIMIT = 20;
 
@@ -155,11 +160,18 @@ export function buildReport(input: {
 /**
  * What a Fix without named items fixes (MCP without `itemKeys`, `cogenly health
  * --fix`): every bad item with a fix the server runs without the owner.
+ * Discarding held history requires naming the item explicitly.
  */
 export const directlyFixableItemKeys = (report: MachineHealthReport) =>
   report.checks
     .flatMap((entry) => entry.items)
-    .filter((entry) => entry.status !== "ok" && entry.fix !== null && entry.fix !== "sign-in")
+    .filter(
+      (entry) =>
+        entry.status !== "ok" &&
+        entry.fix !== null &&
+        entry.fix !== "sign-in" &&
+        entry.fix !== "discard-quarantined",
+    )
     .map((entry) => entry.key)
     .slice(0, MACHINE_HEALTH_FIX_MAX_ITEMS);
 
@@ -200,6 +212,7 @@ export function serverCheck(input: {
 export function databaseCheck(input: {
   readonly answered: boolean;
   readonly sizeBytes: number | null;
+  readonly writerWorkerUnavailable?: boolean;
 }): MachineHealthCheck {
   if (!input.answered) {
     return check("database", "The database didn't answer", [
@@ -216,7 +229,17 @@ export function databaseCheck(input: {
     input.sizeBytes === null
       ? "Database answers"
       : `Database answers (${formatBytes(input.sizeBytes)})`,
-    [],
+    input.writerWorkerUnavailable
+      ? [
+          item({
+            key: "database:writer-worker",
+            status: "warn",
+            title: "Database writes are using the main thread",
+            detail:
+              "The background writer is unavailable. Writes still work, but may delay the client. Cogenly retries starting the worker on later writes.",
+          }),
+        ]
+      : [],
   );
 }
 
@@ -342,6 +365,46 @@ export function providersCheck(input: {
   );
 }
 
+/** Rate-limit hits in the last hour at which an account counts as repeatedly throttled. */
+export const RATE_LIMIT_REPEAT_THRESHOLD = 3;
+
+export interface RateLimitStreak {
+  readonly providerInstanceId: ProviderInstanceId;
+  /** Rate-limit retry/failure items recorded in the window. */
+  readonly count: number;
+  readonly latestAt: DateTime.Utc;
+}
+
+/**
+ * One warning per account being rate-limited over and over. The usual cause
+ * is too many concurrent threads sharing one provider account, so the item
+ * says so instead of just naming the symptom.
+ */
+export function rateLimitItems(input: {
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly streaks: ReadonlyArray<RateLimitStreak>;
+}): MachineHealthItem[] {
+  const items: MachineHealthItem[] = [];
+  for (const streak of input.streaks) {
+    if (streak.count < RATE_LIMIT_REPEAT_THRESHOLD) continue;
+    const provider = input.providers.find(
+      (candidate) => candidate.instanceId === streak.providerInstanceId,
+    );
+    const name = provider?.displayName ?? streak.providerInstanceId;
+    items.push(
+      item({
+        key: `providers:${streak.providerInstanceId}:rate-limited`,
+        status: "warn",
+        title: `${name} is being rate-limited repeatedly`,
+        detail: `${streak.count} rate limits in the last hour. The likely cause is too many concurrent threads on one account; let some finish, or spread work across accounts.`,
+        since: streak.latestAt,
+        target: { _tag: "provider", instanceId: streak.providerInstanceId },
+      }),
+    );
+  }
+  return items;
+}
+
 // ---------------------------------------------------------------------------
 // machine-links, sync
 // ---------------------------------------------------------------------------
@@ -349,6 +412,17 @@ export function providersCheck(input: {
 /** The machines this one has a direct link with: its hub, or its spokes. */
 export const directPeers = (machines: ReadonlyArray<MachineInfo>) =>
   machines.filter((machine) => machine.relation === "hub" || machine.relation === "spoke");
+
+/** The newest exact version known on this paired group; never recommend a downgrade. */
+export const newestMachineVersion = (machines: ReadonlyArray<MachineInfo>) =>
+  machines
+    .filter((machine) => machine.pairing !== "revoked")
+    .flatMap((machine) =>
+      machine.serverVersion !== undefined && isExactServiceVersion(machine.serverVersion)
+        ? [machine.serverVersion]
+        : [],
+    )
+    .toSorted((left, right) => compareExactServiceVersions(right, left))[0];
 
 export function machineLinksCheck(input: {
   readonly machines: ReadonlyArray<MachineInfo>;
@@ -358,6 +432,34 @@ export function machineLinksCheck(input: {
   const peers = directPeers(input.machines);
   if (peers.length === 0) return check("machine-links", "Not paired with other machines", []);
   const items: MachineHealthItem[] = [];
+  const targetVersion = newestMachineVersion(input.machines);
+  if (targetVersion !== undefined) {
+    for (const machine of input.machines) {
+      if (
+        machine.pairing === "revoked" ||
+        machine.serverVersion === undefined ||
+        machine.serverVersion === targetVersion
+      )
+        continue;
+      items.push(
+        item({
+          key: `machine-version:${machine.environmentId}`,
+          status: "warn",
+          title: `Update ${machine.name} to match`,
+          detail: `${machine.name} runs ${machine.serverVersion}; paired machines run ${targetVersion}.`,
+          target: { _tag: "machine", environmentId: machine.environmentId },
+          fix:
+            machine.online &&
+            machine.relation !== "peer" &&
+            isExactServiceVersion(machine.serverVersion) &&
+            (machine.relation === "this" ||
+              compareExactServiceVersions(machine.serverVersion, "0.3.3") >= 0)
+              ? "update-machine"
+              : null,
+        }),
+      );
+    }
+  }
   for (const peer of peers) {
     if (
       peer.relation === "hub" &&
@@ -392,11 +494,13 @@ export function machineLinksCheck(input: {
 
 /** What one sample of the sync tables says about a direct peer. */
 export interface SyncPeerSample {
+  readonly quarantined?: number;
   readonly environmentId: EnvironmentId;
   readonly name: string;
   readonly online: boolean;
   /** Local shared-state changes and thread events the peer hasn't acknowledged. */
   readonly backlog: number;
+  readonly ratePerSecond?: number;
   /** The peer's acknowledged cursors, joined; a change means sync moved. */
   readonly acknowledged: string;
   /** Changes received from the peer that this build can't read yet. */
@@ -437,6 +541,22 @@ export function trackSyncProgress(
   };
 }
 
+/** A discard names one thread and the exact retained incoming volume. */
+export const quarantinedThreadItem = (input: {
+  readonly threadId: ThreadId;
+  readonly title: string | null;
+  readonly count: number;
+  readonly bytes: number;
+}): MachineHealthItem =>
+  item({
+    key: `sync:quarantined-thread:${input.threadId}`,
+    status: "fail",
+    title: `Discard quarantined changes for ${input.title ?? input.threadId}`,
+    detail: `${input.count} incoming items (${input.bytes} bytes). Discard removes only these held changes; local thread data is kept. Later events can sync. Retention is capped at 1,000 items or 16 MiB per thread.`,
+    target: { _tag: "thread", threadId: input.threadId },
+    fix: "discard-quarantined",
+  });
+
 export function syncCheck(input: {
   readonly peers: ReadonlyArray<{
     readonly sample: SyncPeerSample;
@@ -448,7 +568,19 @@ export function syncCheck(input: {
   const items: MachineHealthItem[] = [];
   for (const { sample, progress } of input.peers) {
     const target = { _tag: "machine", environmentId: sample.environmentId } as const;
-    if (sample.heldChanges > 0) {
+    if ((sample.quarantined ?? 0) > 0) {
+      items.push(
+        item({
+          key: `sync:quarantined:${sample.environmentId}`,
+          status: "fail",
+          title: `${plural(sample.quarantined!, "change")} from ${sample.name} quarantined`,
+          detail:
+            "Invalid thread history could not be applied. Review the per-thread discard actions; other threads continue syncing.",
+          target,
+        }),
+      );
+    }
+    if (sample.heldChanges > (sample.quarantined ?? 0)) {
       items.push(
         item({
           key: `sync:held:${sample.environmentId}`,
@@ -458,6 +590,22 @@ export function syncCheck(input: {
             sample.heldThreads > 0
               ? `They touch ${plural(sample.heldThreads, "thread")}. This machine can't read them yet; they apply once Cogenly is updated here.`
               : "This machine can't read them yet; they apply once Cogenly is updated here.",
+          target,
+        }),
+      );
+    }
+    if (sample.online && sample.backlog > 0) {
+      const rate = sample.ratePerSecond ?? 0;
+      items.push(
+        item({
+          key: `sync:catch-up:${sample.environmentId}`,
+          status: "ok",
+          title: `Catching up ${sample.name}`,
+          detail: `${plural(sample.backlog, "change")} pending. ${
+            rate > 0
+              ? `About ${rate.toFixed(1)} changes/s; estimated ${formatAgo((sample.backlog / rate) * 1000)} remaining.`
+              : "Measuring catch-up rate and time remaining."
+          }`,
           target,
         }),
       );
@@ -632,6 +780,7 @@ export interface ActiveRun {
   readonly threadId: ThreadId;
   readonly threadTitle: string;
   readonly startedAt: DateTime.Utc;
+  readonly inactiveSince?: DateTime.Utc;
 }
 
 export const stuckRunsItemKey = (threadId: ThreadId) => `stuck-runs:thread:${threadId}`;
@@ -655,7 +804,12 @@ export function stuckRunsCheck(input: {
   readonly now: DateTime.Utc;
 }): MachineHealthCheck {
   const stuck = input.active
-    .filter((run) => millisBetween(run.startedAt, input.now) >= STUCK_RUN_AFTER_MS)
+    .filter(
+      (run) =>
+        millisBetween(run.startedAt, input.now) >= STUCK_RUN_AFTER_MS ||
+        (run.inactiveSince !== undefined &&
+          millisBetween(run.inactiveSince, input.now) >= RUN_INACTIVITY_AFTER_MS),
+    )
     .toSorted(
       (left, right) =>
         DateTime.toEpochMillis(left.startedAt) - DateTime.toEpochMillis(right.startedAt),
@@ -670,20 +824,29 @@ export function stuckRunsCheck(input: {
     const subagents = runs.filter((run) => run.kind === "subagent").length;
     return item({
       key: stuckRunsItemKey(oldest.threadId),
-      status: "fail",
-      title: stuckThreadTitle(
-        oldest.threadTitle,
-        runs.length - subagents,
-        subagents,
-        formatAgo(millisBetween(oldest.startedAt, input.now)),
-      ),
+      status: runs.some((run) => millisBetween(run.startedAt, input.now) >= STUCK_RUN_AFTER_MS)
+        ? "fail"
+        : "warn",
+      title:
+        oldest.inactiveSince !== undefined
+          ? `${quoted(oldest.threadTitle)} has had no provider activity for ${formatAgo(millisBetween(oldest.inactiveSince, input.now))}`
+          : stuckThreadTitle(
+              oldest.threadTitle,
+              runs.length - subagents,
+              subagents,
+              formatAgo(millisBetween(oldest.startedAt, input.now)),
+            ),
       detail:
-        runs.length === 1
-          ? "It has likely lost its provider session. Fix stops it so the thread can continue."
-          : "They have likely lost their provider sessions. Fix stops them so the thread can continue.",
+        oldest.inactiveSince !== undefined
+          ? "The turn may be stuck starting or waiting for its provider. Open the thread to stop it and retry if needed."
+          : runs.length === 1
+            ? "It has likely lost its provider session. Fix stops it so the thread can continue."
+            : "They have likely lost their provider sessions. Fix stops them so the thread can continue.",
       since: oldest.startedAt,
       target: { _tag: "thread", threadId: oldest.threadId },
-      fix: "resume",
+      fix: runs.some((run) => millisBetween(run.startedAt, input.now) >= STUCK_RUN_AFTER_MS)
+        ? "resume"
+        : null,
     });
   });
   return check(
@@ -770,7 +933,7 @@ export function tailscaleServeCheck(input: {
   const exposing = input.setup.steps.some(
     (entry) => entry.id === "expose" && entry.state === "working",
   );
-  if (tailscale.running && tailscale.signedIn && !tailscale.served && exposing) {
+  if (!tailscale.served && exposing) {
     return check("tailscale-serve", "Pointing Tailscale Serve at this server", []);
   }
   const failure = !tailscale.installed
@@ -803,6 +966,39 @@ export function tailscaleServeCheck(input: {
   );
 }
 
+export const AGENT_ORPHANS_ITEM_KEY = "agent-processes:orphaned";
+
+/**
+ * Commands agents started that an earlier server left running: ones marked
+ * keep-running, or ones the restart could not kill. Fix kills them all.
+ */
+export function agentProcessesCheck(input: {
+  readonly processes: ReadonlyArray<{
+    readonly orphaned: boolean;
+    readonly command: string;
+    readonly pids: ReadonlyArray<number>;
+  }>;
+}): MachineHealthCheck {
+  const orphans = input.processes.filter((entry) => entry.orphaned && entry.pids.length > 0);
+  if (orphans.length === 0) return check("agent-processes", "No orphaned processes", []);
+  const pids = orphans.reduce((total, entry) => total + entry.pids.length, 0);
+  const title = `${plural(orphans.length, "orphaned agent command")} still running`;
+  return check("agent-processes", title, [
+    item({
+      key: AGENT_ORPHANS_ITEM_KEY,
+      status: "warn",
+      title,
+      detail: `A previous server started ${orphans
+        .slice(0, 3)
+        .map((entry) => quoted(entry.command.split("\n")[0] ?? ""))
+        .join(
+          ", ",
+        )}${orphans.length > 3 ? " and more" : ""} (${pids} ${pids === 1 ? "process" : "processes"}). Nothing reads their output now. Fix kills them; Settings → Diagnostics lists each one.`,
+      fix: "kill-orphans",
+    }),
+  ]);
+}
+
 export const chatSandboxCheck = (status: SandboxStatus): MachineHealthCheck => {
   if (status.available)
     return {
@@ -826,9 +1022,12 @@ export const chatSandboxCheck = (status: SandboxStatus): MachineHealthCheck => {
         key: "chat-terminal-sandbox",
         status: "warn",
         title,
-        detail: fixable
-          ? "Fix installs the distro bubblewrap package using root or passwordless sudo, then checks the sandbox again. If elevation is unavailable, it shows the command to run."
-          : "Chat commands stay off until this host supports the required sandbox.",
+        detail:
+          status.failure === "apparmor-userns"
+            ? "bubblewrap is installed, but kernel.apparmor_restrict_unprivileged_userns=1 blocks its user namespaces. Fix installs a narrowly scoped AppArmor profile at /etc/apparmor.d/cogenly-bwrap for the bubblewrap binary only (flags=(unconfined), userns), reloads it with apparmor_parser -r, then checks the sandbox again. The global restriction stays on. If the profile already exists, Fix leaves it unchanged; if elevation is unavailable, it shows the exact commands to run."
+            : fixable
+              ? "Fix installs the distro bubblewrap package using root or passwordless sudo, then checks the sandbox again. If elevation is unavailable, it shows the command to run."
+              : "Chat commands stay off until this host supports the required sandbox.",
         since: null,
         target: null,
         fix: fixable ? "setup-sandbox" : null,
@@ -836,3 +1035,16 @@ export const chatSandboxCheck = (status: SandboxStatus): MachineHealthCheck => {
     ],
   };
 };
+
+/** Queue stalls share the run-health section and link directly to their thread. */
+export function stuckQueuesItems(queues: ReadonlyArray<ActiveRun>): MachineHealthItem[] {
+  return queues.map((queue) => ({
+    key: `stuck-queue:thread:${queue.threadId}`,
+    status: "warn",
+    title: `Queued messages not sending in ${queue.threadTitle}`,
+    detail: "The provider turn is idle. Fix sends the next queued message now.",
+    since: queue.startedAt,
+    target: { _tag: "thread", threadId: queue.threadId },
+    fix: "send-queue",
+  }));
+}

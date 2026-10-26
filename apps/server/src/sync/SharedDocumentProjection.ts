@@ -129,6 +129,7 @@ export const readConfiguration = Effect.fn("SharedState.readConfiguration")(func
     );
     return {
       ...fields,
+      coreMemory: data.coreMemory ?? "",
       fallbackChain: data.fallbackChain ?? [],
       ownerMachine: rows[0].owner_machine,
       repositoryRemote: yield* repository(

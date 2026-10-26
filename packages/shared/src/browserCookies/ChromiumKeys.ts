@@ -74,7 +74,7 @@ export interface ChromiumKeyMaterial {
   readonly cbcV11Error?: ChromiumKeyError;
   /**
    * AES-128-CBC from an empty passphrase. Some Linux clients wrote records
-   * with it (crbug.com/1195256), so Chromium — and this import — retry with it
+   * with it (crbug.com/1195256), so Chromium (and this import) retry with it
    * after a record's own key fails.
    */
   readonly cbcEmpty?: Buffer;

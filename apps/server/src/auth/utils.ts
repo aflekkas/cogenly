@@ -13,7 +13,7 @@ const SESSION_COOKIE_NAME = "t3_session";
 
 /**
  * Cookies are scoped by host but *not* by port, so any two servers that can be
- * live on one hostname at once need separate names — otherwise the second
+ * live on one hostname at once need separate names; otherwise the second
  * clobbers the first's session and both sides see "Invalid session token
  * signature" until someone clears cookies by hand.
  *

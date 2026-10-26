@@ -13,7 +13,7 @@ const quotePath = Schema.encodeSync(Schema.fromJsonString(Schema.String));
  * Resolve the Claude config directory the CLI would use: the instance's
  * `homePath` (exported as `CLAUDE_CONFIG_DIR`), then an inherited
  * `CLAUDE_CONFIG_DIR`, then Claude's default `~/.claude`. Empty must not
- * fall back to bare `$HOME` — that leftover from the old HOME override
+ * fall back to bare `$HOME`; that leftover from the old HOME override
  * produced a different continuation group than an explicit `~/.claude`.
  */
 export const resolveClaudeHomePath = Effect.fn("resolveClaudeHomePath")(function* (

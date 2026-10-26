@@ -7,11 +7,7 @@ import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Store from "./AgentStore.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
-import {
-  agentSessionSeedItems,
-  conversationCarryOver,
-  shouldRotateAgentSession,
-} from "./context.ts";
+import { agentSessionSeedItems, recentConversation, shouldRotateAgentSession } from "./context.ts";
 import { callingAgent } from "./MemoryMcp.ts";
 import * as Invocation from "../mcp/McpInvocationContext.ts";
 import { EnvironmentId } from "@cogenly/contracts";
@@ -41,7 +37,22 @@ describe("persistent agents", () => {
       yield* sql`INSERT INTO agent_approvals(id, agent_id, action_json, status, requested_at) VALUES ('approval:delete', ${agent.id}, '{}', 'pending', ${agent.createdAt})`;
       yield* sql`INSERT INTO agent_run_actions(id, agent_id, kind, at) VALUES ('action:delete', ${agent.id}, 'read', ${agent.createdAt})`;
       yield* sql`INSERT INTO agent_run_threads(thread_id, agent_id, trigger_kind) VALUES ('run:delete', ${agent.id}, 'owner')`;
+      for (const status of ["proposed", "open"]) {
+        yield* sql`INSERT INTO commitments(id, agent_id, status, payload_json, created_at, updated_at) VALUES (${`commitment:${status}`}, ${agent.id}, ${status}, ${JSON.stringify({ agentId: agent.id, owner: { kind: "agent", agentId: agent.id } })}, ${agent.createdAt}, ${agent.createdAt})`;
+      }
       expect(yield* store.delete(agent.id)).toBe(true);
+      const commitments = yield* sql<{
+        id: string;
+        agent_id: string | null;
+        payload_json: string;
+      }>`SELECT * FROM commitments`;
+      expect(commitments).toHaveLength(1);
+      expect(commitments[0]?.id).toBe("commitment:open");
+      expect(commitments[0]?.agent_id).toBeNull();
+      expect(JSON.parse(commitments[0]!.payload_json)).toMatchObject({
+        agentId: null,
+        owner: { kind: "user" },
+      });
       expect(yield* sql`SELECT * FROM agent_approvals`).toEqual([]);
       expect(yield* sql`SELECT * FROM agent_run_actions`).toEqual([]);
       expect(yield* sql`SELECT * FROM agent_run_threads`).toEqual([]);
@@ -157,6 +168,27 @@ describe("persistent agents", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect(
+    "bounds core memory, permits clearing it and preserves it through other profile edits",
+    () =>
+      Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const agent = yield* store.save(agentFixture());
+        const coreMemory = "Do NOT send invoices over 1750.\n" + "x".repeat(7900);
+        yield* store.updateCoreMemory(agent.id, coreMemory);
+        expect((yield* store.get(agent.id)).coreMemory).toBe(coreMemory);
+        expect(yield* store.context(agent.conversationThreadId)).toContain(coreMemory);
+        yield* store.save({ ...(yield* store.get(agent.id)), name: "Updated name" });
+        expect((yield* store.get(agent.id)).coreMemory).toBe(coreMemory);
+        expect(
+          (yield* Effect.result(store.updateCoreMemory(agent.id, "x".repeat(8001))))._tag,
+        ).toBe("Failure");
+        expect((yield* store.get(agent.id)).coreMemory).toBe(coreMemory);
+        yield* store.updateCoreMemory(agent.id, "");
+        expect((yield* store.get(agent.id)).coreMemory).toBe("");
+      }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("enforces a daily cap and exponential backoff, and never pauses after failures", () =>
     Effect.gen(function* () {
       const store = yield* Store.AgentStore;
@@ -180,26 +212,6 @@ describe("persistent agents", () => {
       expect(yield* store.reserve(agent.id)).toBe(true);
       yield* store.outcome(agent.id, true);
       expect((yield* store.get(agent.id)).consecutiveFailures).toBe(0);
-    }).pipe(Effect.provide(layer)),
-  );
-
-  it.effect("persists rolling conversation summaries and ignores duplicate compaction", () =>
-    Effect.gen(function* () {
-      const store = yield* Store.AgentStore;
-      const agent = yield* store.save(agentFixture());
-      const messages = Array.from({ length: 50 }, (_, i) => ({ role: "user", text: `text ${i}` }));
-      yield* store.carryOver(agent.id, 40, messages);
-      yield* store.carryOver(agent.id, 40, [
-        { role: "user", text: "duplicate should not overwrite" },
-      ]);
-      const context = yield* store.context(agent.conversationThreadId);
-      expect(context).toContain("text 0");
-      expect(context).toContain("text 29");
-      expect(context).not.toContain("duplicate should not overwrite");
-      const carry = conversationCarryOver("earlier summary", messages);
-      expect(carry.summary).toContain("earlier summary");
-      expect(carry.recent).toContain("text 49");
-      expect(carry.recent).not.toContain("text 29");
     }).pipe(Effect.provide(layer)),
   );
 
@@ -233,12 +245,10 @@ describe("persistent agents", () => {
           role: i % 2 ? "assistant" : "user",
           text: `text ${i}`,
         }));
-        yield* store.carryOver(agent.id, 15, messages);
+        yield* store.updateCoreMemory(agent.id, "Do NOT email Ada. Budget: 1750.");
         const context = yield* store.context(agent.conversationThreadId);
         expect(context).toContain("heron");
-        expect(context).toContain("user: text 0");
-        expect(context).toContain("assistant: text 9");
-        expect(context).not.toContain("text 10");
+        expect(context).toContain("Do NOT email Ada. Budget: 1750.");
 
         const history = [
           ...messages.map((m, i) => ({
@@ -275,3 +285,11 @@ it.effect("job reservations stop at the conversation handoff fence and after own
     expect(yield* store.reserve(agent.id)).toBe(true);
   }).pipe(Effect.provide(layer)),
 );
+
+it("excludes internal kickoff text from background context", () => {
+  const recent = recentConversation([
+    { id: "agent-kickoff:one", role: "user", text: "hidden setup" },
+    { id: "owner:one", role: "user", text: "Watch CI" },
+  ]);
+  expect(recent).toBe("user: Watch CI");
+});

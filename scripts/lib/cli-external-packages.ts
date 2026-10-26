@@ -12,14 +12,14 @@
  * list prevents packaging from drifting away from the bundle boundary.
  *
  * Entries are matched as prefixes (`id.startsWith(prefix)`), so they also cover
- * a package's platform-specific siblings — `node-gyp-build` covers
+ * a package's platform-specific siblings: `node-gyp-build` covers
  * `node-gyp-build-optional-packages`, `@yuuang/` covers every `ffi-rs-*` binding.
  */
 /**
  * External because Node actually loads them from disk at runtime.
  *
- * Native addons (.node), the JS wrappers that dlopen them by real path, and —
- * critically — the ordinary JS packages those wrappers require. An external
+ * Native addons (.node), the JS wrappers that dlopen them by real path, and
+ * (critically) the ordinary JS packages those wrappers require. An external
  * package is loaded from the real filesystem, so its own `require` also
  * resolves from the real filesystem; a dependency that was bundled away exists
  * only inside the emitted bundle and is unreachable there. This closure is
@@ -60,7 +60,7 @@ export function isRuntimeExternalCliDependency(id: string): boolean {
  * True when `id` must stay out of the bundle.
  *
  * This has to be wired to the bundler's `neverBundle`, not just to
- * `alwaysBundle`. `alwaysBundle` only forces packages IN — returning false from
+ * `alwaysBundle`. `alwaysBundle` only forces packages IN; returning false from
  * it means "no opinion", and the default then applies: a declared dependency
  * stays external, but a transitive one gets bundled. That is how a native
  * loader such as node-gyp-build ended up inlined while node-pty (a declared

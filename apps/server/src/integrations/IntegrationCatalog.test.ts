@@ -77,7 +77,7 @@ describe("resolveCatalogConnect", () => {
     expect(resolve({ catalogId: "slack" })).toMatchObject({
       _tag: "needs",
       mode: "oauth_app",
-      message: expect.stringContaining('domains: ["slack.com"]'),
+      message: expect.stringContaining('allowedDomains: ["slack.com"]'),
     });
     // Each account's secret gets its own vault item.
     expect(resolve({ catalogId: "slack", accountLabel: "Acme" })).toMatchObject({

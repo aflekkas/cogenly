@@ -138,8 +138,12 @@ const DIRECT_FIXES: ReadonlySet<MachineHealthFix> = new Set([
   "run-now",
   "resume",
   "stop-runs",
+  "send-queue",
   "retry-sync",
+  "discard-quarantined",
   "setup-sandbox",
+  "update-machine",
+  "kill-orphans",
 ]);
 
 const targetLine = (target: MachineHealthTarget | null): string | null => {
@@ -314,6 +318,9 @@ function legacyHealthCommand(
         ? { kind: "setupSandbox", itemKey, environmentId: origin }
         : null;
     case "retry-sync": {
+      // Quarantine is stored on the receiving machine. An older intermediary
+      // can retry its own outgoing sync, but cannot replay the origin's held rows.
+      if (itemKey.startsWith("sync:quarantined:") && !context.isConnected(origin)) return null;
       const peer =
         target?._tag === "machine" && target.environmentId !== origin
           ? target.environmentId

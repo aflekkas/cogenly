@@ -15,21 +15,21 @@ import type { SidebarListEdge } from "./sidebarListAnchor.logic";
  * search results) builds its column from these, so spacing, type, hover and
  * selected states, truncation and collapse read the same everywhere:
  *
- * - `SidebarList` — the list itself, reading down from the top, or for a list
+ * - `SidebarList`: the list itself, reading down from the top, or for a list
  *   anchored to the bottom edge stacked up against the dock below it;
  *   it fills the column when it `grow`s (`sidebarFillClassName`).
- * - `SidebarGroupHeader` — a group's heading: optional icon or badge, a label
+ * - `SidebarGroupHeader`: a group's heading: optional icon or badge, a label
  *   that truncates, a hairline, and a disclosure chevron when it collapses.
- * - `SidebarFoldRow` — a row under a collapsible heading, which folds with it.
- * - `sidebarRowClassName` / `SidebarRowSubtitle` — a row: one line (32px) or a
+ * - `SidebarFoldRow`: a row under a collapsible heading, which folds with it.
+ * - `sidebarRowClassName` / `SidebarRowSubtitle`: a row of one line (32px) or a
  *   title with a muted second line (40px). Chats are rows.
  * - `SidebarCardItem` / `sidebarCardClassName` / `SidebarCardBody` and its
- *   `SidebarCardLine`s — a card: Work's, Agents' and Projects' items, which
+ *   `SidebarCardLine`s: a card for Work's, Agents' and Projects' items, which
  *   carry live status and actions. Two lines (64px) or three (88px) inside
  *   12px insets; Work and Agents sort by drag (`SidebarSortable`).
- * - `SidebarListEmptyState` (its own file) — one quiet line for a list with
+ * - `SidebarListEmptyState` (its own file): one quiet line for a list with
  *   nothing in it.
- * - `SidebarShelfBar` / `SidebarSegmentBar` (their own file) — the count bar
+ * - `SidebarShelfBar` / `SidebarSegmentBar` (their own file): the count bar
  *   under the search dock, the same in Work, Agents and Projects.
  *
  * Spacing comes from three values in index.css: rows sit

@@ -5,6 +5,7 @@ import {
   REMOTE_REPOSITORY_ID_PREFIX,
   RepositoryCheckoutError,
   SourceControlProviderKind,
+  cloneFailureKind,
   isRemoteRepositoryPlaceholder,
   type ProjectCloneSnapshot,
   type ProjectLabelCheckoutRepositoryInput,
@@ -33,6 +34,8 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as ProjectLabelFolders from "../projectLabels/ProjectLabelFolders.ts";
 import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
+import { findLocalCheckout } from "./findLocalCheckout.ts";
+import { clearInterruptedClone } from "./interruptedClone.ts";
 import * as ProjectCloneTracker from "./ProjectCloneTracker.ts";
 import { projectRepositoryDirectory, repositoryDirectoryNameFromRemote } from "./ProjectsRoot.ts";
 import * as ProjectService from "./ProjectService.ts";
@@ -149,6 +152,36 @@ export function isRebuildableIgnored(entry: string): boolean {
   return REBUILDABLE_IGNORED.has(name) || name.endsWith(".log") || name.endsWith(".tsbuildinfo");
 }
 
+/** The innermost error's own message, which names what actually failed. */
+export function rootCauseMessage(cause: unknown): string | null {
+  let current = cause;
+  let message: string | null = null;
+  for (let depth = 0; depth < 8 && current instanceof Error; depth += 1) {
+    if (current.message.trim().length > 0) message = current.message.trim();
+    current = current.cause;
+  }
+  return message;
+}
+
+/**
+ * The checkout error for a clone that would not start or did not finish:
+ * `sign_in_required` when git or GitHub asked for a login, else `clone_failed`.
+ */
+export function cloneCheckoutError(input: {
+  readonly repositoryId: ProjectId;
+  readonly repositoryName: string;
+  readonly detail: string;
+  readonly cause?: unknown;
+}): RepositoryCheckoutError {
+  return new RepositoryCheckoutError({
+    repositoryId: input.repositoryId,
+    repositoryName: input.repositoryName,
+    reason: cloneFailureKind(input.detail) === "sign_in" ? "sign_in_required" : "clone_failed",
+    detail: input.detail,
+    ...(input.cause === undefined ? {} : { cause: input.cause }),
+  });
+}
+
 /** Turns a stored remote back into clone input for the tracked clone flow. */
 export function cloneInputForRemote(remote: string): {
   readonly provider?: SourceControlProviderKind;
@@ -210,6 +243,33 @@ const make = Effect.gen(function* () {
       Effect.orElseSucceed(() => false),
     );
 
+  /** Clears what a clone the server stopped mid-way left in `root`, unless a clone runs there now. */
+  const clearInterrupted = (repositoryId: ProjectId | null, root: string) =>
+    Effect.gen(function* () {
+      if (repositoryId !== null && (yield* clones.get(repositoryId))?.phase === "running") return;
+      if (
+        yield* clearInterruptedClone(fileSystem, path, root).pipe(Effect.orElseSucceed(() => false))
+      )
+        yield* Effect.logInfo("Cleared an interrupted clone before cloning again", {
+          repositoryId,
+          root,
+        });
+    });
+
+  /** This machine's checkout of `remote` in no other project, when there is one to file instead of cloning. */
+  const localCheckoutOf = (labelId: ProjectLabelId, remote: string) =>
+    Option.isNone(identities)
+      ? Effect.succeed(Option.none<{ readonly repositoryId: ProjectId }>())
+      : findLocalCheckout(labelId, remote).pipe(
+          Effect.provideService(
+            RepositoryIdentityResolver.RepositoryIdentityResolver,
+            identities.value,
+          ),
+          Effect.provideService(SqlClient.SqlClient, sql),
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.orElseSucceed(() => Option.none<{ readonly repositoryId: ProjectId }>()),
+        );
+
   const entriesOf = (dir: string) =>
     fileSystem.readDirectory(dir).pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
 
@@ -267,10 +327,9 @@ const make = Effect.gen(function* () {
   ) =>
     settled !== undefined && settled.phase !== "done"
       ? Effect.fail(
-          new RepositoryCheckoutError({
+          cloneCheckoutError({
             repositoryId,
             repositoryName,
-            reason: "clone_failed",
             detail:
               settled.phase === "cancelled"
                 ? "The clone was cancelled."
@@ -279,8 +338,16 @@ const make = Effect.gen(function* () {
         )
       : Effect.void;
 
-  const storage = (repositoryId: ProjectId, repositoryName: string) => (cause: unknown) =>
-    new RepositoryCheckoutError({ repositoryId, repositoryName, reason: "storage", cause });
+  const storage = (repositoryId: ProjectId, repositoryName: string) => (cause: unknown) => {
+    const detail = rootCauseMessage(cause);
+    return new RepositoryCheckoutError({
+      repositoryId,
+      repositoryName,
+      reason: "storage",
+      ...(detail === null ? {} : { detail }),
+      cause,
+    });
+  };
 
   // Re-resolve the folder's repository (it may have been cached as an
   // enclosing repo while empty), then refresh the project record.
@@ -321,7 +388,7 @@ const make = Effect.gen(function* () {
       }
       // The check above and this start are not atomic: a concurrent launch
       // for the same repository can claim the clone in between. Its start
-      // conflict is not a failure — the caller waits for that clone instead.
+      // conflict is not a failure; the caller waits for that clone instead.
       const started = yield* Effect.result(
         clones
           .start(
@@ -342,16 +409,14 @@ const make = Effect.gen(function* () {
             { cloneCaller: "owner" },
           )
           .pipe(
-            Effect.mapError(
-              (cause) =>
-                new RepositoryCheckoutError({
-                  repositoryId,
-                  repositoryName,
-                  reason: "clone_failed",
-                  detail:
-                    cause._tag === "SourceControlRepositoryError" ? cause.detail : cause.message,
-                  cause,
-                }),
+            Effect.mapError((cause) =>
+              cloneCheckoutError({
+                repositoryId,
+                repositoryName,
+                detail:
+                  cause._tag === "SourceControlRepositoryError" ? cause.detail : cause.message,
+                cause,
+              }),
             ),
           ),
       );
@@ -368,18 +433,13 @@ const make = Effect.gen(function* () {
       }
       return;
     }
-    const retried = yield* clones.retry(repositoryId).pipe(
-      Effect.mapError(
-        (cause) =>
-          new RepositoryCheckoutError({
-            repositoryId,
-            repositoryName,
-            reason: "clone_failed",
-            detail: cause.detail,
-            cause,
-          }),
-      ),
-    );
+    const retried = yield* clones
+      .retry(repositoryId)
+      .pipe(
+        Effect.mapError((cause) =>
+          cloneCheckoutError({ repositoryId, repositoryName, detail: cause.detail, cause }),
+        ),
+      );
     if (!retried) {
       return yield* new RepositoryCheckoutError({
         repositoryId,
@@ -422,6 +482,7 @@ const make = Effect.gen(function* () {
     remote: string,
   ) =>
     Effect.gen(function* () {
+      yield* clearInterrupted(project.id, project.workspaceRoot);
       const clone = yield* clones.get(project.id);
       const ready =
         clone?.phase !== "running" &&
@@ -477,6 +538,17 @@ const make = Effect.gen(function* () {
             .bindRepositoryCheckout({ labelId: label.id, remote, repositoryId: earlier.id })
             .pipe(Effect.mapError(fail));
           return { repositoryId: earlier.id };
+        }
+        // Already checked out elsewhere on this machine (by hand, or for
+        // unfiled threads): file that checkout where it is, not a second clone.
+        // A clone already in the project folder is preferred, below.
+        yield* clearInterrupted(null, destination);
+        const local = Option.getOrUndefined(yield* localCheckoutOf(label.id, remote));
+        if (local !== undefined && !(yield* hasOwnCheckout(destination))) {
+          yield* labels
+            .bindRepositoryCheckout({ labelId: label.id, remote, repositoryId: local.repositoryId })
+            .pipe(Effect.mapError(fail));
+          return { repositoryId: local.repositoryId };
         }
         if (yield* insideOtherCheckout(destination, dir))
           return yield* new RepositoryCheckoutError({
@@ -547,16 +619,14 @@ const make = Effect.gen(function* () {
               { cloneCaller: "owner" },
             )
             .pipe(
-              Effect.mapError(
-                (cause) =>
-                  new RepositoryCheckoutError({
-                    repositoryId: link.repositoryId,
-                    repositoryName,
-                    reason: "clone_failed",
-                    detail:
-                      cause._tag === "SourceControlRepositoryError" ? cause.detail : cause.message,
-                    cause,
-                  }),
+              Effect.mapError((cause) =>
+                cloneCheckoutError({
+                  repositoryId: link.repositoryId,
+                  repositoryName,
+                  detail:
+                    cause._tag === "SourceControlRepositoryError" ? cause.detail : cause.message,
+                  cause,
+                }),
               ),
             );
         }
@@ -632,6 +702,9 @@ const make = Effect.gen(function* () {
       // fall through and let the normal flow judge what is on disk.
     }
 
+    // A clone the server stopped mid-way has `.git` and nothing checked out:
+    // clone it again rather than launch into an empty repository.
+    yield* clearInterrupted(repositoryId, workspaceRoot);
     if (yield* hasOwnCheckout(workspaceRoot)) {
       return;
     }

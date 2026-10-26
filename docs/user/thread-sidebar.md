@@ -5,94 +5,13 @@ need a separate branch and working directory.
 
 ## Message an agent
 
-An agent is a persistent specialist, such as "Spawn Ops", with its own conversation,
-responsibility and permissions. The sidebar's **Agents** tab lists them. Each row shows its status
-(**Needs approval**, **Needs you**, **Running** or **Idle**) and a
-count only when decisions are waiting on you. Drag an agent up or down within its project, or
-focus it and press `Alt+Up` or `Alt+Down`, to change its place. New agents arrive at the top of
-their project. The server saves the order, like Work's.
+The sidebar's **Agents** tab lists persistent assistants and the decisions waiting
+for you. Open an agent to read its conversation, give it direction, or open its
+Details. Drag it within its project, or focus it and press `Alt+Up` or `Alt+Down`,
+to change its place. New agents arrive at the top of their project.
 
-Choose **New agent** in the sidebar or command palette to create one. Tell the builder
-what the agent should take care of, in a sentence ("watch my GitHub PRs and summarize them
-every morning"). It asks a short question only when it has to, then proposes the agent as a
-card: its face, name, responsibility, when it runs, what it needs, and the model (your
-default). Keep talking to adjust anything ("make it run on Mondays only"); the card
-updates. **Create** makes the agent and opens its conversation, where it introduces itself
-and gets going. Nothing creates an agent for you.
-
-Opening an agent shows its chat. Ask it what is outstanding, give it direction, or
-ask it to start Work. **Details** in its header opens everything else in a side sheet:
-
-- **Responsibility**: its face, name, what it owns, and standing instructions.
-- **Schedule**: its triggers, each in plain words, with a switch, **Run now** and
-  **Delete**. **+** opens the full trigger editor.
-- **Tools & permissions**: what it may do on its own.
-- **Open items**: things to follow up on, owned by you, the agent or someone else,
-  with due dates, projects, and links to where they came from. Items the agent
-  finds stay **Proposed** until you confirm or dismiss them. **Mark done** asks
-  what finished it, optionally with a link as evidence; done and dismissed items
-  can be reopened. **Delete** removes an item and its history for good; dismiss it
-  instead to keep a record. **History** on an item lists every status change: who
-  made it, when, why, and any evidence. Pending approvals sit at the top, and also appear
-  in the chat.
-- **Recent activity**: each run with what woke it (your message, a trigger, an event, an
-  approved action, or Work), its recorded status, model and summary, and what it
-  did, such as items it proposed or Work it started. Work links open the session;
-  event runs also link the Work, pull request or open item the event was about.
-- **Memory**: facts it proposed wait there for you to confirm; see
-  [Memory](./memory-and-export.md#memory).
-- **Advanced**: notifications, the daily run cap, its home repository, and **Delete**.
-
-Everything in Details can also be changed by telling the agent in its chat; what it
-cannot do itself (a trigger, more permissions) it asks you to approve.
-
-Agents work on their own across all of your projects and repositories, and can add
-new projects. What they may do is set by permission switches: read, draft and start
-Work are on for a new agent; the high-impact send, create PRs, merge, deploy and
-delete stay off until you turn them on. An agent cannot grant itself anything.
-When it wants to start Work, add a trigger, or change its permissions, it
-asks, and you **Approve** or **Reject**. Approvals expire after seven days.
-
-**Start Work…** at the top of Details starts a coding session in any repository, its
-home repository first. Without the start Work permission the agent would ask you
-first; starting it yourself approves that one session. The session runs in a new worktree and appears in **Work**, named by its
-repository and marked with the agent's name.
-The command palette also has **Start Work with …** and **Open items for …** for
-each agent.
-
-The badge on **Agents** counts decisions waiting for you across all agents:
-approvals they asked for, and approvals or questions inside their runs. Unread
-replies show as a dot on the agent instead.
-
-Triggers wake an agent for one recorded run: on an interval, at a time, on a
-webhook, or **When something happens**, such as PR checks failing, a PR merging,
-Work finishing or becoming ready for review, or an open item coming due. An event
-trigger can be limited to some projects, repositories, or Work you, a chat or an
-agent started. Filters only narrow what wakes it, and a repeated event wakes it
-once. Event triggers have no **Run now**; they run when the event happens. Add triggers under
-**Details → Schedule**, by describing them when creating the agent, or in **Settings →
-Scheduled tasks**. An agent can suggest one, but it is added only if you approve.
-
-An agent uses the model picked in its chat, for its replies and its background runs.
-A new agent starts on the model a new chat in its workspace would get. Agents are
-always on: their triggers keep running, up to the daily run cap, and a run that fails
-waits a little longer before the next one. To stop a trigger, turn it off under
-**Schedule**. Messages sent while an agent is busy use its normal queue or steering
-behavior.
-
-An agent can also have a fallback chain: an ordered list of other provider
-instances and models to run on when its main one stops it. If a background run
-hits a usage limit ("You've hit your weekly limit") or finds that provider
-signed out, the next run uses the next entry in the chain instead of waiting
-on the same provider, and **Recent activity** shows which instance the run
-actually used and why it switched. When the provider names a reset time, the
-agent returns to its main instance then; otherwise it tries the main one
-again after an hour. Other failures, and agents without a chain, behave as
-before. Ask the agent in its chat to set or change its fallback chain, for
-example "fall back to Codex if Claude hits its limit".
-
-Coding work an agent starts appears in **Work** with your own threads, named by its
-repository and marked with the agent's name.
+See [Agents](agents.md) for creating one, triggers, permissions, memory, deleting,
+and choosing which machine runs it.
 
 ## Start Work from a chat
 
@@ -141,15 +60,20 @@ while Chats is open, and **New chat** in the command palette all start one witho
 project; they never open a repository. Opening **Chats** returns to the chat you last
 had open there; the first time, or once that chat is archived or deleted, it shows your
 most recent chat, or a new one when you have none. Every tab in the rail works the same
-way, Settings included: switching away and back returns to where you were. A small dot marks a chat that is still running
-or waiting on you. Older chats load as you scroll, and search covers all of them. Add
+way, Settings included: switching away and back returns to where you were. A running chat
+shows a spinner. A blue dot and a brighter title mark a reply you have not read yet, and
+opening the chat clears it on every device. An amber dot means the chat is waiting on you,
+and it takes the place of the blue one. The rail's Chats, Work and Agents icons show the
+same dots when anything inside them is unread or waiting. Older chats load as you scroll, and search covers all of them. Add
 repositories from **Work** or the command palette.
 
 A chat is a conversation; Work is a coding session in a repository. Chats run in
 conversation mode: the agent answers directly and looks things up itself. It can run
-quick read-only commands, such as searching files, reading git history or querying
-`gh`, from the chat's project folder (or its own folder when it has no project), and
-each command shows in the conversation. It doesn't edit repositories, install
+quick read-only commands, such as searching files or reading git history, from the
+chat's project folder (or its own folder when it has no project), and each command
+shows in the conversation. Chat commands can't read Cogenly's data, provider logins,
+SSH keys or saved CLI credentials, so commands that need a login, such as `gh`, run
+signed out; use Work for those. It doesn't edit repositories, install
 anything or run long builds from a chat; it hands that work to a task instead.
 Chat commands need full-access mode and the `enableAgentTerminals` preference. They also require a working local sandbox:
 macOS uses the built-in `sandbox-exec`. On Linux, Cogenly installs the distro's
@@ -170,7 +94,7 @@ Network access remains available for lookups. The sandbox does **not** prevent
 remote writes: chat agents are instructed never to run commands that change
 remote state, such as sending messages, changing issues or pushing commits.
 
-A chat's menu has **Start Work…**, rename, **Mark unread**, projects, copy and **Delete**,
+A chat's menu has **Start Work…**, rename, **Mark as read** or **Mark as unread**, projects, copy and **Delete**,
 which always asks first, while settling, snoozing, archiving, repository settings
 and the branch and worktree controls, the right panel with its browser and device, and the
 terminal panel belong to Work. When a
@@ -315,7 +239,13 @@ Manually settling an idle thread dismisses unanswered async questions without
 sending an answer or restarting the agent. Settling also closes the thread's
 terminals that wait at an idle prompt, and keeps their output. A project script you
 started stays open while it runs a command. Agent-run terminals, including dev servers
-and their child processes, stop when you settle, archive, or delete the thread.
+and every process they start, stop when you stop the thread, cancel its task, or settle,
+archive, or delete it. A command left running in a thread with no activity for four hours
+is stopped too. To keep a server up, ask the agent to start it with keep-running; it then
+survives stop, settle and the idle sweep, and only archiving or deleting the thread ends it.
+**Settings → Diagnostics → Agent processes** lists what agents are running, per thread, with a
+Kill button and a log of what was stopped and why. After a restart, machine health reports
+commands an earlier server left running, and its Fix stops them.
 
 Every shell command the agent runs appears in the terminal panel under the conversation
 (see [Terminal](terminal.md)), newest first and labelled with the command. The panel never
@@ -370,8 +300,13 @@ the project there or in the composer's project control, and the task moves to th
 project's most recently used repository, or to the project's folder when it has none.
 The repository menu lists every repository in the project, on the machine the task runs on
 (with **No project**, that machine's repositories). A repository the project has but this
-machine doesn't reads **Clone to set up**: pick it to clone it here, and the task moves to it
-once the clone lands. The command palette's **New thread in...** lists the same repositories
+machine doesn't reads **Not on** _machine_: pick it to clone it here; the row shows the clone's
+progress and the task moves to it once the clone lands. A clone that fails says why on its row;
+picking it again retries, or, when the machine needs a GitHub sign-in, opens
+**Settings → Source control** for that machine. Hover the reason for git's own words.
+Switching the composer's machine keeps the task's project and repository: when the other
+machine doesn't have the repository yet, the task stays as it is and that machine sets it up
+(its own checkout, or a fresh clone) when you send. The command palette's **New thread in...** lists the same repositories
 under **Not cloned here**; picking one clones it. A repository not cloned here still shows
 its icon once any machine with a checkout has found it, or its owner's GitHub avatar until
 then. A repository's **⋯** menu can remove it from this machine (the project
@@ -387,10 +322,17 @@ repositories, recent chats and Work, agents, files and GitHub org. The GitHub or
 button beside the project's name) is where agents and the repository picker look for its
 repositories; **Sources** lists any other repositories it reaches. Use **Add repository** to bring one in
 from this machine or GitHub (a repository already in another project asks before it moves),
-click a **Clone to set up** row to clone it on this machine, a repository row's **⋯** menu
+click a **Not on** _machine_ row to clone it there, a repository row's **⋯** menu
 to remove it from this machine or the project, and the page's **⋯** menu to rename,
 recolor, describe or delete the project. Deleting a project keeps its chats, Work and repositories; they are just no
 longer in a folder. Start one with **New project** on the page or in the command palette.
+
+Deleting a project also removes its folder if it is empty. If you put files in it, the
+folder stays on disk and shows under **Leftover folders** at the bottom of **Settings →
+Projects**, along with any other folder in your projects folder that no project uses.
+Each machine lists its own. Open one to look inside, choose **Turn into project** to keep
+working with it, or **Move to Trash**. You can put it back from the Trash. Cogenly cleans
+up empty leftover folders by itself.
 
 You can also ask an agent in any chat or Work to set a project up or change it: add a
 repository, link GitHub, set the instructions its agents follow, rename or recolor it, or
@@ -447,7 +389,7 @@ another provider instance.
 On web and desktop, press **Resume** in an empty composer to continue a limited
 or interrupted turn manually.
 Queued messages stay saved while the limit blocks the thread. They run after
-the continuation finishes. If the queue was held by a restart, resume it then.
+the continuation finishes. You can also use **Send now** on a held queued message.
 
 When the provider reports a reset time, the thread continues on its own at the
 reset. Choose **Don't resume** in the thread's banner, its sidebar menu, or the

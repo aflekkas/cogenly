@@ -4,7 +4,7 @@
  *
  * Containment rules (lifted from the reviewed #3650 inspection service):
  * - the resolved realpath must live under the configured Claude projects
- *   directory (where the harness persists workflow scripts and transcripts) —
+ *   directory (where the harness persists workflow scripts and transcripts);
  *   realpath re-containment defeats symlink escapes, including a symlinked
  *   leaf file;
  * - only the caller's expected extension is served;

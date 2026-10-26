@@ -35,7 +35,7 @@ interface QueuedThreadShell {
 /**
  * A queued turn start lives for at most this long: session adoption takes
  * seconds, so a user message still unadopted after the grace window is a
- * failed start (or stale data — shells from older servers can carry user
+ * failed start (or stale data: shells from older servers can carry user
  * messages with no latestTurn at all), not pending work. Without this bound
  * such threads would be permanently unsettleable.
  */
@@ -47,8 +47,8 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
  * dispatched (message-sent + turn-start-requested) but no session has
  * adopted it, so `session` is still null and the pending work is invisible
  * to the session-status checks. Detectable as a user message strictly newer
- * than every timestamp on the latest turn — on adoption the new turn's
- * requestedAt equals the message time, clearing the condition — and only
+ * than every timestamp on the latest turn (on adoption the new turn's
+ * requestedAt equals the message time, clearing the condition), and only
  * within the adoption grace window.
  */
 export function hasQueuedTurnStart(
@@ -100,7 +100,7 @@ export interface ThreadSnoozeShell extends QueuedThreadShell {
  * A snoozed thread "raises its hand" when something happens that outranks
  * the user's snooze: the agent or one of its subagents is blocked on them
  * (approval / user input), the session failed, or a run completed after the
- * snooze was set — the v1 taste of event-based snooze ("something happened"
+ * snooze was set: the v1 taste of event-based snooze ("something happened"
  * wakes early). Raising a hand never clears the server-side snooze fields; it
  * only stops the thread from classifying as snoozed.
  */
@@ -110,7 +110,7 @@ export function threadRaisedHandWhileSnoozed(shell: ThreadSnoozeShell): boolean 
   const runtime = shell.runtime ?? shell.session ?? null;
   const latestRun = shell.latestRun ?? shell.latestTurn ?? null;
   // Only a FRESH failure raises the hand: a thread snoozed while already
-  // failed stays snoozed — that snooze was the user saying "I saw it, not
+  // failed stays snoozed; that snooze was the user saying "I saw it, not
   // now". session.updatedAt stamps the status edge, so an error newer than
   // the snooze is new information.
   if (
@@ -135,7 +135,7 @@ export function threadRaisedHandWhileSnoozed(shell: ThreadSnoozeShell): boolean 
  * A thread may be snoozed unless the agent or one of its subagents is blocked
  * on the user: hiding a pending approval or user-input request defeats the
  * request, and a queued turn start (a message no turn has adopted yet) is
- * invisible pending work the same way it is for settle. A running session IS snoozable — snooze
+ * invisible pending work the same way it is for settle. A running session IS snoozable; snooze
  * only affects visibility, never the agent. Client-side twin of the server
  * invariants so the UI can reject before a round trip.
  */
@@ -161,7 +161,7 @@ export function canSnooze(
 
 /**
  * Snoozed resolution: hidden from the inbox while the wake time is in the
- * future and the thread has not raised its hand. Timer wakes are derived —
+ * future and the thread has not raised its hand. Timer wakes are derived:
  * no server event fires when snoozedUntil passes; the stale fields simply
  * stop classifying as snoozed (and feed the woke indicator until the user
  * visits or re-engages).
@@ -183,7 +183,7 @@ export function effectiveSnoozed(
  * still snoozed. Used for the "Woke" indicator: the thread reappears in its
  * original sort position (the inbox sort is deliberately static), so the
  * wake signal has to carry the weight. Compare against the client's
- * lastVisitedAt — visiting clears the indicator like it clears unread.
+ * lastVisitedAt; visiting clears the indicator like it clears unread.
  *
  * Timer wakes report the wake time itself; raised-hand wakes report the
  * triggering timestamp so a visit BEFORE the early wake doesn't suppress

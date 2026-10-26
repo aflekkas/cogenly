@@ -1,5 +1,5 @@
 /**
- * ModelManifest — remote provider-model metadata with a bundled offline
+ * ModelManifest: remote provider-model metadata with a bundled offline
  * fallback.
  *
  * Provider catalogs and legacy classification live in `model-manifest.json`.

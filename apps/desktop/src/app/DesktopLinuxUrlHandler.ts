@@ -16,7 +16,7 @@ import { makeComponentLogger } from "./DesktopObservability.ts";
 // created by whatever integration tool they use (AppImageLauncher names it
 // appimagekit_<hash>-….desktop) and its filename is not under our control.
 // Electron's app.setAsDefaultProtocolClient resolves the desktop id from
-// setDesktopName, which cannot match those files — so the browser keeps
+// setDesktopName, which cannot match those files, so the browser keeps
 // prompting "Choose an application" for every OAuth callback. Instead, write
 // our own handler entry pointing at the current AppImage, refresh the desktop
 // MIME cache so desktop environments recognize that entry as a handler, and
@@ -66,7 +66,7 @@ const escapeDesktopEntryString = (value: string): string =>
     .replaceAll("\t", "\\t");
 
 // Exec values are unescaped twice by implementations: first the general
-// string-value rules, then the Exec quoting rules — so writing composes the
+// string-value rules, then the Exec quoting rules, so writing composes the
 // layers in reverse. The argument is double-quoted with reserved characters
 // backslash-escaped and literal percent signs doubled (field codes), and the
 // general string escaping is applied on top: a literal backslash ends up as
@@ -127,7 +127,7 @@ export const make = Effect.gen(function* () {
 
   const writeDesktopEntry = Effect.gen(function* () {
     // Inside the mounted AppImage, process.execPath points at a transient
-    // /tmp/.mount_* path — the handler must launch the AppImage itself.
+    // /tmp/.mount_* path; the handler must launch the AppImage itself.
     const execTarget = Option.getOrElse(environment.appImagePath, () => process.execPath);
     const content = renderUrlHandlerDesktopEntry({
       displayName: environment.displayName,
@@ -256,7 +256,7 @@ export const make = Effect.gen(function* () {
     yield* logInfo("registered URL scheme handler", { scheme });
   }).pipe(
     // Registration is best-effort: a missing xdg-mime or read-only home must
-    // never block startup — the OS chooser remains as fallback.
+    // never block startup; the OS chooser remains as fallback.
     Effect.catch((error) =>
       logWarning("URL scheme handler registration failed", {
         scheme,

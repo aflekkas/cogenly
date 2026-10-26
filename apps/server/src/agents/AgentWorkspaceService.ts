@@ -1,3 +1,6 @@
+import { decideFallback } from "./providerFallback.ts";
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
+import { AgentHandoffBrief } from "@cogenly/contracts";
 import * as AccountAccess from "../accounts/AccountAccess.ts";
 import * as Access from "./AgentAccessScope.ts";
 import {
@@ -14,6 +17,8 @@ import {
   Commitment,
   CommitmentHistory,
   CommandId,
+  MessageId,
+  type Integration,
   ScheduledTaskId,
   ThreadId,
   type Agent,
@@ -32,12 +37,15 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
+import * as InlineCardNotifications from "../orchestration-v2/InlineCardNotifications.ts";
 import * as ApprovalChanges from "./ApprovalChanges.ts";
 import * as Store from "./AgentStore.ts";
 import * as Agents from "./AgentService.ts";
 import * as Work from "../work/WorkHandoffService.ts";
 import * as Schedules from "../scheduledTasks/ScheduledTaskService.ts";
 import * as Integrations from "../integrations/Integrations.ts";
+import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
+import { hostMatchesAnyDomain } from "../vault/VaultPolicy.ts";
 
 const decodeEventContext = Schema.decodeUnknownEffect(Schema.fromJsonString(AgentEventContext));
 const isAgentError = Schema.is(AgentError);
@@ -51,26 +59,22 @@ const decodeHistory = Schema.decodeUnknownEffect(Schema.fromJsonString(Commitmen
 const decodeJsonRecord = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
 );
-const decodeVaultPolicy = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(
-    // Local shape mirrors contracts VaultPolicy; kept inline to avoid a cycle.
-    Schema.Struct({
-      mode: Schema.Literals(["ask", "allow"]),
-      allowedAgentIds: Schema.Array(Schema.String),
-      allowedThreadIds: Schema.optional(Schema.Array(Schema.String)),
-      allowedDomains: Schema.Array(Schema.String),
-    }),
-  ),
+// Local shape mirrors contracts VaultPolicy; kept inline to avoid a cycle.
+// Every field must be listed, or an approval would drop it on rewrite.
+const StoredVaultPolicy = Schema.fromJsonString(
+  Schema.Struct({
+    mode: Schema.Literals(["ask", "allow", "deny"]),
+    allowedAgentIds: Schema.Array(Schema.String),
+    allowedThreadIds: Schema.optional(Schema.Array(Schema.String)),
+    allowedDomains: Schema.Array(Schema.String),
+    approvedDomains: Schema.optional(Schema.Array(Schema.String)),
+    ownerSet: Schema.optional(Schema.Boolean),
+  }),
 );
-const encodeVaultPolicy = Schema.encodeEffect(
-  Schema.fromJsonString(
-    Schema.Struct({
-      mode: Schema.Literals(["ask", "allow"]),
-      allowedAgentIds: Schema.Array(Schema.String),
-      allowedThreadIds: Schema.optional(Schema.Array(Schema.String)),
-      allowedDomains: Schema.Array(Schema.String),
-    }),
-  ),
+const decodeVaultPolicy = Schema.decodeUnknownEffect(StoredVaultPolicy);
+const encodeVaultPolicy = Schema.encodeEffect(StoredVaultPolicy);
+const decodeDomains = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Array(Schema.String)),
 );
 const decodeActivityRun = Schema.decodeUnknownEffect(AgentActivityRun);
 const decodeRunAction = Schema.decodeUnknownEffect(AgentRunAction);
@@ -88,6 +92,7 @@ const wrap = (cause: unknown) =>
             : "Could not access agent workspace state.",
         cause,
       });
+const decodeHandoffBrief = Schema.decodeUnknownEffect(Schema.fromJsonString(AgentHandoffBrief));
 export class AgentWorkspaceService extends Context.Service<
   AgentWorkspaceService,
   {
@@ -172,6 +177,7 @@ const make = Effect.gen(function* () {
   const access = yield* Access.AgentAccessScope;
   const crypto = yield* Crypto.Crypto;
   const store = yield* Store.AgentStore;
+  const providers = yield* ProviderRegistry.ProviderRegistry;
   const agents = yield* Agents.AgentService;
   const accountAccess = yield* Effect.serviceOption(AccountAccess.AccountAccess);
   const work = yield* Work.WorkHandoffService;
@@ -190,8 +196,13 @@ const make = Effect.gen(function* () {
   // Optional so workspaces built without the gateway (unit tests) still
   // approve other actions; an integration approval then fails clearly.
   const integrations = yield* Effect.serviceOption(Integrations.Integrations);
+  const threads = yield* Effect.serviceOption(Threads.ThreadManagementService);
   const approvalChanges = yield* ApprovalChanges.optional;
   const notifyApprovals = approvalChanges.notify;
+  // Inline card answers (vault use, integration approval) wake their thread
+  // through the one late-answer path; the command key dedupes repeats.
+  const cardNotifications = yield* InlineCardNotifications.optional;
+  const approvalKey = (approval: AgentApproval) => `approval:${approval.id}`;
   const lock = yield* Semaphore.make(1);
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const uuid = (prefix: string) =>
@@ -379,6 +390,82 @@ const make = Effect.gen(function* () {
         yield* notifyApprovals;
         return { approval: yield* getApproval(id) };
       }).pipe(Effect.mapError(wrap));
+  const threadManagement = threads;
+  /** A persistent agent's decision goes to its conversation thread, on its fallback model. */
+  const notifyAgentDecision = (approval: AgentApproval) =>
+    Effect.gen(function* () {
+      if (approval.agentId === null || threadManagement._tag === "None") return;
+      const agent = yield* store.get(approval.agentId);
+      if (agent.projectId === null) return;
+      const key = `agent-approval-decision:${approval.id}`;
+      yield* threadManagement.value.sendToThread({
+        projectId: agent.projectId,
+        threadId: agent.conversationThreadId,
+        commandId: CommandId.make(key),
+        messageId: MessageId.make(key),
+        text: `The owner ${approval.status} your ${approval.action.actionKind} request (${approval.id}).${approval.resultThreadId ? ` Work thread: ${approval.resultThreadId}.` : ""} Continue within the decided permissions; a rejection does not authorize the action.`,
+        attachments: [],
+        modelSelection: decideFallback(
+          agent,
+          DateTime.toEpochMillis(yield* DateTime.now),
+          yield* providers.getProviders,
+        ).selection,
+        mode: "queue",
+        createdBy: "agent",
+        creationSource: "server",
+      });
+    });
+  /** True once the provider call that waited for this approval has ended. */
+  const threadIdle = (threadId: ThreadId) =>
+    threads._tag === "None"
+      ? Effect.succeed(false)
+      : threads.value
+          .getThreadShell(threadId)
+          .pipe(
+            Effect.map(
+              (shell) =>
+                shell !== undefined &&
+                shell !== null &&
+                shell.activeRunId === null &&
+                shell.deletedAt === null &&
+                shell.archivedAt === null,
+            ),
+          );
+  const notifyDecision = ({ approval }: { approval: AgentApproval }) =>
+    Effect.gen(function* () {
+      const action = approval.action;
+      if (action.actionKind === "vault_use" && action.payload.threadId) {
+        // vault_fill returns at once, so every decision is a late answer.
+        yield* cardNotifications.answered({
+          threadId: action.payload.threadId,
+          key: approvalKey(approval),
+          summary: `Approval ${approval.status === "approved" ? "granted" : "denied"}: use vault credential on ${action.payload.domain ?? "the approved destination"}; retry vault_fill if still needed`,
+        });
+        return;
+      }
+      if (
+        (action.actionKind === "integration_add" || action.actionKind === "integration_update") &&
+        action.threadId
+      ) {
+        // An approval is announced where it is applied, with the integration's name.
+        // A rejection only needs a message once the waiting call has ended.
+        if (approval.status !== "approved" && (yield* threadIdle(action.threadId)))
+          yield* cardNotifications.answered({
+            threadId: action.threadId,
+            key: approvalKey(approval),
+            summary: `Approval denied: ${action.actionKind.replaceAll("_", " ")}`,
+          });
+        return;
+      }
+      yield* notifyAgentDecision(approval);
+    }).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("Could not deliver an approval decision", {
+          approvalId: approval.id,
+          cause,
+        }),
+      ),
+    );
   const executeWork = (
     input: AgentStartWorkInput,
     key: string,
@@ -387,6 +474,13 @@ const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       const agent = yield* store.get(input.agentId);
+      const fallback = decideFallback(
+        agent,
+        DateTime.toEpochMillis(yield* DateTime.now),
+        yield* providers.getProviders,
+      );
+      if (fallback.restored)
+        yield* store.setFallback(agent.id, { index: 0, reason: null, until: null });
       const id = ThreadId.make(`agent-work:${agent.id}:${key}`);
       // Stable launch identity and the standard launch service make approval retries safe.
       yield* sql`INSERT OR IGNORE INTO agent_run_threads(thread_id, agent_id, trigger_kind, source_run_id) VALUES (${id}, ${agent.id}, ${triggerKind}, ${sourceRunId})`;
@@ -400,7 +494,7 @@ const make = Effect.gen(function* () {
             : { projectFolderId: input.projectFolderId }),
           title: input.title,
           scopeSummary: input.prompt,
-          modelSelection: agent.modelSelection,
+          modelSelection: fallback.selection,
         },
         {
           origin: "agent",
@@ -470,7 +564,7 @@ const make = Effect.gen(function* () {
     expireApprovals().pipe(
       Effect.andThen(
         sql`SELECT a.* FROM agent_approvals a JOIN orchestration_v2_projection_threads t ON t.thread_id = COALESCE(json_extract(a.action_json, '$.threadId'), json_extract(a.action_json, '$.payload.threadId'))
-          WHERE a.status = 'pending' AND a.agent_id IS NULL AND json_extract(a.action_json, '$.actionKind') IN ('vault_use', 'integration_add', 'integration_update')
+          WHERE a.status = 'pending' AND (a.agent_id IS NULL OR json_extract(a.action_json, '$.actionKind') IN ('integration_add', 'integration_update')) AND json_extract(a.action_json, '$.actionKind') IN ('vault_use', 'integration_add', 'integration_update')
             AND (${threadId ?? null} IS NULL OR t.thread_id = ${threadId ?? null})
             AND t.deleted_at IS NULL AND t.archived_at IS NULL AND json_extract(t.payload_json, '$.settledOverride') IS NOT 'settled'
           ORDER BY a.requested_at, a.id LIMIT 200`,
@@ -610,32 +704,56 @@ const make = Effect.gen(function* () {
                 Effect.gen(function* () {
                   const rows = yield* sql<{
                     policy_json: string;
-                  }>`SELECT policy_json FROM vault_items WHERE id = ${payload.vaultItemId} AND deleted_at IS NULL`;
+                    allowed_domains_json: string;
+                  }>`SELECT policy_json, allowed_domains_json FROM vault_items WHERE id = ${payload.vaultItemId} AND deleted_at IS NULL`;
                   if (!rows[0]) return yield* fail("Vault item not found.");
                   const decoded = yield* decodeVaultPolicy(rows[0].policy_json);
-                  const policy = {
-                    mode: "allow" as const,
-                    allowedAgentIds: [
-                      ...new Set([
-                        ...decoded.allowedAgentIds,
-                        ...(approval.agentId ? [approval.agentId] : []),
-                      ]),
-                    ],
-                    allowedThreadIds: [
-                      ...new Set([
-                        ...(decoded.allowedThreadIds ?? []),
-                        ...(approval.agentId === null && payload.threadId
-                          ? [payload.threadId]
-                          : []),
-                      ]),
-                    ],
-                    allowedDomains: [
-                      ...new Set([
-                        ...decoded.allowedDomains,
-                        ...(payload.domain ? [payload.domain] : []),
-                      ]),
-                    ],
-                  };
+                  const itemDomains = yield* decodeDomains(rows[0].allowed_domains_json);
+                  // A fill outside the item's sites approves that site; the
+                  // rule's own lists are left as they are.
+                  const offSite =
+                    payload.domain !== null && !hostMatchesAnyDomain(payload.domain, itemDomains);
+                  const approvedDomains = [
+                    ...new Set([
+                      ...(decoded.approvedDomains ?? []),
+                      ...(offSite && payload.domain ? [payload.domain] : []),
+                    ]),
+                  ];
+                  // "Any agent" stays any agent: approving one use must not narrow it.
+                  const anyCaller =
+                    decoded.mode === "allow" &&
+                    decoded.allowedAgentIds.length === 0 &&
+                    (decoded.allowedThreadIds ?? []).length === 0;
+                  const policy = anyCaller
+                    ? { ...decoded, approvedDomains }
+                    : {
+                        ...decoded,
+                        mode: "allow" as const,
+                        allowedAgentIds: [
+                          ...new Set([
+                            ...decoded.allowedAgentIds,
+                            ...(approval.agentId ? [approval.agentId] : []),
+                          ]),
+                        ],
+                        allowedThreadIds: [
+                          ...new Set([
+                            ...(decoded.allowedThreadIds ?? []),
+                            ...(approval.agentId === null && payload.threadId
+                              ? [payload.threadId]
+                              : []),
+                          ]),
+                        ],
+                        allowedDomains:
+                          decoded.allowedDomains.length === 0 && !offSite
+                            ? []
+                            : [
+                                ...new Set([
+                                  ...decoded.allowedDomains,
+                                  ...(payload.domain ? [payload.domain] : []),
+                                ]),
+                              ],
+                        approvedDomains,
+                      };
                   yield* sql`UPDATE vault_items SET policy_json = ${yield* encodeVaultPolicy(policy)}, updated_at = ${yield* now} WHERE id = ${payload.vaultItemId}`;
                   yield* sql`UPDATE agent_approvals SET status = 'approved', decided_at = ${yield* now}, decided_by = 'user' WHERE id = ${id} AND status = 'pending'`;
                 }),
@@ -652,8 +770,9 @@ const make = Effect.gen(function* () {
               const agent = approval.agentId === null ? null : yield* store.get(approval.agentId);
               if (!agent && !action.threadId)
                 return yield* fail("An integration approval needs a calling thread.");
+              let connected: Integration;
               if (action.actionKind === "integration_add") {
-                yield* integrations.value
+                connected = (yield* integrations.value
                   .create(action.payload, {
                     approveCredentials: true,
                     approveExecutable: true,
@@ -662,11 +781,11 @@ const make = Effect.gen(function* () {
                       ? { id: agent.id, name: agent.name }
                       : { id: action.threadId!, name: "Coding agent" },
                   })
-                  .pipe(Effect.mapError((cause) => fail(cause.message)));
+                  .pipe(Effect.mapError((cause) => fail(cause.message)))).integration;
               } else {
-                yield* integrations.value
+                connected = (yield* integrations.value
                   .update(action.payload, { approveCredentials: true, approveExecutable: true })
-                  .pipe(Effect.mapError((cause) => fail(cause.message)));
+                  .pipe(Effect.mapError((cause) => fail(cause.message)))).integration;
               }
               yield* sql.withTransaction(
                 Effect.gen(function* () {
@@ -675,6 +794,13 @@ const make = Effect.gen(function* () {
                     yield* sql`INSERT INTO agent_run_actions(id, agent_id, run_id, kind, target_id, at) VALUES (${`approval-action:${id}`}, ${agent.id}, ${approval.sourceRunId}, ${action.actionKind}, ${id}, ${yield* now}) ON CONFLICT(id) DO NOTHING`;
                 }),
               );
+              // An owner can approve after the provider has ended its waiting call.
+              if (action.threadId && (yield* threadIdle(action.threadId)))
+                yield* cardNotifications.answered({
+                  threadId: action.threadId,
+                  key: `approval:${id}`,
+                  summary: `The owner approved ${connected.displayName}. Continue setup with integration_update name ${connected.name}; use the inline sign-in card, then integration_test and list the tools`,
+                });
               return { approval: yield* getApproval(id) };
             }
             if (approval.agentId === null) return yield* fail("An agent approval needs an agent.");
@@ -713,6 +839,7 @@ const make = Effect.gen(function* () {
         )
         .pipe(
           Effect.tap(() => notifyApprovals),
+          Effect.tap(notifyDecision),
           Effect.mapError(wrap),
         ),
     reject: (id) =>
@@ -728,6 +855,7 @@ const make = Effect.gen(function* () {
         )
         .pipe(
           Effect.tap(() => notifyApprovals),
+          Effect.tap(notifyDecision),
           Effect.mapError(wrap),
         ),
     activity: (agentId) =>
@@ -744,7 +872,7 @@ const make = Effect.gen(function* () {
         }>`SELECT r.*, CASE WHEN r.ordinal = 1 THEN w.trigger_context_json END AS trigger_context_json, CASE WHEN r.ordinal = 1 THEN COALESCE(t.trigger_kind, CASE WHEN w.run_id IS NOT NULL THEN 'trigger' ELSE 'owner_message' END) ELSE 'owner_message' END AS trigger_kind,
         (SELECT substr(json_extract(m.payload_json, '$.text'), 1, 1200) FROM orchestration_v2_projection_messages m WHERE m.thread_id = r.thread_id AND m.run_id = r.run_id AND m.role = 'assistant' AND m.streaming = 0 ORDER BY m.created_at DESC LIMIT 1) AS summary
         FROM orchestration_v2_projection_runs r LEFT JOIN agent_run_threads t ON t.thread_id = r.thread_id LEFT JOIN agent_work_runs w ON w.work_thread_id = r.thread_id
-        WHERE r.thread_id = ${agent.conversationThreadId} OR t.agent_id = ${agentId} OR w.agent_id = ${agentId} ORDER BY r.requested_at DESC, r.run_id LIMIT 100`;
+        WHERE (r.thread_id = ${agent.conversationThreadId} OR t.agent_id = ${agentId} OR w.agent_id = ${agentId}) AND COALESCE(json_extract(r.payload_json, '$.userMessageId'), '') NOT LIKE 'agent-kickoff:%' ORDER BY r.requested_at DESC, r.run_id LIMIT 100`;
         const runs = yield* Effect.forEach(rows, (r) =>
           Effect.gen(function* () {
             const data = yield* decodeJsonRecord(r.payload_json);
@@ -770,7 +898,21 @@ const make = Effect.gen(function* () {
           yield* sql`SELECT id, agent_id AS agentId, run_id AS runId, kind, target_id AS targetId, at FROM agent_run_actions WHERE agent_id = ${agentId} ORDER BY at DESC, id LIMIT 500`.pipe(
             Effect.flatMap((rows) => Effect.forEach(rows, (r) => decodeRunAction(r))),
           );
-        return { runs, actions };
+        const briefRows = yield* sql<{
+          payload_json: string;
+        }>`SELECT payload_json FROM agent_handoff_briefs WHERE agent_id = ${agentId} ORDER BY version DESC LIMIT 10`;
+        const handoffBriefs = yield* Effect.forEach(briefRows, (r) =>
+          decodeHandoffBrief(r.payload_json),
+        );
+        let briefChars = 0;
+        return {
+          runs,
+          actions,
+          handoffBriefs: handoffBriefs.filter((brief) => {
+            briefChars += brief.text.length;
+            return briefChars <= 200_000;
+          }),
+        };
       }).pipe(Effect.mapError(wrap)),
   });
 });

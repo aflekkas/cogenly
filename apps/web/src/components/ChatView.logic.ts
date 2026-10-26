@@ -218,8 +218,8 @@ export function resolveEmptyServerThreadHero(input: {
 
 /**
  * Keep painted timelines on screen across thread jumps. Remounting LegendList
- * (or handing it an empty first paint) punches a hole through the chat pane —
- * white in light mode — so cmd+1/2/3 spam flashes even when the destination
+ * (or handing it an empty first paint) punches a hole through the chat pane
+ * (white in light mode), so cmd+1/2/3 spam flashes even when the destination
  * is already cached.
  *
  * Stored at module scope because ChatView remounts when the thread route
@@ -817,7 +817,7 @@ export function branchMismatchKey(
 
 // The mismatch banner only matters when the user is about to send: passive
 // reading of an old thread carries no risk (the branch picker tint already
-// covers ambient awareness). Draft content is the intent signal — composer
+// covers ambient awareness). Draft content is the intent signal; composer
 // focus is useless here because ChatView autofocuses the composer on every
 // thread open. `wasShownForCurrentMismatch` keeps the banner mounted once
 // revealed so it doesn't flicker away when the draft is cleared.

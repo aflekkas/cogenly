@@ -1,5 +1,7 @@
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 import { ORCHESTRATION_V2_WS_METHODS, WS_METHODS, type WsRpcGroup } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
+import * as RpcSchema from "effect/rpc/RpcSchema";
 import * as Layer from "effect/Layer";
 import * as References from "effect/References";
 import type * as RpcGroup from "effect/rpc/RpcGroup";
@@ -18,8 +20,6 @@ const RPC_AGGREGATES = {
   [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: "orchestrationV2",
   [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: "orchestration",
   [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: "orchestration",
-  [ORCHESTRATION_V2_WS_METHODS.recommendUsageLimitHandoff]: "orchestration",
-  [ORCHESTRATION_V2_WS_METHODS.acceptUsageLimitHandoff]: "orchestration",
   [ORCHESTRATION_V2_WS_METHODS.getTurnItem]: "orchestration",
   [ORCHESTRATION_V2_WS_METHODS.getTurnDiff]: "orchestration",
   [ORCHESTRATION_V2_WS_METHODS.getFullThreadDiff]: "orchestration",
@@ -75,6 +75,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.serverGetUsageSummary]: "server",
   [WS_METHODS.serverRefreshUsageRates]: "server",
   [WS_METHODS.serverSignalProcess]: "server",
+  [WS_METHODS.serverGetAgentProcesses]: "server",
+  [WS_METHODS.serverKillAgentProcess]: "server",
   [WS_METHODS.serverReportClientActivity]: "server",
   [WS_METHODS.serverReportHostPowerState]: "server",
   [WS_METHODS.serverGetBackgroundPolicy]: "server",
@@ -109,6 +111,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.projectLabelsAdoptRepository]: "projectLabels",
   [WS_METHODS.projectLabelsListOrphanFolders]: "projectLabels",
   [WS_METHODS.projectLabelsAdoptOrphanFolder]: "projectLabels",
+  [WS_METHODS.projectLabelsTrashOrphanFolder]: "projectLabels",
   [WS_METHODS.projectLabelsRemoveOrphanFolder]: "projectLabels",
   [WS_METHODS.projectLabelsListResources]: "projectLabels",
   [WS_METHODS.projectLabelsSubscribeResources]: "projectLabels",
@@ -134,8 +137,6 @@ const RPC_AGGREGATES = {
   [WS_METHODS.threadApprovalsSubscribe]: "agents",
   [WS_METHODS.agentsStartWork]: "agents",
   [WS_METHODS.agentsActivity]: "agents",
-  [WS_METHODS.integrationsPreviewNative]: "integrations",
-  [WS_METHODS.integrationsImportNative]: "integrations",
   [WS_METHODS.repoMcpTrustSubscribe]: "integrations",
   [WS_METHODS.repoMcpTrustRespond]: "integrations",
   [WS_METHODS.integrationsList]: "integrations",
@@ -227,6 +228,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.scheduledTasksListWebhookDeliveries]: "scheduledTasks",
   [WS_METHODS.scheduledTasksGetWebhookDelivery]: "scheduledTasks",
   [WS_METHODS.secretsAnswerRequest]: "secrets",
+  [WS_METHODS.secretsAnswerLoginRequest]: "secrets",
   [WS_METHODS.cloudGetRelayClientStatus]: "cloud",
   [WS_METHODS.cloudInstallRelayClient]: "cloud",
   [WS_METHODS.pullRequestsList]: "pull-requests",
@@ -381,7 +383,12 @@ export class RpcInstrumentation extends RpcMiddleware.Service<RpcInstrumentation
  */
 export const rpcInstrumentationLayer = Layer.succeed(RpcInstrumentation)((effect, { rpc }) => {
   const method = rpc._tag;
-  const measured = effect.pipe(
+  // Subscription refreshes caused by replication are background work, not
+  // fresh user activity; counting them would keep an idle client throttled.
+  const request = RpcSchema.isStreamSchema(rpc.successSchema)
+    ? effect
+    : effect.pipe(NodeSqliteClient.interactive);
+  const measured = request.pipe(
     withMetrics({ counter: rpcRequestsTotal, timer: rpcRequestDuration, attributes: { method } }),
   );
 

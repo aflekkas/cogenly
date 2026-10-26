@@ -1019,7 +1019,7 @@ function AgentCard({
       <ProviderInstanceIcon
         driverKind={ProviderDriverKind.make(driver)}
         displayName={displayName}
-        iconClassName="size-5"
+        size="lg"
       />
       <div className="min-w-0 flex-1">
         <span className="block text-sm font-medium text-foreground">{displayName}</span>
@@ -1357,8 +1357,8 @@ function ImportStep({
     const importGeneration = importGenerationRef.current;
     const importedProjects = importedProjectsRef.current;
     const projectAttempts = projectAttemptsRef.current;
-    // Interrupted imports are neither failures nor successes — the command was
-    // superseded or the environment dropped — but they still didn't land, so
+    // Interrupted imports are neither failures nor successes (the command was
+    // superseded or the environment dropped), but they still didn't land, so
     // they must not read as "imported everything". Retries skip paths that
     // already landed this session (re-creating them would only trip the
     // duplicate-root invariant and read as a failure).
@@ -1830,7 +1830,7 @@ function ImportRowMeta({
             <ProviderInstanceIcon
               driverKind={ProviderDriverKind.make("claudeAgent")}
               displayName="Claude Code"
-              iconClassName="size-3"
+              size="xs"
             />
           </span>
         ) : null}
@@ -1841,7 +1841,7 @@ function ImportRowMeta({
             <ProviderInstanceIcon
               driverKind={ProviderDriverKind.make("codex")}
               displayName="Codex"
-              iconClassName="size-3"
+              size="xs"
             />
           </span>
         ) : null}

@@ -1,5 +1,5 @@
 /**
- * ProviderInstanceRegistryHydration — derive a `ProviderInstanceConfigMap`
+ * ProviderInstanceRegistryHydration: derive a `ProviderInstanceConfigMap`
  * from `ServerSettings` and keep `ProviderInstanceRegistry` in sync with it.
  *
  * `settings.providerInstances` is the source of truth. Every built-in driver
@@ -80,7 +80,7 @@ export const deriveProviderInstanceConfigMap = (
  * layer scope (process lifetime in production), so it is interrupted on
  * shutdown without leaking.
  *
- * Errors inside the watcher are logged and swallowed — the registry's own
+ * Errors inside the watcher are logged and swallowed. The registry's own
  * "unavailable" bucket already absorbs unknown drivers and invalid
  * configs, so the only way the watcher could fail is a settings stream
  * tear-down, which logs and exits cleanly.

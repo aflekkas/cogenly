@@ -150,8 +150,8 @@ const LIVE_OR_ENDED_PROVIDER_TURN_STATUS: ReadonlySet<OrchestrationV2ProviderTur
 /**
  * Whether a run's provider turn went live: the run started (`startedAt` is
  * set when the turn start commits), or one of its attempts has a provider
- * turn that ran or ended. An unstarted restart continuation — dispatched by
- * an earlier restart but cut again before its turn began — never went live,
+ * turn that ran or ended. An unstarted restart continuation (dispatched by
+ * an earlier restart but cut again before its turn began) never went live,
  * so continuing it once more would only stack another marker for a turn that
  * was never actually resumed.
  */

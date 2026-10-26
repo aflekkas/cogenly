@@ -1,6 +1,12 @@
 import * as Schema from "effect/Schema";
 
-import { AuthPeerDelegateScope, AuthSyncReplicateScope } from "./auth.ts";
+import {
+  AuthEnvironmentMaintainScope,
+  AuthEnvironmentScope,
+  AuthOrchestrationOperateScope,
+  AuthPeerDelegateScope,
+  AuthSyncReplicateScope,
+} from "./auth.ts";
 import { EnvironmentId, ScheduledTaskId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { makePeerChannel } from "./machine.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
@@ -32,6 +38,7 @@ export const MachineHealthCheckId = Schema.Literals([
   "canary",
   "computer-use",
   "chat-terminal-sandbox",
+  "agent-processes",
 ]);
 export type MachineHealthCheckId = typeof MachineHealthCheckId.Type;
 
@@ -50,7 +57,8 @@ export type MachineHealthTarget = typeof MachineHealthTarget.Type;
  * A direct remedy, run by `machines.healthFix` on the machine the item is on:
  * `run-now` runs the scheduled task, `stop-runs` stops the thread's stale runs
  * and subagents, `retry-sync` retries sync with the target machine,
- * `setup-sandbox` installs the chat sandbox. `sign-in` needs the owner, so
+ * `setup-sandbox` installs the chat sandbox, `kill-orphans` kills commands an
+ * earlier server left running. `sign-in` needs the owner, so
  * clients open the provider or integration sign-in instead. Stuck-run reports
  * emit `resume` for 0.3.1 wire compatibility; 0.3.2 handles it as `stop-runs`.
  * An item without a fix gets an agent: clients start a chat to investigate it.
@@ -60,10 +68,38 @@ export const MachineHealthFix = Schema.Literals([
   "run-now",
   "resume",
   "stop-runs",
+  "send-queue",
   "retry-sync",
+  "discard-quarantined",
   "setup-sandbox",
+  "update-machine",
+  "kill-orphans",
 ]);
 export type MachineHealthFix = typeof MachineHealthFix.Type;
+
+/**
+ * The scope each fix actually needs, checked per selected item before the
+ * fix runs locally or is forwarded to a peer. `machinesHealthFix` itself is
+ * gated on `orchestration:operate`, which must not silently grant updating
+ * Cogenly, installing the sandbox, or killing processes.
+ */
+export const MACHINE_HEALTH_FIX_REQUIRED_SCOPES: Record<MachineHealthFix, AuthEnvironmentScope> = {
+  "sign-in": AuthOrchestrationOperateScope,
+  "run-now": AuthOrchestrationOperateScope,
+  resume: AuthOrchestrationOperateScope,
+  "stop-runs": AuthOrchestrationOperateScope,
+  "send-queue": AuthOrchestrationOperateScope,
+  "retry-sync": AuthOrchestrationOperateScope,
+  "discard-quarantined": AuthOrchestrationOperateScope,
+  "setup-sandbox": AuthEnvironmentMaintainScope,
+  "update-machine": AuthEnvironmentMaintainScope,
+  // Killing processes is the same capability as serverKillAgentProcess.
+  "kill-orphans": AuthEnvironmentMaintainScope,
+};
+export const requiredScopeForMachineHealthFix = (
+  fix: MachineHealthFix | null,
+): AuthEnvironmentScope =>
+  fix === null ? AuthOrchestrationOperateScope : MACHINE_HEALTH_FIX_REQUIRED_SCOPES[fix];
 
 export const MachineHealthItem = Schema.Struct({
   /** Stable across reports, e.g. `providers:claude`; alert state is keyed on it. */
@@ -229,8 +265,21 @@ export const MachineHealthRead = makePeerChannel({
 export const MachineHealthFixRun = makePeerChannel({
   name: "health.fix.v1",
   scope: AuthPeerDelegateScope,
-  payload: Schema.Struct({ itemKeys: MachineHealthFixItemKeys }),
+  payload: Schema.Struct({
+    itemKeys: MachineHealthFixItemKeys,
+    /** The original caller's scopes, forwarded so the peer checks them, not its peer credential. */
+    callerScopes: Schema.optionalKey(Schema.Array(AuthEnvironmentScope)),
+  }),
   success: MachineHealthFixResult,
+  error: MachineHealthError,
+});
+
+/** Update this peer to a version already running on a paired machine. */
+export const MachineVersionUpdate = makePeerChannel({
+  name: "health.update-version.v1",
+  scope: AuthPeerDelegateScope,
+  payload: Schema.Struct({ targetVersion: TrimmedNonEmptyString }),
+  success: Schema.Struct({}),
   error: MachineHealthError,
 });
 

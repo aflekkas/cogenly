@@ -33,7 +33,7 @@ export interface BotFrame {
 }
 
 /**
- * Ou le bot porte son regard quand quelque chose d'exterieur le pilote — le
+ * Ou le bot porte son regard quand quelque chose d'exterieur le pilote : le
  * pointeur de la souris, aujourd'hui.
  *
  * `yaw` et `pitch` sont des directions ABSOLUES, qui remplacent celles de la pose
@@ -44,8 +44,8 @@ export interface BotFrame {
  *   l'expression lirait sa valeur d'arrivee pendant que le morph est encore en
  *   cours, et les yeux sautaient a chaque changement d'humeur ;
  * - et il faut que ce soit absolu sur les DEUX axes. En relatif, la hauteur des
- *   yeux suivait celle de chaque expression — « neutre » regarde a +28,6deg quand
- *   les autres sont entre -9 et +9 — donc les yeux tombaient d'un coup au premier
+ *   yeux suivait celle de chaque expression (« neutre » regarde a +28,6deg quand
+ *   les autres sont entre -9 et +9), donc les yeux tombaient d'un coup au premier
  *   changement d'humeur. Ce qui fait le caractere d'une expression pendant le
  *   suivi, c'est la FORME de ses yeux (plisses, ronds, dissymetriques), pas
  *   l'endroit ou elle regarde : celui-la, c'est le curseur qui le decide.
@@ -53,7 +53,7 @@ export interface BotFrame {
  * `mix` dit a quel point l'exterieur commande la DIRECTION (0 = pas du tout).
  *
  * `wander` dit, separement, ce qui reste de derive automatique. Les deux ne se
- * confondent pas : quand le pointeur bouge, la derive doit s'eteindre — cumulees,
+ * confondent pas : quand le pointeur bouge, la derive doit s'eteindre ; cumulees,
  * le bot aurait l'air de chercher le curseur sans jamais le tenir. Mais quand il
  * n'y a PAS de pointeur (arrivee au clavier, au tactile, ou souris sortie de la
  * fenetre), la tete doit rester tournee ET continuer de vivre. Les confondre
@@ -61,7 +61,7 @@ export interface BotFrame {
  *
  * `spin` est un tour a parcourir EN CHEMIN, en degres, qu'on fait fondre vers 0
  * avec l'arrivee. Comme les yeux vivent sur une sphere, un tour les fait passer
- * derriere la boule et revenir de l'autre cote — et `-360deg` etant le meme
+ * derriere la boule et revenir de l'autre cote, et `-360deg` etant le meme
  * angle que `0`, il ne change rien a l'endroit ou ils se posent.
  */
 export interface Look {
@@ -179,7 +179,7 @@ export class BotEngine {
    * Duree de rattrapage du regard vers la cible. Plus court que `SHAPE_MORPH` :
    * un regard qui suit doit paraitre attentif, pas visqueux. Comme la cible est
    * reposee a chaque mouvement de souris, c'est cette duree qui donne au suivi
-   * son inertie — le regard n'atteint jamais tout a fait un curseur qui bouge.
+   * son inertie : le regard n'atteint jamais tout a fait un curseur qui bouge.
    */
   static readonly LOOK_MORPH = 0.24;
 
@@ -255,7 +255,7 @@ export class BotEngine {
    * Elle repart de la valeur COURANTE, et non de la cible precedente comme
    * `setShape` : cette methode est appelee a chaque mouvement de pointeur, et
    * repartir de l'ancienne cible ferait reculer le regard d'un cran avant
-   * chaque rattrapage — le suivi tremblerait au lieu de glisser.
+   * chaque rattrapage, et le suivi tremblerait au lieu de glisser.
    *
    * Meme contrat que `setShape` par ailleurs : l'etat externe entre par un
    * setter horodate, jamais par une variable lue pendant `sample`, sinon le
@@ -265,7 +265,7 @@ export class BotEngine {
     /*
      * Une cible non finie est refusee. Le moteur GARDE la derniere : un `NaN`
      * pose une seule fois se propagerait a chaque image et le bot ne se
-     * reposerait plus jamais. C'est arrive pour de vrai — un
+     * reposerait plus jamais. C'est arrive pour de vrai : un
      * `getBoundingClientRect` sur une boite de taille nulle donne `0 / 0` chez
      * l'appelant. Celui-la est corrige, mais le moteur n'a pas a dependre de la
      * prudence de ses appelants pour rester rejouable.
@@ -319,8 +319,8 @@ export class BotEngine {
    *
    * Il est LU dans une table et interpole, jamais recalcule : `eyefit.ts` explique
    * pourquoi cette distinction est tout le correctif. Ici il ne reste qu'a l'interpoler
-   * sur l'axe de la forme, avec exactement la courbe et la duree du morph de silhouette
-   * — c'est la meme cause, donc ce doit etre le meme mouvement.
+   * sur l'axe de la forme, avec exactement la courbe et la duree du morph de silhouette :
+   * c'est la meme cause, donc ce doit etre le meme mouvement.
    *
    * On interroge la table sur les BORNES du morph (`shapePrev` et `shape`) et non sur le
    * profil que rend `shapeAtTime` : celui-la est un tableau neuf alloue a chaque image,
@@ -329,7 +329,7 @@ export class BotEngine {
   private decalageAtTime(now: number, state: StateId): { x: number; y: number } {
     /**
      * Un axe de morph : on lit la table sur ses deux BORNES et on interpole avec sa
-     * courbe. Jamais sur la valeur interpolee — celle-la n'a pas d'identite et n'existe
+     * courbe. Jamais sur la valeur interpolee : celle-la n'a pas d'identite et n'existe
      * dans aucune table, et c'est en la lui donnant a manger que les versions
      * precedentes tremblaient.
      */
@@ -396,7 +396,7 @@ export class BotEngine {
    * faire : il garde l'etat quitte pour le fondre, ce qui est exactement son role en
    * lecture, et exactement ce qu'il ne faut pas quand on revient au debut d'une sequence.
    * Rejouer l'image 0 apres une passe complete melangeait le premier etat avec le DERNIER,
-   * et l'export GIF s'ouvrait sur une boule sans yeux — la comete a un `eyeAlpha` nul.
+   * et l'export GIF s'ouvrait sur une boule sans yeux, la comete a un `eyeAlpha` nul.
    *
    * `sample` reste une fonction pure du temps : comme `setState`, ceci est un setter DATE,
    * appele par le pilote de la sequence, jamais pendant un echantillonnage.
@@ -412,7 +412,7 @@ export class BotEngine {
 
   /**
    * Origine du fondu en cours : la pose figee s'il y en a une, sinon l'etat quitte evalue
-   * a son propre temps ecoule — donc encore en train de s'animer, ce qui est voulu.
+   * a son propre temps ecoule, donc encore en train de s'animer, ce qui est voulu.
    */
   private origine(now: number, shape: number[] | null, expr: BotExpression | null): Pose | null {
     if (this.departFige) return this.departFige;
@@ -450,8 +450,8 @@ export class BotEngine {
    * construction, quel que soit le nombre de changements enchaines.
    *
    * Et SEULEMENT dans ce cas. Figer a chaque changement arreterait net l'animation de
-   * l'etat qu'on quitte pendant tout le fondu — le « ! » d'`alert` se figerait en pleine
-   * course — alors qu'il n'y a rien a corriger hors morph : l'etat quitte y est deja
+   * l'etat qu'on quitte pendant tout le fondu (le « ! » d'`alert` se figerait en pleine
+   * course), alors qu'il n'y a rien a corriger hors morph : l'etat quitte y est deja
    * exactement l'image affichee. La lecture d'un montage, dont les blocs durent au moins
    * le plus long fondu (`MIN_BLOCK`), ne fige donc jamais rien et rend au bit ce qu'elle
    * rendait.
@@ -481,7 +481,7 @@ export class BotEngine {
     const since = now - this.tCur;
     // L'etat precedent n'est jamais purge : `since < def.morph` suffit a
     // l'ignorer une fois le fondu passe, et l'oublier rendrait le moteur non
-    // rejouable — relire une date d'avant la fin du fondu ne le retrouverait
+    // rejouable : relire une date d'avant la fin du fondu ne le retrouverait
     // plus. C'est l'optimisation qui parait innocente et qui casse tout.
     const origine = since < def.morph ? this.origine(now, shape, expr) : null;
     // part de vie au repos : 0 sur un repos immobile, 1 ailleurs, fondue avec l'etat
@@ -491,13 +491,13 @@ export class BotEngine {
       // Ease-out exponentiel : c'est la courbe mesuree sur la video. Le corps
       // n'a pas d'overshoot (seuls la pastille et l'ouverture des yeux en ont).
       // Le ratio est borne : relire une date ANTERIEURE au changement d'etat
-      // donnerait un ratio negatif, que l'ease-out extrapole — la silhouette
+      // donnerait un ratio negatif, que l'ease-out extrapole, et la silhouette
       // part alors trente fois trop loin.
       const ratio = easings.easeOutQuint(clamp(since / def.morph));
       pose = blendPose(origine, pose, ratio);
       if (this.prev) vie = lerp(vitalite(this.prev), vie, ratio);
       // Le decalage des yeux suit la MEME courbe que la silhouette qui le motive. Il vient
-      // de l'etat quitte, que `setState` renseigne toujours en meme temps que l'origine —
+      // de l'etat quitte, que `setState` renseigne toujours en meme temps que l'origine ;
       // le test est la pour le typage, pas pour un cas reel.
       const quitte = this.prev;
       if (quitte) {
@@ -521,7 +521,7 @@ export class BotEngine {
     const gaze = {
       // Les deux visees REMPLACENT celles de la pose au lieu de s'y ajouter (voir
       // `Look`), et le tour se retranche en chemin. La derive s'ajoute APRES le
-      // melange, sinon la cible l'annulerait en meme temps que la pose — or elle
+      // melange, sinon la cible l'annulerait en meme temps que la pose, or elle
       // doit survivre a une tete tournee sans pointeur.
       yaw: lerp(pose.gaze.yaw, look.yaw, look.mix) + life.dYaw - look.spin,
       pitch: lerp(pose.gaze.pitch, look.pitch, look.mix) + life.dPitch,

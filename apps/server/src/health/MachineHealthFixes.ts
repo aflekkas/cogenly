@@ -14,6 +14,9 @@ import {
   type MachineHealthFixOutcome,
   type MachineHealthFixResult,
   MachineHealthFixRun,
+  MachineVersionUpdate,
+  requiredScopeForMachineHealthFix,
+  type AuthEnvironmentScope,
   type MachineHealthItem,
   type ThreadId,
   isOrchestrationV2WorkActive,
@@ -27,20 +30,29 @@ import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import * as ServerSelfUpdate from "../cloud/selfUpdate.ts";
+import { compareExactServiceVersions, isExactServiceVersion } from "../cloud/serviceProtocol.ts";
 import * as MachineIdentity from "../machines/MachineIdentity.ts";
 import * as Machines from "../machines/Machines.ts";
 import * as PeerChannels from "../machines/PeerChannels.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
+import * as AgentProcesses from "../process/AgentProcesses.ts";
 import * as ScheduledTasks from "../scheduledTasks/ScheduledTaskService.ts";
 import * as MachineHealth from "./MachineHealth.ts";
-import { STUCK_RUN_AFTER_MS } from "./healthChecks.ts";
+import { STUCK_RUN_AFTER_MS, newestMachineVersion } from "./healthChecks.ts";
 import { readStaleRuns } from "./staleRuns.ts";
 
 export class MachineHealthFixes extends Context.Service<
   MachineHealthFixes,
   {
+    /**
+     * `callerScopes` is the original caller's authority: each selected fix is
+     * checked against its own required scope before it runs here or is
+     * forwarded to a peer. Omit only for owner-equivalent internal callers.
+     */
     readonly fix: (
       input: MachineHealthFixInput,
+      callerScopes?: ReadonlyArray<AuthEnvironmentScope>,
     ) => Effect.Effect<MachineHealthFixResult, MachineHealthError>;
   }
 >()("cogenly-server/health/MachineHealthFixes") {}
@@ -68,6 +80,7 @@ export function summarizeFixOutcomes(outcomes: ReadonlyArray<MachineHealthFixOut
 
 const make = Effect.gen(function* () {
   const health = yield* MachineHealth.MachineHealth;
+  const selfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
   const machines = yield* Machines.Machines;
   const channels = yield* PeerChannels.PeerChannels;
   const identity = yield* MachineIdentity.MachineIdentity;
@@ -75,6 +88,7 @@ const make = Effect.gen(function* () {
   const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
   const sql = yield* SqlClient.SqlClient;
   const crypto = yield* Crypto.Crypto;
+  const agentProcesses = yield* AgentProcesses.AgentProcesses;
 
   const commandId = (suffix: string) =>
     crypto.randomUUIDv4().pipe(
@@ -210,6 +224,28 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  const updateHere = (targetVersion: string) =>
+    Effect.gen(function* () {
+      const self = yield* identity.self;
+      const view = yield* machines.list.pipe(
+        Effect.mapError((cause) => new MachineHealthError({ reason: "unavailable", cause })),
+      );
+      if (
+        selfUpdate.capability !== "boot-service" ||
+        !isExactServiceVersion(targetVersion) ||
+        !isExactServiceVersion(self.serverVersion) ||
+        targetVersion !== newestMachineVersion(view.machines) ||
+        compareExactServiceVersions(targetVersion, self.serverVersion) <= 0
+      ) {
+        return yield* new MachineHealthError({ reason: "unavailable" });
+      }
+      yield* selfUpdate
+        .update({ targetVersion })
+        .pipe(Effect.mapError((cause) => new MachineHealthError({ reason: "unavailable", cause })));
+      return {};
+    });
+  yield* channels.register(MachineVersionUpdate, ({ targetVersion }) => updateHere(targetVersion));
+
   const runFix = (item: MachineHealthItem): Effect.Effect<MachineHealthFixOutcome> => {
     const itemKey = item.key;
     const target = item.target;
@@ -237,6 +273,19 @@ const make = Effect.gen(function* () {
               Effect.as({ itemKey, status: "fixed", message: "Started a new run." } as const),
               Effect.catch((error) => Effect.succeed(failed(error.message))),
             );
+      case "discard-quarantined":
+        return target?._tag !== "thread"
+          ? Effect.succeed(failed("The thread to discard incoming changes for is missing."))
+          : health.discardQuarantined(target.threadId).pipe(
+              Effect.map((count) => ({
+                itemKey,
+                status: "fixed" as const,
+                message: `Discarded ${count} quarantined incoming items for ${item.title.replace("Discard quarantined changes for ", "")}. Local thread data was kept.`,
+              })),
+              Effect.catch(() =>
+                Effect.succeed(failed("Quarantined changes could not be discarded.")),
+              ),
+            );
       case "retry-sync":
         return target?._tag !== "machine"
           ? Effect.succeed(failed("The machine to sync with is missing."))
@@ -244,6 +293,26 @@ const make = Effect.gen(function* () {
               Effect.as({ itemKey, status: "fixed", message: "Sync ran again." } as const),
               Effect.catch((error) => Effect.succeed(failed(error.message))),
             );
+      case "update-machine":
+        return Effect.gen(function* () {
+          if (target?._tag !== "machine") return failed("The machine to update is missing.");
+          const view = yield* machines.list;
+          const targetVersion = newestMachineVersion(view.machines);
+          if (targetVersion === undefined) return failed("The target version is unknown.");
+          const self = yield* identity.self;
+          if (target.environmentId === self.environmentId) yield* updateHere(targetVersion);
+          else
+            yield* machines
+              .call(target.environmentId, MachineVersionUpdate, { targetVersion })
+              .pipe(Effect.timeout(PEER_FIX_TIMEOUT));
+          return {
+            itemKey,
+            status: "fixed",
+            message: `Started updating to ${targetVersion}.`,
+          } as const;
+        }).pipe(
+          Effect.catch(() => Effect.succeed(failed("The machine update could not be started."))),
+        );
       case "setup-sandbox":
         return health.setupSandbox.pipe(
           Effect.map((result) =>
@@ -252,16 +321,42 @@ const make = Effect.gen(function* () {
               : failed(result.message),
           ),
         );
+      case "send-queue":
+        return target?._tag !== "thread"
+          ? Effect.succeed(failed("The thread to send to is missing."))
+          : Effect.gen(function* () {
+              yield* threads.dispatch({
+                type: "queue.resume",
+                threadId: target.threadId,
+                commandId: yield* commandId(`queue:${target.threadId}`),
+              });
+              return { itemKey, status: "fixed", message: "Started the queued messages." } as const;
+            }).pipe(Effect.catch(() => Effect.succeed(failed("The queue could not be sent."))));
       case "resume":
       case "stop-runs":
         return target?._tag !== "thread"
           ? Effect.succeed(failed("The thread to stop is missing."))
           : stopStaleRuns(target.threadId, itemKey);
+      case "kill-orphans":
+        return agentProcesses.killOrphans.pipe(
+          Effect.map(
+            (pids) =>
+              ({
+                itemKey,
+                status: "fixed",
+                message:
+                  pids.length === 0
+                    ? "They had already exited."
+                    : `Killed ${pids.length} ${pids.length === 1 ? "process" : "processes"}.`,
+              }) as const,
+          ),
+        );
     }
   };
 
   const fixHere = Effect.fn("MachineHealthFixes.fixHere")(function* (
     itemKeys: ReadonlyArray<string>,
+    callerScopes?: ReadonlyArray<AuthEnvironmentScope>,
   ) {
     const report = yield* health.report;
     const items = new Map(
@@ -270,6 +365,17 @@ const make = Effect.gen(function* () {
     const outcomes: Array<MachineHealthFixOutcome> = [];
     for (const itemKey of new Set(itemKeys)) {
       const entry = items.get(itemKey);
+      if (entry !== undefined && entry.status !== "ok" && callerScopes !== undefined) {
+        const required = requiredScopeForMachineHealthFix(entry.fix);
+        if (!callerScopes.includes(required)) {
+          outcomes.push({
+            itemKey,
+            status: "failed",
+            message: `This fix needs the ${required} permission, which the caller does not have.`,
+          });
+          continue;
+        }
+      }
       outcomes.push(
         entry === undefined || entry.status === "ok"
           ? { itemKey, status: "resolved", message: "This has already cleared." }
@@ -286,20 +392,31 @@ const make = Effect.gen(function* () {
     } satisfies MachineHealthFixResult;
   });
 
-  yield* channels.register(MachineHealthFixRun, (payload) => fixHere(payload.itemKeys));
+  yield* channels.register(MachineHealthFixRun, (payload) =>
+    fixHere(payload.itemKeys, payload.callerScopes),
+  );
 
-  const fixThere = (environmentId: EnvironmentId, itemKeys: ReadonlyArray<string>) =>
-    machines.call(environmentId, MachineHealthFixRun, { itemKeys }).pipe(
-      Effect.timeout(PEER_FIX_TIMEOUT),
-      // Offline, an older Cogenly without Fix, or a fix that timed out there.
-      Effect.mapError((cause) => new MachineHealthError({ reason: "unavailable", cause })),
-    );
+  const fixThere = (
+    environmentId: EnvironmentId,
+    itemKeys: ReadonlyArray<string>,
+    callerScopes?: ReadonlyArray<AuthEnvironmentScope>,
+  ) =>
+    machines
+      .call(environmentId, MachineHealthFixRun, {
+        itemKeys,
+        ...(callerScopes === undefined ? {} : { callerScopes: [...callerScopes] }),
+      })
+      .pipe(
+        Effect.timeout(PEER_FIX_TIMEOUT),
+        // Offline, an older Cogenly without Fix, or a fix that timed out there.
+        Effect.mapError((cause) => new MachineHealthError({ reason: "unavailable", cause })),
+      );
 
   const fix: MachineHealthFixes["Service"]["fix"] = Effect.fn("MachineHealthFixes.fix")(
-    function* (input) {
+    function* (input, callerScopes) {
       const self = yield* identity.self;
       if (input.environmentId === undefined || input.environmentId === self.environmentId) {
-        return yield* fixHere(input.itemKeys);
+        return yield* fixHere(input.itemKeys, callerScopes);
       }
       const view = yield* machines.list.pipe(
         Effect.mapError((cause) => new MachineHealthError({ reason: "unavailable", cause })),
@@ -310,7 +427,7 @@ const make = Effect.gen(function* () {
           (candidate.relation === "hub" || candidate.relation === "spoke"),
       );
       if (machine === undefined) return yield* new MachineHealthError({ reason: "not-paired" });
-      return yield* fixThere(machine.environmentId, input.itemKeys);
+      return yield* fixThere(machine.environmentId, input.itemKeys, callerScopes);
     },
   );
 

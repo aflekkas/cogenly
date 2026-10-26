@@ -163,6 +163,12 @@ const ICON_PATHS: Record<string, ReadonlyArray<{ tag: string; attrs: Record<stri
     },
     { tag: "circle", attrs: { cx: "12", cy: "12", r: "3" } },
   ],
+  smile: [
+    { tag: "circle", attrs: { cx: "12", cy: "12", r: "10" } },
+    { tag: "path", attrs: { d: "M8 14s1.5 2 4 2 4-2 4-2" } },
+    { tag: "line", attrs: { x1: "9", x2: "9.01", y1: "9", y2: "9" } },
+    { tag: "line", attrs: { x1: "15", x2: "15.01", y1: "9", y2: "9" } },
+  ],
   "folder-tree": [
     {
       tag: "path",
@@ -446,7 +452,7 @@ export function showContextMenuFallback<T extends string>(
       // Fit the viewport minus its margins, so a menu only scrolls when the
       // window is shorter than the menu itself.
       const maxHeight = `calc(100vh - ${MENU_VIEWPORT_MARGIN_PX * 2}px)`;
-      inner.className = "min-w-0 max-w-sm overflow-y-auto overflow-x-hidden p-1";
+      inner.className = "scroll-fade-y min-w-0 max-w-sm overflow-y-auto overflow-x-hidden p-1";
       inner.style.cssText = `max-height:${maxHeight};min-width:0;max-width:24rem;overflow-x:hidden;overflow-y:auto;padding:0.25rem;`;
 
       for (const item of entries) {

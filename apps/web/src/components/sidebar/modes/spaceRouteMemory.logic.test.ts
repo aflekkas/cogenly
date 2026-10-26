@@ -2,11 +2,13 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   forgetSpaceRoute,
+  forgetSpaceRouteToThread,
   parseStoredSpaceRouteMemory,
   rememberSpaceRoute,
   resolveSpaceReturn,
   spaceOfRoute,
   spaceRouteForMatch,
+  threadRouteAvailability,
   type SpaceRoute,
   type SpaceRouteMemory,
 } from "./spaceRouteMemory.logic";
@@ -109,6 +111,35 @@ describe("space route memory", () => {
         space === "agents" ? "available" : "gone",
       ),
     ).toBeNull();
+  });
+
+  it("does not return Agents to a deleted agent's conversation", () => {
+    const conversation: SpaceRoute = {
+      kind: "thread",
+      environmentId: "env-1",
+      threadId: "agent-conversation:a1",
+    };
+    const memory = visit({}, [
+      { href: "/env-1/agent-conversation:a1", route: conversation, mode: "agents" },
+    ]);
+    const returnWith = (agentListed: boolean | null) =>
+      resolveSpaceReturn(memory, "agents", (_route, space) =>
+        threadRouteAvailability({ space, mode: "agents", archived: false, agentListed }),
+      );
+    expect(returnWith(true)).toBe("/env-1/agent-conversation:a1");
+    expect(returnWith(false)).toBeNull();
+    // The agents list is still loading: return there and let the page load.
+    expect(returnWith(null)).toBe("/env-1/agent-conversation:a1");
+
+    const forgotten = forgetSpaceRouteToThread(memory, "agents", {
+      environmentId: "env-1",
+      threadId: "agent-conversation:a1",
+    });
+    expect(resolveSpaceReturn(forgotten, "agents", always)).toBeNull();
+    // Deleting another agent leaves the page remembered.
+    expect(
+      forgetSpaceRouteToThread(memory, "agents", { environmentId: "env-1", threadId: "other" }),
+    ).toBe(memory);
   });
 
   it("never sends a space to a page another space owns", () => {

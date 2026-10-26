@@ -11,7 +11,6 @@ import {
   agentFailureMessage,
   agentNextStep,
   catalogSetupFor,
-  settingsSetupUrl,
   setupActionFor,
 } from "./IntegrationSetup.ts";
 
@@ -229,7 +228,6 @@ describe("setupActionFor, from errors", () => {
 describe("agentNextStep", () => {
   it("gives the agent private setup instructions rather than a Settings wizard", () => {
     const text = agentNextStep(catalogSetupFor({ entry: entry("slack"), mode: "oauth_app" })!, {
-      settingsUrl: settingsSetupUrl(undefined),
       entry: entry("slack"),
       accountLabel: "Acme",
     });
@@ -238,17 +236,79 @@ describe("agentNextStep", () => {
     expect(text).toContain("Retry integration_add");
     expect(text).not.toContain("The user can do this in Settings");
   });
-  it("keeps precise failures while directing setup to the agent", () => {
-    const { message, transient } = agentFailureMessage(
-      { reason: "google_client_missing" },
-      undefined,
+  it("has the agent do console work itself, named Cogenly, leaving only consent to the user", () => {
+    const google = setupActionFor({
+      entry: entry("google-workspace"),
+      reason: "google_client_missing",
+      redirectUri: "https://cogenly.example.com/oauth/integrations/google/callback",
+    })!;
+    const cases = [
+      [google, entry("google-workspace")],
+      [catalogSetupFor({ entry: entry("slack"), mode: "oauth_app" })!, entry("slack")],
+      [catalogSetupFor({ entry: entry("github"), mode: "oauth_app" })!, entry("github")],
+      [catalogSetupFor({ entry: entry("github"), mode: "api_key" })!, entry("github")],
+      [catalogSetupFor({ entry: entry("linear"), mode: "api_key" })!, entry("linear")],
+    ] as const;
+    for (const [action, service] of cases) {
+      const text = agentNextStep(action, {
+        entry: service,
+      });
+      expect(text).toContain("collaborative browser");
+      expect(text).toContain("Cogenly");
+      expect(text).toContain("setupNotes");
+      expect(text).toContain("Do not hand these steps to the user.");
+      // The old guides handed the user the console steps.
+      expect(text).not.toMatch(/help the user create|paste (it|them) here|may require the user/i);
+      expect(text).not.toMatch(/into view|reply "?go/i);
+    }
+    const googleText = agentNextStep(google, {
+      entry: entry("google-workspace"),
+    });
+    // Reuse before create, and the client goes straight to the vault.
+    expect(googleText.indexOf("Reuse it if it exists")).toBeLessThan(
+      googleText.indexOf("https://console.cloud.google.com/projectcreate"),
     );
+    expect(googleText).toContain('vault_capture {name: "google-oauth-client"');
+    expect(googleText).toContain("cogenly-");
+  });
+
+  it("keeps precise failures while directing setup to the agent", () => {
+    const { message, transient } = agentFailureMessage({
+      operation: "create",
+      reason: "google_client_missing",
+    });
     expect(transient).toBe(false);
     expect(message).toContain("google-oauth-client");
     expect(message).not.toContain("google_client_missing");
-    expect(agentFailureMessage({ reason: "upstream_timeout" }, undefined).transient).toBe(true);
-    expect(agentFailureMessage({ reason: "not_found" }, undefined).message).toContain(
+    expect(agentFailureMessage({ operation: "test", reason: "upstream_timeout" }).transient).toBe(
+      true,
+    );
+    expect(agentFailureMessage({ operation: "update", reason: "not_found" }).message).toContain(
       "No connected integration",
     );
+  });
+
+  it("names the refusing step and the OAuth server's error instead of a generic failure", () => {
+    const refused = agentFailureMessage({
+      operation: "validate private endpoint",
+      reason: "invalid_request",
+    }).message;
+    expect(refused).toContain('"validate private endpoint"');
+    expect(refused).not.toContain("/settings/");
+    const oauth = agentFailureMessage({
+      operation: "register",
+      reason: "upstream_error",
+      oauthFailure: {
+        stage: "DCR",
+        host: "mcp-auth.wisprflow.com",
+        status: 400,
+        error: "invalid_redirect_uri",
+        description: "Redirect not allowed",
+      },
+    });
+    expect(oauth.message).toBe(
+      "OAuth DCR failed at mcp-auth.wisprflow.com (HTTP 400): invalid_redirect_uri (Redirect not allowed).",
+    );
+    expect(oauth.transient).toBe(true);
   });
 });

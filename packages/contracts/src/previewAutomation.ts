@@ -58,9 +58,32 @@ export const PREVIEW_AUTOMATION_SERVER_OPERATIONS = [
   "select",
   "drag",
   "permission",
+  "extract",
 ] as const;
 export const PreviewAutomationOperation = Schema.Literals(PREVIEW_AUTOMATION_SERVER_OPERATIONS);
 export type PreviewAutomationOperation = typeof PreviewAutomationOperation.Type;
+
+export const PreviewAutomationOutputOptions = Schema.Struct({
+  output: Schema.optional(
+    Schema.Literals(["none", "changes", "compact", "full"]).annotate({
+      description:
+        "Response detail for this call. Actions default to changes; snapshots default to compact. none skips page inspection; full includes the accessibility tree and diagnostics. Screenshots are requested separately with preview_snapshot includeImage=true.",
+    }),
+  ),
+  viewportOnly: Schema.optional(
+    Schema.Boolean.annotate({
+      description:
+        "Limit compact elements to the viewport (default true). Set false for the whole document.",
+    }),
+  ),
+  scope: Schema.optional(
+    Schema.String.check(Schema.isMaxLength(2048)).annotate({
+      description:
+        "Limit the returned view to a Playwright locator, CSS selector, or aria-ref=<ref> subtree. Does not change the action target.",
+    }),
+  ),
+});
+export type PreviewAutomationOutputOptions = typeof PreviewAutomationOutputOptions.Type;
 
 const PreviewAutomationTabTargetFields = {
   tabId: Schema.optional(
@@ -91,9 +114,8 @@ export const PreviewAutomationProfile = Schema.Struct({
 export type PreviewAutomationProfile = typeof PreviewAutomationProfile.Type;
 
 /**
- * Server hosts: `panel` when the desktop app's browser panel renders the tab
- * (the user's own profile and logins), `background` when the server's own
- * browser does.
+ * Server hosts: `panel` for a desktop-owned page or a streamed page with a
+ * viewer; `background` for a headless page without viewers.
  */
 export const PreviewAutomationTabRendering = Schema.Literals(["panel", "background"]);
 export type PreviewAutomationTabRendering = typeof PreviewAutomationTabRendering.Type;
@@ -115,6 +137,14 @@ export type PreviewAutomationTabSummary = typeof PreviewAutomationTabSummary.Typ
 
 export const PreviewAutomationStatus = Schema.Struct({
   available: Schema.Boolean,
+  /** Health of the automation connection, independent of whether the tab is visible. */
+  automation: Schema.optional(
+    Schema.Struct({
+      connected: Schema.Boolean,
+      state: Schema.Literals(["ready", "unresponsive", "disconnected"]),
+    }),
+  ),
+  status: Schema.optional(Schema.Literals(["pending_panel"])),
   /** Advisory: whether the user can see this tab. Never a reason to stop or to ask the user. */
   visible: Schema.Boolean,
   tabId: Schema.NullOr(PreviewTabId),
@@ -299,6 +329,7 @@ export const BrowserNavigationTarget = Schema.Union([
 export type BrowserNavigationTarget = typeof BrowserNavigationTarget.Type;
 
 export const PreviewAutomationNavigateInput = Schema.Struct({
+  ...PreviewAutomationOutputOptions.fields,
   ...PreviewAutomationTabTargetFields,
   url: Schema.optional(BoundedUrl).annotate({
     description: `Website URL. ${URL_GUIDANCE} Use this for public pages and directly reachable URLs.`,
@@ -436,7 +467,7 @@ export type PreviewAutomationSetColorSchemeResult =
 
 const Locator = TrimmedNonEmptyString.annotate({
   description:
-    "Use locator='aria-ref=<ref>' with a ref from the latest server snapshot (including iframe elements), or a unique Playwright role/text selector. Refs expire on navigation, a new snapshot, or control handoff; refresh the snapshot after a stale-ref error.",
+    "Use locator='aria-ref=<ref>' with a ref from the latest server snapshot (including iframe elements), or a unique Playwright role/text selector. Refs survive snapshots while the element remains unchanged; navigation or control handoff expires them; refresh the snapshot after a stale-ref error.",
 });
 
 const LegacySelector = TrimmedNonEmptyString.annotate({
@@ -445,6 +476,7 @@ const LegacySelector = TrimmedNonEmptyString.annotate({
 });
 
 const PointerTargetFields = {
+  ...PreviewAutomationOutputOptions.fields,
   ...PreviewAutomationTabTargetFields,
   selector: Schema.optional(LegacySelector).annotate({
     description:
@@ -452,7 +484,7 @@ const PointerTargetFields = {
   }),
   locator: Schema.optional(Locator).annotate({
     description:
-      "Use locator='aria-ref=<ref>' with a ref from the latest server snapshot (including iframe elements), or a unique Playwright role/text selector. Refs expire on navigation, a new snapshot, or control handoff; refresh the snapshot after a stale-ref error.",
+      "Use locator='aria-ref=<ref>' with a ref from the latest server snapshot (including iframe elements), or a unique Playwright role/text selector. Refs survive snapshots while the element remains unchanged; navigation or control handoff expires them; refresh the snapshot after a stale-ref error.",
   }),
   x: Schema.optional(
     Schema.Finite.annotate({
@@ -513,6 +545,7 @@ export const PreviewAutomationHoverInput = Schema.Struct(PointerTargetFields)
 export type PreviewAutomationHoverInput = typeof PreviewAutomationHoverInput.Type;
 
 export const PreviewAutomationSelectInput = Schema.Struct({
+  ...PreviewAutomationOutputOptions.fields,
   ...PreviewAutomationTabTargetFields,
   selector: Schema.optional(LegacySelector).annotate({
     description: "Legacy CSS selector for a <select>. Prefer locator.",
@@ -550,6 +583,7 @@ const DescribedLocator = (description: string) =>
     .annotateKey({ description });
 
 export const PreviewAutomationDragInput = Schema.Struct({
+  ...PreviewAutomationOutputOptions.fields,
   ...PreviewAutomationTabTargetFields,
   source: DescribedLocator(
     "Locator of the element to drag, for example aria-ref=<ref> from the latest snapshot.",
@@ -560,6 +594,7 @@ export const PreviewAutomationDragInput = Schema.Struct({
 export type PreviewAutomationDragInput = typeof PreviewAutomationDragInput.Type;
 
 export const PreviewAutomationUploadInput = Schema.Struct({
+  ...PreviewAutomationOutputOptions.fields,
   ...PreviewAutomationTabTargetFields,
   paths: Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(20)).annotate({
     description:
@@ -588,6 +623,7 @@ export const PreviewAutomationUploadInput = Schema.Struct({
 export type PreviewAutomationUploadInput = typeof PreviewAutomationUploadInput.Type;
 
 export const PreviewAutomationTypeInput = Schema.Struct({
+  ...PreviewAutomationOutputOptions.fields,
   ...PreviewAutomationTabTargetFields,
   /** Vault delivery checks and writes in the target document's same JavaScript task. */
   expectedOrigin: Schema.optional(Schema.String),
@@ -620,6 +656,7 @@ export const PreviewAutomationTypeInput = Schema.Struct({
 export type PreviewAutomationTypeInput = typeof PreviewAutomationTypeInput.Type;
 
 export const PreviewAutomationPressInput = Schema.Struct({
+  ...PreviewAutomationOutputOptions.fields,
   ...PreviewAutomationTabTargetFields,
   key: Schema.String.check(Schema.isTrimmed())
     .check(
@@ -641,6 +678,7 @@ export const PreviewAutomationPressInput = Schema.Struct({
 export type PreviewAutomationPressInput = typeof PreviewAutomationPressInput.Type;
 
 export const PreviewAutomationScrollInput = Schema.Struct({
+  ...PreviewAutomationOutputOptions.fields,
   ...PreviewAutomationTabTargetFields,
   deltaX: Schema.optional(
     Schema.Finite.annotate({
@@ -704,7 +742,27 @@ export const PreviewAutomationEvaluateInput = Schema.Struct({
 });
 export type PreviewAutomationEvaluateInput = typeof PreviewAutomationEvaluateInput.Type;
 
+export const PreviewAutomationExtractInput = Schema.Struct({
+  ...PreviewAutomationTabTargetFields,
+  selector: Schema.String.check(Schema.isNonEmpty())
+    .check(Schema.isMaxLength(2048))
+    .annotate({ description: "CSS selector for matching elements in the main frame." }),
+  attributes: Schema.optional(
+    Schema.Array(Schema.String.check(Schema.isMaxLength(128))).check(Schema.isMaxLength(20)),
+  ).annotate({
+    description: "Attributes to read alongside visible text. No page JavaScript is accepted.",
+  }),
+  limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))).annotate(
+    {
+      description:
+        "Maximum matched elements, default 50 and maximum 100. Use a narrower selector to page large results.",
+    },
+  ),
+});
+export type PreviewAutomationExtractInput = typeof PreviewAutomationExtractInput.Type;
+
 export const PreviewAutomationWaitForInput = Schema.Struct({
+  ...PreviewAutomationOutputOptions.fields,
   ...PreviewAutomationTabTargetFields,
   selector: Schema.optional(LegacySelector).annotate({
     description: "Legacy CSS selector that must match an element. Prefer locator.",
@@ -787,6 +845,71 @@ export const PreviewAutomationActionEvent = Schema.Struct({
 });
 export type PreviewAutomationActionEvent = typeof PreviewAutomationActionEvent.Type;
 
+export const PreviewAutomationCompactElement = Schema.Struct({
+  ref: Schema.optional(Schema.String),
+  role: Schema.String,
+  name: Schema.String,
+  value: Schema.optional(Schema.String),
+  states: Schema.optional(Schema.Array(Schema.String)),
+});
+export type PreviewAutomationCompactElement = typeof PreviewAutomationCompactElement.Type;
+
+export const PreviewAutomationScreenshot = Schema.Struct({
+  mimeType: Schema.Literals(["image/png", "image/jpeg"]),
+  data: Schema.String,
+  width: Schema.Int,
+  height: Schema.Int,
+});
+
+export const PreviewAutomationObservation = Schema.Struct({
+  url: Schema.optional(Schema.String),
+  title: Schema.optional(Schema.String),
+  loading: Schema.optional(Schema.Boolean),
+  elements: Schema.optional(Schema.Array(PreviewAutomationCompactElement)),
+  errors: Schema.optional(Schema.Array(Schema.String)),
+  summary: Schema.optional(
+    Schema.Struct({
+      added: Schema.Number,
+      changed: Schema.Number,
+      removed: Schema.Number,
+    }),
+  ).annotate({
+    description:
+      "Counts in place of changes when the diff is too large to list; call preview_snapshot for the page.",
+  }),
+  changes: Schema.optional(
+    Schema.Struct({
+      added: Schema.Array(PreviewAutomationCompactElement),
+      changed: Schema.Array(PreviewAutomationCompactElement),
+      removed: Schema.Array(Schema.String),
+    }),
+  ),
+  omitted: Schema.optional(Schema.Number),
+  guidance: Schema.optional(Schema.String),
+  observationError: Schema.optional(Schema.String),
+  screenshot: Schema.optional(PreviewAutomationScreenshot),
+  screenshotError: Schema.optional(Schema.String),
+});
+export type PreviewAutomationObservation = typeof PreviewAutomationObservation.Type;
+
+export const PreviewAutomationSnapshotInput = Schema.Struct({
+  ...PreviewAutomationTabTargetFields,
+  ...PreviewAutomationOutputOptions.fields,
+  includeImage: Schema.optional(
+    Schema.Boolean.annotate({
+      description:
+        "Capture and include an image. Default false; request for visual checks, canvas, or an ambiguous structured view.",
+    }),
+  ),
+  save: Schema.optional(
+    Schema.Boolean.annotate({
+      description:
+        "Save a PNG and return screenshotPath. Existing save-only callers receive only the URL and path.",
+    }),
+  ),
+});
+export type PreviewAutomationSnapshotInput = typeof PreviewAutomationSnapshotInput.Type;
+
 export const PreviewAutomationSnapshot = Schema.Struct({
   /** Server hosts: the tab this snapshot read. */
   tab: Schema.optional(PreviewAutomationTabSummary),
@@ -799,14 +922,19 @@ export const PreviewAutomationSnapshot = Schema.Struct({
   consoleEntries: Schema.Array(PreviewAutomationConsoleEntry),
   networkEntries: Schema.Array(PreviewAutomationNetworkEntry),
   actionTimeline: Schema.Array(PreviewAutomationActionEvent),
-  screenshot: Schema.Struct({
-    mimeType: Schema.Literal("image/png"),
-    data: Schema.String,
-    width: Schema.Int,
-    height: Schema.Int,
-  }),
+  screenshotError: Schema.optional(Schema.String),
+  screenshot: Schema.optional(PreviewAutomationScreenshot),
 });
 export type PreviewAutomationSnapshot = typeof PreviewAutomationSnapshot.Type;
+
+export const PreviewAutomationSnapshotResult = Schema.Union([
+  PreviewAutomationSnapshot,
+  Schema.Struct({
+    ...PreviewAutomationObservation.fields,
+    tab: Schema.optional(PreviewAutomationTabSummary),
+  }),
+]);
+export type PreviewAutomationSnapshotResult = typeof PreviewAutomationSnapshotResult.Type;
 
 export const PreviewAutomationRecordingStatus = Schema.Struct({
   tabId: PreviewTabId,
@@ -1021,16 +1149,26 @@ export class PreviewAutomationTabNotFoundError extends Schema.TaggedError<Previe
   }
 }
 
+const PreviewAutomationTimeoutTabState = Schema.Struct({
+  tabId: Schema.optional(PreviewTabId),
+  rendering: PreviewAutomationTabRendering,
+  visible: Schema.Boolean,
+  loading: Schema.Boolean,
+  automationConnected: Schema.Boolean,
+});
+
 export class PreviewAutomationTimeoutError extends Schema.TaggedError<PreviewAutomationTimeoutError>()(
   "PreviewAutomationTimeoutError",
   {
     ...PreviewAutomationRequestErrorFields,
     ...PreviewAutomationOptionalRemoteDiagnosticFields,
+    tabState: Schema.optional(PreviewAutomationTimeoutTabState),
   },
 ) {
   override get message(): string {
     const summary = `Preview automation ${this.operation} timed out after ${this.timeoutMs}ms.`;
-    return summary;
+    const state = this.tabState;
+    return `${summary} Tab ${state?.tabId ?? this.tabId ?? "unknown"}; client ${this.clientId}; ${state ? `rendering=${state.rendering}, visible=${state.visible}, loading=${state.loading}, automationConnected=${state.automationConnected}.` : "automation connection did not answer."} Read preview_status before retrying. Keep the existing tab open; do not reload or recreate it.`;
   }
 }
 
@@ -1114,7 +1252,7 @@ export class PreviewAutomationInvalidSelectorError extends Schema.TaggedError<Pr
 ) {
   override get message(): string {
     if (this.staleRef)
-      return "This element ref is stale. Navigation, dialogs, and new snapshots replace refs; take a fresh snapshot and use its refs.";
+      return "This element ref is stale. Navigation, element replacement, or control handoff can expire refs; take a fresh snapshot and use its refs.";
     if (this.selectorKind !== undefined && this.selectorLength !== undefined) {
       return `Preview automation ${this.operation} received an invalid ${this.selectorKind} (${this.selectorLength} characters).`;
     }
@@ -1267,3 +1405,18 @@ export const PreviewUrlResolution = Schema.Struct({
   environmentId: EnvironmentId,
 });
 export type PreviewUrlResolution = typeof PreviewUrlResolution.Type;
+
+/** A page value goes directly into the vault; never through a preview tool result. */
+export const PreviewVaultCaptureInput = Schema.Struct({
+  tabId: Schema.optional(PreviewTabId),
+  locator: Schema.String.check(Schema.isNonEmpty()),
+  attribute: Schema.optional(Schema.String),
+  clientIdLocator: Schema.optional(Schema.String).annotate({
+    description:
+      "For Google OAuth: capture the client ID from this second locator and save client_id/client_secret JSON without exposing either value.",
+  }),
+  name: Schema.String.check(Schema.isNonEmpty()),
+  kind: Schema.Literals(["api_key", "note"]),
+  domains: Schema.optional(Schema.Array(Schema.String)),
+});
+export type PreviewVaultCaptureInput = typeof PreviewVaultCaptureInput.Type;

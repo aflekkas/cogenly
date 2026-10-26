@@ -52,7 +52,7 @@ export function buildVisibleToastLayout<TToast extends object>(
   //   - `full*`  advances on every toast, so an ending toast keeps the slot it
   //     occupied before dismissal and its data-ending-style exit transform
   //     originates from the correct position (critical for dismissing a
-  //     non-front toast in the expanded stack — otherwise it would snap to
+  //     non-front toast in the expanded stack; otherwise it would snap to
   //     Y=0 and slide off diagonally).
   //   - `live*`  advances only on non-ending toasts, so live toasts reflow
   //     past the vacated slot in parallel with the exit animation instead of

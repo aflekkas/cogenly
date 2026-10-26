@@ -1,3 +1,6 @@
+import * as Clock from "effect/Clock";
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
+import * as BackfillBudget from "../sync/BackfillBudget.ts";
 import { isMisroutedLegacyRecoveryEvent } from "@cogenly/shared/legacyRecoveryEvent";
 import { projectReplicaFilings } from "./replicaFiling.ts";
 import { normalizeLegacyProviderThread } from "@cogenly/shared/legacyProviderThreadIdentity";
@@ -18,7 +21,6 @@ import {
   ProjectId,
   ProjectLabelId,
   THREAD_REPLICATION_BATCH_BYTES,
-  THREAD_REPLICATION_BATCH_EVENTS,
   ThreadId,
   ThreadReplicaSource,
   ThreadReplicaMeta,
@@ -29,6 +31,7 @@ import {
   ThreadRemoteError,
 } from "@cogenly/contracts";
 import * as Context from "effect/Context";
+import * as Semaphore from "effect/Semaphore";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -55,6 +58,11 @@ export interface ThreadOwnerRecord {
 export class ThreadReplication extends Context.Service<
   ThreadReplication,
   {
+    readonly replayHeld: Effect.Effect<void>;
+    /** Drops only incoming quarantine rows, never local history or projections. */
+    readonly discardQuarantined: (
+      threadId: string,
+    ) => Effect.Effect<number, ThreadReplicationError>;
     readonly environmentId: EnvironmentId;
     /** The recorded owner; undefined for a thread created here and never handed off. */
     readonly owner: (threadId: ThreadId) => Effect.Effect<ThreadOwnerRecord | undefined>;
@@ -68,6 +76,8 @@ export class ThreadReplication extends Context.Service<
       after: ThreadReplicationCursor,
       target: EnvironmentId,
       localOnly: boolean,
+      threadId?: ThreadId,
+      maxEvents?: number,
     ) => Effect.Effect<ThreadReplicationBatch, ThreadReplicationError>;
     /**
      * trustedRelay is true only for this spoke's pinned hub. Ownership claims
@@ -78,6 +88,13 @@ export class ThreadReplication extends Context.Service<
       source: EnvironmentId,
       trustedRelay: boolean,
     ) => Effect.Effect<{ readonly acknowledged: ThreadReplicationCursor }, ThreadReplicationError>;
+    /** Apply a targeted page; bulk replication cursors remain untouched. */
+    readonly receivePriority: (
+      threadId: ThreadId,
+      batch: ThreadReplicationBatch,
+      source: EnvironmentId,
+      trustedRelay: boolean,
+    ) => Effect.Effect<void, ThreadReplicationError>;
     readonly cursors: (peer: EnvironmentId) => Effect.Effect<
       {
         readonly received: ThreadReplicationCursor;
@@ -185,8 +202,60 @@ export class ThreadReplication extends Context.Service<
 
 const isReplicationError = Schema.is(ThreadReplicationError);
 const isPortableSource = Schema.is(ThreadReplicaSource);
+/** Inspect wrapped driver errors without mistaking a lock timeout for poison history. */
+const replicationFailureReason = (cause: unknown): "busy" | "projection" | "storage" => {
+  let current = cause;
+  let projection = false;
+  const seen = new Set<unknown>();
+  while (typeof current === "object" && current !== null && !seen.has(current)) {
+    seen.add(current);
+    const error = current as {
+      code?: unknown;
+      errcode?: unknown;
+      message?: unknown;
+      _tag?: unknown;
+      cause?: unknown;
+      reason?: unknown;
+    };
+    const code = typeof error.code === "string" ? error.code : "";
+    const message = typeof error.message === "string" ? error.message : "";
+    const sqliteCode = typeof error.errcode === "number" ? error.errcode & 255 : undefined;
+    if (
+      error._tag === "LockTimeoutError" ||
+      sqliteCode === 5 ||
+      sqliteCode === 6 ||
+      /SQLITE_(BUSY|LOCKED)/i.test(code) ||
+      /SQLITE_(BUSY|LOCKED)|database (is )?(locked|busy)|(?:lock|busy).*timeout|timeout.*(?:lock|busy)/i.test(
+        message,
+      )
+    )
+      return "busy";
+    if (
+      [
+        "ConstraintError",
+        "UniqueViolation",
+        "ForeignKeyViolation",
+        "NotNullViolation",
+        "CheckViolation",
+        "ThreadOwnedElsewhereError",
+      ].includes(String(error._tag)) ||
+      sqliteCode === 19 ||
+      /SQLITE_CONSTRAINT/i.test(code) ||
+      /constraint failed/i.test(message) ||
+      error._tag === "SchemaError"
+    )
+      projection = true;
+    current = error.cause ?? error.reason;
+  }
+  return projection ? "projection" : "storage";
+};
 const storage = (cause: unknown) =>
-  isReplicationError(cause) ? cause : new ThreadReplicationError({ reason: "storage", cause });
+  isReplicationError(cause)
+    ? cause
+    : new ThreadReplicationError({
+        reason: replicationFailureReason(cause) === "busy" ? "busy" : "storage",
+        cause,
+      });
 const encodeEventJson = Schema.encodeEffect(OrchestrationV2DomainEventJson);
 const decodeEventJson = Schema.decodeUnknownOption(OrchestrationV2DomainEventJson);
 const encodeMeta = Schema.encodeEffect(ThreadReplicaMeta);
@@ -255,6 +324,7 @@ const make = Effect.gen(function* () {
     threadIds.length === 0
       ? Effect.succeed(new Map<string, OwnerRow>())
       : sql<OwnerRow>`SELECT * FROM thread_owners WHERE thread_id IN ${sql.in(threadIds)}`.pipe(
+          NodeSqliteClient.readOnly,
           Effect.map((rows) => new Map(rows.map((row) => [row.thread_id, row]))),
         );
 
@@ -299,6 +369,7 @@ const make = Effect.gen(function* () {
     readonly thread_id: string;
     readonly owner_env: string;
   }>`SELECT thread_id, owner_env FROM thread_owners WHERE local = 0`.pipe(
+    NodeSqliteClient.readOnly,
     Effect.map(
       (rows) =>
         new Map(
@@ -377,202 +448,204 @@ const make = Effect.gen(function* () {
 
   const readBatch: ThreadReplication["Service"]["readBatch"] = Effect.fn(
     "ThreadReplication.readBatch",
-  )(function* (after, target, localOnly) {
-    const latest = (yield* sql<{
-      readonly events: number;
-      readonly meta: number;
-    }>`SELECT
+  )(
+    function* (after, target, localOnly, threadId, maxEvents = 32) {
+      const limit = Math.max(1, Math.min(64, maxEvents));
+      const latest = (yield* sql<{
+        readonly events: number;
+        readonly meta: number;
+      }>`SELECT
         (SELECT COALESCE(MAX(sequence), 0) FROM orchestration_events) AS events,
         (SELECT COALESCE(MAX(seq), 0) FROM thread_replication_meta_log) AS meta`)[0]!;
-    if (!isCursor(after.events, latest.events) || !isCursor(after.meta, latest.meta))
-      return yield* new ThreadReplicationError({ reason: "invalid-cursor" });
-    // Filter by owner in SQL so a spoke full of replicas does not decode them to skip them.
-    const ownerFilter = localOnly
-      ? sql`NOT EXISTS (SELECT 1 FROM thread_owners o WHERE o.thread_id = e.stream_id AND o.local = 0)`
-      : sql`NOT EXISTS (SELECT 1 FROM thread_owners o WHERE o.thread_id = e.stream_id AND o.owner_env = ${target})`;
-    const listed = yield* sql<{
-      readonly sequence: number;
-      readonly stream_id: string;
-      readonly bytes: number;
-    }>`
+      if (!isCursor(after.events, latest.events) || !isCursor(after.meta, latest.meta))
+        return yield* new ThreadReplicationError({ reason: "invalid-cursor" });
+      // Filter by owner in SQL so a spoke full of replicas does not decode them to skip them.
+      const ownerFilter = localOnly
+        ? sql`NOT EXISTS (SELECT 1 FROM thread_owners o WHERE o.thread_id = e.stream_id AND o.local = 0)`
+        : sql`NOT EXISTS (SELECT 1 FROM thread_owners o WHERE o.thread_id = e.stream_id AND o.owner_env = ${target})`;
+      const listed = yield* sql<{
+        readonly sequence: number;
+        readonly stream_id: string;
+        readonly bytes: number;
+      }>`
       SELECT e.sequence, e.stream_id, max(length(CAST(e.payload_json AS BLOB)) + 2048, COALESCE(length(CAST(r.event_json AS BLOB)), 0)) AS bytes
       FROM orchestration_events e LEFT JOIN thread_replication_raw_events r ON r.event_id = e.event_id
       WHERE e.sequence > ${after.events} AND e.sequence <= ${latest.events}
         AND e.aggregate_kind = 'thread' AND e.application_event_version = 2
         AND ${ownerFilter}
-      ORDER BY e.sequence LIMIT ${THREAD_REPLICATION_BATCH_EVENTS}`;
-    // Fewer candidates than the limit: everything up to `latest` was examined.
-    let eventsCursor =
-      listed.length < THREAD_REPLICATION_BATCH_EVENTS ? latest.events : listed.at(-1)!.sequence;
-    // Size the batch from stored sizes before reading, so a run of large
-    // events is never loaded only to be cut; the first always travels.
-    const budget = THREAD_REPLICATION_BATCH_BYTES - 64 * 1024;
-    let planned = 0;
-    let take = 0;
-    while (take < listed.length && (take === 0 || planned + listed[take]!.bytes <= budget)) {
-      planned += listed[take]!.bytes;
-      take++;
-    }
-    if (take < listed.length) eventsCursor = listed[take]!.sequence - 1;
-    const candidates = listed.slice(0, take);
-    const events: Array<Schema.Json> = [];
-    const eventThreads: Array<ThreadId> = [];
-    const eventSequences: Array<number> = [];
-    if (candidates.length > 0) {
-      // Read each thread's own run: the range between candidates can hold
-      // many events this batch skips (threads the target owns).
-      const runs = new Map<string, { first: number; last: number }>();
-      for (const row of candidates) {
-        const run = runs.get(row.stream_id);
-        runs.set(row.stream_id, { first: run?.first ?? row.sequence, last: row.sequence });
+        AND ${threadId === undefined ? sql`TRUE` : sql`e.stream_id = ${threadId}`}
+      ORDER BY e.sequence LIMIT ${limit}`;
+      // Fewer candidates than the limit: everything up to `latest` was examined.
+      let eventsCursor = listed.length < limit ? latest.events : listed.at(-1)!.sequence;
+      // Size the batch from stored sizes before reading, so a run of large
+      // events is never loaded only to be cut; the first always travels.
+      const budget = 64 * 1024 - 4096;
+      let planned = 0;
+      let take = 0;
+      while (take < listed.length && (take === 0 || planned + listed[take]!.bytes <= budget)) {
+        planned += listed[take]!.bytes;
+        take++;
       }
-      const wanted = new Set(candidates.map((row) => row.sequence));
-      const stored = (yield* Effect.forEach(runs, ([streamId, run]) =>
-        Stream.runCollect(
-          eventStore.read({
-            threadId: ThreadId.make(streamId),
-            afterSequence: run.first - 1,
-            throughSequence: run.last,
-          }),
-        ),
-      ))
-        .flat()
-        .filter((item) => wanted.has(item.sequence))
-        .sort((left, right) => left.sequence - right.sequence);
-      const raw = yield* rawEvents(stored.map((item) => item.event.id));
-      const commandIds = [
-        ...new Set(stored.flatMap((item) => (item.commandId === null ? [] : [item.commandId]))),
-      ];
-      const receipts =
-        commandIds.length === 0
-          ? []
-          : yield* sql<{
-              readonly command_id: string;
-              readonly aggregate_id: string;
-              readonly command_type: string;
-              readonly accepted_at: string;
-              readonly status: "accepted" | "rejected";
-              readonly error: string | null;
-            }>`SELECT command_id, aggregate_id, command_type, accepted_at, status, error FROM orchestration_command_receipts
-        WHERE command_id IN ${sql.in(commandIds)} AND aggregate_kind = 'thread'`;
-      const byCommand = new Map(receipts.map((row) => [row.command_id, row]));
-      for (const item of stored) {
-        // A newer build's fields this one cannot read travel on as received.
-        const kept = raw.get(item.event.id);
-        let encoded =
-          kept === undefined ? ((yield* encodeEventJson(item.event)) as Schema.Json) : kept;
-        if (
-          (item.event.type.startsWith("provider-session.") ||
-            normalizeLegacySession(item.event, environmentId) !== item.event ||
-            normalizeLegacyProviderThread(item.event) !== item.event) &&
-          rawField(encoded, "cogenlyReplicaSessionOrigin") === undefined
-        ) {
-          encoded = {
-            ...(encoded as object),
-            cogenlyReplicaSessionOrigin: replicaSessionOrigin(item.commandId) ?? environmentId,
-          } as Schema.Json;
+      if (take < listed.length) eventsCursor = listed[take]!.sequence - 1;
+      const candidates = listed.slice(0, take);
+      const events: Array<Schema.Json> = [];
+      const eventThreads: Array<ThreadId> = [];
+      const eventSequences: Array<number> = [];
+      if (candidates.length > 0) {
+        // Read each thread's own run: the range between candidates can hold
+        // many events this batch skips (threads the target owns).
+        const runs = new Map<string, { first: number; last: number }>();
+        for (const row of candidates) {
+          const run = runs.get(row.stream_id);
+          runs.set(row.stream_id, { first: run?.first ?? row.sequence, last: row.sequence });
         }
-        const receipt = item.commandId == null ? undefined : byCommand.get(item.commandId);
-        events.push(
-          receipt !== undefined && receipt.aggregate_id === item.event.threadId
-            ? ({
-                ...(encoded as object),
-                cogenlyReplicaReceipt: {
-                  commandId: receipt.command_id,
-                  commandType: receipt.command_type,
-                  acceptedAt: receipt.accepted_at,
-                  status: receipt.status,
-                  error: receipt.error,
-                },
-              } as Schema.Json)
-            : encoded,
-        );
-        eventThreads.push(item.event.threadId);
-        eventSequences.push(item.sequence);
+        const wanted = new Set(candidates.map((row) => row.sequence));
+        const stored = (yield* Effect.forEach(runs, ([streamId, run]) =>
+          Stream.runCollect(
+            eventStore.read({
+              threadId: ThreadId.make(streamId),
+              afterSequence: run.first - 1,
+              throughSequence: run.last,
+            }),
+          ),
+        ))
+          .flat()
+          .filter((item) => wanted.has(item.sequence))
+          .sort((left, right) => left.sequence - right.sequence);
+        const raw = yield* rawEvents(stored.map((item) => item.event.id));
+        const commandIds = [
+          ...new Set(stored.flatMap((item) => (item.commandId === null ? [] : [item.commandId]))),
+        ];
+        const receipts =
+          commandIds.length === 0
+            ? []
+            : yield* sql<{
+                readonly command_id: string;
+                readonly aggregate_id: string;
+                readonly command_type: string;
+                readonly accepted_at: string;
+                readonly status: "accepted" | "rejected";
+                readonly error: string | null;
+              }>`SELECT command_id, aggregate_id, command_type, accepted_at, status, error FROM orchestration_command_receipts
+        WHERE command_id IN ${sql.in(commandIds)} AND aggregate_kind = 'thread'`;
+        const byCommand = new Map(receipts.map((row) => [row.command_id, row]));
+        for (const item of stored) {
+          yield* NodeSqliteClient.eventLoopTurn;
+          // A newer build's fields this one cannot read travel on as received.
+          const kept = raw.get(item.event.id);
+          let encoded =
+            kept === undefined ? ((yield* encodeEventJson(item.event)) as Schema.Json) : kept;
+          if (
+            (item.event.type.startsWith("provider-session.") ||
+              normalizeLegacySession(item.event, environmentId) !== item.event ||
+              normalizeLegacyProviderThread(item.event) !== item.event) &&
+            rawField(encoded, "cogenlyReplicaSessionOrigin") === undefined
+          ) {
+            encoded = {
+              ...(encoded as object),
+              cogenlyReplicaSessionOrigin: replicaSessionOrigin(item.commandId) ?? environmentId,
+            } as Schema.Json;
+          }
+          const receipt = item.commandId == null ? undefined : byCommand.get(item.commandId);
+          events.push(
+            receipt !== undefined && receipt.aggregate_id === item.event.threadId
+              ? ({
+                  ...(encoded as object),
+                  cogenlyReplicaReceipt: {
+                    commandId: receipt.command_id,
+                    commandType: receipt.command_type,
+                    acceptedAt: receipt.accepted_at,
+                    status: receipt.status,
+                    error: receipt.error,
+                  },
+                } as Schema.Json)
+              : encoded,
+          );
+          eventThreads.push(item.event.threadId);
+          eventSequences.push(item.sequence);
+        }
       }
-    }
-    const metaRows = yield* sql<{
-      readonly seq: number;
-      readonly thread_id: string;
-    }>`SELECT seq, thread_id FROM thread_replication_meta_log WHERE seq > ${after.meta} AND seq <= ${latest.meta} ORDER BY seq LIMIT ${THREAD_REPLICATION_BATCH_EVENTS}`;
-    let metaCursor =
-      metaRows.length < THREAD_REPLICATION_BATCH_EVENTS ? latest.meta : metaRows.at(-1)!.seq;
-    const threadIds = [...new Set([...eventThreads, ...metaRows.map((row) => row.thread_id)])];
-    const owners = yield* ownerRows(threadIds);
-    const include = sendable(target, localOnly);
-    const meta = yield* Effect.forEach(
-      threadIds.filter((threadId) => include(owners.get(threadId))),
-      (threadId) =>
-        metaFor(threadId, owners.get(threadId)).pipe(
-          Effect.flatMap(encodeMeta),
-          Effect.map((encoded) => {
-            // A relayed thread keeps the keys its newer owner sent.
-            const extras = owners.get(threadId)?.meta_extra_json;
-            const kept =
-              extras == null ? undefined : Option.getOrUndefined(decodeJsonOption(extras));
-            return (
-              typeof kept === "object" && kept !== null
-                ? {
-                    ...kept,
-                    ...encoded,
-                    source:
-                      encoded.source === null
-                        ? null
-                        : {
-                            ...(rawField(kept, "source") as object | null),
-                            ...encoded.source,
-                          },
-                  }
-                : encoded
-            ) as Schema.Json;
-          }),
-        ),
-    );
-    // Enforce the wire budget, including envelopes, raw fields and metadata.
-    // A single oversized item travels alone rather than wedging the cursor.
-    const byThread = new Map(meta.map((item) => [rawThreadId(item)!, item]));
-    const selectedMeta = new Map<string, Schema.Json>();
-    const selectedEvents: Array<Schema.Json> = [];
-    const bytes = (value: unknown) => Buffer.byteLength(encodeJson(value));
-    let used = bytes({
-      after,
-      cursor: { events: eventsCursor, meta: metaCursor },
-      events: [],
-      meta: [],
-    });
-    for (let at = 0; at < events.length; at++) {
-      const id = eventThreads[at]!;
-      const metadata = selectedMeta.has(id) ? undefined : byThread.get(id);
-      const size = bytes(events[at]) + (metadata === undefined ? 0 : bytes(metadata)) + 2;
-      if (selectedEvents.length > 0 && used + size > THREAD_REPLICATION_BATCH_BYTES) {
-        eventsCursor = eventSequences[at]! - 1;
-        break;
+      const metaRows = yield* sql<{
+        readonly seq: number;
+        readonly thread_id: string;
+      }>`SELECT seq, thread_id FROM thread_replication_meta_log WHERE seq > ${after.meta} AND seq <= ${latest.meta} AND ${threadId === undefined ? sql`TRUE` : sql`thread_id = ${threadId}`} ORDER BY seq LIMIT ${limit}`;
+      let metaCursor = metaRows.length < limit ? latest.meta : metaRows.at(-1)!.seq;
+      const threadIds = [...new Set([...eventThreads, ...metaRows.map((row) => row.thread_id)])];
+      const owners = yield* ownerRows(threadIds);
+      const include = sendable(target, localOnly);
+      const meta = yield* Effect.forEach(
+        threadIds.filter((threadId) => include(owners.get(threadId))),
+        (threadId) =>
+          metaFor(threadId, owners.get(threadId)).pipe(
+            Effect.flatMap(encodeMeta),
+            Effect.map((encoded) => {
+              // A relayed thread keeps the keys its newer owner sent.
+              const extras = owners.get(threadId)?.meta_extra_json;
+              const kept =
+                extras == null ? undefined : Option.getOrUndefined(decodeJsonOption(extras));
+              return (
+                typeof kept === "object" && kept !== null
+                  ? {
+                      ...kept,
+                      ...encoded,
+                      source:
+                        encoded.source === null
+                          ? null
+                          : {
+                              ...(rawField(kept, "source") as object | null),
+                              ...encoded.source,
+                            },
+                    }
+                  : encoded
+              ) as Schema.Json;
+            }),
+          ),
+      );
+      // Enforce the wire budget, including envelopes, raw fields and metadata.
+      // A single oversized item travels alone rather than wedging the cursor.
+      const byThread = new Map(meta.map((item) => [rawThreadId(item)!, item]));
+      const selectedMeta = new Map<string, Schema.Json>();
+      const selectedEvents: Array<Schema.Json> = [];
+      const bytes = (value: unknown) => Buffer.byteLength(encodeJson(value));
+      let used = bytes({
+        after,
+        cursor: { events: eventsCursor, meta: metaCursor },
+        events: [],
+        meta: [],
+      });
+      for (let at = 0; at < events.length; at++) {
+        const id = eventThreads[at]!;
+        const metadata = selectedMeta.has(id) ? undefined : byThread.get(id);
+        const size = bytes(events[at]) + (metadata === undefined ? 0 : bytes(metadata)) + 2;
+        if (selectedEvents.length > 0 && used + size > 64 * 1024) {
+          eventsCursor = eventSequences[at]! - 1;
+          break;
+        }
+        selectedEvents.push(events[at]!);
+        if (metadata !== undefined) selectedMeta.set(id, metadata);
+        used += size;
       }
-      selectedEvents.push(events[at]!);
-      if (metadata !== undefined) selectedMeta.set(id, metadata);
-      used += size;
-    }
-    for (const row of metaRows) {
-      const metadata = byThread.get(row.thread_id);
-      if (metadata === undefined || selectedMeta.has(row.thread_id)) continue;
-      const size = bytes(metadata) + 1;
-      if (
-        (selectedEvents.length > 0 || selectedMeta.size > 0) &&
-        used + size > THREAD_REPLICATION_BATCH_BYTES
-      ) {
-        metaCursor = row.seq - 1;
-        break;
+      for (const row of metaRows) {
+        const metadata = byThread.get(row.thread_id);
+        if (metadata === undefined || selectedMeta.has(row.thread_id)) continue;
+        const size = bytes(metadata) + 1;
+        if ((selectedEvents.length > 0 || selectedMeta.size > 0) && used + size > 64 * 1024) {
+          metaCursor = row.seq - 1;
+          break;
+        }
+        selectedMeta.set(row.thread_id, metadata);
+        used += size;
       }
-      selectedMeta.set(row.thread_id, metadata);
-      used += size;
-    }
-    return {
-      after,
-      cursor: { events: eventsCursor, meta: metaCursor },
-      events: selectedEvents,
-      meta: [...selectedMeta.values()],
-    } satisfies ThreadReplicationBatch;
-  }, Effect.mapError(storage));
+      return {
+        after,
+        cursor: { events: eventsCursor, meta: metaCursor },
+        events: selectedEvents,
+        meta: [...selectedMeta.values()],
+      } satisfies ThreadReplicationBatch;
+    },
+    NodeSqliteClient.readOnly,
+    Effect.mapError(storage),
+  );
 
   const cursors: ThreadReplication["Service"]["cursors"] = Effect.fn("ThreadReplication.cursors")(
     function* (peer) {
@@ -587,6 +660,7 @@ const make = Effect.gen(function* () {
         acknowledged: { events: row?.acknowledged_events ?? 0, meta: row?.acknowledged_meta ?? 0 },
       };
     },
+    NodeSqliteClient.readOnly,
     Effect.mapError(storage),
   );
 
@@ -624,6 +698,11 @@ const make = Effect.gen(function* () {
     commandKey: string,
     trustedRelay: boolean,
   ) {
+    if (
+      metas.some(({ meta }) => !trustedRelay && meta.owner !== source) ||
+      items.some(({ event }) => !metas.some(({ meta }) => meta.threadId === event.threadId))
+    )
+      return yield* new ThreadReplicationError({ reason: "invalid-batch" });
     const metaByThread = new Map(metas.map((item) => [item.meta.threadId, item]));
     const owners = yield* ownerRows([...metaByThread.keys()]);
     const present = new Set(
@@ -825,7 +904,7 @@ const make = Effect.gen(function* () {
           acceptedAt: yield* decodeReceiptTime(receipt.value.acceptedAt),
         });
       }
-      // Refuse the batch on a storage/projection failure; retry it without advancing the cursor.
+      // The caller isolates deterministic failures to this thread.
       yield* eventSink.writeReplica({
         commandId,
         events: fresh,
@@ -869,33 +948,41 @@ const make = Effect.gen(function* () {
         readonly thread_id: string;
       }>`SELECT DISTINCT thread_id FROM thread_replication_deferred`).map((row) => row.thread_id),
     );
-    const metas = batch.meta.map((raw) => ({
-      raw,
-      threadId: rawThreadId(raw),
-      decoded: decodeMeta(raw),
-    }));
-    const events = batch.events.map((raw) => ({
-      raw,
-      threadId: rawThreadId(raw),
-      decoded: decodeEventJson(raw),
-    }));
-    // Shape checks that hold for every build: each item names its thread,
-    // each event comes with its thread's metadata, and a peer speaks only
-    // for threads it owns unless it is this spoke's hub.
+    const metas = yield* Effect.forEach(batch.meta, (raw) =>
+      NodeSqliteClient.eventLoopTurn.pipe(
+        Effect.map(() => ({
+          raw,
+          threadId: rawThreadId(raw),
+          decoded: decodeMeta(raw),
+        })),
+      ),
+    );
+    const events = yield* Effect.forEach(batch.events, (raw) =>
+      NodeSqliteClient.eventLoopTurn.pipe(
+        Effect.map(() => ({
+          raw,
+          threadId: rawThreadId(raw),
+          decoded: decodeEventJson(raw),
+        })),
+      ),
+    );
+    const reasons = new Map<string | undefined, string>();
     const metaThreads = new Set(metas.map((item) => item.threadId));
     for (const item of [...metas, ...events])
-      if (item.threadId === undefined)
-        return yield* new ThreadReplicationError({ reason: "invalid-batch" });
+      if (item.threadId === undefined) reasons.set(undefined, "missing-thread");
     for (const item of events)
-      if (!metaThreads.has(item.threadId))
-        return yield* new ThreadReplicationError({ reason: "invalid-batch" });
+      if (item.threadId !== undefined && !metaThreads.has(item.threadId))
+        reasons.set(item.threadId, "missing-meta");
     for (const item of metas)
-      if (!trustedRelay && rawField(item.raw, "owner") !== source)
-        return yield* new ThreadReplicationError({ reason: "invalid-batch" });
-    for (const item of metas) if (Option.isNone(item.decoded)) held.add(item.threadId!);
-    for (const item of events) if (Option.isNone(item.decoded)) held.add(item.threadId!);
+      if (item.threadId !== undefined && !trustedRelay && rawField(item.raw, "owner") !== source)
+        reasons.set(item.threadId, "wrong-owner");
+    for (const item of [...metas, ...events]) {
+      if (item.decoded._tag === "None") held.add(item.threadId!);
+      if (reasons.has(item.threadId)) held.add(item.threadId!);
+    }
     const isHeld = (item: { readonly threadId: string | undefined }) => held.has(item.threadId!);
     return {
+      reasons,
       deferred: [
         ...metas.filter(isHeld).map((item) => ({ kind: "meta" as const, ...item })),
         ...events.filter(isHeld).map((item) => ({ kind: "event" as const, ...item })),
@@ -907,10 +994,37 @@ const make = Effect.gen(function* () {
         .filter((item) => !isHeld(item))
         .flatMap((item) => Option.toArray(item.decoded).map((event) => ({ event, raw: item.raw }))),
     };
-  });
+  }, NodeSqliteClient.readOnly);
+
+  // One permit serializes bulk receive, priority pages, held replay and discard.
+  const replayPermit = yield* Semaphore.make(1);
+  const receiveBudget = yield* BackfillBudget.make;
+
+  const receivePriority: ThreadReplication["Service"]["receivePriority"] = Effect.fn(
+    "ThreadReplication.receivePriority",
+  )(
+    function* (threadId, batch, source, trustedRelay) {
+      if ([...batch.events, ...batch.meta].some((raw) => rawThreadId(raw) !== threadId))
+        return yield* new ThreadReplicationError({ reason: "invalid-batch" });
+      const split = yield* splitBatch(batch, source, trustedRelay);
+      if (split.deferred.length > 0)
+        return yield* new ThreadReplicationError({ reason: "invalid-batch" });
+      yield* applyItems(
+        split.metas,
+        split.events,
+        source,
+        `priority:${encodeURIComponent(threadId)}:${batch.cursor.events}`,
+        trustedRelay,
+      );
+    },
+    Effect.mapError(storage),
+    replayPermit.withPermits(1),
+  );
 
   const receive: ThreadReplication["Service"]["receive"] = Effect.fn("ThreadReplication.receive")(
     function* (batch, source, trustedRelay) {
+      yield* receiveBudget.ready;
+      const started = yield* Clock.currentTimeMillis;
       const previous = (yield* cursors(source)).received;
       if (
         batch.cursor.events < batch.after.events ||
@@ -922,37 +1036,94 @@ const make = Effect.gen(function* () {
       if (batch.cursor.events <= previous.events && batch.cursor.meta <= previous.meta)
         return { acknowledged: previous };
       const split = yield* splitBatch(batch, source, trustedRelay);
-      if (split.deferred.length > 0) {
-        yield* Effect.logWarning("Holding replicated threads this build cannot read yet", {
-          threads: [...new Set(split.deferred.map((item) => item.threadId))],
+      const hold = (
+        threadId: string,
+        reason: string | null,
+        items: ReadonlyArray<{ kind: "meta" | "event"; raw: unknown }>,
+      ) =>
+        Effect.gen(function* () {
+          // Keep appending, but retain at most 1,000 items / 16 MiB per thread.
+          // Once trimmed, history requires an explicit discard, never partial replay.
+          const inherited = (yield* sql<{
+            reason: string | null;
+          }>`SELECT reason FROM thread_replication_deferred
+            WHERE thread_id = ${threadId} AND reason IS NOT NULL LIMIT 1`)[0]?.reason;
+          for (const item of items) {
+            const json = encodeJson(item.raw);
+            const oversized = Buffer.byteLength(json) > 16 * 1024 * 1024;
+            yield* sql`INSERT INTO thread_replication_deferred(thread_id, item_kind, source_env, trusted_relay, item_json, reason)
+              SELECT ${threadId}, ${item.kind}, ${source}, ${trustedRelay ? 1 : 0}, ${oversized ? encodeJson({ threadId, discardedOversizedItem: true }) : json}, ${oversized ? "capacity" : (reason ?? inherited ?? null)}
+              WHERE NOT EXISTS (SELECT 1 FROM thread_replication_deferred
+                WHERE thread_id = ${threadId} AND source_env = ${source}
+                  AND item_kind = ${item.kind} AND item_json = ${json})`;
+          }
+          const removed = yield* sql`DELETE FROM thread_replication_deferred WHERE seq IN (
+            SELECT seq FROM (
+              SELECT seq, ROW_NUMBER() OVER (ORDER BY seq DESC) AS n,
+                SUM(length(CAST(item_json AS BLOB))) OVER (ORDER BY seq DESC) AS bytes
+              FROM thread_replication_deferred WHERE thread_id = ${threadId})
+            WHERE n > 1000 OR bytes > ${16 * 1024 * 1024}) RETURNING seq`;
+          if (removed.length > 0) {
+            yield* sql`UPDATE thread_replication_deferred SET reason = 'capacity' WHERE thread_id = ${threadId}`;
+            yield* Effect.logWarning("Thread quarantine capacity reached", {
+              threadId,
+              droppedItems: removed.length,
+            });
+          }
         });
-        for (const item of split.deferred)
-          yield* sql`INSERT INTO thread_replication_deferred(thread_id, item_kind, source_env, trusted_relay, item_json)
-            SELECT ${item.threadId!}, ${item.kind}, ${source}, ${trustedRelay ? 1 : 0}, ${encodeJson(item.raw)}
-            WHERE NOT EXISTS (SELECT 1 FROM thread_replication_deferred
-              WHERE thread_id = ${item.threadId!} AND source_env = ${source}
-                AND item_kind = ${item.kind} AND item_json = ${encodeJson(item.raw)})`;
+      const deferredByThread = new Map<string | undefined, typeof split.deferred>();
+      for (const item of split.deferred) {
+        const items = deferredByThread.get(item.threadId) ?? [];
+        items.push(item);
+        deferredByThread.set(item.threadId, items);
       }
-      yield* applyItems(split.metas, split.events, source, `${batch.cursor.events}`, trustedRelay);
+      for (const [threadId, items] of deferredByThread)
+        yield* hold(threadId ?? `invalid:${source}`, split.reasons.get(threadId) ?? null, items);
+      for (const { meta, raw } of split.metas) {
+        const events = split.events.filter(({ event }) => event.threadId === meta.threadId);
+        yield* sql
+          .withTransaction(
+            applyItems([{ meta, raw }], events, source, `${batch.cursor.events}`, trustedRelay),
+          )
+          .pipe(
+            Effect.catch((cause) => {
+              const reason =
+                isReplicationError(cause) && cause.reason === "invalid-batch"
+                  ? "invalid-batch"
+                  : replicationFailureReason(cause);
+              if (reason !== "invalid-batch" && reason !== "projection")
+                return Effect.fail(storage(cause));
+              return hold(meta.threadId, reason, [
+                { kind: "meta", raw },
+                ...events.map(({ raw }) => ({ kind: "event" as const, raw })),
+              ]).pipe(Effect.mapError(storage));
+            }),
+          );
+      }
       // Never moves back: a batch that only advances one cursor must not rewind the other.
       yield* sql`INSERT INTO thread_replication_cursors(environment_id, received_events, received_meta)
         VALUES (${source}, ${batch.cursor.events}, ${batch.cursor.meta})
         ON CONFLICT(environment_id) DO UPDATE SET
           received_events = max(received_events, excluded.received_events),
           received_meta = max(received_meta, excluded.received_meta)`;
+      yield* receiveBudget.completed(
+        Math.max(batch.events.length, batch.meta.length),
+        (yield* Clock.currentTimeMillis) - started,
+      );
       return { acknowledged: batch.cursor };
     },
     Effect.mapError(storage),
+    replayPermit.withPermits(1),
   );
 
-  // Read sizes before payloads: a page holds at most 128 items and the normal
+  // Read sizes before payloads: a page holds at most 32 items and the normal
   // byte budget, allowing a metadata/event pair even when one item is oversized.
   const heldPage = (threadId: string, after: number, through: number) =>
     Effect.gen(function* () {
       const sizes = yield* sql<{ readonly seq: number; readonly bytes: number }>`
       SELECT seq, length(CAST(item_json AS BLOB)) AS bytes FROM thread_replication_deferred
       WHERE thread_id = ${threadId} AND seq > ${after} AND seq <= ${through}
-      ORDER BY seq LIMIT 128`;
+      ORDER BY seq LIMIT 32`;
       let end = after;
       let bytes = 0;
       let count = 0;
@@ -970,7 +1141,7 @@ const make = Effect.gen(function* () {
         readonly item_json: string;
       }>`SELECT seq, item_kind, source_env, trusted_relay, item_json FROM thread_replication_deferred
       WHERE thread_id = ${threadId} AND seq > ${after} AND seq <= ${end} ORDER BY seq`;
-    });
+    }).pipe(NodeSqliteClient.readOnly);
   const decodeHeld = (row: Effect.Success<ReturnType<typeof heldPage>>[number]) => {
     const raw = decodeJsonOption(row.item_json);
     return {
@@ -989,6 +1160,7 @@ const make = Effect.gen(function* () {
         const page = yield* heldPage(threadId, after, through);
         if (page.length === 0) return true;
         for (const row of page) {
+          yield* NodeSqliteClient.eventLoopTurn;
           const item = decodeHeld(row);
           if (Option.isNone(item.meta) && Option.isNone(item.event)) return false;
         }
@@ -1006,56 +1178,115 @@ const make = Effect.gen(function* () {
       if (next === undefined) return;
       const { thread_id: threadId, through } = next;
       afterThread = threadId;
+      // Older builds stored structural failures as unreadable version skew.
+      yield* sql`UPDATE thread_replication_deferred SET reason = CASE
+        WHEN json_type(item_json, '$.threadId') IS NOT 'text' THEN 'missing-thread'
+        WHEN item_kind = 'meta' AND trusted_relay = 0
+          AND json_extract(item_json, '$.owner') IS NOT source_env THEN 'wrong-owner'
+        WHEN item_kind = 'event' AND NOT EXISTS (
+          SELECT 1 FROM thread_replication_deferred m WHERE m.thread_id = ${threadId} AND m.item_kind = 'meta'
+        ) THEN 'missing-meta' ELSE reason END
+        WHERE thread_id = ${threadId} AND reason IS NULL AND json_valid(item_json)`;
+      if (
+        (yield* sql`SELECT 1 FROM thread_replication_deferred WHERE thread_id = ${threadId}
+        AND reason IN ('capacity', 'missing-thread', 'missing-meta', 'wrong-owner') LIMIT 1`)
+          .length > 0
+      )
+        continue;
       if (!(yield* readableHeld(threadId, through))) continue;
       for (;;) {
-        const page = (yield* heldPage(threadId, 0, through)).map(decodeHeld);
+        yield* receiveBudget.ready;
+        const pageStarted = yield* Clock.currentTimeMillis;
+        const page = yield* Effect.forEach(yield* heldPage(threadId, 0, through), (row) =>
+          NodeSqliteClient.eventLoopTurn.pipe(Effect.map(() => decodeHeld(row))),
+        );
         if (page.length === 0) break;
         const end = page.at(-1)!.row.seq;
-        yield* sql.withTransaction(
-          Effect.gen(function* () {
-            // Keep sender runs separate. Each batch starts with metadata; retain
-            // the final run's last meta row as context for the next chunk/restart.
-            let at = 0;
-            let retained: number | null = null;
-            while (at < page.length) {
-              const first = page[at]!.row;
-              let stop = at + 1;
-              while (
-                stop < page.length &&
-                page[stop]!.row.source_env === first.source_env &&
-                page[stop]!.row.trusted_relay === first.trusted_relay
-              )
-                stop++;
-              const run = page.slice(at, stop);
-              const metas = run.flatMap((item) =>
-                Option.toArray(item.meta).map((meta) => ({ meta, raw: item.raw })),
-              );
-              const events = run.flatMap((item) =>
-                Option.toArray(item.event).map((event) => ({ event, raw: item.raw })),
-              );
-              if (metas.length === 0 && events.length > 0)
-                return yield* new ThreadReplicationError({ reason: "invalid-batch" });
-              yield* applyItems(
-                metas,
-                events,
-                EnvironmentId.make(first.source_env),
-                `held:${run.at(-1)!.row.seq}`,
-                first.trusted_relay === 1,
-              );
-              retained = run.findLast((item) => Option.isSome(item.meta))?.row.seq ?? null;
-              at = stop;
-            }
-            yield* sql`DELETE FROM thread_replication_deferred WHERE thread_id = ${threadId} AND seq <= ${end}
+        const applied = yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              // Keep sender runs separate. Each batch starts with metadata; retain
+              // the final run's last meta row as context for the next chunk/restart.
+              let at = 0;
+              let retained: number | null = null;
+              while (at < page.length) {
+                const first = page[at]!.row;
+                let stop = at + 1;
+                while (
+                  stop < page.length &&
+                  page[stop]!.row.source_env === first.source_env &&
+                  page[stop]!.row.trusted_relay === first.trusted_relay
+                )
+                  stop++;
+                const run = page.slice(at, stop);
+                const metas = run.flatMap((item) =>
+                  Option.toArray(item.meta).map((meta) => ({ meta, raw: item.raw })),
+                );
+                const events = run.flatMap((item) =>
+                  Option.toArray(item.event).map((event) => ({ event, raw: item.raw })),
+                );
+                if (metas.length === 0 && events.length > 0)
+                  return yield* new ThreadReplicationError({ reason: "invalid-batch" });
+                yield* applyItems(
+                  metas,
+                  events,
+                  EnvironmentId.make(first.source_env),
+                  `held:${run.at(-1)!.row.seq}`,
+                  first.trusted_relay === 1,
+                );
+                retained = run.findLast((item) => Option.isSome(item.meta))?.row.seq ?? null;
+                at = stop;
+              }
+              yield* sql`DELETE FROM thread_replication_deferred WHERE thread_id = ${threadId} AND seq <= ${end}
             ${end === through || retained === null ? sql`` : sql`AND seq <> ${retained}`}`;
-          }),
-        );
-        if (end === through) break;
+            }),
+          )
+          .pipe(
+            Effect.as(true),
+            Effect.catch((cause) =>
+              Effect.gen(function* () {
+                const reason =
+                  isReplicationError(cause) && cause.reason === "invalid-batch"
+                    ? "invalid-batch"
+                    : replicationFailureReason(cause);
+                if (reason === "invalid-batch" || reason === "projection")
+                  yield* sql`UPDATE thread_replication_deferred SET reason = ${reason} WHERE thread_id = ${threadId}`;
+                yield* Effect.logWarning("Could not replay quarantined thread", {
+                  threadId,
+                  cause,
+                });
+                return false;
+              }),
+            ),
+          );
+        yield* receiveBudget.completed(page.length, (yield* Clock.currentTimeMillis) - pageStarted);
+        if (!applied || end === through) break;
       }
     }
   }).pipe(
     Effect.catchCause((cause) =>
       Effect.logWarning("Could not replay held replicated threads", { cause }),
     ),
+    replayPermit.withPermits(1),
+  );
+
+  const discardQuarantined: ThreadReplication["Service"]["discardQuarantined"] = Effect.fn(
+    "ThreadReplication.discardQuarantined",
+  )(
+    function* (threadId) {
+      const removed =
+        yield* sql`DELETE FROM thread_replication_deferred WHERE thread_id = ${threadId}
+      AND EXISTS (SELECT 1 FROM thread_replication_deferred WHERE thread_id = ${threadId} AND reason IS NOT NULL)
+      RETURNING seq`;
+      yield* Effect.logWarning("Discarded quarantined incoming thread changes", {
+        threadId,
+        itemCount: removed.length,
+        environmentId,
+      });
+      return removed.length;
+    },
+    Effect.mapError(storage),
+    replayPermit.withPermits(1),
   );
 
   const acknowledge: ThreadReplication["Service"]["acknowledge"] = Effect.fn(
@@ -1066,7 +1297,9 @@ const make = Effect.gen(function* () {
       readonly meta: number;
     }>`SELECT
         (SELECT COALESCE(MAX(sequence), 0) FROM orchestration_events) AS events,
-        (SELECT COALESCE(MAX(seq), 0) FROM thread_replication_meta_log) AS meta`)[0]!;
+        (SELECT COALESCE(MAX(seq), 0) FROM thread_replication_meta_log) AS meta`.pipe(
+      NodeSqliteClient.readOnly,
+    ))[0]!;
     if (!isCursor(cursor.events, latest.events) || !isCursor(cursor.meta, latest.meta))
       return yield* new ThreadReplicationError({ reason: "invalid-cursor" });
     yield* sql`INSERT INTO thread_replication_cursors(environment_id, acknowledged_events, acknowledged_meta)
@@ -1336,10 +1569,13 @@ const make = Effect.gen(function* () {
   yield* replayHeld;
   yield* sql.withTransaction(projectReplicaFilings()).pipe(Effect.orDie);
   return ThreadReplication.of({
+    replayHeld,
+    discardQuarantined,
     environmentId,
     owner,
     remoteOwners,
     readBatch,
+    receivePriority,
     receive,
     cursors,
     acknowledge,

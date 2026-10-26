@@ -89,7 +89,7 @@ function AgentView({
   onDeleted?: (() => void) | undefined;
 }) {
   const client = useAgentsClient();
-  const canWrite = client.canWrite?.(agent.environmentId) ?? true;
+  const canWrite = agent.ownerOnline !== false && (client.canWrite?.(agent.environmentId) ?? true);
   const viewKey = agentViewKey(agent);
   // The command palette, search and the thread menu can ask for a Details section or
   // Start Work before or after this mounts.
@@ -153,7 +153,15 @@ function AgentView({
           state: agent.requests.length ? "blocked" : agent.state,
         }}
         name={agent.name}
-        status={busy ? "Working…" : status === "Idle" ? null : status}
+        status={
+          agent.preparingHandoff
+            ? "Preparing handoff…"
+            : busy
+              ? "Working…"
+              : status === "Idle"
+                ? null
+                : status
+        }
         onBack={onBack}
         onDetails={() => setDetails("responsibility")}
         trailing={
@@ -222,7 +230,7 @@ function ChatPane({
   const modelStatus = (model: AgentModelRef) =>
     client.modelStatus?.(agent, model) ?? { status: "unknown" as const, providerName: "" };
   const currentModelUnavailable = modelStatus(agent.modelSelection).status === "unavailable";
-  const canWrite = client.canWrite?.(agent.environmentId) ?? true;
+  const canWrite = agent.ownerOnline !== false && (client.canWrite?.(agent.environmentId) ?? true);
   const busy = agent.state === "thinking" || agent.state === "working";
   // The typing bubble follows a send by a beat, as a reply would.
   const typingBusy = useDelayedOn(busy, 150);
@@ -480,6 +488,11 @@ function ChatPane({
         </div>
       </div>
       <footer className="agent-composer-area">
+        {agent.ownerOnline === false && (
+          <p className="agent-error">
+            {agent.ownerName ?? "The owner machine"} is offline. Reconnect it to send messages.
+          </p>
+        )}
         {error && (
           <p role="alert" className="agent-error">
             {error}
@@ -524,8 +537,8 @@ function DeliveryFailure({
         ? `${model.model} isn't available on ${status.providerName}`
         : failed
           ? `Couldn't reach ${model.model}`
-          : "Interrupted"}{" "}
-      —{" "}
+          : "Interrupted"}
+      .{" "}
       {canRetry ? (
         <button type="button" disabled={disabled} onClick={onRetry}>
           Retry

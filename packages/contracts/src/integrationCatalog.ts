@@ -211,6 +211,37 @@ export function integrationCatalogEntryFor(
   );
 }
 
+/**
+ * Visual identity only: a private endpoint may have been reduced to its origin.
+ * A catalog mark wins, then an icon the agent chose; otherwise an HTTPS server
+ * shows its site icon by host, which the server caches (SiteIconCache).
+ */
+export function integrationIcon(
+  integration: Pick<Integration, "transport" | "url" | "local" | "icon" | "iconUrl">,
+) {
+  const entry = integrationCatalogEntryFor(integration);
+  const url = URL.parse(integration.url);
+  const known =
+    entry ??
+    INTEGRATION_CATALOG.find(
+      (candidate) =>
+        candidate.kind === "remote" && URL.parse(candidate.url)?.hostname === url?.hostname,
+    );
+  const icon = known?.icon ?? integration.icon ?? null;
+  const iconUrl = icon !== null ? undefined : integration.iconUrl;
+  const faviconHost =
+    icon !== null || iconUrl !== undefined
+      ? undefined
+      : integration.transport === "http" && url?.protocol === "https:"
+        ? url.hostname
+        : undefined;
+  return {
+    icon,
+    ...(iconUrl === undefined ? {} : { iconUrl }),
+    ...(faviconHost === undefined ? {} : { faviconHost }),
+  };
+}
+
 /** What a catalog entry asks for with one auth mode, in the order Settings shows it. */
 export function integrationCatalogInputs(
   entry: IntegrationCatalogEntry,

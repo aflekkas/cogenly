@@ -1,7 +1,7 @@
 import type { OrchestrationV2ThreadProjection } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { activeRunRefusesSteering } from "./threadWorkflows.ts";
+import { activeRunRefusesSteering, resolveActiveThreadRun } from "./threadWorkflows.ts";
 
 type Projection = Pick<OrchestrationV2ThreadProjection, "runs" | "messages">;
 
@@ -21,4 +21,9 @@ describe("activeRunRefusesSteering", () => {
     expect(activeRunRefusesSteering(projection("running", "Fix the tests"))).toBe(false);
     expect(activeRunRefusesSteering(projection("completed", "/compact"))).toBe(false);
   });
+});
+
+it("offers an idle queue action while a settled turn waits on children or monitors", () => {
+  expect(resolveActiveThreadRun(projection("waiting", "Delegate and monitor"))).toBeNull();
+  expect(resolveActiveThreadRun(projection("running", "Delegate and monitor"))?.id).toBe("run-1");
 });

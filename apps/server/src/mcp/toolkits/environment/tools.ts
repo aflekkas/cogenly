@@ -41,7 +41,6 @@ const PreferenceFields = {
   newWorktreesStartFromOrigin: ServerSettings.fields.newWorktreesStartFromOrigin,
   enableAgentTerminals: ServerSettings.fields.enableAgentTerminals,
   enableProviderUpdateChecks: ServerSettings.fields.enableProviderUpdateChecks,
-  useProviderConnectors: ServerSettings.fields.useProviderConnectors,
   projectsRoot: ServerSettings.fields.projectsRoot,
   modelEffortDefaults: ServerSettings.fields.modelEffortDefaults,
   backgroundActivity: Schema.Struct({ profile: BackgroundActivityProfileSelection }),
@@ -80,7 +79,7 @@ const EnvironmentReadTool = Tool.make("environment_read", {
 const EnvironmentPreferencesTool = Tool.make("environment_preferences_update", {
   ...shared,
   description:
-    "Update selected preferences through normal settings persistence and notifications. Requires a live full-access/default calling thread. defaultThreadEnvMode, setModelEffortDefault, newWorktreesStartFromOrigin, enableAgentTerminals, sourceControlWritingStyle and useProviderConnectors are universal: they reach every paired machine. The client-prefixed appearance, notifications, confirmation, composer, sidebar and diff preferences, and sharedKeybindings, are universal too. sharedKeybindings is the complete ordered list of { key, command, when? } rules; use mod for the platform modifier. enableProviderUpdateChecks, backgroundActivity and projectsRoot apply to this machine only. Omitted fields are preserved; empty customInstructions clears them. setModelEffortDefault sets the reasoning effort a model starts at ({ provider: instance id, model: slug, option: { id: the model's effort option id from orchestrator_capabilities, e.g. reasoningEffort or effort, value } }); option null restores the model's own default. projectsRoot sets where new project folders and their repositories go on this machine; empty restores the default, <Cogenly home>/projects. Existing project folders are not moved. useProviderConnectors (off by default) restores provider-native MCP servers, connectors, plugins and apps; servers checked into a repo load either way. It applies to new agent sessions.",
+    "Update selected preferences through normal settings persistence and notifications. Requires a live full-access/default calling thread. defaultThreadEnvMode, setModelEffortDefault, newWorktreesStartFromOrigin, enableAgentTerminals and sourceControlWritingStyle are universal: they reach every paired machine. The client-prefixed appearance, notifications, confirmation, composer, sidebar and diff preferences, and sharedKeybindings, are universal too. sharedKeybindings is the complete ordered list of { key, command, when? } rules; use mod for the platform modifier. enableProviderUpdateChecks, backgroundActivity and projectsRoot apply to this machine only. Omitted fields are preserved; empty customInstructions clears them. setModelEffortDefault sets the reasoning effort a model starts at ({ provider: instance id, model: slug, option: { id: the model's effort option id from orchestrator_capabilities, e.g. reasoningEffort or effort, value } }); option null restores the model's own default. projectsRoot sets where new project folders and their repositories go on this machine; empty restores the default, <Cogenly home>/projects. Existing project folders are not moved.",
   parameters: Schema.Struct({
     ...UniversalClientPreferencePatch.fields,
     sharedKeybindings: ServerSettingsPatch.fields.sharedKeybindings,
@@ -89,7 +88,6 @@ const EnvironmentPreferencesTool = Tool.make("environment_preferences_update", {
     newWorktreesStartFromOrigin: ServerSettingsPatch.fields.newWorktreesStartFromOrigin,
     enableAgentTerminals: ServerSettingsPatch.fields.enableAgentTerminals,
     enableProviderUpdateChecks: ServerSettingsPatch.fields.enableProviderUpdateChecks,
-    useProviderConnectors: ServerSettingsPatch.fields.useProviderConnectors,
     backgroundActivity: Schema.optionalKey(Schema.Struct({ profile: BackgroundActivityProfile })),
     sourceControlWritingStyle: ServerSettingsPatch.fields.sourceControlWritingStyle,
     projectsRoot: ServerSettingsPatch.fields.projectsRoot,
@@ -179,7 +177,7 @@ const MachineHealthFixTool = Tool.make("machine_health_fix", {
     MachineHealthFixes.MachineHealthFixes,
   ],
   description:
-    "Run the direct fix for machine_health items, on the machine they are on (a paired machine runs it over the peer link). Fixes by item `fix`: stop-runs (and legacy resume) stops the thread's stale turn and subagents and marks dead ones interrupted, even with no live provider session; run-now runs the scheduled task; retry-sync retries sync with the target machine; setup-sandbox installs bubblewrap with root or passwordless sudo, or returns the command to run. Items whose fix is sign-in or null come back `manual`: investigate those yourself with machine_health and the thread, integration or provider tools. Omit itemKeys to fix every item that has a direct fix. Run machine_health afterwards to see current health.",
+    "Run the direct fix for machine_health items, on the machine they are on (a paired machine runs it over the peer link). Fixes by item `fix`: stop-runs (and legacy resume) stops the thread's stale turn and subagents and marks dead ones interrupted, even with no live provider session; run-now runs the scheduled task; discard-quarantined discards only held incoming changes for the named thread, preserving local data; retry-sync retries transient sync failures with the target machine; setup-sandbox installs bubblewrap with root or passwordless sudo, or returns the command to run. Items whose fix is sign-in or null come back `manual`: investigate those yourself with machine_health and the thread, integration or provider tools. Omit itemKeys to fix every item that has a direct fix except discard-quarantined, which requires the named item key. Run machine_health afterwards to see current health.",
   parameters: Schema.Struct({
     environmentId: Schema.optionalKey(
       EnvironmentId.annotate({

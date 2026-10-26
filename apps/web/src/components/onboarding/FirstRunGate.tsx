@@ -34,12 +34,12 @@ import { Button } from "../ui/button";
 /**
  * Holds back authenticated and hosted app trees until the first-run decision
  * is known, so a fresh install never flashes the main screen before the wizard.
- * Nothing renders while pending — no shell, no EventRouter (whose welcome
+ * Nothing renders while pending: no shell, no EventRouter (whose welcome
  * payload would otherwise navigate into a thread), no dialogs.
  *
  * Decision order: a set `onboardingCompletedAt` resolves to the app as soon as
  * settings hydrate (the common case, no server round-trip). A `null` flag also
- * covers installs that predate the field, so it alone is not enough — the gate
+ * covers installs that predate the field, so it alone is not enough; the gate
  * waits for environment shells to bootstrap and inspects the workspace.
  * Hosted mode instead checks its saved environment catalog. A timeout shows
  * recovery for an unreachable primary server without mounting the app tree.
@@ -109,7 +109,7 @@ export function FirstRunGate({
   // startup (`autoBootstrapProjectFromCwd` defaults on there), so "no
   // projects at all" would mean `npx t3` users never see the wizard. Any
   // other project, more than one thread, or state in a non-primary
-  // environment is real user state — the aggregate hooks span every
+  // environment is real user state. The aggregate hooks span every
   // environment, and a saved remote's project must never read as "the
   // bootstrap project" just because its root string matches the primary cwd.
   const serverCwd = serverConfig?.cwd ?? null;

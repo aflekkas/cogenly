@@ -7,20 +7,47 @@ tokens are readable by the agent and the terminal commands it runs.
 
 ## What it stores
 
-Each item has a name, a type (login, API key, card, or note), the domains it
-may be used on, and its secret fields, such as a username, password, or
-one-time-code secret. A card stores its number, expiry, CVC, and the name on
+Each item has a name, a type (login, API key, card, or note), the sites it
+may be used on, and its secret fields, such as a password or one-time-code
+secret. A login's username or email is shown in lists, like an integration's
+account, so you and your agents can tell several logins apart; its password
+and codes stay secret. A card stores its number, expiry, CVC, and the name on
 the card as secret fields; only its description and the last 4 digits of the number
 are shown in lists. Items can belong to one project or work everywhere. Agents can list and use
 only items for their thread’s project, plus items that work everywhere.
 
+## Logins
+
+**Settings → Vault → Logins** lists every saved sign-in with its site's icon,
+the username it signs in as, its label, and when and by which agent it was
+last used. Select one to see its allowed sites, who may use it, the
+integrations it signs in to, and its history, or to edit it, update its
+password, or delete it. **Add login** saves a new one.
+
+One site can have several logins, for example a work and a personal account.
+They share the site's name and are told apart by label, which defaults to
+"Site · username". When more than one login fits a page, the agent picks the
+one the task needs instead of guessing; if it can't tell, it asks you.
+
+A login marked **Missing username** has only its password, as some older
+items do. Choose **Add email** and type the username or email so agents can
+sign in on their own.
+
+When an agent sets up an integration that signs in with one of your logins,
+such as the Google account that owns a Cloud project, it links them; the
+integration's page then shows **Signs in with** and that login.
+
 ## Add an item
 
-Open **Settings → Vault** and choose **Add item**. Pick a type, give the item
-a name agents can ask for, and fill in its fields. For a login, list the
-sites it may be used on. Choose whether agents ask you first (the default)
-or which agents may use it without asking, optionally only on certain sites,
-under **Access**.
+Open **Settings → Vault** and choose **Add login**, or **Add item** for a key,
+card or note. Give the item a name agents can ask for and fill in its fields.
+For a login or card, list the sites it may be used on.
+
+Under **Access**, the default is **Allow for agents on its allowed sites**:
+your chats, Work and agents fill it on those sites without asking. **Ask me
+first** makes every agent use wait for your approval, and **Block agents**
+stops agents from using it at all. A fill on any site outside the allowed
+ones always asks you first.
 
 Saved secrets cannot be viewed again, even by you. When you edit an item,
 leave a secret field blank to keep it, or type a new value to replace it.
@@ -33,7 +60,16 @@ leave a secret field blank to keep it, or type a new value to replace it.
   the item's domains and types the value in. The agent gets only a "filled"
   confirmation. At checkout it can fill a card's number, expiry, CVC, and
   cardholder name the same way, one field at a time.
-- If an agent needs a secret only you know, it asks with a private card.
+- When a site needs a login the vault doesn't have, the agent shows a
+  **Sign in to (site)** card in the thread instead of asking in chat. Enter
+  the username and password there and choose **Submit**. With **Save to
+  vault** on (the default), the login is saved for that site and any agent
+  can sign in there without asking; turn it off to use it for the
+  current task only. **Skip** tells the agent you declined. If a saved
+  password stops working, the agent shows the card again to update that
+  login. Cards from scheduled runs wait for you and mark the thread as
+  needing input.
+- If an agent needs another secret only you know, it asks with a private card.
   It can keep your answer in the vault so it never has to ask again.
 - Secret values are scrubbed from tool results and terminal output, so a
   filled password does not leak back into the conversation.
@@ -42,9 +78,11 @@ leave a secret field blank to keep it, or type a new value to replace it.
 
 ## Approvals
 
-The first time an agent wants to use an item, you get an approval
-request naming the item and field. Approving lets that agent use that item
-again (on the approved site, when one was involved). For chats and Work,
+You get an approval request, naming the item, field and site, when an agent
+wants to fill an item on a site outside its allowed ones, or uses an item you
+set to **Ask me first**. Approving a new site lets agents fill the item there
+from then on; approving an **Ask me first** item lets that agent use it
+again. For chats and Work,
 the request is a card above that thread's composer, the thread shows
 **Needs approval**, and allowing it applies to that thread only; deny it and
 the agent is told you declined. A persistent agent's requests wait in its open
@@ -53,39 +91,39 @@ items. CLI process exposure always needs its own approval.
 ## Usage log
 
 Every use is recorded: which item, which agent or chat, which site, and
-whether it was allowed, denied, or waited on approval. In Settings → Vault,
+whether it was allowed, denied, or waited on approval. A login you entered on
+a sign-in card shows which thread and agent it was saved from. In Settings → Vault,
 the history button on an item shows its uses, and **Recent activity** lists
 uses across the vault, including items you have since deleted.
 
 ## Vault on several machines
 
-With [paired machines](machines.md), you can share the vault between a
-machine and its hub. Turn on **Share vault** for the other machine under
-**Paired machines** in **Settings → Vault**, on both machines: items move only
-when each side has chosen to share with the other. Until the other side does,
-the machine shows **Waiting for (machine) to share back**, and releases no
-keys to that machine. Sharing is
-end-to-end encrypted. The secrets, names, and sites of items are readable only
-on machines you share with. The other machine must be online to turn sharing
-on.
+With [paired machines](machines.md), portable vault items and web integration
+sign-ins share automatically between a machine and its hub. Sharing is
+end-to-end encrypted. Turn off **Share vault** for a machine in **Settings →
+Vault** to stop future sharing in both directions. Either machine can opt out.
+The other machine must be online to turn sharing back on and verify its key.
+Agents can inspect and change the same switches with `vault_sharing_status`
+and `vault_sharing_update`, without an owner approval prompt.
 
-- A hub you have not shared with still passes items between your other
-  machines, but cannot read them. For one laptop's items to reach another
-  laptop, share both laptops with the hub, and the hub with both.
-- Approvals stay on each machine. An item arriving on a machine asks before any
-  agent there uses it, even if you allowed that agent elsewhere.
+Existing pairings share automatically after upgrading unless sharing was
+explicitly disabled. Older peers keep their opt-in behavior until they upgrade.
+A hub that shares can pass readable items to its other sharing machines.
+
+- Access rules and approvals stay on each machine. An item arriving on a
+  machine gets the default rule there: agents fill it on its allowed sites.
 - To keep an item on one machine, edit it and choose **Keep on this machine
   only**. Credentials that a local integration runs with, such as the Google
   OAuth client, always stay on their machine. Either way the item shows
   **This machine only**.
 - If a machine shows **Key changed**, it now presents a different vault key
-  than the one this machine trusted. Unpair it and pair again, then turn
-  sharing back on on both machines.
-- If an arriving item has the same name as one already there, it shows up as
-  "Name (from Machine)" on that machine.
+  than the one this machine trusted. Unpair it and pair again.
+- If an arriving key, card or note has the same name as one already there, it
+  shows up as "Name (from Machine)" on that machine. Logins keep their site's
+  name.
 - Deleting an item sends the delete to every machine you share with. The
   newest change wins, so an edit made elsewhere after a delete brings the
-  item back. It asks for approval again on machines where it was deleted.
+  item back, with the default rule on machines where it was deleted.
 - Turning sharing off or unpairing stops new changes from reaching that
   machine. Items it already has stay on it. If a machine is lost or stolen,
   change the passwords and keys it held.

@@ -32,19 +32,28 @@ const REASON_TEXT: Readonly<Record<IntegrationError["reason"], string>> = {
 
 /** Plain text for a failed integrations RPC. */
 export function integrationErrorText(error: unknown): string {
-  if (isIntegrationError(error)) return REASON_TEXT[error.reason];
+  if (isIntegrationError(error))
+    return error.oauthFailure ? error.message : REASON_TEXT[error.reason];
   return error instanceof Error && error.message.trim() !== ""
     ? error.message
     : "The server rejected the change.";
 }
 
-/** The server words a failed test as "Could not connect (<reason>)."; this makes it plain. */
+/**
+ * Plain text for a failed test, from its reason code (or the "Could not connect (<reason>)."
+ * the server words it as); a message with no known code reads as is.
+ */
 export function testResultReason(result: IntegrationTestResult): string | null {
   if (result.status === "connected") return null;
-  const token = /\(([a-z_]+)\)/.exec(result.message)?.[1];
+  const token = result.reason ?? /\(([a-z_]+)\)/.exec(result.message)?.[1];
   return token !== undefined && token in REASON_TEXT
     ? REASON_TEXT[token as IntegrationError["reason"]]
     : result.message;
+}
+
+/** "3 tools available": a passed test's toast. */
+export function testResultToolsText(result: IntegrationTestResult): string {
+  return `${result.toolCount} ${result.toolCount === 1 ? "tool" : "tools"} available`;
 }
 
 export interface IntegrationStatusView {
@@ -56,9 +65,19 @@ export interface IntegrationStatusView {
   readonly checkedAt?: string;
 }
 
+/**
+ * The account label worth showing beside the service: none when it only repeats the
+ * service's name ("Linear · Linear").
+ */
+export function integrationAccountLabel(integration: Integration): string | null {
+  const account = integration.accountLabel?.trim();
+  if (!account) return null;
+  return integration.displayName.trim().toLowerCase() === account.toLowerCase() ? null : account;
+}
+
 /** "Linear · Spawn Partners": how two accounts of one service read apart. */
 export function integrationTitle(integration: Integration): string {
-  const account = integration.accountLabel?.trim();
+  const account = integrationAccountLabel(integration);
   return account ? `${integration.displayName} · ${account}` : integration.displayName;
 }
 

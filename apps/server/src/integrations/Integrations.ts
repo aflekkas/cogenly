@@ -1,13 +1,12 @@
-import { isPublicIntegrationPath } from "./publicEndpoint.ts";
-import * as NativeImport from "./NativeIntegrationImport.ts";
+import { isPublicIntegrationUrl } from "./publicEndpoint.ts";
 import {
   Integration,
   IntegrationError,
   IntegrationId,
   integrationCatalogEntry,
   integrationCatalogEntryFor,
-  type IntegrationNativeImportPreview,
-  type IntegrationNativeImportResult,
+  integrationIcon,
+  INTEGRATION_CATALOG,
   type IntegrationCallResult,
   type IntegrationAddInput,
   type IntegrationCatalogConnectInput,
@@ -46,6 +45,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import { integrationSetupGuide } from "./IntegrationSetupGuides.ts";
 import { redactUpstream, toolErrorMessage, upstreamErrorMessage } from "./UpstreamResult.ts";
+import * as InlineCardEvents from "../orchestration-v2/InlineCardEvents.ts";
 import { selectCallbackOrigin, type SignInOrigin } from "./SignInOrigin.ts";
 import { hostMatchesAnyDomain } from "../vault/VaultPolicy.ts";
 import { redactValue } from "../vault/VaultRedactor.ts";
@@ -157,8 +157,11 @@ const redactIntegration = (integration: Integration | StoredIntegration): Integr
     syncedFrom: _synced,
     ...rest
   } = integration as StoredIntegration;
+  const identity = integrationIcon(integration);
   return {
     ...rest,
+    ...(identity.icon === null ? {} : { icon: identity.icon }),
+    ...(identity.iconUrl === undefined ? {} : { iconUrl: identity.iconUrl }),
     headers: redactHeaders(integration.headers),
     ...(integration.command === undefined
       ? {}
@@ -208,6 +211,21 @@ export const integrationExecutableChanged = (
   (input.transport === "stdio" && current.transport !== "stdio") ||
   (input.command !== undefined &&
     JSON.stringify(input.command) !== JSON.stringify(current.command));
+
+/**
+ * `integration` with its setup notes replaced by `text`, stamped `at`. An
+ * empty `text` clears them; undefined leaves them as they are.
+ */
+const withSetupNotes = (
+  integration: StoredIntegration,
+  text: string | undefined,
+  at: string,
+): StoredIntegration => {
+  if (text === undefined) return integration;
+  const { setupNotes: _, setupNotesUpdatedAt: _at, ...rest } = integration;
+  const trimmed = text.trim();
+  return trimmed === "" ? rest : { ...rest, setupNotes: trimmed, setupNotesUpdatedAt: at };
+};
 
 /** Account labels identify the signed-in account; agents need approval to change them. */
 export const integrationAccountLabelChanged = (
@@ -346,6 +364,7 @@ export interface SignInCallback {
   readonly state: string | undefined;
   readonly code: string | undefined;
   readonly error: string | undefined;
+  readonly errorDescription?: string | undefined;
   readonly iss: string | undefined;
 }
 
@@ -381,8 +400,7 @@ export function tokenRefreshAt(expiresAt: number | null, issuedAtMs: number | nu
 export class Integrations extends Context.Service<
   Integrations,
   {
-    readonly previewNative: () => Effect.Effect<IntegrationNativeImportPreview, IntegrationError>;
-    readonly importNative: () => Effect.Effect<IntegrationNativeImportResult, IntegrationError>;
+    /** The service's setup guide, opening with notes left on its existing integrations. */
     readonly setupGuide: (
       service: string,
     ) => Effect.Effect<ReturnType<typeof integrationSetupGuide>>;
@@ -528,7 +546,7 @@ export const integrationSource = (summary: IntegrationSummary): IntegrationSourc
     id: integration.id,
     name: integration.name,
     displayName: integration.displayName,
-    icon: entry?.icon ?? null,
+    ...integrationIcon(integration),
     serviceName: entry?.name ?? integration.displayName,
     accountLabel: integration.accountLabel?.trim() || null,
     status,
@@ -596,10 +614,11 @@ const CHECK_MESSAGES: Partial<Record<IntegrationError["reason"], string>> = {
 
 /** Status text owners and agents see; upstream messages are already bounded. */
 const checkMessage = (error: IntegrationError): string => {
+  if (error.oauthFailure) return error.message;
   const waiting = refreshWaitMessage(error);
   if (waiting !== undefined) return waiting;
   const { reason, cause } = error;
-  const base = CHECK_MESSAGES[reason] ?? "The request could not be completed.";
+  const base = CHECK_MESSAGES[reason] ?? error.message;
   return (reason === "upstream_error" || reason === "scope_missing") &&
     typeof cause === "string" &&
     cause.trim() !== ""
@@ -625,6 +644,7 @@ const signInAttachment = (
     url: integration.url,
     scope: integration.scope,
     ...(integration.auth?.scope === undefined ? {} : { oauthScope: integration.auth.scope }),
+    ...(integration.auth?.clientId === undefined ? {} : { clientId: integration.auth.clientId }),
   },
   server: state.server,
   ...(state.registration === undefined ? {} : { registration: state.registration }),
@@ -642,13 +662,20 @@ const adoptable = (
   integration: StoredIntegration,
   signIn: Tokens.AttachedSignIn,
   nowMs: number,
+  alreadySignedIn = false,
 ): boolean => {
   const { attachment } = signIn;
   const authorization = attachment.authorization;
   if (
     authorization === undefined ||
     authorization.url !== integration.url ||
-    authorization.oauthScope !== integration.auth?.scope
+    authorization.oauthScope !== integration.auth?.scope ||
+    (authorization.clientId !== integration.auth?.clientId &&
+      !(
+        alreadySignedIn &&
+        authorization.clientId === undefined &&
+        attachment.registration === undefined
+      ))
   )
     return false;
   if (
@@ -676,6 +703,7 @@ const tokenItemName = (integration: Integration) =>
 
 const make = (options: IntegrationsOptions = {}) =>
   Effect.gen(function* () {
+    const cardEvents = yield* InlineCardEvents.optional;
     const sql = yield* SqlClient.SqlClient;
     const sync = yield* Effect.serviceOption(IntegrationSync.IntegrationSync);
     const crypto = yield* Crypto.Crypto;
@@ -684,7 +712,6 @@ const make = (options: IntegrationsOptions = {}) =>
     const tokenStore = yield* Tokens.IntegrationTokens;
     const peers = yield* IntegrationSyncPeers;
     const protocol = yield* OAuth.make;
-    const nativeImport = yield* Effect.serviceOption(NativeImport.NativeIntegrationImport);
     const local = yield* Effect.serviceOption(Local.LocalIntegrations);
     // Settings' secret forms and the uv installer; absent in suites that do not use them.
     const secretWriter = yield* Effect.serviceOption(Credentials.IntegrationSecrets);
@@ -717,6 +744,7 @@ const make = (options: IntegrationsOptions = {}) =>
         {
           readonly integrationId: IntegrationId;
           readonly fromAgent: boolean;
+          readonly threadId?: import("@cogenly/contracts").ThreadId | undefined;
           readonly url: string;
           readonly definition: string;
           readonly server: OAuth.OAuthServer;
@@ -780,12 +808,25 @@ const make = (options: IntegrationsOptions = {}) =>
               ),
             );
 
-    /** Private paths are capabilities: keep the endpoint in the vault, even for direct creates. */
+    /**
+     * Private paths are capabilities: keep the endpoint in the vault, even for direct creates.
+     * An OAuth server's path is not one (its token is), and OAuth discovery and the
+     * `resource` parameter need the real URL, so those endpoints stay as they are.
+     */
     const protectEndpoint = (integration: StoredIntegration) =>
       Effect.gen(function* () {
-        if (integration.transport !== "http") return integration;
+        if (integration.transport !== "http" || integration.auth?.type === "oauth")
+          return integration;
         const url = new URL(integration.url);
-        if (isPublicIntegrationPath(url.pathname)) return integration;
+        if (
+          url.username ||
+          url.password ||
+          url.hash ||
+          (url.search && integration.auth !== undefined)
+        )
+          return integration;
+        if (!url.search && (isPublicIntegrationUrl(url) || integrationCatalogEntryFor(integration)))
+          return integration;
         const item = `integration-endpoint:${integration.id.replace(/^integration:/, "")}`;
         yield* saveSecret({
           item,
@@ -863,14 +904,49 @@ const make = (options: IntegrationsOptions = {}) =>
     const readStored = (payload: string) =>
       Effect.gen(function* () {
         const current = yield* decode(payload).pipe(Effect.mapError(failure("read", "storage")));
-        const protectedValue = yield* protectLiterals(yield* protectEndpoint(current));
+        let repaired = current;
+        const catalogEndpoint =
+          current.transport === "http" && current.endpointRef !== undefined
+            ? INTEGRATION_CATALOG.find(
+                (entry) =>
+                  entry.kind === "remote" &&
+                  new URL(entry.url).origin === new URL(current.url).origin,
+              )
+            : undefined;
+        if (catalogEndpoint?.kind === "remote" && current.endpointRef !== undefined) {
+          // Older versions vaulted even public catalog paths (notably Wispr's /v1/mcp).
+          // Restore only an exact catalog endpoint, never infer a credential destination.
+          const endpoint = yield* credentials
+            .resolve(current.endpointRef, {
+              host: new URL(current.url).hostname,
+              approvedItems: [],
+            })
+            .pipe(Effect.orElseSucceed(() => Option.none<string>()));
+          if (Option.isSome(endpoint) && endpoint.value === catalogEndpoint.url) {
+            const { endpointRef: _, ...rest } = current;
+            repaired = { ...rest, url: catalogEndpoint.url, icon: catalogEndpoint.icon };
+          }
+        }
+        const identity = integrationIcon(repaired);
+        const withIcon = {
+          ...repaired,
+          ...(identity.icon === null ? {} : { icon: identity.icon }),
+        };
+        const protectedValue = yield* protectLiterals(yield* protectEndpoint(withIcon));
         const encoded = yield* encode(protectedValue).pipe(
           Effect.mapError(failure("write", "storage")),
         );
-        if (encoded !== (yield* encode(current).pipe(Effect.mapError(failure("read", "storage")))))
+        if (
+          encoded !== (yield* encode(current).pipe(Effect.mapError(failure("read", "storage"))))
+        ) {
           yield* sql`UPDATE integrations SET payload_json=${encoded} WHERE id=${current.id} AND payload_json=${payload}`.pipe(
             Effect.mapError(failure("write", "storage")),
           );
+          if (Option.isSome(sync))
+            yield* sync.value
+              .publish(protectedValue, current)
+              .pipe(Effect.mapError(failure("upgrade definition", "storage")));
+        }
         return protectedValue;
       }).pipe(sql.withTransaction, Effect.mapError(failure("migrate credentials", "storage")));
 
@@ -2005,7 +2081,11 @@ const make = (options: IntegrationsOptions = {}) =>
             )
               return false;
             const next =
-              pointed !== undefined && adoptable(integration, pointed, nowMs)
+              // Preserve a local legacy manual-client grant until its owner refreshes
+              // with client identity metadata. A changed definition has cleared this
+              // state already; a peer without a local grant cannot use this exception.
+              pointed !== undefined &&
+              adoptable(integration, pointed, nowMs, state?.signedIn === true)
                 ? pointed
                 : attached.find((signIn) => adoptable(integration, signIn, nowMs));
             if (next === undefined) {
@@ -2199,34 +2279,12 @@ const make = (options: IntegrationsOptions = {}) =>
           );
 
     const service: Integrations["Service"] = Integrations.of({
-      previewNative: () =>
-        Option.isSome(nativeImport)
-          ? nativeImport.value.preview
-          : Effect.fail(
-              new IntegrationError({
-                operation: "preview native integrations",
-                reason: "upstream_unreachable",
-              }),
-            ),
-      importNative: () =>
-        Effect.gen(function* () {
-          const preview = yield* service.previewNative();
-          const existing = (yield* service.list()).integrations.map((row) => row.integration);
-          const imported: string[] = [];
-          for (const definition of preview.definitions) {
-            if (existing.some((item) => item.deletedAt === null && item.name === definition.name))
-              continue;
-            yield* service.create(definition);
-            imported.push(definition.name);
-          }
-          return {
-            imported,
-            reconnect: preview.reconnect,
-            warnings: preview.warnings,
-            incomplete: preview.incomplete,
-          };
-        }),
-      setupGuide: (service) => Effect.succeed(integrationSetupGuide(service)),
+      setupGuide: (service) =>
+        rows().pipe(
+          // A guide without notes still beats no guide when the store can't be read.
+          Effect.orElseSucceed(() => []),
+          Effect.map((existing) => integrationSetupGuide(service, existing)),
+        ),
       list: (options) =>
         rows().pipe(
           Effect.flatMap((all) => summaries(all, options?.includeProcessOutput === true)),
@@ -2323,6 +2381,8 @@ const make = (options: IntegrationsOptions = {}) =>
             ),
             name: input.name,
             displayName: input.displayName,
+            ...(input.icon === undefined ? {} : { icon: input.icon }),
+            ...(input.iconUrl === undefined ? {} : { iconUrl: input.iconUrl }),
             transport: input.transport,
             ...(input.local ? { local: input.local } : {}),
             ...(input.command ? { command: input.command } : {}),
@@ -2345,6 +2405,7 @@ const make = (options: IntegrationsOptions = {}) =>
             updatedAt: at,
             deletedAt: null,
           };
+          integration = withSetupNotes(integration, request.setupNotes, at);
           integration = yield* protectLiterals(yield* protectEndpoint(integration));
           yield* persistDefinition(integration);
           // The process starts now so a sign-in link answers quickly; listing retries a failure.
@@ -2385,7 +2446,18 @@ const make = (options: IntegrationsOptions = {}) =>
           // Nothing to change (an agent asking for a fresh sign-in link): keep the
           // version, so a managed process and its pending sign-in keep running.
           if (Object.entries(masked).every(([key, value]) => key === "id" || value === undefined))
-            return { integration: redactIntegration(current), changed: false };
+            return { integration: redactIntegration(current), changed: false, notesOnly: false };
+          // Notes describe the setup and change nothing it runs with, so the
+          // process, its sign-in and its tokens stay as they are.
+          if (
+            Object.entries(masked).every(
+              ([key, value]) => key === "id" || key === "setupNotes" || value === undefined,
+            )
+          ) {
+            const integration = withSetupNotes(current, masked.setupNotes, yield* now);
+            yield* persistDefinition(integration, current);
+            return { integration: redactIntegration(integration), changed: true, notesOnly: true };
+          }
           // A masked value is one the caller left as it was.
           if (masked.command !== undefined) {
             const env = Object.fromEntries(
@@ -2470,10 +2542,14 @@ const make = (options: IntegrationsOptions = {}) =>
           });
           if (input.url !== undefined) yield* validateUrl(input.url);
           yield* validateAuth(auth, "update");
+          // An OAuth account with a vaulted endpoint (stored before OAuth paths stayed
+          // public) can never sign in; a new URL repairs it.
           const endpointRef =
-            input.endpointRef === undefined
-              ? current.endpointRef
-              : (input.endpointRef ?? undefined);
+            input.endpointRef !== undefined
+              ? (input.endpointRef ?? undefined)
+              : auth?.type === "oauth" && input.url !== undefined
+                ? undefined
+                : current.endpointRef;
           yield* validateTransport({
             transport: input.transport ?? current.transport,
             ...(endpointRef === undefined ? {} : { endpointRef }),
@@ -2511,6 +2587,8 @@ const make = (options: IntegrationsOptions = {}) =>
             ...rest,
             ...(endpointRef === undefined ? {} : { endpointRef }),
             ...(input.displayName === undefined ? {} : { displayName: input.displayName }),
+            ...(input.icon === undefined ? {} : { icon: input.icon }),
+            ...(input.iconUrl === undefined ? {} : { iconUrl: input.iconUrl }),
             ...(input.transport === undefined ? {} : { transport: input.transport }),
             ...(input.url === undefined ? {} : { url: input.url }),
             ...(input.headers === undefined ? {} : { headers: input.headers }),
@@ -2535,17 +2613,19 @@ const make = (options: IntegrationsOptions = {}) =>
             credentialOrigin,
             approvedCredentialItems,
           };
+          integration = withSetupNotes(integration, input.setupNotes, integration.updatedAt);
           integration = yield* protectLiterals(yield* protectEndpoint(integration));
           yield* persistDefinition(integration, current);
           if (!keepSignIn) yield* dropTokens(current);
           yield* invalidate(integration.id);
-          return { integration: redactIntegration(integration), changed: true };
+          return { integration: redactIntegration(integration), changed: true, notesOnly: false };
         }).pipe(
           sql.withTransaction,
           integrationLock(masked.id).withPermits(1),
           // Once committed, the old process gives way; the next list starts the new version.
-          Effect.tap(({ integration, changed }) =>
+          Effect.tap(({ integration, changed, notesOnly }) =>
             changed &&
+            !notesOnly &&
             (integration.transport === "local" || integration.transport === "stdio") &&
             Option.isSome(local)
               ? local.value.stop(integration.id, integration)
@@ -2748,6 +2828,7 @@ const make = (options: IntegrationsOptions = {}) =>
             return next.set(state, {
               integrationId: integration.id,
               fromAgent: from.fromAgent === true,
+              threadId: from.threadId,
               url: integration.url,
               definition: definitionKey(integration),
               server,
@@ -2813,15 +2894,27 @@ const make = (options: IntegrationsOptions = {}) =>
           )
             return yield* rejected;
           if (callback.error !== undefined || callback.code === undefined) {
-            yield* recordCheck(
-              integration,
-              new IntegrationError({
-                operation: "sign in",
-                reason: "upstream_error",
-                cause: `Sign-in did not finish (${(callback.error ?? "no code").slice(0, 64)}).`,
-              }),
-            );
-            return yield* rejected;
+            const error = new IntegrationError({
+              operation: "sign in",
+              reason: "upstream_error",
+              oauthFailure: {
+                stage: "authorize",
+                host: new URL(pending.server.authorizationEndpoint).host,
+                error: (callback.error ?? "no_code").slice(0, 64),
+                ...(callback.errorDescription
+                  ? { description: callback.errorDescription.slice(0, 500) }
+                  : {}),
+              },
+            });
+            yield* recordCheck(integration, error);
+            // A denial leaves the setup card pending; tell its thread what happened.
+            if (pending.threadId)
+              yield* cardEvents.answered({
+                threadId: pending.threadId,
+                key: InlineCardEvents.signInAnswerKey(state),
+                summary: `Integration sign-in denied or cancelled: ${integrationTitle(integration)}`,
+              });
+            return yield* error;
           }
           const previous = integration.oauthState;
           // A reused registration's secret is the one stored with the earlier sign-in.
@@ -2853,9 +2946,11 @@ const make = (options: IntegrationsOptions = {}) =>
                   new IntegrationError({
                     operation: "complete sign in",
                     reason: "upstream_error",
+                    oauthFailure: error.oauthFailure,
                     cause: error.message,
                   }),
               ),
+              Effect.tapError((error) => recordCheck(integration, error)),
             );
           // A new sign-in anywhere replaces the shared item and picks its refresher afresh.
           const refreshOwner = yield* peers.defaultRefreshOwner;
@@ -2939,6 +3034,7 @@ const make = (options: IntegrationsOptions = {}) =>
               ),
               Effect.ignore,
             );
+          // The setup card completes and notifies its thread (IntegrationSetupRequests).
           yield* notify;
           return { integration: redactIntegration(signedIn) };
         }).pipe(
@@ -3029,14 +3125,18 @@ const make = (options: IntegrationsOptions = {}) =>
           if (signIn._tag === "Success") return { integration, signIn: signIn.success };
           const error = signIn.failure;
           if (error.reason === "approval_required") return { integration, ...keep };
+          // A loopback agent can't know the browser's address; the inline card's
+          // Sign in starts from the browser itself, so this is a plain sign-in step.
+          const noCallbackOrigin = error.operation === "start sign-in";
           const setup = setupActionFor({
             entry: integrationCatalogEntryFor(stored),
             integration: stored,
             status: "needs_sign_in",
-            reason: error.reason,
-            // A refused callback origin explains itself; anything else gets the plain status text.
-            message:
-              error.reason === "invalid_request" && typeof error.cause === "string"
+            reason: noCallbackOrigin ? "sign_in_required" : error.reason,
+            // A refused request explains itself; anything else gets the plain status text.
+            message: noCallbackOrigin
+              ? undefined
+              : error.reason === "invalid_request" && typeof error.cause === "string"
                 ? error.cause
                 : checkMessage(error),
             redirectUri:

@@ -22,6 +22,9 @@ import {
   type ReactNode,
 } from "react";
 import type {
+  EnvironmentId,
+  ServerAgentProcess,
+  ServerAgentProcessKill,
   ServerProcessDiagnosticsEntry,
   ServerProcessResourceHistorySummary,
   ServerProcessSignal,
@@ -34,7 +37,7 @@ import { ensureLocalApi } from "../../localApi";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
-import { Button } from "../ui/button";
+import { Button, InlineButton } from "../ui/button";
 import { MorphIcon } from "~/components/MorphIcon";
 import { ScrollArea } from "../ui/scroll-area";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
@@ -668,6 +671,161 @@ function ProcessResourceHistoryTable({
   );
 }
 
+const AGENT_PROCESS_KILL_REASONS = {
+  stopped: "Thread stopped or settled",
+  idle: "Thread idle",
+  restart: "Server restarted",
+  orphan: "Orphan fixed",
+} as const satisfies Record<ServerAgentProcessKill["reason"], string>;
+
+/**
+ * Commands agents started, per thread, each killable as a whole tree; then
+ * what was killed for them and why.
+ */
+function AgentProcessesSection({
+  environmentId,
+  canMaintainEnvironment,
+}: {
+  environmentId: EnvironmentId;
+  canMaintainEnvironment: boolean;
+}) {
+  const { data, error, isPending, refresh } = useEnvironmentQuery(
+    serverEnvironment.agentProcesses({ environmentId, input: {} }),
+  );
+  const killAgentProcess = useAtomCommand(serverEnvironment.killAgentProcess, {
+    reportFailure: false,
+  });
+  const [killingKey, setKillingKey] = useState<string | null>(null);
+  const kill = useCallback(
+    async (process: ServerAgentProcess) => {
+      const key = `${process.threadId}:${process.terminalId}`;
+      if (killingKey !== null || !readEnvironmentScope(environmentId, AuthEnvironmentMaintainScope))
+        return;
+      setKillingKey(key);
+      try {
+        const result = await killAgentProcess({
+          environmentId,
+          input: { threadId: process.threadId, terminalId: process.terminalId },
+        });
+        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+          const failure = squashAtomCommandFailure(result);
+          toastManager.add({
+            type: "error",
+            title: "Could not kill the command",
+            description: failure instanceof Error ? failure.message : "The kill failed.",
+          });
+        }
+        refresh();
+      } finally {
+        setKillingKey(null);
+      }
+    },
+    [environmentId, killAgentProcess, killingKey, refresh],
+  );
+  const processes = data?.processes ?? [];
+  const killed = data?.killed ?? [];
+  return (
+    <SettingsSection
+      title="Agent processes"
+      headerAction={
+        <SettingsRefreshAction
+          checkedAt={null}
+          idleLabel="Checking"
+          refreshing={isPending}
+          label="Refresh agent processes"
+          onRefresh={refresh}
+        />
+      }
+    >
+      <DiagnosticsErrors messages={[error]} />
+      {processes.length > 0 ? (
+        <DiagnosticsTable
+          headers={["Thread", "Command", "PIDs", "Started", "Kill"]}
+          minTableWidth="min-w-[760px]"
+          columnWidths={["w-[24%]", "w-[42%]", "w-[14%]", "w-[12%]", "w-[8%]"]}
+        >
+          {processes.map((process) => {
+            const key = `${process.threadId}:${process.terminalId}`;
+            const tags = [
+              process.kind === "provider" ? "provider" : null,
+              process.keepRunning ? "kept" : null,
+              process.orphaned ? "orphaned" : null,
+            ].filter((tag) => tag !== null);
+            return (
+              <tr key={key} className="interactive hover:bg-muted/15">
+                <td className="truncate px-4 py-3 align-top font-medium text-foreground sm:pl-5">
+                  {process.threadTitle ?? process.threadId}
+                  {tags.length > 0 ? (
+                    <div className="truncate text-2xs font-normal text-muted-foreground">
+                      {tags.join(" · ")}
+                    </div>
+                  ) : null}
+                </td>
+                <td className="px-4 py-3 align-top text-muted-foreground">
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={<span className="block truncate font-mono">{process.command}</span>}
+                    />
+                    <TooltipPopup side="top" variant="code">
+                      {process.command}
+                    </TooltipPopup>
+                  </Tooltip>
+                </td>
+                <td className="truncate px-4 py-3 align-top font-mono tabular-nums text-muted-foreground">
+                  {process.pids.join(", ")}
+                </td>
+                <td className="whitespace-nowrap px-4 py-3 align-top text-muted-foreground">
+                  {formatRelativeTimeLabel(process.startedAt)}
+                </td>
+                <td className="p-2 text-right align-top sm:pr-4">
+                  <InlineButton
+                    tone="destructive"
+                    disabled={!canMaintainEnvironment || killingKey !== null}
+                    aria-label={`Kill ${process.command}`}
+                    onClick={() => void kill(process)}
+                  >
+                    KILL
+                  </InlineButton>
+                </td>
+              </tr>
+            );
+          })}
+        </DiagnosticsTable>
+      ) : (
+        <EmptyRows
+          label={
+            isPending && data === null ? "Loading agent processes..." : "No agent commands running."
+          }
+        />
+      )}
+      {killed.length > 0 ? (
+        <DiagnosticsTable
+          headers={["Killed", "Command", "PIDs", "Why"]}
+          minTableWidth="min-w-[760px]"
+          columnWidths={["w-[14%]", "w-[50%]", "w-[14%]", "w-[22%]"]}
+        >
+          {killed.map((entry) => (
+            <tr key={`${entry.threadId}:${entry.terminalId}:${entry.at}`}>
+              <td className="whitespace-nowrap px-4 py-3 align-top text-muted-foreground sm:pl-5">
+                {formatRelativeTimeLabel(entry.at)}
+              </td>
+              <td className="truncate px-4 py-3 align-top font-mono text-muted-foreground">
+                {entry.command}
+              </td>
+              <td className="truncate px-4 py-3 align-top font-mono tabular-nums text-muted-foreground">
+                {entry.pids.join(", ")}
+              </td>
+              <td className="px-4 py-3 align-top text-muted-foreground sm:pr-5">
+                {AGENT_PROCESS_KILL_REASONS[entry.reason]}
+              </td>
+            </tr>
+          ))}
+        </DiagnosticsTable>
+      ) : null}
+    </SettingsSection>
+  );
+}
+
 /** The shared section refresh, fed the diagnostics read time. */
 function DiagnosticsRefreshAction({
   checkedAt,
@@ -1190,6 +1348,13 @@ export function DiagnosticsSettingsPanel() {
           />
         )}
       </SettingsSection>
+
+      {environmentId === null ? null : (
+        <AgentProcessesSection
+          environmentId={environmentId}
+          canMaintainEnvironment={canMaintainEnvironment}
+        />
+      )}
 
       <ResourceTelemetryDiagnostics
         environmentId={environmentId}

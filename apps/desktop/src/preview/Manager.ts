@@ -1864,7 +1864,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     yield* keepFrameCaptureWebContentsUnthrottled(tabId, wc);
     if (tab.webContentsId === webContentsId && currentAttachment?.webContents === wc) {
       // The guest we already own re-announced itself, so nothing about the tab
-      // changed. Only push its zoom back down — Chromium may have just handed
+      // changed. Only push its zoom back down: Chromium may have just handed
       // this guest the app window's zoom level.
       yield* assertTabZoom(tabId);
       yield* attempt({ operation: "registerWebview.sendTheme", tabId, webContentsId }, () => {
@@ -2468,7 +2468,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     }
     if (tab.colorScheme !== colorScheme) {
       // Record the choice even when the CDP call below can't run yet (no
-      // webview, DevTools holding the debugger) — it is re-applied on the
+      // webview, DevTools holding the debugger); it is re-applied on the
       // next control-session (re)attach.
       yield* update(tabId, { colorScheme });
     }
@@ -2496,7 +2496,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     yield* withTabLifecycleLock(
       tabId,
       Effect.gen(function* () {
-        // Record the intent even when no guest is attached yet — it is
+        // Record the intent even when no guest is attached yet; it is
         // re-applied by registerWebview when one arrives.
         const previous = (yield* SynchronizedRef.get(tabsRef)).get(tabId)?.audioMuted;
         const committed = previous !== undefined && previous !== audioMuted;

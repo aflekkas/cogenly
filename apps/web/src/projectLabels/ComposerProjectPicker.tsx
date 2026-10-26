@@ -7,6 +7,7 @@ import {
   ComposerControl,
   ComposerControlChevron,
   ComposerControlIcon,
+  composerControlGapClassName,
   type ComposerControlSize,
 } from "../components/chat/ComposerControl";
 import {
@@ -18,7 +19,7 @@ import {
   ComboboxSearchInput,
   ComboboxTrigger,
 } from "../components/ui/combobox";
-import { InlineButton } from "../components/ui/button";
+import { toastManager } from "../components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import type { DraftId } from "../composerDraftStore";
 import { cn } from "../lib/utils";
@@ -35,12 +36,13 @@ import {
   threadForksIntoProjects,
   threadProjectFolderId,
 } from "./projectLabels.logic";
-import { HeroProjectSuffixText } from "./HeroProjectSuffix";
+import { HeroProjectSuffix } from "./HeroProjectSuffix";
 import { HERO_INLINE_ICON_STYLE, ProjectFolderIcon } from "./ProjectFolderMark";
 import { ProjectPickerRow } from "./ProjectPickerRow";
 import { useComposerProjectFolder } from "./useComposerProjectFolder";
 import { useMoveThreadToFolder } from "./useMoveThreadToFolder";
 import { pickNoProjectForWork } from "./workNoProjectPicks";
+import { HeroName, HeroPickerButton } from "../components/chat/HeroHeadline";
 import { WorkHeroCrumbText } from "../components/chat/WorkHeroSentence";
 
 type ProjectOption =
@@ -55,6 +57,42 @@ type ProjectOption =
   | { readonly kind: "none"; readonly key: "none"; readonly label: string }
   | { readonly kind: "new"; readonly key: "new" }
   | { readonly kind: "create"; readonly key: "create"; readonly name: string };
+
+/**
+ * The composer's project chip, inside a collapsible `ComposerControl`: the project's
+ * mark and name, or No project. Every composer with a project picker draws this, so
+ * a narrow composer collapses each to its icon alike.
+ */
+export function ComposerProjectChip({
+  project,
+  size = "sm",
+}: {
+  project: EnvironmentProjectLabel | null;
+  size?: ComposerControlSize | undefined;
+}) {
+  return (
+    <>
+      {/* A picked project fades in where the last one was. */}
+      <span
+        key={project?.key ?? "none"}
+        className={cn("swap-motion flex min-w-0 items-center", composerControlGapClassName(size))}
+      >
+        {project ? (
+          <ProjectFolderIcon project={project} className={size === "xs" ? "size-3" : "size-4"} />
+        ) : (
+          <ComposerControlIcon icon={FolderIcon} size={size} />
+        )}
+        <span
+          data-composer-control-label
+          className={cn("max-w-40 truncate", project === null && "text-muted-foreground")}
+        >
+          <span>{project ? project.label.name : "No project"}</span>
+        </span>
+      </span>
+      <ComposerControlChevron size={size} />
+    </>
+  );
+}
 
 function optionText(option: ProjectOption): string {
   switch (option.kind) {
@@ -120,6 +158,8 @@ export function ComposerProjectPicker(props: {
   readonly draftId: DraftId | null;
   readonly size: ComposerControlSize;
   readonly disabled?: boolean;
+  /** Looks as usual but does not open, for a moment too brief to dim it for. */
+  readonly locked?: boolean;
   /**
    * `hero` is the new-chat greeting's " · in <project>" tail: the same picker,
    * opened from the project's name, and nothing to click without a project.
@@ -228,7 +268,7 @@ export function ComposerProjectPicker(props: {
   };
 
   const choose = async (option: ProjectOption) => {
-    if (busy) return;
+    if (busy || props.locked) return;
     if (option.kind === "new" || option.kind === "create") {
       setOpen(false);
       setQuery("");
@@ -245,9 +285,20 @@ export function ComposerProjectPicker(props: {
     setBusy(true);
     try {
       await assign(option.kind === "project" ? { id: option.id, name: option.name } : null);
+    } catch (cause) {
+      // A refused move toasts itself; this is anything that threw on the way.
+      toastManager.add({
+        type: "error",
+        title:
+          option.kind === "project"
+            ? `Couldn't move to ${option.name}`
+            : "Couldn't remove from the project",
+        description: cause instanceof Error ? cause.message : undefined,
+      });
+    } finally {
+      // Closed whatever happened, so a failure doesn't leave the list hanging open.
       setOpen(false);
       setQuery("");
-    } finally {
       setBusy(false);
     }
   };
@@ -269,6 +320,7 @@ export function ComposerProjectPicker(props: {
       open={open}
       onOpenChange={(next, details) => {
         if (!next && details.reason === "item-press") return;
+        if (next && props.locked) return;
         setOpen(next);
         if (!next) setQuery("");
       }}
@@ -281,46 +333,27 @@ export function ComposerProjectPicker(props: {
       {isHeadline ? (
         // Named mid-sentence: the visible project name is the accessible name.
         // It shrinks (truncating) before the breadcrumb outgrows its line.
-        <ComboboxTrigger
-          disabled={props.disabled}
-          data-hero-project-picker=""
-          render={
-            <InlineButton
-              tone="picker"
-              weight="normal"
-              className="pointer-events-auto min-w-0 max-w-64 shrink align-baseline"
-            />
-          }
-        >
-          <span className={cn("block truncate", current === null && "text-muted-foreground")}>
-            {current ? headlineIcon : null}
-            {current?.label.name ?? "No project"}
-          </span>
-        </ComboboxTrigger>
-      ) : isHero ? (
-        // The headline owns the fade; the suffix only renders its reserved name slot.
-        <ComboboxTrigger
-          disabled={props.disabled}
-          aria-label={current ? `In ${current.label.name}. Move to project` : undefined}
-          aria-hidden={current === null || undefined}
-          tabIndex={current === null ? -1 : undefined}
-          data-hero-project-suffix=""
-          render={
-            <button
-              type="button"
-              className={cn(
-                "group/hero-suffix pointer-events-auto inline-block max-w-full cursor-pointer rounded-sm align-baseline text-foreground outline-none focus-visible:outline-2 focus-visible:outline-ring",
-                current === null && "pointer-events-none",
-              )}
-            />
-          }
-        >
-          <HeroProjectSuffixText
-            name={current?.label.name ?? null}
-            project={current ?? null}
-            open={open}
+        <ComboboxTrigger disabled={props.disabled} render={<HeroPickerButton />}>
+          <HeroName
+            text={current?.label.name ?? "No project"}
+            placeholder={current === null}
+            icon={headlineIcon}
+            chevron
           />
         </ComboboxTrigger>
+      ) : isHero ? (
+        current === null ? null : (
+          // " · in <project>" after the greeting; the headline owns the fade.
+          <HeroProjectSuffix>
+            <ComboboxTrigger
+              disabled={props.disabled}
+              aria-label={`In ${current.label.name}. Move to project`}
+              render={<HeroPickerButton />}
+            >
+              <HeroName text={current.label.name} icon={headlineIcon} chevron />
+            </ComboboxTrigger>
+          </HeroProjectSuffix>
+        )
       ) : (
         <Tooltip>
           <TooltipTrigger
@@ -329,25 +362,11 @@ export function ComposerProjectPicker(props: {
                 disabled={props.disabled}
                 aria-label={triggerLabel}
                 data-composer-project-picker=""
-                render={<ComposerControl size={props.size} className="min-w-0" />}
+                render={<ComposerControl size={props.size} collapsible />}
               />
             }
           >
-            {current ? (
-              <ProjectFolderIcon
-                project={current}
-                className={props.size === "xs" ? "size-3" : "size-4"}
-              />
-            ) : (
-              <ComposerControlIcon icon={FolderIcon} size={props.size} />
-            )}
-            <span
-              data-composer-control-label
-              className={cn("max-w-40 truncate", current === null && "text-muted-foreground")}
-            >
-              {current ? current.label.name : "No project"}
-            </span>
-            <ComposerControlChevron size={props.size} />
+            <ComposerProjectChip project={current} size={props.size} />
           </TooltipTrigger>
           <TooltipPopup side="top">
             {forks ? "Fork into project…" : "Move to project…"}

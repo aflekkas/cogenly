@@ -360,9 +360,9 @@ import {
 } from "../../reviewCommentContext";
 
 // ---------------------------------------------------------------------------
-// Context — shared state consumed by every row component via Context.
+// Context: shared state consumed by every row component via Context.
 // Propagates through LegendList's memo boundaries for shared callbacks and
-// non-row-scoped state. `nowIso` is intentionally excluded — self-ticking
+// non-row-scoped state. `nowIso` is intentionally excluded; self-ticking
 // components (LiveElapsed) handle it.
 // ---------------------------------------------------------------------------
 
@@ -644,7 +644,7 @@ interface MessagesTimelineProps {
 }
 
 // ---------------------------------------------------------------------------
-// MessagesTimeline — list owner
+// MessagesTimeline: list owner
 // ---------------------------------------------------------------------------
 
 export function MessagesTimeline(props: MessagesTimelineProps) {
@@ -1887,7 +1887,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     contentInsetEndAdjustment,
   });
 
-  // Stable renderItem — no closure deps. Row components read shared state
+  // Stable renderItem with no closure deps. Row components read shared state
   // from TimelineRowCtx, which propagates through LegendList's memo.
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
@@ -2503,7 +2503,7 @@ function TimelineMinimapNavigationButton({
 }
 
 // ---------------------------------------------------------------------------
-// TimelineRowContent — the actual row component
+// TimelineRowContent: the actual row component
 // ---------------------------------------------------------------------------
 
 type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"][number];
@@ -3320,7 +3320,7 @@ function RevertUserMessageButton({
 }
 
 /**
- * Hover-revealed wall-clock time with a full-date tooltip — the same metadata
+ * Hover-revealed wall-clock time with a full-date tooltip: the same metadata
  * presentation as message rows, for work entries and turn folds. The parent
  * carries `group/timeline-row`; hover or focus on an existing control reveals
  * the time without adding a tab stop. Hidden timestamps stay outside the row
@@ -3839,6 +3839,9 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
         environmentId={ctx.activeThreadEnvironmentId}
         item={item}
         visibility={visibility}
+        onToggle={(collapsed) => {
+          ctx.onToggleWorkEntry(row.id, collapsed);
+        }}
       />
     );
   }
@@ -4055,7 +4058,7 @@ const V2SubagentRows = memo(function V2SubagentRows({
 });
 
 // ---------------------------------------------------------------------------
-// Extracted row sections — own their state / store subscriptions so changes
+// Extracted row sections own their state / store subscriptions so changes
 // re-render only the affected row, not the entire list.
 // ---------------------------------------------------------------------------
 
@@ -5017,7 +5020,7 @@ function UserMessagePreviewAnnotationDetails(props: {
                     ) : null}
                   </div>
                   {element.htmlPreview?.trim() ? (
-                    <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded bg-muted/60 px-2 py-1.5 text-3xs leading-relaxed">
+                    <pre className="scroll-fade-y mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded bg-muted/60 px-2 py-1.5 text-3xs leading-relaxed">
                       {element.htmlPreview.trim()}
                     </pre>
                   ) : null}
@@ -5641,6 +5644,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
       lineBreaks
       parseRawHtml={false}
       renderContextReference={props.renderContextReference}
+      threadLinkChips
       headingLevelOffset={MESSAGE_HEADING_LEVEL}
     />
   );
@@ -5695,7 +5699,7 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
         </DiffWorkerPoolProvider>
       )}
       {renderablePatch?.kind === "raw" && (
-        <pre className="overflow-x-auto rounded-md bg-muted/40 p-2 text-xs">
+        <pre className="scroll-fade-x overflow-x-auto rounded-md bg-muted/40 p-2 text-xs">
           {renderablePatch.text}
         </pre>
       )}
@@ -5704,14 +5708,14 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
 }
 
 // ---------------------------------------------------------------------------
-// Structural sharing — reuse old row references when data hasn't changed
+// Structural sharing: reuse old row references when data hasn't changed
 // so LegendList (and React) can skip re-rendering unchanged items.
 // ---------------------------------------------------------------------------
 
 /** Content-stable projection of the runs the handoff rows read. The incoming
  *  array is rebuilt on every projection event (status/timestamp churn), but
  *  the returned reference only changes when a run's identity-relevant fields
- *  (id, ordinal, instance, model) do — keeping TimelineRowCtx stable. */
+ *  (id, ordinal, instance, model) do, keeping TimelineRowCtx stable. */
 function useStableHandoffRuns(
   runs: ReadonlyArray<HandoffTimelineRun>,
 ): ReadonlyArray<HandoffTimelineRun> {
@@ -6133,7 +6137,7 @@ function buildToolCallExpandedBody(
 }
 
 const toolCallExpandedBodyClassName =
-  "max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-secondary-label text-(length:--font-size-code,var(--text-2xs)) leading-relaxed select-text";
+  "scroll-fade-y max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-secondary-label text-(length:--font-size-code,var(--text-2xs)) leading-relaxed select-text";
 
 /** Every row's icon comes from the registry: its tool, its notice, or the thought icon. */
 function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {

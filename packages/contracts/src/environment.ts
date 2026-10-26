@@ -93,7 +93,7 @@ export type ServerInstallation = typeof ServerInstallation.Type;
 
 /** What update path a client should offer for a server: one of the RPC
     self-update methods above, or "desktop-managed" when the backend's
-    version belongs to the Cogenly desktop app supervising it — updating the
+    version belongs to the Cogenly desktop app supervising it; updating the
     app on that machine is the only way to update the server. */
 export const ServerSelfUpdateCapability = Schema.Literals([
   "boot-service",
@@ -190,7 +190,7 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** Agent-activity publishes (push notifications and Live Activities)
       currently leave this environment: the publish opt-in is enabled and the
       relay link credentials exist. Clients skip seeding a Live Activity when
-      this is false — no update would ever repaint it. Absent on older
+      this is false, since no update would ever repaint it. Absent on older
       servers, which may still publish, so only an explicit false skips. */
   agentActivityPublishing: Schema.optionalKey(Schema.Boolean),
   /** Server runs repository clones for new projects in the background and

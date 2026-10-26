@@ -1087,7 +1087,7 @@ export const make = Effect.gen(function* () {
             ...(manualReason !== null
               ? {
                   manualDownloadUrl: desktopUpdateDownloadUrl(info.version, downloadBaseUrl),
-                  message: `Update available — download. ${manualReason}`,
+                  message: `Update available to download. ${manualReason}`,
                 }
               : {}),
           });

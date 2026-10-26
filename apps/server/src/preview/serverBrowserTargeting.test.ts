@@ -2,10 +2,10 @@ import { describe, expect, it } from "@effect/vitest";
 
 import {
   BACKGROUND_TAB_NOTICE,
+  openHandoffStatus,
   isTabShown,
   pickDefaultTab,
   revealBeforeAttach,
-  shouldMoveToDesktop,
   tabBacking,
   tabRenderingStatus,
   targetKey,
@@ -151,10 +151,10 @@ describe("session mismatch", () => {
     expect(tabRenderingStatus(tab({ tabId: "a" }), false)).toEqual({ rendering: "background" });
   });
 
-  it("moves a headless tab to the desktop page when it attaches", () => {
-    expect(shouldMoveToDesktop({ rendersOnDesktop: false })).toBe(true);
-    expect(shouldMoveToDesktop({ rendersOnDesktop: true })).toBe(false);
-    expect(shouldMoveToDesktop(undefined)).toBe(false);
+  it("reports a streamed headless page as the panel's own page", () => {
+    expect(tabRenderingStatus(tab({ tabId: "a", viewerCount: 1 }), true)).toEqual({
+      rendering: "panel",
+    });
   });
 
   it("names the tab the user is looking at when the target is another one", () => {
@@ -164,5 +164,19 @@ describe("session mismatch", () => {
     expect(targetNotice(target, [target, user], true, shown)).toContain("user");
     expect(targetNotice(target, [target, user], true, shown)).toContain("https://grok.com/");
     expect(targetNotice(user, [target, user], true, shown)).toBeUndefined();
+  });
+});
+
+it("reports a panel handoff as pending while preserving the tab for retry", () => {
+  const result = openHandoffStatus({
+    tabId: "tab:setup",
+    url: "https://accounts.google.com/login",
+    sessionMismatch: true,
+  });
+  expect(result).toMatchObject({ tabId: "tab:setup", status: "pending_panel" });
+  expect(result.notice).toContain("do not treat a background sign-in page");
+  expect(openHandoffStatus({ tabId: "tab:panel", sessionMismatch: false })).toEqual({
+    tabId: "tab:panel",
+    sessionMismatch: false,
   });
 });

@@ -1,3 +1,9 @@
+import Migration0112 from "./Migrations/112_VaultLogins.ts";
+import Migration0111 from "./Migrations/111_AgentContinuity.ts";
+import Migration0110 from "./Migrations/110_DeferredAgentFires.ts";
+import Migration0109 from "./Migrations/109_VaultSharingDefaults.ts";
+import Migration0108 from "./Migrations/108_RemoteDelegationIntents.ts";
+import Migration0107 from "./Migrations/107_ThreadSyncQuarantine.ts";
 import Migration0106 from "./Migrations/106_LegacyImportProviderIdentity.ts";
 import Migration0105 from "./Migrations/105_ThreadHandoffRepositories.ts";
 import Migration0104 from "./Migrations/104_RepoMcpTrust.ts";
@@ -240,6 +246,12 @@ export const migrationEntries = [
   [104, "RepoMcpTrust", Migration0104],
   [105, "ThreadHandoffRepositories", Migration0105],
   [106, "LegacyImportProviderIdentity", Migration0106],
+  [107, "ThreadSyncQuarantine", Migration0107],
+  [108, "RemoteDelegationIntents", Migration0108],
+  [109, "VaultSharingDefaults", Migration0109],
+  [110, "DeferredAgentFires", Migration0110],
+  [111, "AgentContinuity", Migration0111],
+  [112, "VaultLogins", Migration0112],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

@@ -52,7 +52,6 @@ import {
   type ScopedThreadRef,
   type ServerProviderSkill,
 } from "@cogenly/contracts";
-import { faviconUrlForOrigin } from "@cogenly/shared/favicon";
 import { githubMediaFetchUrl } from "@cogenly/shared/githubMedia";
 import {
   isAtomCommandInterrupted,
@@ -102,9 +101,14 @@ import { createIncrementalMarkdownPlugin } from "../markdown-incremental";
 import { defaultUrlTransform } from "react-markdown";
 import { parseAssistantCitationHref } from "@cogenly/shared/assistantCitations";
 import { parseComposerContextHref } from "@cogenly/shared/composerContextReferences";
-import { parseAppThreadUrl, parseThreadLinkHref } from "@cogenly/shared/threadLinks";
+import {
+  formatThreadLink,
+  parseAppThreadUrl,
+  parseThreadLinkHref,
+} from "@cogenly/shared/threadLinks";
 import { AssistantCitationChip } from "./chat/AssistantCitationChip";
 import { MarkdownThreadLink } from "./chat/MarkdownThreadLink";
+import { ThreadContextChip } from "./ThreadContextChip";
 import {
   artifactTemplateFromHastProperties,
   renderCodexInlineDirectivesAsMarkdown,
@@ -162,7 +166,7 @@ import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
 import { getSyntaxHighlighterPromise } from "../lib/syntaxHighlighting";
-import { GitHubIcon } from "./Icons";
+import { SiteFavicon } from "./SiteFavicon";
 import { createIncrementalHighlightedDocument } from "../lib/incrementalHighlighting";
 import { HighlightedCodeLines } from "./chat/HighlightedCodeLines";
 import { RenderErrorBoundary } from "./RenderErrorBoundary";
@@ -226,7 +230,7 @@ interface ChatMarkdownProps {
   isStreaming?: boolean;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   className?: string;
-  /** Treat single newlines as hard breaks — chat-style user input. */
+  /** Treat single newlines as hard breaks, as in chat-style user input. */
   lineBreaks?: boolean;
   /** Parse sanitized raw HTML instead of displaying its source text. */
   parseRawHtml?: boolean;
@@ -240,6 +244,8 @@ interface ChatMarkdownProps {
   extraRemarkPlugins?: NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
   /** Renders a `cogenly-context://` link as a chip; without it the link shows its label as text. */
   renderContextReference?: ((reference: ChatMarkdownContextReference) => ReactNode) | undefined;
+  /** Show `cogenly-thread://` links as the composer's thread chips, as a sent user message does. */
+  threadLinkChips?: boolean | undefined;
   /** Loads GitHub-hosted media through `cwd`'s GitHub credential, which a private repository's
       uploads need; without it those images and videos load unauthenticated and 404. */
   githubMedia?: boolean | undefined;
@@ -520,7 +526,7 @@ function extractCodeBlock(
     return null;
   }
   // With a custom `code` component the child's type is that component, not
-  // the "code" tag — the hast node react-markdown attaches still names it.
+  // the "code" tag. The hast node react-markdown attaches still names it.
   if (onlyChild.type !== "code" && onlyChild.props.node?.tagName !== "code") {
     return null;
   }
@@ -1155,44 +1161,13 @@ function normalizeMarkdownLinkHrefKey(href: string): string {
     : rewrittenHref;
 }
 
-const MARKDOWN_LINK_FAVICON_CLASS_NAME = "block size-full shrink-0 select-none";
-
-/** Hosts whose favicon request already failed this session — skip straight to the globe. */
-const failedFaviconHosts = new Set<string>();
-
-/** Sites whose brand mark (drawn in `currentColor`) replaces the fetched favicon so it follows the theme. */
-function brandLinkIcon(host: string): typeof GitHubIcon | null {
-  const hostname = host.toLowerCase();
-  if (hostname === "github.com" || hostname.endsWith(".github.com")) return GitHubIcon;
-  return null;
-}
-
 const MarkdownLinkFavicon = memo(function MarkdownLinkFavicon({ host }: { host: string }) {
-  const [failedHost, setFailedHost] = useState<string | null>(null);
-  const BrandIcon = brandLinkIcon(host);
-  const faviconUrl = BrandIcon ? null : faviconUrlForOrigin(`https://${host}`);
   return (
     <span
       className="ms-[0.25em] me-[0.2em] inline-flex size-[14px] [vertical-align:-0.125em]"
       aria-hidden
     >
-      {BrandIcon ? (
-        <BrandIcon className={MARKDOWN_LINK_FAVICON_CLASS_NAME} />
-      ) : faviconUrl === null || failedHost === host || failedFaviconHosts.has(host) ? (
-        <GlobeIcon className={MARKDOWN_LINK_FAVICON_CLASS_NAME} />
-      ) : (
-        <img
-          src={faviconUrl}
-          alt=""
-          loading="lazy"
-          draggable={false}
-          className={cn(MARKDOWN_LINK_FAVICON_CLASS_NAME, "rounded-sm")}
-          onError={() => {
-            failedFaviconHosts.add(host);
-            setFailedHost(host);
-          }}
-        />
-      )}
+      <SiteFavicon host={host} />
     </span>
   );
 });
@@ -1706,8 +1681,8 @@ function hastPlainTextDeep(node: unknown): string {
 }
 
 /**
- * Whether the link carries any words of its own. An anchor that is only an image — a badge, a
- * "Fix in Cursor" button — already shows its identity, and a favicon bolted on in front of it
+ * Whether the link carries any words of its own. An anchor that is only an image (a badge, a
+ * "Fix in Cursor" button) already shows its identity, and a favicon bolted on in front of it
  * is a stray logo rather than a hint.
  */
 function hastHasText(node: unknown): boolean {
@@ -2240,6 +2215,7 @@ function useChatMarkdownState({
   imageBaseDir,
   onImageExpand,
   renderContextReference,
+  threadLinkChips = false,
   headingLevelOffset = 0,
   githubMedia = false,
 }: ChatMarkdownProps) {
@@ -2603,6 +2579,7 @@ function useChatMarkdownState({
       fileLinkChip,
       githubMedia,
       renderContextReference,
+      threadLinkChips,
       headingLevelOffset,
       imageBaseDir,
       inlineCodeFileLinkMetaByText,
@@ -2623,6 +2600,7 @@ function useChatMarkdownState({
       threadRef,
     }),
     [
+      threadLinkChips,
       canOperateHost,
       canOperatePreview,
       cwd,
@@ -2738,7 +2716,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       return <blockquote {...props}>{children}</blockquote>;
     }
     // Not a <blockquote>: the stylesheet mutes those, and an alert's body is ordinary
-    // text under a colored title — which is how the host renders it.
+    // text under a colored title, which is how the host renders it.
     return (
       <div role="note" className={cn("my-1 border-l-2 pl-3", alert.borderClassName)}>
         <p
@@ -2811,6 +2789,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       serverConfig,
       fileLinkChip,
       renderContextReference,
+      threadLinkChips,
       text,
     } = use(ChatMarkdownRendererContext);
     const citation = href ? parseAssistantCitationHref(href) : null;
@@ -2819,6 +2798,14 @@ const CHAT_MARKDOWN_COMPONENTS = {
     const linkedThreadId = href ? parseThreadLinkHref(href) : null;
     if (linkedThreadId) {
       const label = hastPlainTextDeep(node) || linkedThreadId;
+      if (threadLinkChips && environmentId) {
+        return (
+          <ThreadContextChip
+            record={{ environmentId, threadId: linkedThreadId, title: label }}
+            copyMarkdown={formatThreadLink(linkedThreadId, label)}
+          />
+        );
+      }
       return environmentId ? (
         <MarkdownThreadLink environmentId={environmentId} threadId={linkedThreadId} label={label} />
       ) : (

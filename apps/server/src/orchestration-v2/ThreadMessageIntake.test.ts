@@ -388,7 +388,7 @@ it.effect("releases claimed copies when dispatch replays an earlier accepted res
     );
     // The first attempt was accepted but its response was lost. The retry's
     // dispatch replays the stored events, which reference the first claim's
-    // attachment id — not this attempt's fresh copy.
+    // attachment id, not this attempt's fresh copy.
     const earlierAttachment = {
       type: "image" as const,
       id: ChatAttachmentId.make("thread-replay-00000000-0000-4000-8000-0000000000aa"),

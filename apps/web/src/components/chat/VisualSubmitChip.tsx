@@ -90,7 +90,7 @@ export function VisualSubmitChip(props: {
           <ChatMarkdown
             text={`\`\`\`json\n${json}\n\`\`\``}
             cwd={undefined}
-            className="max-h-80 overflow-auto px-1 text-xs"
+            className="scroll-fade max-h-80 overflow-auto px-1 text-xs"
           />
         </div>
       ) : null}

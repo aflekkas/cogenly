@@ -14,6 +14,7 @@ import {
   UNIVERSAL_SERVER_SETTING_KEYS,
   type UniversalServerSettingKey,
 } from "@cogenly/contracts";
+import { providerIdFromSettingsKey, providerSettingsCodec } from "./providerSettingsDocument.ts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
@@ -56,7 +57,7 @@ const keyOf = (run: (input: unknown) => Option.Option<unknown>, key: string) => 
   );
 
 /** What this build reads of a `settings` document, per key. */
-export const UNIVERSAL_SETTINGS_CODECS: ReadonlyMap<string, SettingsFieldCodec> = new Map(
+const universalCodecs: ReadonlyMap<string, SettingsFieldCodec> = new Map(
   UNIVERSAL_SERVER_SETTING_KEYS.map((key) => [
     key,
     { decode: keyOf(decodeUniversalPartial, key), encode: keyOf(encodeUniversalPartial, key) },
@@ -88,3 +89,9 @@ export function decodeUniversalSetting<K extends UniversalServerSettingKey>(
     | ServerSettings[K]
     | undefined;
 }
+
+export const UNIVERSAL_SETTINGS_CODECS = {
+  get: (key: string): SettingsFieldCodec | undefined =>
+    providerIdFromSettingsKey(key) === undefined ? universalCodecs.get(key) : providerSettingsCodec,
+  has: (key: string) => providerIdFromSettingsKey(key) !== undefined || universalCodecs.has(key),
+};

@@ -109,7 +109,8 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
           settledAt: null,
           snoozedUntil: null,
           snoozedAt: null,
-          lastVisitedAt: null,
+          // Starts read, so the fork's own first reply shows as unread.
+          lastVisitedAt: input.createdAt,
           deletedAt: null,
         };
         const transfer: OrchestrationV2ContextTransfer = {

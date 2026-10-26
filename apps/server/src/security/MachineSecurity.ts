@@ -303,7 +303,7 @@ export const buildMachineSecurityStatus = (
       status: "unknown",
       title: "Host firewall unknown",
       detail:
-        "Firewall state was not readable (ufw needs root on many installs). A socket listening publicly is not proof it is reachable publicly; this machine cannot prove public reachability by itself — that needs an external probe or provider firewall evidence.",
+        "Firewall state was not readable (ufw needs root on many installs). A socket listening publicly is not proof it is reachable publicly; this machine cannot prove public reachability by itself. That needs an external probe or provider firewall evidence.",
       evidence: "ufw status unavailable",
     });
   } else {

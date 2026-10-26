@@ -39,7 +39,7 @@ import { PreviewSnapshotToolkit, PreviewStandardToolkit, PreviewToolkit } from "
  * Collapses the `show` alias onto `open` and defaults tab reuse.
  *
  * Deliberately leaves an unstated `open` unstated. Whether a preview the agent
- * said nothing about surfaces is the client's call — filling in `true` would
+ * said nothing about surfaces is the client's call; filling in `true` would
  * force every `preview_open` into view.
  */
 export function normalizePreviewOpenInput(
@@ -81,16 +81,22 @@ const invoke = Effect.fn("PreviewToolkit.invoke")(function* <A>(
     (operation !== "evaluate" && typeof result === "object" && result !== null
       ? (result as { tabId?: PreviewTabId }).tabId
       : undefined) ?? targetTabId;
-  const page = yield* broker
-    .invoke<PreviewAutomationStatus>({
-      scope,
-      operation: "status",
-      input: {},
-      timeoutMs: 500,
-      updateCurrentTab: false,
-      ...(statusTabId === undefined ? {} : { tabId: statusTabId }),
-    })
-    .pipe(Effect.orElseSucceed(() => null));
+  const summary =
+    typeof result === "object" && result !== null && "tab" in result
+      ? (result as { tab?: { url?: string | null } }).tab
+      : undefined;
+  const page =
+    summary ??
+    (yield* broker
+      .invoke<PreviewAutomationStatus>({
+        scope,
+        operation: "status",
+        input: {},
+        timeoutMs: 500,
+        updateCurrentTab: false,
+        ...(statusTabId === undefined ? {} : { tabId: statusTabId }),
+      })
+      .pipe(Effect.orElseSucceed(() => null)));
   return {
     result,
     ...(page?.url && /^https?:\/\//i.test(page.url) && page.url.length <= 4096
@@ -219,11 +225,12 @@ const handlers = {
   preview_permission: McpToolAccess.actsAsCaller((input) =>
     invokeTargeted<SitePermissionsState>("permission", input),
   ),
-  preview_snapshot: McpToolAccess.readsAsCaller((input) => {
-    // Output selection and saving are MCP-only; the browser still produces a complete snapshot.
-    const { includeImage: _includeImage, save: _save, ...operationInput } = input ?? {};
-    return invokeTargeted<PreviewAutomationSnapshot>("snapshot", operationInput);
-  }),
+  preview_snapshot: McpToolAccess.readsAsCaller((input) =>
+    invokeTargeted<PreviewAutomationSnapshot>("snapshot", input ?? {}),
+  ),
+  preview_extract: McpToolAccess.actsAsCaller((input) =>
+    invokeTargeted<{ value: unknown }>("extract", input),
+  ),
   preview_click: McpToolAccess.actsAsCaller((input) =>
     invokeTargeted<object>("click", input, input.timeoutMs),
   ),

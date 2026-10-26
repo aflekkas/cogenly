@@ -242,7 +242,7 @@ export function createPullRequestEnvironmentAtoms<R, E>(
     }),
     /**
      * The line counts for rows the listing has already handed over. Its own query because the
-     * listing is quicker without them — measured over twelve repositories, ~4.0s against ~7.1s —
+     * listing is quicker without them (measured over twelve repositories, ~4.0s against ~7.1s),
      * so the rows arrive first and their stats a moment later. Kept longer than the listing:
      * a change request's size only moves when somebody pushes to it.
      */

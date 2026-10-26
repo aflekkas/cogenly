@@ -6,18 +6,18 @@ join one hub. Paired machines sync project names, instructions, archive state,
 repository remotes and source links, agent profiles, fallback chains and
 scheduled-task configuration, and every conversation. They also sync your
 settings, including appearance, keybindings,
-notification preferences and composer behavior. Settings that describe one machine
-stay on it: provider setup and sign-ins, folders such as the projects root,
+notification preferences, composer behavior and provider configuration. Provider IDs, names, colours, enabled state, order, custom models and non-secret environment variables follow you too. Settings that describe one machine
+stay on it: CLI paths and sign-in credentials, folders such as the projects root,
 storage and backups, background activity, and devices. Changes made while a
 machine is offline catch up when it reconnects. A machine on an older version
 keeps syncing and picks up anything newer once it updates.
 
 Agents and schedule timers run only on their owner machine. A schedule can
-start each fresh conversation on another machine. New owners default to the
-hub; existing ones keep the machine they were created on until you
-[move them](#move-threads-and-projects). Editing a profile or schedule on
-another machine updates the owner's configuration without starting a second
-copy. Provider sign-ins and an agent's current fallback position stay on the
+start each fresh conversation on another machine. New agents default to the
+online hub, or this machine when the hub is offline; existing agents keep the machine they were created on until you
+[move them](#move-threads-and-projects). Editing an agent profile from another machine sends the change to its owner.
+The owner must be online to save the edit; an offline notice identifies which machine to reconnect.
+Changes never start a second copy. Provider sign-ins and an agent's current fallback position stay on the
 owner.
 
 Repository checkouts and worktrees stay local, but every machine lists all of a
@@ -26,13 +26,21 @@ a clone. Pick it, and it clones into the project's folder on this machine;
 [moving a project](#move-threads-and-projects) clones all of them there. A
 repository's folder is named after the repository, so it lands in the same
 place everywhere. Removing a repository from one machine frees the disk space
-and keeps it in the project, so you can clone it back later. Memory, settings and web integration definitions sync between paired machines. Share the vault to sync web sign-ins too; see [Vault on several machines](vault.md#vault-on-several-machines). Local integrations, including Google Workspace, sign in on each machine. Resource files stay local. Matching
-project names are kept separately until you choose how to combine them.
+and keeps it in the project, so you can clone it back later.
+
+Memory, settings and web integration definitions sync between paired machines.
+Portable vault items and web sign-ins share by default, with a per-machine
+opt-out in Settings → Vault; see
+[Vault on several machines](vault.md#vault-on-several-machines).
+Local integrations, including Google Workspace, sign in on each machine.
+Resource files stay local. Matching project names are kept separately until you
+choose how to combine them.
 
 ## Your conversations on every machine
 
 Chats, Work and agent conversations show up on every paired machine. Each one
-runs on one machine, shown as "Runs on" in the thread header. Open it from any
+runs on one machine, named on its sidebar card, under the composer, and in
+thread details. Open it from any
 machine to read it, follow it live, or send a message: the message runs on the
 machine that runs the thread. If that machine is offline, sending fails with
 a notice instead of waiting; reading still works. Attachments open from any
@@ -56,7 +64,9 @@ updating a schedule). Names and environment IDs work; `this` means the machine
 the agent runs on and `auto` means the hub. Isolated delegated work carries the
 parent's committed code to the target. Its committed result branch can come
 back when the parent reads the task result, without a push; uncommitted changes
-stay on their original machine.
+stay on their original machine. Cloud subagents need Cogenly 0.3.3 or later on
+both machines; their progress and results stay available while history sync
+catches up.
 
 ## Fork a thread to another machine
 
@@ -221,16 +231,25 @@ cloud-server`. `--reset` goes back to the detected name and kind.
 
 Each machine reports the state of what it depends on: the server and its
 scheduler, the database, free disk space, provider sign-ins and usage limits,
-paired machines and sync, integrations, scheduled tasks, runs stuck far longer
-than any real one, the background service, and Tailscale Serve. Each problem
-has a **Fix**. Where Cogenly can fix it directly, Fix does it on the machine
+paired machines and sync, integrations, scheduled tasks, unresponsive runs,
+the background service, and Tailscale Serve. A turn with no provider activity
+for five minutes warns you to open the thread, stop it, and retry if needed.
+Each problem has a **Fix**. Where Cogenly can fix it directly, Fix does it on the machine
 with the problem, even when you are connected to the other one: it stops a
 thread's stuck runs (they lost their provider session, so they can't be
 resumed; send the thread a message to carry on), runs a failed task again,
-retries sync, or sets up the chat sandbox. A provider or integration that needs
+retries sync, or sets up the chat sandbox. Machine links also warn when paired
+machines run different Cogenly versions. Update the older machine to match;
+Fix can start a supported background service update. A provider or integration that needs
 sign-in opens its sign-in. Anything else opens a new chat with the problem
 filled in, so an agent can investigate and fix it once you send it. A paired
 machine that can't be reached is shown from what this machine last saw of it.
+
+For invalid incoming thread history, health offers **Discard quarantined changes for
+<thread>**, with the incoming item count and size. Its Fix discards only those held
+changes, keeping the thread's local data so later changes can sync. Review the named
+thread before discarding. Agents use `machine_health_fix` with that item's key;
+Fix without named items does not discard quarantines.
 
 From a terminal on the machine, run `cogenly health` (or `cogenly doctor
 --health`). Add `--machine <environment-id>` to read a paired machine,

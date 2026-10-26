@@ -66,8 +66,8 @@ Run `cogenly --help` for the full reference. If `cogenly` reports an already
 running server, connect to that server instead. Stop it before starting a
 replacement, or use a different `--base-dir` for an independent server.
 
-To run a server from source instead, see the
-[README](https://github.com/aflekkas/cogenly#readme). `cogenly update` does not
+To run a server from source instead, see
+[Development](../operations/development.md). `cogenly update` does not
 apply to a source checkout; update it with `git pull` and a rebuild.
 
 ## Run Cogenly on a VPS

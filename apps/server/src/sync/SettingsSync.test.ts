@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { ProjectId } from "@cogenly/contracts";
+import { ProviderDriverKind, ProviderInstanceId, ProjectId } from "@cogenly/contracts";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -127,43 +127,6 @@ describe("settings sync between paired machines", () => {
   );
 
   it.live(
-    "Use only Cogenly integrations follows the user between the Mac and the VPS",
-    () =>
-      Effect.gen(function* () {
-        const vps = yield* start("connectors-vps", "cloud-server", ProjectId.make("vps-repo"));
-        const mac = yield* start("connectors-mac", "computer", ProjectId.make("mac-repo"));
-        yield* pair(vps, mac);
-        const exchange = Effect.gen(function* () {
-          yield* vps.reconcile;
-          yield* mac.reconcile;
-          yield* mac.sync.sync(vps.environmentId);
-          yield* vps.reconcile;
-          yield* mac.reconcile;
-        });
-        // On by default on both: native servers stay off everywhere.
-        expect((yield* mac.settings.getSettings).useProviderConnectors).toBe(false);
-
-        // Turning it off on the Mac restores native servers on the VPS too.
-        yield* mac.settings.updateSettings({ useProviderConnectors: true });
-        yield* exchange;
-        expect((yield* vps.settings.getSettings).useProviderConnectors).toBe(true);
-        expect((yield* vps.state.get("settings", "universal"))?.fields).toMatchObject({
-          useProviderConnectors: true,
-        });
-        // The import prompt is per machine: what it reviewed is that machine's config.
-        yield* mac.settings.updateSettings({ nativeMcpImportReviewed: true });
-        yield* exchange;
-        expect((yield* vps.settings.getSettings).nativeMcpImportReviewed).toBe(false);
-
-        // And back on from the VPS.
-        yield* vps.settings.updateSettings({ useProviderConnectors: false });
-        yield* exchange;
-        expect((yield* mac.settings.getSettings).useProviderConnectors).toBe(false);
-      }).pipe(Effect.scoped),
-    20000,
-  );
-
-  it.live(
     "a machine that never customized a setting adopts its peer's value",
     () =>
       Effect.gen(function* () {
@@ -188,9 +151,9 @@ describe("settings sync between paired machines", () => {
         const hub = yield* start("newer-hub", "cloud-server", ProjectId.make("newer-hub-repo"));
         const spoke = yield* start("older-spoke", "computer", ProjectId.make("older-spoke-repo"));
         yield* pair(hub, spoke);
-        // What a newer hub sends: a key this build lacks (as useProviderConnectors
-        // is to builds before it), a value it cannot read for a key it knows, and
-        // values it can.
+        // What another build sends: a key this build lacks (as useProviderConnectors
+        // is to builds after its removal), a value it cannot read for a key it
+        // knows, and values it can.
         const fields = {
           branchNamePrefix: "feat",
           branchNamingMode: "lunar",
@@ -227,7 +190,6 @@ describe("settings sync between paired machines", () => {
         const settings = yield* spoke.settings.getSettings;
         expect(settings.branchNamePrefix).toBe("feat");
         expect(settings.branchNamingMode).toBe("static");
-        expect(settings.useProviderConnectors).toBe(true);
         // The unknown key stays in the document; the unreadable value waits for an update.
         expect((yield* spoke.state.get("settings", "universal"))?.fields).toEqual({
           branchNamePrefix: "feat",
@@ -247,6 +209,65 @@ describe("settings sync between paired machines", () => {
           branchNamePrefix: "fix",
           accentTheme: "dark",
         });
+      }).pipe(Effect.scoped),
+    20000,
+  );
+  it.live(
+    "provider IDs, metadata and models converge without secrets entering shared events",
+    () =>
+      Effect.gen(function* () {
+        const hub = yield* start("provider-hub", "cloud-server", ProjectId.make("hub"));
+        const mac = yield* start("provider-mac", "computer", ProjectId.make("mac"));
+        yield* pair(hub, mac);
+        const id = ProviderInstanceId.make("claude-personal");
+        const driver = ProviderDriverKind.make("claudeAgent");
+        yield* mac.settings.updateSettings({
+          providerInstances: {
+            [id]: {
+              driver,
+              displayName: "Personal",
+              accentColor: "blue",
+              enabled: true,
+              config: {
+                homePath: "/mac-only",
+                customModels: ["private-model"],
+                password: "NEVER_IN_EVENTS",
+              },
+              environment: [
+                { name: "LANG", value: "C", sensitive: false },
+                { name: "TOKEN", value: "NEVER_IN_EVENTS", sensitive: true },
+              ],
+            },
+          },
+        });
+        yield* mac.reconcile;
+        yield* hub.reconcile;
+        yield* mac.sync.sync(hub.environmentId);
+        yield* hub.reconcile;
+        const copied = (yield* hub.settings.getSettings).providerInstances[id];
+        expect(copied).toMatchObject({
+          driver,
+          displayName: "Personal",
+          accentColor: "blue",
+          enabled: true,
+          environment: [{ name: "LANG", value: "C", sensitive: false }],
+          config: {
+            customModels: ["private-model"],
+            homePath: "~/.cogenly/provider-homes/claude-personal",
+          },
+        });
+        const sql = yield* hub.run(SqlClient.SqlClient);
+        expect(
+          (yield* sql<{
+            count: number;
+          }>`SELECT count(*) AS count FROM shared_changes WHERE change_json LIKE '%NEVER_IN_EVENTS%'`)[0]
+            ?.count,
+        ).toBe(0);
+        yield* hub.settings.updateSettings({ providerInstances: {} });
+        yield* hub.reconcile;
+        yield* mac.sync.sync(hub.environmentId);
+        yield* mac.reconcile;
+        expect((yield* mac.settings.getSettings).providerInstances[id]).toBeUndefined();
       }).pipe(Effect.scoped),
     20000,
   );

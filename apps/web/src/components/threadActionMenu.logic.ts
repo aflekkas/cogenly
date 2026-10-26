@@ -390,7 +390,7 @@ export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuIt
       : []),
   ];
   // Archive removes the thread from the sidebar while keeping its
-  // conversation under Settings > Archived threads — distinct from Settle
+  // conversation under Settings > Archived threads, distinct from Settle
   // (stays visible in the Settled shelf) and Delete (clears history for
   // good), so it sits beside Delete without borrowing its destructive
   // styling.

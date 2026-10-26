@@ -64,8 +64,8 @@ describe("machinesTurnContext", () => {
       [
         "<machines>",
         header,
-        "- MacBook (laptop, online) — this machine",
-        "- vps-1 (server, online) — hub",
+        "- MacBook (laptop, online): this machine",
+        "- vps-1 (server, online): hub",
         "</machines>",
       ].join("\n"),
     );
@@ -85,7 +85,7 @@ describe("machinesTurnContext", () => {
       [
         "<machines>",
         header,
-        "- vps-1 (server, online) — this machine, hub",
+        "- vps-1 (server, online): this machine, hub",
         "- MacBook (laptop, online)",
         "- Studio Mac (desktop, offline)",
         "Offline machines can't take work until they reconnect.",

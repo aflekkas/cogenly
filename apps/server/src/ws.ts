@@ -28,6 +28,7 @@ import * as ProjectLabels from "./projectLabels/ProjectLabelService.ts";
 import * as ProjectLabelClone from "./projectLabels/ProjectLabelCloneRepository.ts";
 import * as RepositoryCheckout from "./project/RepositoryCheckout.ts";
 import * as RepositoryIconResolver from "./project/RepositoryIconResolver.ts";
+import * as SiteIconCache from "./assets/SiteIconCache.ts";
 import { resolveProjectsRootDirectory } from "./project/ProjectsRoot.ts";
 import * as ProjectLabelFolders from "./projectLabels/ProjectLabelFolders.ts";
 import * as ProjectLabelFork from "./projectLabels/ProjectLabelForkToProject.ts";
@@ -144,16 +145,17 @@ import * as ServerConfig from "./config.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as ThreadManagementService from "./orchestration-v2/ThreadManagementService.ts";
-import * as UsageLimitHandoff from "./orchestration-v2/UsageLimitHandoff.ts";
 import * as CommandOutputHub from "./orchestration-v2/CommandOutputHub.ts";
 import * as McpAppRequests from "./mcpApps/McpAppRequests.ts";
 import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
 import * as ThreadLaunchService from "./orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts";
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
+import * as LoginRequests from "./secrets/LoginRequests.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as Vault from "./vault/Vault.ts";
 import * as VaultSync from "./vault/VaultSync.ts";
+import { vaultItemForClient, vaultListForClient } from "./vault/vaultClientCompat.ts";
 import * as Accounts from "./accounts/Accounts.ts";
 import {
   archivedShellStreamItemFromThreadShell,
@@ -249,6 +251,7 @@ import { requiredScopeForDeviceList, rpcAuthorizationError } from "./auth/RpcAut
 import * as RpcAuthorization from "./auth/RpcAuthorization.ts";
 import { RpcInstrumentation, rpcInstrumentationLayer } from "./observability/RpcInstrumentation.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
+import * as AgentProcessControl from "./process/AgentProcessControl.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as HostResources from "./resourceTelemetry/HostResources.ts";
@@ -1064,7 +1067,6 @@ const makeWsRpcHandlers = (
     const projectService = yield* ProjectService.ProjectService;
     const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
     const threadSearch = yield* ThreadSearch.ThreadSearch;
-    const usageLimitHandoff = yield* UsageLimitHandoff.UsageLimitHandoffService;
 
     const providerSessionsV2 = yield* ProviderSessionManager.ProviderSessionManagerV2;
     const mcpAppRequests = yield* McpAppRequests.McpAppRequests;
@@ -1114,6 +1116,7 @@ const makeWsRpcHandlers = (
     const retrieval = yield* Retrieval.ContextRetrievalService;
     const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
     const secretRequests = yield* SecretRequests.SecretRequests;
+    const loginRequests = yield* LoginRequests.LoginRequests;
     const vault = yield* Vault.Vault;
     const vaultSync = yield* VaultSync.VaultSync;
     const accounts = yield* Accounts.Accounts;
@@ -1147,6 +1150,7 @@ const makeWsRpcHandlers = (
     const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
     const repositoryCheckout = yield* RepositoryCheckout.RepositoryCheckout;
     const repositoryIcons = yield* RepositoryIconResolver.RepositoryIconResolver;
+    const siteIcons = yield* SiteIconCache.SiteIconCache;
     const repositoryIdentityResolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
     const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
     const agentSessionImporter = yield* AgentSessionImporter.AgentSessionImporter;
@@ -1214,6 +1218,7 @@ const makeWsRpcHandlers = (
     const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
     const sessions = yield* SessionStore.SessionStore;
     const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
+    const agentProcessControl = yield* AgentProcessControl.AgentProcessControl;
     const hostResources = yield* HostResources.HostResources;
     const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
     const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
@@ -1443,10 +1448,6 @@ const makeWsRpcHandlers = (
           ),
         ),
       [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: (input) => threadManagement.stopWorkflow(input),
-      [ORCHESTRATION_V2_WS_METHODS.recommendUsageLimitHandoff]: (input) =>
-        usageLimitHandoff.recommend(input.threadId),
-      [ORCHESTRATION_V2_WS_METHODS.acceptUsageLimitHandoff]: (input) =>
-        usageLimitHandoff.accept({ ...input, createdBy: "user", creationSource: "web" }),
       [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: (input) =>
         readWorkflowScript({ scriptPath: input.scriptPath }),
       [ORCHESTRATION_V2_WS_METHODS.getTurnItem]: (input) =>
@@ -1729,8 +1730,11 @@ const makeWsRpcHandlers = (
       [WS_METHODS.projectLabelsListOrphanFolders]: () => projectLabels.listOrphanFolders(),
       [WS_METHODS.projectLabelsAdoptOrphanFolder]: (input) =>
         projectLabels.adoptOrphanFolder(input),
+      [WS_METHODS.projectLabelsTrashOrphanFolder]: (input) =>
+        projectLabels.trashOrphanFolder(input),
+      // Deprecated 0.3.2 name for the same action.
       [WS_METHODS.projectLabelsRemoveOrphanFolder]: (input) =>
-        projectLabels.removeOrphanFolder(input),
+        projectLabels.trashOrphanFolder(input),
       [WS_METHODS.workStart]: (input) => workHandoff.start(input),
       [WS_METHODS.agentsApprovalsList]: (input) => agentWorkspace.listApprovals(input),
       [WS_METHODS.agentsRequestApproval]: (input) =>
@@ -1740,8 +1744,6 @@ const makeWsRpcHandlers = (
       [WS_METHODS.threadApprovalsSubscribe]: () => agentWorkspace.subscribeThreadApprovals,
       [WS_METHODS.agentsStartWork]: (input) => agentWorkspace.startWork(input),
       [WS_METHODS.agentsActivity]: (input) => agentWorkspace.activity(input.agentId),
-      [WS_METHODS.integrationsPreviewNative]: () => integrations.previewNative(),
-      [WS_METHODS.integrationsImportNative]: () => integrations.importNative(),
       [WS_METHODS.repoMcpTrustSubscribe]: ({ threadId }) => repoMcpTrust.subscribe(threadId),
       [WS_METHODS.repoMcpTrustRespond]: (input) => repoMcpTrust.respond(input),
       [WS_METHODS.integrationsList]: () => integrations.list({ includeProcessOutput: true }),
@@ -1800,7 +1802,8 @@ const makeWsRpcHandlers = (
       [WS_METHODS.machinesHealthAlertsSubscribe]: () => healthAlerts.subscribe,
       [WS_METHODS.machinesHealthRetrySync]: (input) =>
         machineHealth.retrySync(input).pipe(Effect.as({})),
-      [WS_METHODS.machinesHealthFix]: (input) => machineHealthFixes.fix(input),
+      [WS_METHODS.machinesHealthFix]: (input) =>
+        machineHealthFixes.fix(input, currentSession.scopes),
       [WS_METHODS.machinesHealthTestAlertChannels]: () => healthAlerts.testChannels,
       [WS_METHODS.factsList]: (input) => facts.list(input),
       [WS_METHODS.factsCreate]: (input) => facts.create(input),
@@ -1868,9 +1871,17 @@ const makeWsRpcHandlers = (
       [WS_METHODS.accountsCreate]: (input) => accounts.create(input),
       [WS_METHODS.accountsUpdate]: (input) => accounts.update(input),
       [WS_METHODS.accountsDisconnect]: (input) => accounts.disconnect(input),
-      [WS_METHODS.vaultList]: (input) => vault.list(input),
+      [WS_METHODS.vaultList]: (input) =>
+        vault
+          .list(input)
+          .pipe(Effect.map((result) => vaultListForClient(result, input.supportsDenyPolicy))),
       [WS_METHODS.vaultCreate]: (input) => vault.create(input),
-      [WS_METHODS.vaultUpdate]: (input) => vault.update(input),
+      [WS_METHODS.vaultUpdate]: (input) =>
+        vault.update(input).pipe(
+          Effect.map(({ item }) => ({
+            item: vaultItemForClient(item, input.supportsDenyPolicy),
+          })),
+        ),
       [WS_METHODS.vaultDelete]: (input) => vault.delete(input),
       [WS_METHODS.vaultUsage]: (input) => vault.listUsage(input),
       [WS_METHODS.vaultSetPeerSharing]: (input) => vaultSync.setPeerSharing(input),
@@ -1878,6 +1889,10 @@ const makeWsRpcHandlers = (
       [WS_METHODS.secretsAnswerRequest]: (input) =>
         Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
           Effect.andThen(secretRequests.answer(input)),
+        ),
+      [WS_METHODS.secretsAnswerLoginRequest]: (input) =>
+        Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
+          Effect.andThen(loginRequests.answer(input)),
         ),
       [WS_METHODS.scheduledTasksListWebhookDeliveries]: (input) =>
         Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
@@ -2126,6 +2141,8 @@ const makeWsRpcHandlers = (
       [WS_METHODS.serverRetryResourceTelemetry]: (_input) => resourceTelemetry.retry,
       [WS_METHODS.serverCheckOtlpEndpoint]: (input) => otlpEndpointCheck.check(input),
       [WS_METHODS.serverSignalProcess]: (input) => processDiagnostics.signal(input),
+      [WS_METHODS.serverGetAgentProcesses]: (_input) => agentProcessControl.list,
+      [WS_METHODS.serverKillAgentProcess]: (input) => agentProcessControl.kill(input),
       [WS_METHODS.serverReportClientActivity]: (input, metadata) =>
         Ref.update(rpcClientIds, (clientIds) => {
           const next = new Set(clientIds);
@@ -2438,6 +2455,12 @@ const makeWsRpcHandlers = (
             return yield* issueAssetUrl({
               resource: input.resource,
               workspaceRoot: input.resource.cwd,
+            });
+          }
+          if (input.resource._tag === "site-icon") {
+            return yield* issueAssetUrl({
+              resource: input.resource,
+              siteIconPath: yield* siteIcons.resolve(input.resource.host),
             });
           }
           if (input.resource._tag === "repository-icon") {
@@ -2841,7 +2864,6 @@ export const WS_RPC_SERVER_OPTIONS = {
 // Keep the transport's public dependency type concrete. Expanding the full RPC
 // handler conditional here makes downstream server layers infer `any`.
 type WsRequestServices =
-  | UsageLimitHandoff.UsageLimitHandoffService
   | Agents.AgentService
   | AgentSessionImporter.AgentSessionImporter
   | T3Import.T3ImportService
@@ -2892,6 +2914,7 @@ type WsRequestServices =
   | PortScanner.PortDiscovery
   | PreviewManager.PreviewManager
   | ProcessDiagnostics.ProcessDiagnostics
+  | AgentProcessControl.AgentProcessControl
   | ProcessResourceMonitor.ProcessResourceMonitor
   | ProjectCloneTracker.ProjectCloneTracker
   | ProjectEnrichmentService.ProjectEnrichmentService
@@ -2904,6 +2927,7 @@ type WsRequestServices =
   | ProjectStore.ProjectStoreV2
   | RepositoryCheckout.RepositoryCheckout
   | RepositoryIconResolver.RepositoryIconResolver
+  | SiteIconCache.SiteIconCache
   | ProviderAuthService.ProviderAuthService
   | ProviderInstanceRegistry.ProviderInstanceRegistry
   | ProviderLatestVersions.ProviderLatestVersions
@@ -2916,6 +2940,7 @@ type WsRequestServices =
   | ReviewService.ReviewService
   | ScheduledTasks.ScheduledTaskService
   | SecretRequests.SecretRequests
+  | LoginRequests.LoginRequests
   | AccountAccess.AccountAccess
   | AccountConnections.AccountConnections
   | Accounts.Accounts

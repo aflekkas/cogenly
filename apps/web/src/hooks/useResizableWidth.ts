@@ -43,7 +43,7 @@ export interface ResizableWidthHandlers {
 /**
  * Width state for a side-anchored panel resized via a drag handle on the
  * specified edge. Width is read on mount or storage-key changes and persisted on
- * drag-end (not on every rAF tick — would otherwise be ~60 writes/sec).
+ * drag-end (not on every rAF tick, which would otherwise be ~60 writes/sec).
  *
  * During a drag the hook writes `RESIZABLE_WIDTH_PROPERTY` on the handle's
  * parent, so the panel follows the cursor in the same frame without

@@ -58,6 +58,9 @@ import * as PeerHub from "./machines/PeerHub.ts";
 import { fixPath } from "./os-jank.ts";
 import * as Ws from "./ws.ts";
 import * as AgentScopeLive from "./process/agentScope.ts";
+import * as AgentProcesses from "./process/AgentProcesses.ts";
+import * as AgentProcessControl from "./process/AgentProcessControl.ts";
+import * as AgentProcessReaper from "./process/AgentProcessReaper.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as NodePtyAdapter from "./terminal/NodePtyAdapter.ts";
 import * as PullRequestHttp from "./pullRequest/http.ts";
@@ -219,7 +222,6 @@ import * as OrchestrationHttp from "./orchestration-v2/http.ts";
 import * as ProjectHttp from "./project/http.ts";
 import * as NetService from "@cogenly/shared/Net";
 import * as RelayClient from "@cogenly/shared/relayClient";
-import { disableTailscaleServe } from "@cogenly/tailscale";
 import * as ServerActivation from "./serverActivation.ts";
 
 // MCP handoff thread IDs include escaped provenance and can exceed find-my-way's
@@ -292,6 +294,8 @@ const layerDesktopAppUpdate = DesktopAppUpdate.layer.pipe(
   Layer.provide(layerDesktopTelemetryReceiver),
 );
 
+const layerServerSelfUpdate = ServerSelfUpdate.layer.pipe(Layer.provide(layerDesktopAppUpdate));
+
 const layerBackground = BackgroundPolicy.layer.pipe(
   Layer.provide(layerHostPowerMonitor),
   Layer.provideMerge(layerServerSettings),
@@ -329,7 +333,7 @@ const layerHttpServer = Layer.unwrap(
       // Negotiate permessage-deflate with clients that offer it; clients
       // that don't still get uncompressed frames on their connection.
       // Context takeover stays enabled (ws default) so the compression
-      // window is shared across frames — that also makes small frames cheap
+      // window is shared across frames. That also makes small frames cheap
       // to compress, so no size threshold is set (ws only honors
       // `threshold` when context takeover is disabled).
       websocket: { perMessageDeflate: true },
@@ -579,6 +583,10 @@ const layerThreadSettlementWorker = Layer.effectDiscard(
   ThreadSettlementService.make.pipe(Effect.flatMap((service) => service.start())),
 ).pipe(Layer.provide(layerPullRequestService), Layer.provide(ProjectionStoreV2.layer));
 
+const layerAgentProcessControl = AgentProcessControl.layer.pipe(
+  Layer.provide(ProjectionStoreV2.layer),
+);
+
 const layerThreadPullRequestWorker = Layer.effectDiscard(
   ThreadPullRequestService.make.pipe(Effect.flatMap((service) => service.start())),
 ).pipe(Layer.provide(layerPullRequestService));
@@ -644,7 +652,7 @@ const layerPairedMachines = Layer.mergeAll(
     Layer.provide(RepositoryHandoff.layer),
     Layer.provideMerge(ThreadRouting.layer),
     Layer.provideMerge(ThreadSync.layer),
-    Layer.provide(ThreadReplication.layer),
+    Layer.provideMerge(ThreadReplication.layer),
     Layer.provide(ProjectLabelFolders.layer),
     Layer.provide(RemoteThreadCommands.layer),
     Layer.provide(RemoteThreadLaunch.layer),
@@ -665,13 +673,15 @@ const layerPairedMachines = Layer.mergeAll(
   Layer.provide(Scheduler.layer),
 );
 
+const layerChatGreetings = ChatGreetingService.layer.pipe(Layer.provide(ProjectionStoreV2.layer));
+
 // Machine health reports on the paired machines and their sync, so it sits
 // above that group. Alerts read paired machines' alerts over the link; their
 // state layer is the same reference turn context reads in the orchestration
 // runtime. Scheduler and identity are the same references the group uses.
 const layerMachineHealth = HealthAlerts.layer.pipe(
   Layer.provide(HealthAlertsState.layer),
-  Layer.provideMerge(MachineHealth.layer),
+  Layer.provideMerge(MachineHealth.layer.pipe(Layer.provide(layerChatGreetings))),
   Layer.provide(HealthCanary.layer),
   Layer.provide(layerMachineSetup),
   Layer.provide(Scheduler.layer),
@@ -694,12 +704,18 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   // Asks Cogenly Connect to deliver webhooks it held while this environment was offline.
   HeldHooksWaker.layer,
   layerThreadSettlementWorker,
+  // Diagnostics' agent process list and Kill, and the idle sweep that uses them.
+  layerAgentProcessControl,
+  AgentProcessReaper.layer.pipe(
+    Layer.provide(layerAgentProcessControl),
+    Layer.provide(ProjectionStoreV2.layer),
+  ),
   StorageCleanup.layer.pipe(
     Layer.provide(ProjectionStoreV2.layer),
     Layer.provide(StorageInspection.layer),
     Layer.provide(ServerBackup.layer),
   ),
-  ChatGreetingService.layer.pipe(Layer.provide(ProjectionStoreV2.layer)),
+  layerChatGreetings,
   // Server-owned periodic jobs: nightly home backups and housekeeping.
   // Neither starts provider turns; both are plain service methods.
   ServerBackup.layer,
@@ -777,7 +793,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   // to clients. Keybindings mirrors its portable list through server settings.
   Layer.provideMerge(Layer.mergeAll(Keybindings.layer.pipe(Layer.provide(layerServerSettings)))),
   Layer.provideMerge(ProviderRegistry.layer),
-  // The instance registry is the new routing keystone — text generation,
+  // The instance registry is the new routing keystone: text generation,
   // adapter lookup, and runtime ingestion all resolve `ProviderInstanceId`
   // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;
   // hydration adds their default instances to `providerInstances` on boot.
@@ -787,6 +803,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
 );
 
 const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
+  Layer.provide(layerServerSelfUpdate),
   Layer.provideMerge(layerPtyAdapter),
   // Provider event loggers are shared by every driver instance and the
   // orchestration runtime, so they are provided once here.
@@ -898,11 +915,16 @@ const layerMakeRoutes = Layer.mergeAll(
   // after the guide service so it reaches that too.
   Layer.provide(layerPullRequestService),
   // The stream route and the WebSocket RPCs share one browser.
-  Layer.provide(ServerBrowser.layer.pipe(Layer.provide(DesktopBrowserChannel.layer))),
+  Layer.provide(
+    ServerBrowser.layer.pipe(
+      Layer.provide(DesktopBrowserChannel.layer),
+      Layer.provide(RuntimeLayer.layerVaultProvided),
+    ),
+  ),
   // Server browser tabs and HTML render previews install and run the same headless browser.
   Layer.provide(PreviewBrowser.layer),
   Layer.provide(PreviewAutomationBroker.layer),
-  Layer.provide(ServerSelfUpdate.layer.pipe(Layer.provide(layerDesktopAppUpdate))),
+  Layer.provide(layerServerSelfUpdate),
   Layer.provide(layerCommandReadiness),
   Layer.provide(ServerHttp.layerBrowserApiCors),
   Layer.provide(ServerHttp.layerHttpCompression),
@@ -957,48 +979,17 @@ const layerMakeServer = Layer.unwrap(
           );
       }),
     );
-    // Machine setup points a saved Serve mapping at this run's port, adopts
-    // one made by hand, and waits in the background when the tailnet has not
-    // approved HTTPS yet. Only `--tailscale-serve` turns Serve off at shutdown;
-    // a mapping set up through Cogenly persists, like `tailscale serve --bg`.
+    // Keep Serve configured across restarts; MachineSetup reconciles it while running.
     const layerTailscaleServe = Layer.effectDiscard(
-      Effect.acquireRelease(
-        Effect.gen(function* () {
-          yield* Deferred.succeed(tailscaleParked, undefined).pipe(Effect.orDie);
-          yield* awaitActivation;
-          const server = yield* HttpServer.HttpServer;
-          const address = server.address;
-          if (typeof address === "string" || !("port" in address)) {
-            return null;
-          }
-          const setup = yield* MachineSetup.MachineSetup;
-          const serveMode = yield* TailscaleServeMode.TailscaleServeMode;
-          yield* setup
-            .start(address.port)
-            .pipe(
-              Effect.catchCause((cause) =>
-                Effect.logWarning("Failed to configure Tailscale Serve", { cause }),
-              ),
-            );
-          return serveMode.explicit ? yield* serveMode.current : null;
-        }),
-        (configured) =>
-          configured
-            ? disableTailscaleServe({ servePort: configured.servePort }).pipe(
-                Effect.tap(() =>
-                  Effect.logInfo("Tailscale Serve disabled", {
-                    servePort: configured.servePort,
-                  }),
-                ),
-                Effect.catch((cause) =>
-                  Effect.logWarning("Failed to disable Tailscale Serve", {
-                    cause,
-                    servePort: configured.servePort,
-                  }),
-                ),
-              )
-            : Effect.void,
-      ),
+      Effect.gen(function* () {
+        yield* Deferred.succeed(tailscaleParked, undefined).pipe(Effect.orDie);
+        yield* awaitActivation;
+        const server = yield* HttpServer.HttpServer;
+        const address = server.address;
+        if (typeof address === "string" || !("port" in address)) return;
+        const setup = yield* MachineSetup.MachineSetup;
+        yield* setup.start(address.port);
+      }),
     );
     const layerCloudDesiredLinkReconcile = Layer.effectDiscard(
       Effect.gen(function* () {
@@ -1271,6 +1262,9 @@ const layerMakeServer = Layer.unwrap(
       Layer.provideMerge(FetchHttpClient.layer),
       // PR reads, Git operations, and WebSocket discovery share one process limiter.
       Layer.provide(VcsProcess.layer),
+      // The ledger of what agents started; terminals, cleanup, health and
+      // Diagnostics share this one instance.
+      Layer.provideMerge(AgentProcesses.layer),
       // Every agent and terminal spawn reads this, so it sits below everything.
       Layer.provideMerge(AgentScopeLive.layer),
       Layer.provideMerge(layerPlatformServices),

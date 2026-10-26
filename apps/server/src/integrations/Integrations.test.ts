@@ -1,3 +1,4 @@
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { loopbackHttpsFetch, loopbackHttpsPolicy } from "./https.testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -8,6 +9,7 @@ import {
   ProjectLabelId,
   ThreadId,
   SLACK_MCP_USER_SCOPES,
+  INTEGRATION_CATALOG,
   integrationCatalogEntryFor,
   type Integration,
 } from "@cogenly/contracts";
@@ -34,7 +36,6 @@ import * as Credentials from "./IntegrationCredentials.ts";
 import { availableToConnect } from "./IntegrationCatalog.ts";
 import * as Integrations from "./Integrations.ts";
 import * as IntegrationSyncPeers from "./IntegrationSyncPeers.ts";
-import * as NativeImport from "./NativeIntegrationImport.ts";
 import * as Tokens from "./IntegrationTokens.ts";
 import { IntegrationEndpointPolicy } from "./RemoteEndpoint.ts";
 import * as Workspace from "../agents/AgentWorkspaceService.ts";
@@ -440,6 +441,7 @@ describe("Integrations gateway", () => {
                 Layer.mock(Agents.AgentService)({}),
                 Layer.mock(Work.WorkHandoffService)({}),
                 Layer.mock(Schedules.ScheduledTaskService)({}),
+                Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
               ),
             ),
             Layer.provide(NodeServices.layer),
@@ -505,6 +507,7 @@ describe("Integrations gateway", () => {
               Layer.mock(Agents.AgentService)({}),
               Layer.mock(Work.WorkHandoffService)({}),
               Layer.mock(Schedules.ScheduledTaskService)({}),
+              Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
             ),
           ),
           Layer.provide(NodeServices.layer),
@@ -903,6 +906,64 @@ describe("Integrations gateway", () => {
     }).pipe(Effect.provide(layerWith())),
   );
 
+  it.effect("keeps an agent's setup notes, stamped, until they are replaced or cleared", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      const notes = "Slack app Cogenly (A0123) in Acme; redirect https://cogenly.example.com/oauth";
+      const { integration } = yield* service.create(
+        { ...createInput("https://example.com/mcp"), headers: {}, setupNotes: `  ${notes}  ` },
+        { addedByAgent: { id: "agent:test", name: "Research" }, fromAgent: true },
+      );
+      expect(integration).toMatchObject({
+        setupNotes: notes,
+        setupNotesUpdatedAt: integration.createdAt,
+      });
+      // A thread agent writes notes without approval, as integration_update does.
+      const agent = { fromAgent: true, holdStoredSecrets: true, preserveScope: true } as const;
+      const replaced = yield* service.update(
+        { id: integration.id, setupNotes: "Moved the redirect to the VPS." },
+        agent,
+      );
+      expect(replaced.integration.setupNotes).toBe("Moved the redirect to the VPS.");
+      expect(replaced.integration.setupNotesUpdatedAt).toBeDefined();
+      // Other edits leave them alone, and listing shows them to the next agent.
+      yield* service.update({ id: integration.id, hint: "Acme Slack" }, agent);
+      expect((yield* service.list()).integrations[0]?.integration.setupNotes).toBe(
+        "Moved the redirect to the VPS.",
+      );
+      const cleared = yield* service.update({ id: integration.id, setupNotes: " " }, agent);
+      expect(cleared.integration).not.toHaveProperty("setupNotes");
+      expect(cleared.integration).not.toHaveProperty("setupNotesUpdatedAt");
+      expect((yield* service.list()).integrations[0]?.integration).not.toHaveProperty("setupNotes");
+    }).pipe(Effect.provide(layerWith())),
+  );
+
+  it.effect("opens the setup guide with notes from the service's existing integrations", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      const notes = "Slack app Cogenly (A0123) in Acme; redirect https://cogenly.example.com/oauth";
+      yield* service.create(
+        { ...createInput("https://mcp.slack.com/mcp", "slack"), headers: {}, setupNotes: notes },
+        { fromAgent: true },
+      );
+      yield* service.create(
+        { ...createInput("https://example.com/mcp"), headers: {}, setupNotes: "Unrelated." },
+        { fromAgent: true },
+      );
+      const guide = yield* service.setupGuide("slack");
+      expect(guide.existingSetupNotes).toEqual([
+        expect.objectContaining({ name: "slack", setupNotes: notes }),
+      ]);
+      expect(guide.instructions.startsWith("Existing setup notes.")).toBe(true);
+      expect(guide.instructions).toContain(notes);
+      expect(guide.instructions).not.toContain("Unrelated.");
+      // A service nobody has set up yet gets the plain guide.
+      expect((yield* service.setupGuide("linear")).existingSetupNotes).toBeUndefined();
+    }).pipe(Effect.provide(layerWith())),
+  );
+
   it.effect("gives additional unlabeled accounts a distinguishing default label", () =>
     Effect.gen(function* () {
       yield* runMigrations();
@@ -1288,6 +1349,7 @@ describe("Services the catalog dropped", () => {
             name: "atlassian",
             displayName: "Atlassian",
             icon: null,
+            faviconHost: "mcp.atlassian.com",
             serviceName: "Atlassian",
             accountLabel: null,
             status: "connected",
@@ -1470,6 +1532,66 @@ describe("Settings secret forms", () => {
 });
 
 describe("integrationSource", () => {
+  it.effect("repairs Wispr's vaulted catalog endpoint and backfills its logo on reads", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      const sql = yield* SqlClient.SqlClient;
+      const endpoint = INTEGRATION_CATALOG.flatMap((entry) =>
+        entry.id === "wispr-flow" && entry.kind === "remote" ? [entry.url] : [],
+      )[0]!;
+      const { integration } = yield* service.create({
+        ...createInput(endpoint, "wispr-flow"),
+        headers: {},
+        auth: { type: "oauth" },
+      });
+      expect(integration.icon).toBe("wispr-flow");
+      expect(integration.endpointRef).toBeUndefined();
+      const [row] = yield* sql<{
+        payload_json: string;
+      }>`SELECT payload_json FROM integrations WHERE id=${integration.id}`;
+      const legacy: Record<string, unknown> = {
+        ...(JSON.parse(row!.payload_json) as Record<string, unknown>),
+        url: `${new URL(endpoint).origin}/`,
+        endpointRef: "legacy-wispr.value",
+      };
+      delete legacy.icon;
+      secrets.set("legacy-wispr.value", endpoint);
+      yield* sql`UPDATE integrations SET payload_json=${JSON.stringify(legacy)} WHERE id=${integration.id}`;
+      const summary = (yield* service.list()).integrations[0]!;
+      expect(summary.integration.url).toBe(endpoint);
+      expect(summary.integration.endpointRef).toBeUndefined();
+      expect(summary.integration.icon).toBe("wispr-flow");
+      expect(Integrations.integrationSource(summary).icon).toBe("wispr-flow");
+      const [upgraded] = yield* sql<{
+        payload_json: string;
+      }>`SELECT payload_json FROM integrations WHERE id=${integration.id}`;
+      expect(JSON.parse(upgraded!.payload_json)).toMatchObject({
+        url: endpoint,
+        icon: "wispr-flow",
+      });
+    }).pipe(Effect.scoped, Effect.provide(layerWith())),
+  );
+
+  it.effect("preserves agent icon overrides through creation, update and Sources", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      const { integration } = yield* service.create(
+        {
+          ...createInput("https://custom.example/mcp"),
+          headers: {},
+          iconUrl: "https://custom.example/logo.png",
+        },
+        { fromAgent: true },
+      );
+      expect(integration.iconUrl).toBe("https://custom.example/logo.png");
+      yield* service.update({ id: integration.id, icon: "linear" }, { fromAgent: true });
+      const summary = (yield* service.list()).integrations[0]!;
+      expect(Integrations.integrationSource(summary).icon).toBe("linear");
+    }).pipe(Effect.scoped, Effect.provide(layerWith())),
+  );
+
   const base = {
     id: IntegrationId.make("integration:1"),
     name: IntegrationName.make("google-work"),
@@ -1549,6 +1671,12 @@ describe("Integration credential destinations", () => {
           });
           yield* service.callTool(integration.name, "echo", {}, null);
           expect(upstream.seen.at(-1)?.path).toBe(`/mcp/${secret}-updated`);
+          yield* service.update({
+            id: integration.id,
+            url: `${upstream.url}?api_key=${secret}-query`,
+          });
+          yield* service.callTool(integration.name, "echo", {}, null);
+          expect(upstream.seen.at(-1)?.path).toBe(`/mcp?api_key=${secret}-query`);
           const rows = yield* sql`SELECT payload_json FROM integrations`;
           expect(JSON.stringify([integration, updated, yield* service.list(), rows])).not.toContain(
             secret,
@@ -1754,36 +1882,4 @@ it.effect(
         "missing a required scope",
       );
     }).pipe(Effect.scoped, Effect.provide(layerWith())),
-);
-
-it.effect("preserves incomplete review warnings when importing available native definitions", () =>
-  Effect.gen(function* () {
-    yield* runMigrations();
-    const service = yield* Integrations.Integrations;
-    const result = yield* service.importNative();
-    expect(result).toMatchObject({
-      imported: ["native-fixture"],
-      incomplete: true,
-      warnings: ["Fixture source could not be reviewed."],
-    });
-    expect((yield* service.list()).integrations[0]?.integration.enabled).toBe(false);
-    expect((yield* service.importNative()).imported).toEqual([]);
-  }).pipe(
-    Effect.provide(
-      layerWith().pipe(
-        Layer.provide(
-          Layer.succeed(NativeImport.NativeIntegrationImport, {
-            preview: Effect.succeed({
-              definitions: [
-                { ...createInput("https://fixture.example/mcp", "native-fixture"), enabled: false },
-              ],
-              reconnect: [],
-              warnings: ["Fixture source could not be reviewed."],
-              incomplete: true,
-            }),
-          }),
-        ),
-      ),
-    ),
-  ),
 );

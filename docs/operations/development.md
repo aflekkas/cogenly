@@ -2,10 +2,11 @@
 
 ## First checkout
 
-Install `vp` using the [root README](../../README.md#install-vp). The checkout requires Node 24;
-Bun is optional. From the repository root:
+The checkout requires Node 24; Bun is optional. Install the [Vite+](https://viteplus.dev) `vp`
+CLI, then run from the repository root:
 
 ```sh
+curl -fsSL https://vite.plus | bash
 vp i
 vp run dev
 ```
@@ -29,6 +30,12 @@ Linked worktrees default to their own `.cogenly/userdata`, even when `COGENLY_HO
 The main checkout defaults to `~/.cogenly/dev/userdata`. An explicit `--home-dir` wins in both cases.
 Never run a development server against the live `~/.cogenly/userdata`.
 See [test data](../../AGENTS.md#test-data) for copying a consistent database snapshot.
+
+A worktree's default `.cogenly` sits inside the git checkout, which turns off Scratch ("No
+project"): its folders would inherit the repository's git status and checkpoints. Chats without a
+project, and agents, which start in Scratch, are then unavailable ("Agents aren't available
+here"). To test them, put the home outside the checkout, for example
+`vp run dev --home-dir /tmp/cogenly-agents`, and delete that folder when you are done.
 
 Read ports from the `[dev-runner]` output. Worktrees derive stable preferences from their paths,
 but occupied ports can shift them. `COGENLY_PORT_OFFSET` or `COGENLY_DEV_INSTANCE` can select a

@@ -5,6 +5,7 @@ import {
 } from "@cogenly/client-runtime/state/runtime";
 import { deriveThreadQueueWorkflowState } from "@cogenly/client-runtime/state/thread-workflows";
 import { replaceComposerContextReferences } from "@cogenly/shared/composerContextReferences";
+import { threadLinksToPlainText } from "@cogenly/shared/threadLinks";
 import type {
   ChatAttachment as ContractChatAttachment,
   EnvironmentId,
@@ -219,7 +220,7 @@ export function QueuedRunsControl({
     [queuedImageAttachmentIds, queuedImageAttachmentUrls],
   );
   // Once the projection holds the message the optimistic copy is stale no
-  // matter what happened to its run — keying on still-queued runs alone would
+  // matter what happened to its run; keying on still-queued runs alone would
   // resurrect a phantom "pending" row after the run is cancelled or started.
   const acknowledgedMessageIds = useMemo(
     () => new Set((projection?.messages ?? []).map((message) => message.id)),
@@ -415,13 +416,17 @@ export function QueuedRunsControl({
 
   const steerInFlightRef = useRef(false);
   const steer = async (queuedRunId: RunId) => {
-    if (activeRun === null || !workflow?.canPromoteToSteer || steerInFlightRef.current) return;
+    if ((activeRun !== null && !workflow?.canPromoteToSteer) || steerInFlightRef.current) return;
     steerInFlightRef.current = true;
     setBusyRunId(queuedRunId);
     try {
       await promote({
         environmentId: props.environmentId,
-        input: { threadId: props.threadId, queuedRunId, targetRunId: activeRun.id },
+        input: {
+          threadId: props.threadId,
+          queuedRunId,
+          ...(activeRun === null ? {} : { targetRunId: activeRun.id }),
+        },
       });
     } finally {
       steerInFlightRef.current = false;
@@ -450,7 +455,7 @@ export function QueuedRunsControl({
   useImperativeHandle(ref, () => ({
     steerNext(repeat) {
       const next = queued[0];
-      if (!next || !workflow?.canPromoteToSteer) return false;
+      if (!next || (activeRun !== null && !workflow?.canPromoteToSteer)) return false;
       if (!repeat && !anyBusy) void steer(next.run.id);
       return true;
     },
@@ -643,10 +648,12 @@ export function QueuedRunsControl({
                 >
                   {presence.rows.map((slot) => {
                     const item = (slot.leaving ? undefined : itemsByKey.get(slot.key)) ?? slot.item;
-                    const previewText = replaceComposerContextReferences(item.text, (reference) =>
-                      reference.kind === "image" && item.thumbnails.length > 0
-                        ? ""
-                        : reference.label,
+                    const previewText = threadLinksToPlainText(
+                      replaceComposerContextReferences(item.text, (reference) =>
+                        reference.kind === "image" && item.thumbnails.length > 0
+                          ? ""
+                          : reference.label,
+                      ),
                     ).trim();
                     const rowRunId = item.runId;
                     const rowServerIndex = item.serverIndex;
@@ -830,7 +837,7 @@ export function QueuedRunsControl({
                                       disabled={
                                         item.runId === null ||
                                         anyBusy ||
-                                        !workflow?.canPromoteToSteer
+                                        (activeRun !== null && !workflow?.canPromoteToSteer)
                                       }
                                       onClick={() => {
                                         if (item.runId !== null) {
@@ -839,12 +846,12 @@ export function QueuedRunsControl({
                                       }}
                                     >
                                       <CornerUpRightIcon className="size-3.5" />
-                                      Steer
+                                      {activeRun === null ? "Send now" : "Steer"}
                                     </Button>
                                   </TooltipTrigger>
                                   <TooltipPopup>
                                     {activeRun === null
-                                      ? "There is no active run to steer"
+                                      ? "Start a turn with this queued message"
                                       : !workflow?.canPromoteToSteer
                                         ? "Starts when the active turn finishes"
                                         : `Send as a steer instead${item.serverIndex === 0 && props.steerShortcutLabel ? ` (${props.steerShortcutLabel})` : ""}`}

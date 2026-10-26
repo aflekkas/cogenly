@@ -1,3 +1,4 @@
+import { IntegrationId, IntegrationSetupAction } from "./integration.ts";
 import { AgentId } from "./agent.ts";
 import { AgentBuilderProposal } from "./agentBuilder.ts";
 import { OrchestrationMessageContext } from "./composerContext.ts";
@@ -632,8 +633,12 @@ export const OrchestrationV2Run = Schema.Struct({
   activeAttemptId: Schema.NullOr(RunAttemptId),
   status: OrchestrationV2RunStatus,
   queuePosition: Schema.optional(Schema.NullOr(PositiveInt)),
-  /** Restart recovery holds the queue until the user explicitly resumes it. */
+  /** A failure, restart, or explicit Stop paused delivery. */
   queueHeld: Schema.optional(Schema.Boolean),
+  /** An explicit Stop survives successful intervening turns and automatic queue recovery. */
+  queueHoldReason: Schema.optional(Schema.Literal("stopped")),
+  /** A model switch is waiting for its portable agent brief. */
+  handoffPending: Schema.optional(Schema.Boolean),
   requestedAt: Schema.DateTimeUtc,
   startedAt: Schema.NullOr(Schema.DateTimeUtc),
   completedAt: Schema.NullOr(Schema.DateTimeUtc),
@@ -787,7 +792,7 @@ export const OrchestrationV2WorkflowAgent = Schema.Struct({
   /**
    * Prompt and result excerpts. A workflow member's whole conversation is one
    * prompt and one answer, so together these are its transcript as far as the
-   * provider exposes it — both are capped by the CLI at a few hundred
+   * provider exposes it. Both are capped by the CLI at a few hundred
    * characters.
    */
   prompt: Schema.optional(Schema.NonEmptyString),
@@ -1620,16 +1625,66 @@ export const OrchestrationV2SecretRequestStatus = Schema.Literals([
 ]);
 export type OrchestrationV2SecretRequestStatus = typeof OrchestrationV2SecretRequestStatus.Type;
 
+/** A field a login request card asks for; `note` is kept as the item's recovery note. */
+export const OrchestrationV2LoginRequestField = Schema.Literals([
+  "username",
+  "password",
+  "totp",
+  "note",
+]);
+export type OrchestrationV2LoginRequestField = typeof OrchestrationV2LoginRequestField.Type;
+
+/**
+ * What a login request card asks for (request_login). Its values go straight
+ * into the vault; the item records only the site, the asked fields and which
+ * vault item the answer was saved to.
+ */
+export const OrchestrationV2LoginRequest = Schema.Struct({
+  /** Where the login is used, e.g. `https://github.com`; the saved item is allowed only there. */
+  origin: TrimmedNonEmptyString,
+  siteName: Schema.optional(TrimmedNonEmptyString),
+  /** Shown as the username field's initial text; the agent's guess, never a stored value. */
+  usernameHint: Schema.optional(Schema.String),
+  fields: Schema.Array(OrchestrationV2LoginRequestField),
+  /** Set when the answer replaces the secrets of an existing vault login. */
+  updateItemId: Schema.optional(TrimmedNonEmptyString),
+  updateItemName: Schema.optional(TrimmedNonEmptyString),
+  /** The vault item the answer was saved to, once saved. */
+  savedItemId: Schema.optional(TrimmedNonEmptyString),
+  savedItemName: Schema.optional(TrimmedNonEmptyString),
+  /** False when the user chose not to keep it: removed when the thread has no active work. */
+  kept: Schema.optional(Schema.Boolean),
+});
+export type OrchestrationV2LoginRequest = typeof OrchestrationV2LoginRequest.Type;
+
 /**
  * A secret an agent asked the user for. The value never passes through
  * orchestration: the item carries only what was asked and how it was answered.
+ * `login` marks a sign-in card (request_login) rather than a single secret.
  */
+const SecretVaultTarget = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  type: Schema.Literals(["login", "api_key", "card", "note"]),
+  domains: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  savedItemId: Schema.optional(TrimmedNonEmptyString),
+  savedItemName: Schema.optional(TrimmedNonEmptyString),
+});
+
 const OrchestrationV2SecretRequestFields = {
   type: Schema.Literal("secret_request"),
   label: TrimmedNonEmptyString,
   reason: Schema.String,
   placeholder: Schema.optional(Schema.String),
+  integrationSetup: Schema.optional(
+    Schema.Struct({
+      integrationId: Schema.optional(IntegrationId),
+      setup: Schema.optional(IntegrationSetupAction),
+      accountLabel: Schema.optional(Schema.String),
+    }),
+  ),
   secretStatus: OrchestrationV2SecretRequestStatus,
+  secretVault: Schema.optional(SecretVaultTarget),
+  login: Schema.optional(OrchestrationV2LoginRequest),
 } as const;
 
 /**
@@ -3031,7 +3086,7 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     // Fractional-index key: pinned threads sort lexicographically by these
-    // keys, so a drag writes one key to one thread — neighbors are never
+    // keys, so a drag writes one key to one thread; neighbors are never
     // touched. Clients compute a key that sorts between the dropped
     // position's neighbors.
     orderKey: TrimmedNonEmptyString,
@@ -3264,7 +3319,7 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     queuedRunId: RunId,
-    targetRunId: RunId,
+    targetRunId: Schema.optional(RunId),
   }),
   Schema.Struct({
     type: Schema.Literal("queue.resume"),
@@ -3577,6 +3632,11 @@ const OrchestrationV2InternalCommand = Schema.Union([
     subagentIds: Schema.Array(NodeId),
     /** Only these stale turns may be interrupted; completed or replaced turns are skipped. */
     runIds: Schema.optional(Schema.Array(RunId)),
+    /**
+     * Automatic sweeps leave runs whose provider session is still live alone. The
+     * user's Fix omits it, so it can stop a turn that is live but wedged.
+     */
+    keepLiveSessions: Schema.optional(Schema.Boolean),
     reason: Schema.String,
     /**
      * Child threads another machine runs whose Stop could not reach that machine. Their
@@ -3598,7 +3658,16 @@ const OrchestrationV2InternalCommand = Schema.Union([
     label: TrimmedNonEmptyString,
     reason: Schema.String,
     placeholder: Schema.optional(Schema.String),
+    integrationSetup: Schema.optional(
+      Schema.Struct({
+        integrationId: Schema.optional(IntegrationId),
+        setup: Schema.optional(IntegrationSetupAction),
+        accountLabel: Schema.optional(Schema.String),
+      }),
+    ),
     secretStatus: OrchestrationV2SecretRequestStatus,
+    secretVault: Schema.optional(SecretVaultTarget),
+    login: Schema.optional(OrchestrationV2LoginRequest),
   }),
 ]);
 export type OrchestrationV2InternalCommand = typeof OrchestrationV2InternalCommand.Type;
@@ -3622,8 +3691,6 @@ export const ORCHESTRATION_V2_WS_METHODS = {
   getThreadProjection: "orchestration.getThreadProjection",
   getWorkflowScript: "orchestration.getWorkflowScript",
   stopWorkflow: "orchestration.stopWorkflow",
-  recommendUsageLimitHandoff: "orchestration.recommendUsageLimitHandoff",
-  acceptUsageLimitHandoff: "orchestration.acceptUsageLimitHandoff",
   getTurnItem: "orchestration.getTurnItem",
   launchThread: "orchestration.launchThread",
   subscribeArchivedShell: "orchestration.subscribeArchivedShell",
@@ -4026,7 +4093,7 @@ export type OrchestrationV2GetWorkflowScriptResult =
 
 /**
  * Shared by every read of a file the Claude harness persisted for a workflow
- * run — the script and each member's transcript. One vocabulary because both
+ * run: the script and each member's transcript. One vocabulary because both
  * reads apply identical containment rules.
  */
 const WORKFLOW_FILE_ERROR_MESSAGES = {

@@ -14,7 +14,6 @@ import {
   parseSeenHealthAlertIds,
   planHealthAlertNotifications,
   rememberSeenHealthAlertIds,
-  worstHealthStatus,
   type MergedHealthAlert,
 } from "../machines/machineHealthAlerts.logic";
 import { useMachineHealthAlertStore } from "../machines/machineHealthAlertsStore";
@@ -75,7 +74,7 @@ export function MachineHealthAlertCoordinator() {
   const connectedIds = useConnectedEnvironmentIds();
   const mode = useClientSettings((settings) => settings.notificationMode);
   const runAction = useRunMachineHealthAction();
-  const setWorstOpenStatus = useMachineHealthAlertStore((store) => store.setWorstOpenStatus);
+  const setOpenAlerts = useMachineHealthAlertStore((store) => store.setOpenAlerts);
   const snapshots = useRef(new Map<EnvironmentId, MachineHealthAlertsSnapshot>());
   const seen = useRef<string[] | null>(null);
   // Keyed by healthAlertGroupKey: one toast per machine and check, whichever server it came from.
@@ -183,7 +182,7 @@ export function MachineHealthAlertCoordinator() {
 
   const reconcile = useStableCallback(() => {
     const merged = mergeHealthAlertSnapshots(snapshots.current);
-    setWorstOpenStatus(worstHealthStatus(merged.open.map(({ alert }) => alert.status)));
+    setOpenAlerts(merged.open.map(({ alert }) => alert));
     seen.current ??= readSeenAlertIds();
     const plan = planHealthAlertNotifications(
       merged,
@@ -237,7 +236,7 @@ export function MachineHealthAlertCoordinator() {
   );
 
   // The dot belongs to this coordinator's view; clear it when it goes away.
-  useEffect(() => () => setWorstOpenStatus(null), [setWorstOpenStatus]);
+  useEffect(() => () => setOpenAlerts([]), [setOpenAlerts]);
 
   return environmentIds.map((environmentId) => (
     <EnvironmentHealthAlerts

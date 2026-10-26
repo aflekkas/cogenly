@@ -16,7 +16,7 @@
  *      threads with pending recovery, are skipped, and scheduled tasks and
  *      queued effects are dropped, so the dev server never adopts live work.
  *      Auth sessions, pairing links, command receipts, and provider
- *      runtime rows are dropped — pair a fresh browser against dev.
+ *      runtime rows are dropped; pair a fresh browser against dev.
  *   3. Runs migrations on the result. Because the clone carries the real
  *      `effect_sql_migrations` table, this proves a new migration applies
  *      on top of the real applied set, and the slot check below catches
@@ -192,7 +192,7 @@ const isProcessAlive = (pid: number): boolean => {
  * server holding an open-but-inactive connection. The SQL probes below back
  * that up: BEGIN IMMEDIATE fails while a writer is active, and
  * wal_checkpoint(TRUNCATE) reports busy while another connection holds the
- * WAL. A leftover -shm alone is not a signal — read-only connections cannot
+ * WAL. A leftover -shm alone is not a signal: read-only connections cannot
  * clean it up on close. */
 const ensureNotInUse = Effect.fn("ensureDevDbNotInUse")(function* (databasePath: string) {
   const fs = yield* FileSystem.FileSystem;
@@ -256,6 +256,8 @@ const CLEARED_TABLES: ReadonlyArray<string> = [
   "provider_session_runtime",
   "auth_sessions",
   "auth_pairing_links",
+  "shared_deferred_changes",
+  "thread_replication_deferred",
 ];
 
 /** Shared between threads; the prune keeps the ones a kept thread is bound to. */
@@ -270,6 +272,48 @@ const rootIsVisible = (sql: SqlClient.SqlClient) => sql`
   AND json_extract(root.payload_json, '$.settledOverride') IS NOT 'settled'`;
 
 /**
+ * A slice can omit a parent before its dependents are copied or pruned. Work only
+ * on the disposable snapshot with FK enforcement off, then delete orphans to a
+ * fixed point. Use schema metadata rather than table order (including composite
+ * keys and WITHOUT ROWID tables), so new dependent tables need no special list.
+ */
+const pruneForeignKeyOrphans = Effect.fn("pruneDevDbForeignKeyOrphans")(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const quote = (name: string) => `"${name.replaceAll('"', '""')}"`;
+  while (true) {
+    const violations = yield* sql<{ table: string; parent: string; fkid: number }>`
+      PRAGMA main.foreign_key_check`;
+    if (violations.length === 0) return;
+    const constraints = new Map(
+      violations.map((row) => [JSON.stringify([row.table, row.fkid]), row]),
+    );
+    for (const violation of constraints.values()) {
+      const columns = yield* sql<{ id: number; seq: number; from: string; to: string | null }>`
+        PRAGMA main.foreign_key_list(${sql(violation.table)})`;
+      const key = columns
+        .filter((column) => column.id === violation.fkid)
+        .sort((a, b) => a.seq - b.seq);
+      const parentColumns = yield* sql<{ name: string; pk: number }>`
+        PRAGMA main.table_info(${sql(violation.parent)})`;
+      const primaryKey = parentColumns
+        .filter((column) => column.pk > 0)
+        .sort((a, b) => a.pk - b.pk);
+      const present = key.map((column) => `child.${quote(column.from)} IS NOT NULL`).join(" AND ");
+      const matches = key
+        .map(
+          (column, index) =>
+            `parent.${quote(column.to ?? primaryKey[index]!.name)} = child.${quote(column.from)}`,
+        )
+        .join(" AND ");
+      yield* sql.unsafe(`DELETE FROM ${quote(violation.table)} AS child
+        WHERE ${present} AND NOT EXISTS (
+          SELECT 1 FROM ${quote(violation.parent)} AS parent WHERE ${matches}
+        )`).unprepared;
+    }
+  }
+});
+
+/**
  * Copies the source into the empty snapshot, without the rows of thread families whose root is
  * hidden. The prune drops those anyway, and they hold nearly all of a long-lived database's
  * events, so copying them is what used to make this take a full-size copy of the real db.
@@ -278,6 +322,7 @@ const rootIsVisible = (sql: SqlClient.SqlClient) => sql`
  */
 const copySourceSlice = Effect.fn("copyDevDbSourceSlice")(function* (sourcePath: string) {
   const sql = yield* SqlClient.SqlClient;
+  yield* sql`PRAGMA foreign_keys = OFF`;
   yield* sql`ATTACH DATABASE ${`${NodeURL.pathToFileURL(sourcePath).href}?mode=ro`} AS src`;
   const schema = yield* sql<{ type: string; name: string; sql: string }>`
     SELECT type, name, sql FROM src.sqlite_master
@@ -324,6 +369,7 @@ const copySourceSlice = Effect.fn("copyDevDbSourceSlice")(function* (sourcePath:
         yield* sql.unsafe(`INSERT INTO main."${name}" SELECT * FROM src."${name}" ${filter}`)
           .unprepared;
       }
+      yield* pruneForeignKeyOrphans();
       // The source's AUTOINCREMENT high-water marks, so new events append after them.
       yield* sql`DELETE FROM main.sqlite_sequence`;
       yield* sql`INSERT INTO main.sqlite_sequence SELECT name, seq FROM src.sqlite_sequence`;
@@ -333,10 +379,12 @@ const copySourceSlice = Effect.fn("copyDevDbSourceSlice")(function* (sourcePath:
     }),
   );
   yield* sql`DETACH DATABASE src`;
+  yield* sql`PRAGMA foreign_keys = ON`;
 });
 
 const pruneSnapshot = Effect.fn("pruneDevDbSnapshot")(function* (input: RunMigrateDevDbInput) {
   const sql = yield* SqlClient.SqlClient;
+  yield* sql`PRAGMA foreign_keys = OFF`;
 
   // Threads the server would resume or start work on by itself. Its own
   // recovery queries find most of them; usage-limit recovery also depends on
@@ -440,8 +488,11 @@ const pruneSnapshot = Effect.fn("pruneDevDbSnapshot")(function* (input: RunMigra
       for (const table of CLEARED_TABLES) {
         yield* sql`DELETE FROM ${sql(table)}`;
       }
+      yield* pruneForeignKeyOrphans();
     }),
   );
+
+  yield* sql`PRAGMA foreign_keys = ON`;
 
   const keptProjects = yield* sql<{ title: string; threads: number }>`
     SELECT

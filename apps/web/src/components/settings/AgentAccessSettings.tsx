@@ -2,15 +2,14 @@ import { DEFAULT_SERVER_SETTINGS } from "@cogenly/contracts";
 
 import { Switch } from "../ui/switch";
 import { ComputerUsePermissionsSetting } from "./ComputerUsePermissionsSetting";
-import { UseOnlyCogenlyIntegrationsRow } from "./IntegrationServicesSettings";
 import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
 /**
  * Settings → Integrations → Agent access: what agents may reach beyond the
- * thread, the shared browser, this machine's apps, and the tools set up in
- * Claude or Codex. Each takes effect when an agent session next starts.
+ * thread, the shared browser and this machine's apps. Each takes effect when an
+ * agent session next starts.
  */
 export function AgentAccessSettings() {
   const settings = useScopedSettings();
@@ -69,7 +68,6 @@ export function AgentAccessSettings() {
         }
       />
       <ComputerUsePermissionsSetting enabled={settings.enableAgentComputerUse} />
-      <UseOnlyCogenlyIntegrationsRow />
     </SettingsSection>
   );
 }

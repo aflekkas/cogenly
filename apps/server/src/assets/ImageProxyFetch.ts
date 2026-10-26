@@ -283,6 +283,40 @@ const fetchProxiedImage = Effect.fn("ImageProxyFetch.fetchProxiedImage")(functio
 });
 
 /**
+ * A public https image's bytes and type, fetched through the same validated,
+ * pinned redirect chain as the proxy. Null for anything that is not an image
+ * of at most `maxBytes`, and on any failure or timeout.
+ */
+export const fetchImageBytes = Effect.fn("ImageProxyFetch.fetchImageBytes")(function* (
+  rawUrl: string,
+  maxBytes: number,
+) {
+  const parsed = parseImageProxyTarget(rawUrl);
+  if (!("url" in parsed)) return null;
+  return yield* Effect.gen(function* () {
+    const response = yield* fetchFollowingRedirects(parsed.url);
+    if (response === null || response.status >= 300) return null;
+    const declaredLength = Number(response.headers["content-length"]);
+    if (Number.isInteger(declaredLength) && declaredLength > maxBytes) return null;
+    const body = yield* readCappedBody(response.stream);
+    if (body === null || body.length === 0 || body.length > maxBytes) return null;
+    const decision = selectProxiedImageResponse({
+      status: response.status,
+      contentType: response.headers["content-type"],
+      declaredLength: undefined,
+      bodyLength: body.length,
+    });
+    return decision.status === 200 && "contentType" in decision
+      ? { bytes: body, contentType: decision.contentType }
+      : null;
+  }).pipe(
+    Effect.scoped,
+    Effect.timeout(IMAGE_FETCH_TIMEOUT),
+    Effect.orElseSucceed(() => null),
+  );
+});
+
+/**
  * Serves a third-party image through this origin so chat clients dodge
  * hotlink protection, mixed content, and tracker cookies. Https only, images
  * only, bounded in size and time. The fetch has its own scope, so the

@@ -213,7 +213,7 @@ function buildDecorations(
     const highlighted = cache.get(blockSignature(node, theme));
     if (!highlighted) continue;
     // Token offsets index the block's text, which lines up with document
-    // positions only because `codeBlock` is `text*` with no marks — one
+    // positions only because `codeBlock` is `text*` with no marks: one
     // unmarked text node, so `content.size === textContent.length`. Allowing
     // marks or hard breaks in the code block would desync these silently.
     if (node.content.size !== node.textContent.length) continue;

@@ -1,3 +1,4 @@
+import { threadRuntimeIsActive } from "@cogenly/client-runtime/state/models";
 import { useContext, useSyncExternalStore, useCallback, useRef, type ComponentType } from "react";
 import type {
   AgentApproval,
@@ -27,6 +28,7 @@ import type {
   CommitmentHistoryView,
 } from "./agents.types";
 import {
+  agentConversationState,
   agentAttachmentIdentity,
   agentAttachmentSupport,
   agentContactKey,
@@ -41,6 +43,7 @@ import {
 import { onePerAgent } from "./agentGroups.logic";
 import { triggerErrorMessage } from "./agentWorkspace.logic";
 import { AgentHydrationContext, AgentsClientContext } from "./agentsContext";
+import { forgetAgentConversationRoute } from "../components/sidebar/modes/spaceRouteMemory";
 
 export class AgentCreatedWithoutTriggerError extends Error {
   constructor(
@@ -267,6 +270,13 @@ const subscribeToContext = () => () => {};
 
 export function LiveAgentsProvider({ children }: { children: ReactNode }) {
   const environmentIds = useConnectedEnvironmentIds();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const machineQuery = useEnvironmentQuery(
+    primaryEnvironmentId === null
+      ? null
+      : serverEnvironment.machinesLive({ environmentId: primaryEnvironmentId, input: {} }),
+  );
+  const machines = machineQuery.data?.machines;
   const projects = useProjects();
   const configs = useServerConfigs();
   const threads = useThreadShells();
@@ -417,6 +427,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
                 title: task.title,
                 prompt: task.prompt,
                 schedule: task.schedule,
+                lastRunStatus: task.lastRunStatus,
                 enabled: task.enabled,
               }));
             const workThreads = threads.filter((thread) => {
@@ -440,13 +451,20 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
             const state =
               approvals.length || waitingInRun || cached?.requests.length
                 ? "blocked"
-                : shell?.runtime?.activeRunId ||
-                    workThreads.some((thread) => thread.runtime?.activeRunId)
+                : threadRuntimeIsActive(shell?.runtime) ||
+                    workThreads.some((thread) => threadRuntimeIsActive(thread.runtime))
                   ? "thinking"
                   : "idle";
             return {
               ...record,
               environmentId,
+              ownerName: machines?.find(
+                (machine) => machine.environmentId === (record.ownerMachine ?? environmentId),
+              )?.name,
+              ownerOnline:
+                machines?.find(
+                  (machine) => machine.environmentId === (record.ownerMachine ?? environmentId),
+                )?.online ?? idsKey.split("\0").includes(record.ownerMachine ?? environmentId),
               state,
               updatedAt: shell?.updatedAt ?? record.updatedAt,
               // A text that only carried files has no words to preview.
@@ -483,7 +501,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
           });
         }),
       ),
-    [results, tasks, threads, hydrated, outbox],
+    [results, tasks, threads, hydrated, outbox, machines, idsKey],
   );
   const snapshot = useMemo<AgentsSnapshot>(
     () => ({
@@ -581,6 +599,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
       },
       remove: async (agent) => {
         commandValue(await remove({ environmentId: agent.environmentId, input: { id: agent.id } }));
+        forgetAgentConversationRoute(agent);
       },
       markRead: async (agent, messageId) => {
         commandValue(
@@ -899,6 +918,13 @@ function useLiveAgentWorkspace(agent: AgentContact): AgentWorkspaceView {
   );
   const refreshCommitments = commitments.refresh;
   const refreshActivity = activity.refresh;
+  const activityRevision = `${agent.updatedAt}:${agent.state}`;
+  const lastActivityRevision = useRef(activityRevision);
+  useEffect(() => {
+    if (lastActivityRevision.current === activityRevision) return;
+    lastActivityRevision.current = activityRevision;
+    refreshActivity();
+  }, [activityRevision, refreshActivity]);
   const refresh = useCallback(() => {
     refreshCommitments();
     refreshActivity();
@@ -942,7 +968,7 @@ function LiveCommitmentHistory({
 
 export type AgentConversationData = Pick<
   AgentContact,
-  "messages" | "requests" | "memory" | "activity" | "workingOn"
+  "messages" | "requests" | "memory" | "activity" | "workingOn" | "preparingHandoff"
 >;
 
 /** The title of the newest tool call still running in a thread, for a typing hint. */
@@ -970,6 +996,14 @@ export function useAgentConversation(agent: AgentContact | null): AgentContact |
       ? agentsRpc.activity({ environmentId: agent.environmentId, input: { id: agent.id } })
       : null,
   );
+  const refreshRuns = activity.refresh;
+  const runsRevision = agent === null ? null : `${agent.id}:${agent.updatedAt}:${agent.state}`;
+  const lastRunsRevision = useRef(runsRevision);
+  useEffect(() => {
+    if (lastRunsRevision.current === runsRevision) return;
+    lastRunsRevision.current = runsRevision;
+    if (runsRevision !== null) refreshRuns();
+  }, [runsRevision, refreshRuns]);
   const activeWork = activity.data?.runs.find(
     (run) => run.status === "running" || run.status === "starting",
   );
@@ -1061,6 +1095,9 @@ export function useAgentConversation(agent: AgentContact | null): AgentContact |
       memory: memory.data?.notes ?? [],
       activity: activity.data?.runs ?? [],
       workingOn: workingOnFromItems(projection.turnItems),
+      preparingHandoff: projection.runs.some(
+        (run) => run.status === "starting" && run.handoffPending,
+      ),
     };
   }, [projection, workProjection, triggerNames, memory.data, activity.data]);
   const key = agent ? agentContactKey(agent) : null;
@@ -1079,14 +1116,14 @@ export function useAgentConversation(agent: AgentContact | null): AgentContact |
         loadingEarlierMessages: state.history.loading,
         historyError: state.history.error,
         conversationError: Option.getOrNull(state.error),
-        state: content.requests.length
-          ? "blocked"
-          : projection?.runs.some((run) =>
-                ["preparing", "starting", "running"].includes(run.status),
-              ) ||
-              content.activity.some((run) => run.status === "running" || run.status === "starting")
-            ? "thinking"
-            : agent.state,
+        state: agentConversationState({
+          needsInput: content.requests.length > 0 || agent.approvals.length > 0,
+          runStatuses: [
+            ...(projection?.runs ?? []).map((run) => run.status),
+            ...(workProjection?.runs ?? []).map((run) => run.status),
+          ],
+          prior: agent.state,
+        }),
       }
     : agent;
 }

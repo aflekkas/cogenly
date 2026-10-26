@@ -22,7 +22,7 @@ const readWslState: Effect.Effect<
   const wslBackend = yield* DesktopWslBackend.DesktopWslBackend;
   const settings = yield* appSettings.get;
   const available = settings.localEnvironmentEnabled && (yield* wslEnvironment.isAvailable);
-  // Only enumerate distros when WSL is actually available — listDistros on a
+  // Only enumerate distros when WSL is actually available; listDistros on a
   // non-WSL host would spawn wsl.exe and hit the timeout for nothing.
   const distros = available ? yield* wslEnvironment.listDistros : [];
   const preflightError = yield* wslBackend.lastPreflightError;
@@ -72,7 +72,7 @@ export const setWslBackendEnabled = makeIpcMethod({
     // Reconcile is idempotent and never fails; no need for a swap-style
     // rollback when the WSL side has trouble coming up. With both
     // backends running side by side, "WSL didn't start" is a transient
-    // state on one instance — the primary stays up either way.
+    // state on one instance; the primary stays up either way.
     yield* wslBackend.reconcile;
     return yield* readWslState;
   }),

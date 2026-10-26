@@ -41,8 +41,8 @@ function remoteUrl(host: string, repository: string): string {
 
 /**
  * GitHub's own "Rebase stack": every open layer, bottom to top, onto the new head of the layer
- * below it (the bottom one onto the stack's base). Each layer moves only its own commits —
- * `git rebase --onto <new parent> <old parent>` — so a rebased lower layer is never replayed into
+ * below it (the bottom one onto the stack's base). Each layer moves only its own commits
+ * (`git rebase --onto <new parent> <old parent>`), so a rebased lower layer is never replayed into
  * the one above it, which is what GitHub's per-PR "update branch" does and why it conflicts.
  *
  * It works in a throwaway clone, so the environment's checkout never moves, and pushes each

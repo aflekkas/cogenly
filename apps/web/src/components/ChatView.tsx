@@ -3,7 +3,6 @@ import { RepoMcpTrustPrompt } from "./chat/RepoMcpTrustPrompt";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
-import { useUsageLimitHandoff } from "./chat/UsageLimitHandoffActions";
 import {
   resolveBackgroundDraftWorkspaceOptions,
   resolveDraftHeroState,
@@ -105,6 +104,7 @@ import {
   deriveRunlessWorkStartedAt,
   deriveThreadActivityRun,
   deriveLatestThreadRun,
+  deriveProviderBackoff,
   deriveThreadRuntime,
   presentPendingBackgroundWork,
   presentProviderGoal,
@@ -139,7 +139,7 @@ import {
   resolveSelectableModel,
 } from "@cogenly/shared/model";
 import { projectScriptCwd } from "@cogenly/shared/projectScripts";
-import { derivePendingBackgroundWork } from "@cogenly/shared/orchestrationV2PendingBackgroundWork";
+import { deriveVisibleBackgroundWork } from "@cogenly/shared/orchestrationV2PendingBackgroundWork";
 import {
   latestUnheldRun,
   usageLimitRunPresentedAsLatest,
@@ -287,14 +287,17 @@ import { WizardPopup } from "./ui/wizard";
 import { BranchToolbar, type BranchToolbarHandle } from "./BranchToolbar";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { ThreadHeaderTitle } from "./chat/ThreadLineageBreadcrumb";
-import { ThreadOwnerBadge } from "../machines/ThreadOwnerBadge";
 import {
   describeOfflineLaunch,
   mergeRunOnOptions,
   resolveDraftLaunchTarget,
   resolveRunOnPick,
 } from "../machines/launchMachine.logic";
+import { threadOwnerMachine } from "../machines/machines.logic";
 import { useEnvironmentMachineList } from "../machines/useMachines";
+import { machineMoveTargets } from "../machines/machines.logic";
+import { modelOnMachine } from "../machines/machineSwitch.logic";
+import { useDraftMachineSwitch } from "../machines/useDraftMachineSwitch";
 import { resolveThreadOrigin } from "./chat/threadLineage.logic";
 import { isEditableFocused } from "../lib/editableFocus";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@cogenly/shared/keybindings";
@@ -476,6 +479,7 @@ import type {
 } from "./chat/ComposerBannerStack";
 import { BackgroundWorkBanner } from "./chat/BackgroundWorkBanner";
 import { useThreadApprovalBannerItems } from "./chat/useThreadApprovalBannerItems";
+import { ProviderBackoffTitle } from "./chat/ProviderBackoffTitle";
 import { ThreadStatusLine } from "./chat/ThreadStatusLine";
 import { classifyThreadKind, hasRightPanel, threadCapabilities } from "../threadCapabilities";
 import {
@@ -1306,7 +1310,7 @@ export default function ChatView(props: ChatViewProps) {
     [serverVisibleTurnItems],
   );
   // Queued messages have no turn item until their run starts, so the
-  // turn-item-derived set alone can never retire their optimistic rows —
+  // turn-item-derived set alone can never retire their optimistic rows;
   // cancelling such a run would leave a phantom "pending" queue row behind.
   // Union in the projection's user messages: once the server holds the
   // message, the optimistic copy is redundant everywhere it could render.
@@ -1353,7 +1357,7 @@ export default function ChatView(props: ChatViewProps) {
       : null;
   }, [citationHref, citationKey, environmentId, threadId]);
   const { resolvedTheme } = useTheme();
-  // Granular store selectors — avoid subscribing to prompt changes.
+  // Granular store selectors, to avoid subscribing to prompt changes.
   const composerInteractionMode = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.interactionMode ?? null,
   );
@@ -1883,7 +1887,7 @@ export default function ChatView(props: ChatViewProps) {
     () => deriveActivePlanState(serverProjection, activeActivityRun?.runId),
     [activeActivityRun?.runId, serverProjection],
   );
-  // Tasks progress for the running turn's own plan only — deriveActivePlanState
+  // Tasks progress for the running turn's own plan only; deriveActivePlanState
   // falls back to older runs' plans, which must not label fresh work.
   const activeComposerTasksProgress = useMemo(() => {
     if (
@@ -2247,6 +2251,10 @@ export default function ChatView(props: ChatViewProps) {
     activeEnvironment: activeEnvironmentOption,
     canPickEnvironment: canPickRunOn,
   });
+  // A started thread another paired machine runs keeps its machine named
+  // under the composer, the one place the open thread shows it.
+  const threadRunsOnOtherMachine =
+    isServerThread && threadOwnerMachine(runOnMachineList, pickedRunOnMachine) !== null;
 
   const openOrReuseProjectDraftThread = async (input: {
     branch: string;
@@ -2980,7 +2988,7 @@ export default function ChatView(props: ChatViewProps) {
         sessionError,
       ) ?? latestUnheldRun(serverProjection.runs);
     return [
-      ...derivePendingBackgroundWork({
+      ...deriveVisibleBackgroundWork({
         latestRun,
         providerThreads: serverProjection.providerThreads,
         turnItems: serverProjection.turnItems,
@@ -3698,6 +3706,7 @@ export default function ChatView(props: ChatViewProps) {
     hasActiveProject: activeProject !== null,
     isGitRepo,
     showEnvironmentIndicator: showComposerEnvironmentIndicator,
+    runsOnOtherMachine: threadRunsOnOtherMachine,
     hostsRestingComposerControls: routeKind === "server",
   });
   const showComposerContextStrip = shouldShowComposerContextStrip({
@@ -3706,6 +3715,7 @@ export default function ChatView(props: ChatViewProps) {
     hasActiveProject: activeProject !== null,
     isGitRepo,
     showEnvironmentIndicator: showComposerEnvironmentIndicator,
+    runsOnOtherMachine: threadRunsOnOtherMachine,
     hostsRestingComposerControls: routeKind === "server" && restingComposerControlsVisible,
   });
   const mountComposerModelStrip = routeKind === "server" && !mountComposerContextStrip;
@@ -3811,6 +3821,7 @@ export default function ChatView(props: ChatViewProps) {
           : "Auto balance"
     : undefined;
 
+  const machineSwitch = useDraftMachineSwitch();
   // The machine an in-flight switch is heading to; a newer switch replaces it.
   const environmentChangeRef = useRef<{ readonly environmentId: EnvironmentId } | null>(null);
   const [isEnvironmentChanging, setIsEnvironmentChanging] = useState(false);
@@ -3841,6 +3852,54 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
     const target = pick.option;
+    const targetName = target.label;
+    // Keep the project, repository and model wherever the target can hold
+    // them; what it cannot is left as it was here, for the way back.
+    const switched = machineSwitch.plan({
+      threadId: originalDraft.threadId,
+      here: originalDraft.environmentId,
+      repository: activeProject !== null && !activeProjectIsScratch ? activeProject : null,
+      target: target.environmentId,
+      targetRecordId: activeProjectIsScratch ? null : target.projectId,
+      canLaunchThere: machineMoveTargets(runOnMachineList).some(
+        (machine) => machine.environmentId === target.environmentId,
+      ),
+    });
+    const keepModel = () => {
+      const draft = useComposerDraftStore.getState().getComposerDraft(draftId);
+      const selection = draft?.activeProvider
+        ? (draft.modelSelectionByProvider[draft.activeProvider] ?? null)
+        : null;
+      const targetConfig = environmentById.get(target.environmentId)?.serverConfig;
+      if (!targetConfig || !draft?.modelSelectionExplicit) return;
+      const kept = modelOnMachine({
+        selection,
+        here: providerInstanceEntries,
+        there: applyProviderInstanceSettings(
+          deriveProviderInstanceEntries(targetConfig.providers),
+          targetConfig.settings,
+        ),
+        machineName: targetName,
+      });
+      if (kept === null) return;
+      setComposerDraftModelSelection(draftId, kept.selection, { replaceOptions: true });
+      if (kept.note) toastManager.add({ type: "info", title: kept.note });
+    };
+    if (switched.plan.kind === "launch-there") {
+      // The draft keeps its project and repository; the target files its
+      // own checkout of the repository, or clones it, when the draft is sent.
+      environmentChangeRef.current = null;
+      setIsEnvironmentChanging(false);
+      setDraftThreadContext(draftId, {
+        launchMachine: target.environmentId,
+        environmentSelection: "manual",
+        loadBalancedEnvironmentId: null,
+        worktreePath: null,
+      });
+      keepModel();
+      return;
+    }
+    const plan = switched.plan;
     const request = { environmentId: target.environmentId };
     environmentChangeRef.current = request;
     setIsEnvironmentChanging(false);
@@ -3872,6 +3931,15 @@ export default function ChatView(props: ChatViewProps) {
           launchMachine: null,
         });
       }
+      if (plan.keepProject && switched.projectId !== null) {
+        machineSwitch.carryProject(
+          originalDraft.threadId,
+          switched.projectId,
+          target.environmentId,
+          activeThreadSurface === "work" ? (plan.repositoryId ?? null) : undefined,
+        );
+      }
+      keepModel();
     };
     const finish = () => {
       if (environmentChangeRef.current === request) {
@@ -3879,10 +3947,13 @@ export default function ChatView(props: ChatViewProps) {
         setIsEnvironmentChanging(false);
       }
     };
-    if (target.projectId !== null) {
+    // The repository the plan landed on, else the target's own copy of it.
+    const landingId = activeProjectIsScratch
+      ? target.projectId
+      : (plan.repositoryId ?? (plan.keepProject ? null : target.projectId));
+    if (landingId !== null) {
       const project = allProjects.find(
-        (project) =>
-          project.environmentId === target.environmentId && project.id === target.projectId,
+        (project) => project.environmentId === target.environmentId && project.id === landingId,
       );
       if (project) retarget(project);
       finish();
@@ -4787,7 +4858,7 @@ export default function ChatView(props: ChatViewProps) {
         const scrollNode = legendListRef.current?.getScrollableNode();
         if (!scrollNode) {
           // The list may not have mounted on the first frame after a thread
-          // switch — without a retry the opt-out listeners never attach and
+          // switch. Without a retry the opt-out listeners never attach and
           // live-follow becomes impossible to escape for the whole thread.
           if (remainingAttempts > 0) {
             attach(remainingAttempts - 1);
@@ -4827,7 +4898,7 @@ export default function ChatView(props: ChatViewProps) {
         };
         // Touch direction isn't observable here (touchmove fires on any
         // finger motion, scrolling or not), so break only once the drag has
-        // actually carried the viewport out of the end band — an upward flick
+        // actually carried the viewport out of the end band. An upward flick
         // gets there within its first few events and later touchmoves break.
         const handleTouchMove = () => {
           if (viewportIsAwayFromEnd()) {
@@ -5514,12 +5585,14 @@ export default function ChatView(props: ChatViewProps) {
   };
   // The stack renders items[0] front-most and tucks the rest behind hover, so
   // ordering is priority: system banners, then the branch-mismatch notice,
-  // and the informational parked-thread banner last — it must never cover another.
+  // and the informational parked-thread banner last, since it must never cover another.
   // Background work (subagent fleets, workflow runs, watch loops, dev servers) can outlive
-  // the turn; once it settles, the composer stop button is gone, so this
-  // banner is the only visible stop affordance. The interrupt path also
-  // accepts a completed run while its provider still has background work.
-  const activeBackgroundTasks = !isWorking && activeThread ? pendingBackgroundTasks : [];
+  // the turn, and stays listed while a steer or wake runs a new one. Once the turn
+  // settles the composer stop button is gone, so this banner is the only visible stop
+  // affordance. The interrupt path also accepts a completed run while its provider
+  // still has background work. While a turn runs, Stop would interrupt that turn, which
+  // is the composer's own stop button, so the banner's waits for it to settle.
+  const activeBackgroundTasks = activeThread ? pendingBackgroundTasks : [];
   const [stoppingBackgroundWorkKey, setStoppingBackgroundWorkKey] = useState<string | null>(null);
   const isStoppingBackgroundWork =
     stoppingBackgroundWorkKey === `${environmentId}:${activeThreadId}`;
@@ -5612,7 +5685,7 @@ export default function ChatView(props: ChatViewProps) {
           accentColor={selectedProviderEntry.accentColor}
           showBadge={shouldShowInstanceBadge(selectedProviderEntry, providerInstanceEntries)}
           className="size-3"
-          iconClassName="size-3"
+          size="xs"
         />
       ) : null,
       title: (
@@ -5718,6 +5791,29 @@ export default function ChatView(props: ChatViewProps) {
     );
   };
   const sendStandaloneCommandStable = useStableCallback(sendStandaloneCommand);
+  // A provider waiting out a 429: the banner names the retry time and the
+  // composer queues sends instead of steering into another 429.
+  const providerBackoff = useMemo(
+    // nowMinute re-derives once a minute so an expired backoff clears even
+    // when nothing else re-renders the thread.
+    () =>
+      serverProjection === null
+        ? null
+        : deriveProviderBackoff(serverProjection, Date.parse(`${nowMinute}:00.000Z`)),
+    [serverProjection, nowMinute],
+  );
+  const backoffBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
+    if (!activeThread || providerBackoff === null) return null;
+    return {
+      id: `provider-backoff:${activeThread.id}`,
+      variant: "warning",
+      priority: "activity",
+      icon: <AlarmClockIcon />,
+      title: <ProviderBackoffTitle backoff={providerBackoff} />,
+      description:
+        "Steering now would make it retry immediately and hit the limit again, so new messages queue until the turn ends.",
+    };
+  }, [activeThread, providerBackoff]);
   // A native /goal keeps the agent working across turns. Stop pauses a Codex
   // goal; once the thread is idle the row offers the native follow-ups.
   const activeGoal = activeThreadShell?.goal ?? null;
@@ -5774,7 +5870,7 @@ export default function ChatView(props: ChatViewProps) {
           environmentId={activeThread.environmentId}
           threadId={activeThread.id}
           presentation={presentation}
-          canStop={canOperateThread}
+          canStop={canOperateThread && !isWorking}
           stopping={isStoppingBackgroundWork}
           onStop={() => void handleStopBackgroundWorkStable()}
           onOpenThread={onOpenRelatedThreadStable}
@@ -5787,6 +5883,7 @@ export default function ChatView(props: ChatViewProps) {
     canOperateThread,
     handleStopBackgroundWorkStable,
     isStoppingBackgroundWork,
+    isWorking,
     onOpenRelatedThreadStable,
   ]);
   // Settled, snoozed, and woke are thread state, not composer actions: each
@@ -5990,32 +6087,11 @@ export default function ChatView(props: ChatViewProps) {
   // onResume is declared below and published here after commit; the banner only calls it from a click.
   const onResumeNowRef = useRef<(() => Promise<void>) | null>(null);
   const onResumeNowStable = useStableCallback(() => void onResumeNowRef.current?.());
-  const stoppedOnUsageLimit =
-    serverRuntime?.status === "failed" && serverRuntime.lastErrorClass === "usage_limit";
-  const usageLimitHandoff = useUsageLimitHandoff({
-    environmentId,
-    threadId: activeThreadShell?.id ?? null,
-    runId: stoppedOnUsageLimit ? (activeThreadShell?.latestRun?.runId ?? null) : null,
-    onAccepted: (modelSelection) => {
-      // The continuation moved the thread; the composer follows, or its own
-      // pick would send the next turn back to the limited instance.
-      if (activeThreadShell) {
-        setComposerDraftModelSelection(
-          scopeThreadRef(environmentId, activeThreadShell.id),
-          modelSelection,
-          { explicit: true, replaceOptions: true },
-        );
-      }
-      clearUsageLimitsFor(routeThreadKey);
-      scrollToEnd();
-    },
-  });
   const limitRecoveryBanner =
     serverRuntime?.status === "failed" &&
     serverRuntime.lastErrorClass === "usage_limit" &&
     activeThreadShell?.latestRun
       ? usageLimitRecoveryBannerItem({
-          handoff: usageLimitHandoff,
           stop: {
             runId: activeThreadShell.latestRun.runId,
             resetAt: serverRuntime.usageLimitResetAt ?? null,
@@ -6040,11 +6116,14 @@ export default function ChatView(props: ChatViewProps) {
     Array<ComposerBannerStackItem | ComposerBannerStackContent>
   >(() => {
     const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];
+    // Up from the queue: background work, then the rate-limit backoff, so
+    // the two keep their places whether or not an activity row leads.
     const backgroundWorkItems = [
+      backgroundWorkBannerItem,
+      backoffBannerItem,
       subagentBannerItem,
       childInputBannerItem,
       goalBannerItem,
-      backgroundWorkBannerItem,
     ].filter((item) => item !== null);
     // The user asked for this one, so it leads the notice tier instead of trailing it.
     const usageLimitsItems = usageLimitsBanner === null ? [] : [usageLimitsBanner];
@@ -6075,7 +6154,7 @@ export default function ChatView(props: ChatViewProps) {
         icon: <GitBranchIcon />,
         title: (
           <span className="flex min-w-0 items-baseline gap-1.5">
-            <span className="shrink-0 font-normal text-muted-foreground">Branch changed — was</span>
+            <span className="shrink-0 font-normal text-muted-foreground">Branch changed from</span>
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -6118,6 +6197,7 @@ export default function ChatView(props: ChatViewProps) {
     handleRestoreThreadBranchStable,
     isRestoringThreadBranch,
     backgroundWorkBannerItem,
+    backoffBannerItem,
     childInputBannerItem,
     subagentBannerItem,
     goalBannerItem,
@@ -9475,14 +9555,6 @@ export default function ChatView(props: ChatViewProps) {
               title={activeThread.title}
               messagesCarried={workHandoffMessagesCarried}
               onOpenThread={onOpenRelatedThreadStable}
-              trailing={
-                activeThreadShell ? (
-                  <ThreadOwnerBadge
-                    environmentId={activeThreadShell.environmentId}
-                    ownerMachine={activeThreadShell.source.ownerMachine}
-                  />
-                ) : null
-              }
             />
           ) : (
             <h2 className="sr-only">{activeThread.title}</h2>
@@ -9573,7 +9645,7 @@ export default function ChatView(props: ChatViewProps) {
             )}
             {/* Messages Wrapper */}
             <div className="relative flex min-h-0 flex-1 flex-col bg-background">
-              {/* Messages — LegendList handles virtualization and scrolling internally */}
+              {/* Messages: LegendList handles virtualization and scrolling internally */}
               <WorkHandoffMarkersProvider
                 environmentId={activeThreadShell?.environmentId ?? null}
                 anchors={paintOnlyDisplayedTimeline ? null : workHandoffAnchors}
@@ -9713,7 +9785,7 @@ export default function ChatView(props: ChatViewProps) {
               </WorkHandoffMarkersProvider>
               {embedded?.renderEmptyState ? (
                 <div
-                  className="absolute inset-x-0 top-0 z-10 flex flex-col overflow-y-auto transition-opacity duration-(--motion-duration-base) ease-standard data-hidden:pointer-events-none data-hidden:opacity-0"
+                  className="scroll-fade-y absolute inset-x-0 top-0 z-10 flex flex-col overflow-y-auto transition-opacity duration-(--motion-duration-base) ease-standard data-hidden:pointer-events-none data-hidden:opacity-0"
                   style={{ bottom: composerTimelineInset }}
                   data-hidden={embeddedEmptyStateVisible ? undefined : ""}
                   inert={!embeddedEmptyStateVisible}
@@ -9737,7 +9809,7 @@ export default function ChatView(props: ChatViewProps) {
               </div>
             </div>
 
-            {/* Input bar — centered for an empty draft, docked after sending. */}
+            {/* Input bar, centered for an empty draft, docked after sending. */}
             <div
               ref={setComposerOverlayElement}
               inert={isRevertingCheckpoint}
@@ -9873,6 +9945,7 @@ export default function ChatView(props: ChatViewProps) {
                             isPreparingWorktree={isPreparingWorktree && !sendQueuesBehindSetup}
                             queuedRunsControl={queuedRunsControl}
                             bannerItems={composerBannerItems}
+                            providerBackoffActive={providerBackoff !== null}
                             resumeCompactionTokens={resumeCompactionTokens}
                             keepFullHistory={keepFullHistory}
                             onToggleKeepFullHistory={toggleKeepFullHistoryStable}

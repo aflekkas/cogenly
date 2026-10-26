@@ -241,7 +241,7 @@ const parseLsofOutput = (
 
 const parsePortFromLsofName = (name: string): number | null => {
   // Examples: "*:5173", "127.0.0.1:5173", "[::1]:5173", "localhost:5173",
-  //           "192.168.1.10:5173 (LISTEN)" — we only care if the host part is local.
+  //           "192.168.1.10:5173 (LISTEN)". We only care if the host part is local.
   const trimmed = name.split(" ", 1)[0]?.trim() ?? "";
   if (trimmed.length === 0) return null;
   const lastColon = trimmed.lastIndexOf(":");

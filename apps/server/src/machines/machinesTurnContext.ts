@@ -21,7 +21,7 @@ const machineLine = (machine: MachineInfo, isHub: boolean) => {
   ];
   const name = normalizeMachineName(machine.name);
   const state = machine.online ? "online" : "offline";
-  return `- ${name} (${machine.hardware}, ${state})${roles.length === 0 ? "" : ` — ${roles.join(", ")}`}`;
+  return `- ${name} (${machine.hardware}, ${state})${roles.length === 0 ? "" : `: ${roles.join(", ")}`}`;
 };
 
 /** The `<machines>` block, or "" when this machine is the only one. */

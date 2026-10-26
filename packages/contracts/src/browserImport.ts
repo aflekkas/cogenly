@@ -36,7 +36,7 @@ export type BrowserImportSourceId = typeof BrowserImportSourceId.Type;
 /**
  * Why a detected source cannot be imported right now.
  *
- * `needsKeychainApproval` and `browserRunning` are recoverable — the user
+ * `needsKeychainApproval` and `browserRunning` are recoverable: the user
  * grants access or quits the browser. `unsupportedPlatform` is not: it covers
  * cases like Chrome on Windows, whose App-Bound Encryption is designed to stop
  * exactly this, and which we will not work around.
@@ -127,7 +127,7 @@ export const BrowserImportResult = Schema.Struct({
   /** Cookies successfully written into the target partition. */
   imported: Schema.Int,
   /**
-   * Cookies read but not written — expired, rejected as malformed, or held
+   * Cookies read but not written: expired, rejected as malformed, or held
    * under a key we could not use. Surfaced rather than hidden so a
    * mostly-failed import doesn't look like a success.
    */
@@ -145,7 +145,7 @@ const BROWSER_IMPORT_UNAVAILABLE_COPY: Readonly<Record<BrowserImportUnavailableR
   notInstalled: "Not installed on this machine.",
   needsKeychainApproval: "Needs Keychain access to read its cookies.",
   keychainItemMissing:
-    "No encryption key in your Keychain — sign in to that browser once, then retry.",
+    "No encryption key in your Keychain. Sign in to that browser once, then retry.",
   needsFullDiskAccess:
     "Give Cogenly Full Disk Access in System Settings → Privacy & Security, then retry.",
   browserRunning: "Quit the browser first so its cookie database can be read.",

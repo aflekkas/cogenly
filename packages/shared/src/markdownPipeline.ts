@@ -31,8 +31,8 @@ function meaningfulHastChildren(node: MarkdownImageHastNode): MarkdownImageHastN
 /**
  * An image that is the only content of its block (optionally wrapped in a
  * link) is almost always a screenshot or figure, so it gets a reserved slot
- * while it loads. Images mixed with text or other images — badge rows, icons
- * in a sentence — stay inline at their natural size, since a placeholder taller
+ * while it loads. Images mixed with text or other images (badge rows, icons
+ * in a sentence) stay inline at their natural size, since a placeholder taller
  * than the image would move the page more than the image itself does.
  */
 /** Containers whose sole child image reads as a figure rather than part of a sentence. */

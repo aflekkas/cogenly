@@ -850,6 +850,28 @@ export function buildCodexTurnStartParams(input: {
   });
 }
 
+type CodexAdditionalContext = NonNullable<
+  CodexTurnStartParamsWithCollaborationMode["additionalContext"]
+>;
+
+/**
+ * The entries of `next` that are new or changed against what this native
+ * thread was last sent. Unchanged instruction/project entries are omitted
+ * so they are not re-sent every turn; a thread with no previous entries
+ * (new provider session, rotation, handoff) receives the full set.
+ */
+export function diffCodexAdditionalContext(
+  previous: CodexAdditionalContext | undefined,
+  next: CodexAdditionalContext,
+): CodexAdditionalContext {
+  if (previous === undefined) return next;
+  return Object.fromEntries(
+    Object.entries(next).filter(
+      ([key, entry]) => JSON.stringify(previous[key]) !== JSON.stringify(entry),
+    ),
+  );
+}
+
 function providerSession(input: {
   readonly providerSessionId: OrchestrationV2ProviderSession["id"];
   readonly providerInstanceId: ProviderInstanceId;
@@ -1177,6 +1199,41 @@ function parseCodexRetryProgress(
   return { attempt, maxAttempts };
 }
 
+/**
+ * The wait Codex names before trying again, e.g. the CLI's logged
+ * `429 Too Many Requests, retrying in 368.99s`. The app-server error
+ * notification carries the same text in its message or details but no
+ * structured delay, so the number is parsed back out. Null when the
+ * notification names no wait.
+ */
+export function parseCodexRetryDelayMs(message: string): number | null {
+  const match =
+    /(?:retrying in|retry after|retry-after)\s*:?\s*(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|sec(?:onds?)?|m|min(?:utes?)?|h|hours?)?/iu.exec(
+      message,
+    );
+  if (match?.[1] === undefined) return null;
+  const value = Number.parseFloat(match[1]);
+  if (!Number.isFinite(value) || value < 0) return null;
+  const unit = (match[2] ?? "s").toLowerCase();
+  const factor =
+    unit.startsWith("ms") || unit.startsWith("millisecond")
+      ? 1
+      : unit.startsWith("h")
+        ? 3_600_000
+        : unit.startsWith("m")
+          ? 60_000
+          : 1_000;
+  return Math.round(value * factor);
+}
+
+/** A retry caused by a 429 throttle rather than a spent usage window. */
+export function isCodexRateLimitRetry(input: {
+  readonly code: string | null;
+  readonly message: string;
+}): boolean {
+  return input.code === "rateLimitExceeded" || /\b429\b|too many requests/iu.test(input.message);
+}
+
 function codexErrorInfoCode(value: unknown): string | null {
   if (typeof value === "string") {
     return value;
@@ -1496,7 +1553,7 @@ export function codexThreadRuntimeParams(input: {
   readonly mcpSession: McpProviderSession.McpProviderSessionConfig | undefined;
   readonly modelSelection?: { readonly model: string };
   readonly runtimePolicy?: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
-  /** Turned off for this thread unless the runtime policy lets provider connectors through. */
+  /** Native servers and apps turned off for this thread. */
   readonly providerDuplicates?: CodexProviderDuplicates | undefined;
 }): {
   readonly cwd?: string;
@@ -1504,10 +1561,7 @@ export function codexThreadRuntimeParams(input: {
   readonly config: Readonly<Record<string, Schema.Json>>;
 } {
   const { mcpSession } = input;
-  const duplicates =
-    input.runtimePolicy?.useProviderConnectors === true
-      ? { appIds: [], mcpServerNames: input.providerDuplicates?.blockedRepoServerNames ?? [] }
-      : input.providerDuplicates;
+  const duplicates = input.providerDuplicates;
   return {
     ...(input.runtimePolicy?.cwd == null ? {} : { cwd: input.runtimePolicy.cwd }),
     ...(input.modelSelection === undefined ? {} : { model: input.modelSelection.model }),
@@ -1520,9 +1574,8 @@ export function codexThreadRuntimeParams(input: {
             "features.multi_agent_v2": false,
           }
         : {}),
-      ...(input.runtimePolicy?.useProviderConnectors === true
-        ? {}
-        : { "features.plugins": false, "features.apps": false }),
+      "features.plugins": false,
+      "features.apps": false,
       // The combined table preserves literal dots and quotes in MCP names.
       // Codex merges it with the configured transports and passes it to subagents.
       ...Object.fromEntries((duplicates?.appIds ?? []).map((id) => [`apps.${id}.enabled`, false])),
@@ -1748,43 +1801,40 @@ export const layerAppServerClientFactory: Layer.Layer<
           // launch override names only servers from outside the repo; the
           // repo's own servers stay on and are sorted per thread below.
           const listingCwd = yield* HostProcess.HomeDirectory;
-          const nativeOffArgs =
-            input.runtimePolicy?.useProviderConnectors === true
-              ? []
-              : yield* Effect.gen(function* () {
-                  const listing = yield* resolveSpawnCommand(
-                    input.settings.binaryPath || "codex",
-                    [
-                      ...codexAppServerArgs(launchArgs).slice(1),
-                      ...codexNativeMcpOffArgs([]),
-                      "mcp",
-                      "list",
-                      "--json",
-                    ],
-                    { env: environment },
-                  );
-                  const json = yield* spawner
-                    .string(
-                      ChildProcess.make(listing.command, listing.args, {
-                        env: environment,
-                        shell: listing.shell,
-                        cwd: listingCwd,
-                      }),
-                    )
-                    .pipe(Effect.timeout("10 seconds"));
-                  const names = yield* Effect.try(() => codexNativeMcpNames(json));
-                  return codexNativeMcpOffArgs(names);
-                }).pipe(
-                  (read) => requireCodexNativeMcpEnumeration("launch", read),
-                  Effect.mapError(
-                    (cause) =>
-                      new ProviderAdapter.ProviderAdapterOpenSessionError({
-                        driver: CODEX_PROVIDER,
-                        providerSessionId: input.providerSessionId,
-                        cause,
-                      }),
-                  ),
-                );
+          const nativeOffArgs = yield* Effect.gen(function* () {
+            const listing = yield* resolveSpawnCommand(
+              input.settings.binaryPath || "codex",
+              [
+                ...codexAppServerArgs(launchArgs).slice(1),
+                ...codexNativeMcpOffArgs([]),
+                "mcp",
+                "list",
+                "--json",
+              ],
+              { env: environment },
+            );
+            const json = yield* spawner
+              .string(
+                ChildProcess.make(listing.command, listing.args, {
+                  env: environment,
+                  shell: listing.shell,
+                  cwd: listingCwd,
+                }),
+              )
+              .pipe(Effect.timeout("10 seconds"));
+            const names = yield* Effect.try(() => codexNativeMcpNames(json));
+            return codexNativeMcpOffArgs(names);
+          }).pipe(
+            (read) => requireCodexNativeMcpEnumeration("launch", read),
+            Effect.mapError(
+              (cause) =>
+                new ProviderAdapter.ProviderAdapterOpenSessionError({
+                  driver: CODEX_PROVIDER,
+                  providerSessionId: input.providerSessionId,
+                  cause,
+                }),
+            ),
+          );
           const command = yield* makeCodexAppServerSpawnCommand({
             command: input.settings.binaryPath || "codex",
             args: [...codexAppServerArgs(launchArgs), ...nativeOffArgs],
@@ -2029,8 +2079,18 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           }).pipe(
             Effect.timeout("10 seconds"),
             Effect.catch((cause) =>
-              Effect.logWarning("Failed to restore Codex additional context after compaction.", {
-                cause,
+              Effect.gen(function* () {
+                // The stored entries were not restored, so forget them:
+                // the next turn must send the full set again.
+                yield* Ref.update(additionalContextByThread, (current) => {
+                  const next = new Map(current);
+                  next.delete(threadId);
+                  return next;
+                });
+                yield* Effect.logWarning(
+                  "Failed to restore Codex additional context after compaction.",
+                  { cause },
+                );
               }),
             ),
           );
@@ -4806,13 +4866,17 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             const updatedAt = yield* DateTime.now;
             const previous = (yield* Ref.get(providerRetries)).get(context.providerTurnId);
             const progress = parseCodexRetryProgress(payload.error.message);
+            const code = codexErrorInfoCode(payload.error.codexErrorInfo);
+            const additionalDetails = payload.error.additionalDetails?.trim();
+            const retryText = `${payload.error.message} ${additionalDetails ?? ""}`;
+            const retryDelayMs =
+              parseCodexRetryDelayMs(retryText) ?? previous?.retry.retryDelayMs ?? null;
+            const rateLimited = isCodexRateLimitRetry({ code, message: retryText });
             const retry: OrchestrationV2ProviderRetry = {
               attempt: progress?.attempt ?? (previous?.retry.attempt ?? 0) + 1,
               maxAttempts: progress?.maxAttempts ?? previous?.retry.maxAttempts ?? null,
-              retryDelayMs: null,
+              retryDelayMs,
             };
-            const code = codexErrorInfoCode(payload.error.codexErrorInfo);
-            const additionalDetails = payload.error.additionalDetails?.trim();
             const failure = makeProviderFailure({
               message:
                 additionalDetails === undefined || additionalDetails.length === 0
@@ -4820,12 +4884,23 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   : additionalDetails,
               code,
               class:
-                code === "usageLimitExceeded" || code === "rateLimitExceeded"
+                code === "usageLimitExceeded" || code === "rateLimitExceeded" || rateLimited
                   ? "usage_limit"
                   : code?.startsWith("http") === true || code?.startsWith("responseStream") === true
                     ? "transport_error"
                     : "provider_error",
               retryable: true,
+              ...(rateLimited
+                ? {
+                    limitKind: "rate_limit" as const,
+                    resetAt:
+                      retryDelayMs === null
+                        ? null
+                        : DateTime.formatIso(
+                            DateTime.makeUnsafe(DateTime.toEpochMillis(updatedAt) + retryDelayMs),
+                          ),
+                  }
+                : {}),
             });
             const itemOrdinal =
               previous?.itemOrdinal ??
@@ -6131,6 +6206,31 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               updated.set(threadId, turnInput);
               return updated;
             });
+            // Instructions and project context go once per provider
+            // session: later turns send only the entries whose value
+            // changed, so an unchanged 11k instruction block is not
+            // re-rendered into the context every turn. A new native
+            // thread (session rotation, handoff) has no stored entries
+            // and gets the full set again; compaction restores from the
+            // stored full set in `restoreAdditionalContext`.
+            const previousContext = (yield* Ref.get(additionalContextByThread)).get(threadId);
+            const changedContext =
+              turnStartParams.additionalContext === undefined
+                ? undefined
+                : diffCodexAdditionalContext(previousContext, turnStartParams.additionalContext);
+            const { additionalContext: _fullContext, ...turnStartRest } = turnStartParams;
+            const wireTurnStartParams =
+              changedContext === undefined
+                ? turnStartParams
+                : yield* decodeCodexTurnStartParamsWithCollaborationMode({
+                    ...turnStartRest,
+                    ...(Object.keys(changedContext).length === 0
+                      ? {}
+                      : { additionalContext: changedContext }),
+                  });
+            const started = yield* client.request("turn/start", wireTurnStartParams);
+            // Recorded only once the turn actually started: a failed start
+            // keeps the previous entries, so the retry sends the full set.
             yield* Ref.update(additionalContextByThread, (current) => {
               const next = new Map(current);
               if (turnStartParams.additionalContext)
@@ -6138,7 +6238,6 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               else next.delete(threadId);
               return next;
             });
-            const started = yield* client.request("turn/start", turnStartParams);
             yield* registerRootTurn({
               turnInput,
               nativeTurnId: started.turn.id,

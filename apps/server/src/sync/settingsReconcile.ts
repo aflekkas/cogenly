@@ -11,8 +11,18 @@
 import {
   DEFAULT_SERVER_SETTINGS,
   type ServerSettings,
+  type ProviderInstanceConfig,
   UNIVERSAL_SERVER_SETTING_KEYS,
 } from "@cogenly/contracts";
+import {
+  applyProviderSettings,
+  encodeProviderSettings,
+  providerIdFromSettingsKey,
+  providerSettingsKey,
+} from "./providerSettingsDocument.ts";
+import * as Option from "effect/Option";
+import { providerSettingsCodec } from "./providerSettingsDocument.ts";
+import type { ProviderAccountIdentity } from "./providerAccountIdentity.ts";
 import type * as Schema from "effect/Schema";
 import {
   decodeUniversalSetting,
@@ -86,6 +96,7 @@ export const settingsBaseKey = (documentId: string, scope: string, key: string) 
 
 export interface SettingsReconcileInput {
   readonly settings: ServerSettings;
+  readonly accounts?: ReadonlyMap<string, ProviderAccountIdentity>;
   /** Keyed by `settingsBaseKey`. */
   readonly base: ReadonlyMap<string, Schema.Json>;
   /** The shared documents' merged fields, by document id. */
@@ -141,5 +152,127 @@ export function planSettingsReconcile(input: SettingsReconcileInput): SettingsRe
     if (outcome._tag === "publish") addPublish(UNIVERSAL_SETTINGS_DOCUMENT_ID, key, outcome.value);
     base.push({ documentId: UNIVERSAL_SETTINGS_DOCUMENT_ID, scope: "", key, value: outcome.value });
   }
+  const instances: Record<string, ProviderInstanceConfig> = { ...input.settings.providerInstances };
+  // Align initial homes and subsequent account changes by verified identity. In particular,
+  // a peer's default ID may name a different account from this machine's default.
+  const aligned = new Set<string>();
+  for (const [key, value] of Object.entries(universal ?? {})) {
+    const id = providerIdFromSettingsKey(key);
+    if (!id) continue;
+    const previous = input.base.get(settingsBaseKey(UNIVERSAL_SETTINGS_DOCUMENT_ID, "", key));
+    const previousProvider =
+      previous === undefined ? undefined : providerSettingsCodec.decode(previous);
+    const decoded = providerSettingsCodec.decode(value);
+    if (Option.isNone(decoded) || !decoded.value?.accountIdentity) continue;
+    const remote = decoded.value;
+    const accountIdentity = remote.accountIdentity;
+    if (!accountIdentity) continue;
+    if (instances[id] && instances[id].driver !== remote.driver) continue;
+    if (
+      previousProvider &&
+      Option.isSome(previousProvider) &&
+      previousProvider.value?.accountIdentity === remote.accountIdentity
+    )
+      continue;
+    const matches = Array.from(input.accounts ?? []).filter(
+      ([, account]) =>
+        account.driver === remote.driver && account.identity === remote.accountIdentity,
+    );
+    const own = input.accounts?.get(id);
+    if (matches.length === 1 && matches[0]![0] !== id) {
+      const [oldId, account] = matches[0]!;
+      const source =
+        input.settings.providerInstances[oldId as keyof typeof input.settings.providerInstances];
+      instances[id] = {
+        driver: remote.driver,
+        ...source,
+        config: {
+          ...(typeof source?.config === "object" && source.config !== null ? source.config : {}),
+          homePath: account.homePath,
+        },
+      };
+      aligned.add(id);
+    } else if (own && own.identity !== remote.accountIdentity) {
+      // Keep the existing login untouched. This canonical ID needs its own grant.
+      const current = instances[id];
+      instances[id] = {
+        ...current,
+        driver: remote.driver,
+        config: {
+          ...(typeof current?.config === "object" && current.config !== null ? current.config : {}),
+          homePath: `~/.cogenly/provider-homes/${id}/${accountIdentity.slice(0, 16)}`,
+          shadowHomePath: "",
+        },
+      };
+      aligned.add(id);
+    }
+  }
+  const ids = new Set([
+    ...Object.keys(instances),
+    ...Object.keys(universal ?? {}).flatMap((key) => {
+      const id = providerIdFromSettingsKey(key);
+      return id === undefined ? [] : [id];
+    }),
+    ...Array.from(input.base.keys()).flatMap((key) => {
+      const id = providerIdFromSettingsKey(key.split("\u0000")[2] ?? "");
+      return id === undefined ? [] : [id];
+    }),
+  ]);
+  for (const id of ids) {
+    const actualIdentity = aligned.has(id) ? undefined : input.accounts?.get(id)?.identity;
+    const current = instances[id];
+    if (current && actualIdentity) {
+      const config =
+        typeof current.config === "object" && current.config !== null ? current.config : {};
+      if (!("syncAccountIdentity" in config) || config.syncAccountIdentity !== actualIdentity) {
+        instances[id] = { ...current, config: { ...config, syncAccountIdentity: actualIdentity } };
+        changed = true;
+      }
+    }
+    const key = providerSettingsKey(id);
+    const outcome = reconcileSettingsField({
+      local: encodeProviderSettings(
+        instances[id],
+        aligned.has(id) ? undefined : input.accounts?.get(id)?.identity,
+        Object.keys(instances).indexOf(id),
+      ),
+      remote: remoteField(universal, key),
+      base: input.base.get(settingsBaseKey(UNIVERSAL_SETTINGS_DOCUMENT_ID, "", key)),
+      unset: instances[id] === undefined,
+    });
+    if (outcome._tag === "none") continue;
+    if (outcome._tag === "apply") {
+      const instance = applyProviderSettings(outcome.value, instances[id], id);
+      if (instance === undefined) continue;
+      if (instance === null) delete instances[id];
+      else instances[id] = instance;
+      changed = true;
+    }
+    if (outcome._tag === "publish") addPublish(UNIVERSAL_SETTINGS_DOCUMENT_ID, key, outcome.value);
+    base.push({ documentId: UNIVERSAL_SETTINGS_DOCUMENT_ID, scope: "", key, value: outcome.value });
+  }
+  const positions = new Map<string, number>();
+  for (const [key, value] of Object.entries({
+    ...universal,
+    ...publish.get(UNIVERSAL_SETTINGS_DOCUMENT_ID),
+  })) {
+    const id = providerIdFromSettingsKey(key);
+    const decoded = providerSettingsCodec.decode(value);
+    if (id && Option.isSome(decoded) && decoded.value?.position !== undefined)
+      positions.set(id, decoded.value.position);
+  }
+  const ordered = Object.fromEntries(
+    Object.entries(instances).sort(
+      ([a], [b]) =>
+        (positions.get(a) ?? Number.MAX_SAFE_INTEGER) -
+          (positions.get(b) ?? Number.MAX_SAFE_INTEGER) || a.localeCompare(b),
+    ),
+  );
+  if (
+    canonicalJson(Object.keys(ordered)) !==
+    canonicalJson(Object.keys(input.settings.providerInstances))
+  )
+    changed = true;
+  if (changed) Object.assign(applied, { providerInstances: ordered });
   return { settings: changed ? { ...input.settings, ...applied } : null, publish, base };
 }

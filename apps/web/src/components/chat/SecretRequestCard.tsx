@@ -1,4 +1,8 @@
+import { AnimatedHeight } from "../AnimatedHeight";
+import { IntegrationSetupCard } from "./IntegrationSetupCard";
 import {
+  loginRequestDisplay,
+  loginRequestSite,
   SECRET_REQUEST_DEFAULT_PLACEHOLDER,
   SECRET_REQUEST_PRIVACY_NOTE,
   secretRequestAnswerInput,
@@ -18,6 +22,7 @@ import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { PendingLoginRequestForm } from "./LoginRequestCard";
 import { ThreadPromptCard } from "./ThreadPromptCard";
 import { WorkLogRow } from "./WorkLog";
 
@@ -29,10 +34,21 @@ import { WorkLogRow } from "./WorkLog";
 export function SecretRequestCard(props: {
   readonly environmentId: EnvironmentId;
   readonly item: SecretRequestItem;
+  readonly onToggle?: (collapsed: boolean) => void;
   readonly visibility: OrchestrationV2ProjectedTurnItem["visibility"];
 }) {
   const { item } = props;
-  const display = secretRequestDisplay(item, props.visibility);
+  // Integration setup and sign-in (request_login) cards share the secret card's lifecycle.
+  if (item.integrationSetup !== undefined)
+    return (
+      <AnimatedHeight>
+        <IntegrationSetupCard {...props} />
+      </AnimatedHeight>
+    );
+  const display = item.login
+    ? loginRequestDisplay(item, props.visibility)
+    : secretRequestDisplay(item, props.visibility);
+  const title = item.login ? `Sign in to ${loginRequestSite(item.login).name}` : item.label;
   if (display.kind === "answered" || display.kind === "pending-elsewhere") {
     const Icon =
       display.kind === "pending-elsewhere"
@@ -46,10 +62,15 @@ export function SecretRequestCard(props: {
         icon={<Icon className="size-3.5 text-icon-muted" aria-hidden />}
         label={
           <>
-            {item.label} · {display.label}
+            {title} · {display.label}
           </>
         }
       />
+    );
+  }
+  if (item.login) {
+    return (
+      <PendingLoginRequestForm environmentId={props.environmentId} item={item} login={item.login} />
     );
   }
   return <PendingSecretRequestForm environmentId={props.environmentId} item={item} />;

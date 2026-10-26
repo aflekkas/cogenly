@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  defaultAgentPermissions,
   EnvironmentId,
   IntegrationId,
   ProjectLabelId,
@@ -164,6 +165,7 @@ describe("integration_add approval gating", () => {
       expect(proposals).toEqual([
         {
           actionKind: "integration_add",
+          threadId: agent.conversationThreadId,
           payload: expect.objectContaining({
             name: "linear-support",
             url: "https://mcp.linear.app/mcp",
@@ -341,6 +343,30 @@ it.effect("ordinary chats propose exact executable definitions before any proces
     } finally {
       persistent = true;
       current = original;
+    }
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("default agents can run lookup commands while sensitive tools retain their grants", () =>
+  Effect.gen(function* () {
+    yield* runMigrations();
+    const sql = yield* SqlClient.SqlClient;
+    const limited = { ...agent, permissions: defaultAgentPermissions };
+    yield* sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap) VALUES (${agent.id}, ${agent.conversationThreadId}, ${JSON.stringify(limited)}, 1, 2)`;
+    const policy = yield* AgentMcpPolicy.AgentMcpPolicy;
+    expect(
+      yield* policy.beforeTool(scopeFor(true), "terminal_run", { command: "cat README" }, false),
+    ).toEqual({ handled: false });
+    for (const name of [
+      "merge_pull_request",
+      "deploy",
+      "delete_file",
+      "create_pull_request",
+      "send_email",
+    ]) {
+      expect(
+        yield* policy.beforeTool(scopeFor(true), name, {}, false).pipe(Effect.result),
+      ).toMatchObject({ _tag: "Failure", failure: { code: "agent_permission_denied" } });
     }
   }).pipe(Effect.provide(layer)),
 );

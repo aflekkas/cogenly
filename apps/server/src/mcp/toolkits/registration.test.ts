@@ -1,3 +1,4 @@
+import * as ProviderAuthService from "../../provider/ProviderAuthService.ts";
 import * as ServerBrowser from "../../preview/ServerBrowser.ts";
 import * as StorageCleanup from "../../storageCleanup.ts";
 import * as Accounts from "../../accounts/Accounts.ts";
@@ -53,6 +54,7 @@ import * as ProviderRegistry from "../../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../../secrets/SecretRequests.ts";
 import * as Vault from "../../vault/Vault.ts";
+import * as VaultSync from "../../vault/VaultSync.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import * as VcsStatusBroadcaster from "../../vcs/VcsStatusBroadcaster.ts";
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
@@ -62,7 +64,6 @@ import * as RepositoryCheckout from "../../project/RepositoryCheckout.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import * as ThreadLaunchService from "../../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadSearch from "../../orchestration-v2/ThreadSearch.ts";
-import * as UsageLimitHandoff from "../../orchestration-v2/UsageLimitHandoff.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
 import * as SourceControlRepositoryService from "../../sourceControl/SourceControlRepositoryService.ts";
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
@@ -269,8 +270,11 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({ list: () => Effect.succeed([]) }),
   Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
   Layer.mock(SecretRequests.SecretRequests)({}),
+  Layer.mock(VaultSync.VaultSync)({
+    sharingStatus: Effect.succeed({ peers: [], itemsShared: 0, itemsWaiting: 0 }),
+  }),
   Layer.mock(Vault.Vault)({
-    list: () => Effect.succeed({ items: [] }),
+    list: () => Effect.succeed({ items: [], sites: [] }),
     scrubText: (text) => Effect.succeed(text),
     scrubValue: (value) => Effect.succeed(value),
   }),
@@ -297,7 +301,6 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(RepositoryCheckout.RepositoryCheckout)({}),
   Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({}),
   Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
-  Layer.mock(UsageLimitHandoff.UsageLimitHandoffService)({}),
   Layer.mock(ThreadSearch.ThreadSearch)({
     search: () =>
       Effect.succeed({
@@ -384,7 +387,6 @@ const smokeCases = [
     toolkit: "integrations",
     names: [
       "integrations_list",
-      "integration_native_preview",
       "integration_install_runtime",
       "integration_setup_guide",
       "integration_test",
@@ -408,6 +410,7 @@ const smokeCases = [
       "machines_list",
       "machines_move_threads",
       "project_move_to_machine",
+      "provider_sign_in",
     ],
     tool: "machines_list",
     args: {},
@@ -442,7 +445,13 @@ const smokeCases = [
   },
   {
     toolkit: "agents",
-    names: ["list_agents", "start_agent_builder", "update_agent_project"],
+    names: [
+      "delete_agent",
+      "list_agents",
+      "start_agent_builder",
+      "update_agent",
+      "update_agent_project",
+    ],
     tool: "list_agents",
     args: {},
     expected: { agents: [] },
@@ -468,6 +477,7 @@ const smokeCases = [
   {
     toolkit: "agentMemory",
     names: [
+      "agent_core_memory_update",
       "memory_read",
       "memory_write",
       "memory_remember",
@@ -682,6 +692,7 @@ const smokeCases = [
       "preview_dialog",
       "preview_drag",
       "preview_evaluate",
+      "preview_extract",
       "preview_hover",
       "preview_navigate",
       "preview_open",
@@ -781,8 +792,6 @@ const smokeCases = [
       "thread_configuration",
       "thread_configure",
       "thread_fork",
-      "thread_limit_handoff",
-      "thread_limit_handoff_options",
       "thread_merge_back",
       "thread_organize",
       "thread_search",
@@ -822,6 +831,7 @@ const smokeCases = [
       "delete_scheduled_task",
       "list_scheduled_tasks",
       "orchestrator_capabilities",
+      "request_login",
       "request_secret",
       "schedule_task",
       "thread_interrupt",
@@ -851,10 +861,19 @@ const smokeCases = [
   },
   {
     toolkit: "vault",
-    names: ["vault_list", "vault_save", "vault_fill", "vault_delete"],
+    names: [
+      "vault_capture",
+      "vault_list",
+      "vault_save",
+      "vault_fill",
+      "vault_link_integration",
+      "vault_delete",
+      "vault_sharing_status",
+      "vault_sharing_update",
+    ],
     tool: "vault_list",
     args: {},
-    expected: { items: [] },
+    expected: { items: [], sites: [] },
   },
 ];
 
@@ -888,6 +907,7 @@ it.effect.each(smokeCases)(
           disableLogger: true,
         }).pipe(
           Layer.provide(Layer.succeed(HttpClient.HttpClient, smokeHttpClient)),
+          Layer.provide(Layer.mock(ProviderAuthService.ProviderAuthService)({})),
           Layer.provide(
             Layer.mock(ServerEnvironment.ServerEnvironment)({
               getEnvironmentId: Effect.succeed(EnvironmentId.make("environment-scratch")),

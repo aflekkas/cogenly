@@ -209,10 +209,8 @@ the published task result.
 
 A child stopped by a limit is not failed while the server recovers it, and `stoppedOn` with
 `recovery` says how: a rate limit (429) retries on the same instance with backoff; a spent quota,
-or a rate limit that outlasted its retries, hands off to the best-ranked instance with headroom
-(`thread_limit_handoff_options`) with the child's context and the stopped request; with nothing
-available a quota resumes at its reset. The task stays nonterminal throughout, and the
-continuation's result becomes the task's. A handoff or scheduled resume queues one `updated`
+resumes on the same account at its reset. A rate limit that outlasted its retries stops. The task stays nonterminal throughout, and the
+continuation's result becomes the task's. A scheduled resume queues one `updated`
 notice on the parent; retries do not. Turning off the child's resume ends the wait, and the limit
 becomes the task's failure. `task_cancel`, a parent's Stop, or a Stop on the child does the same.
 

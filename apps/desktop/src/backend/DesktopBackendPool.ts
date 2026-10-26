@@ -12,7 +12,7 @@
 //     `DesktopBackendConfiguration.resolvePrimary` and the
 //     `onReady`/`onShutdown` callbacks to the window service. WSL
 //     instances wire `configResolve: configuration.resolveWsl(...)`
-//     and skip onReady/onShutdown — the window only follows the primary.
+//     and skip onReady/onShutdown; the window only follows the primary.
 //   - The pool exposes `register(spec)` and `unregister(id)`. Each
 //     registered instance gets its own child scope, so unregister can
 //     stop it cleanly without tearing down the pool. The primary's id
@@ -27,7 +27,7 @@
 //     primary keeps the "primary" id; WSL instances are "wsl:default"
 //     or "wsl:<distro>".
 //   - `pickFolder` accepts an optional `targetEnvironmentId`. Omitting
-//     it gives the Windows picker — what every existing caller gets,
+//     it gives the Windows picker, which is what every existing caller gets,
 //     and what non-WSL users see. WSL targets route to the wsl helpers.
 //   - Web settings UX: a plain toggle for "WSL backend" plus a distro
 //     picker that shows up when the toggle is on. Default-off, so
@@ -156,7 +156,7 @@ export class DesktopBackendPool extends Context.Service<
     // Build a fresh DesktopBackendInstance from `spec` and add it to the
     // registry. The pool owns the instance's scope: unregister(id) or pool
     // teardown closes it and runs the instance's auto-stop finalizer. The
-    // returned instance has not been started — callers decide when to
+    // returned instance has not been started; callers decide when to
     // start it (and can call start more than once if a retry-after-failure
     // story makes sense for them).
     readonly register: (
@@ -173,7 +173,7 @@ export class DesktopBackendPool extends Context.Service<
   }
 >()("@cogenly/desktop/backend/DesktopBackendPool") {}
 
-// Services required by makeBackendInstance — exported so caller
+// Services required by makeBackendInstance, exported so caller
 // orchestrators that build their own specs can confirm the layer graph
 // satisfies them at compile time.
 export type BackendInstanceFactoryRequirements =
@@ -260,8 +260,8 @@ export const layer = Layer.effect(
           "WSL backend couldn't start",
           `${reason}\n\nFalling back to the Windows backend so Cogenly can open. Re-enable the WSL backend from Settings > Connections once the WSL distro is fixed.`,
         );
-        // Fully disable the WSL backend — both flags, matching the "Switch to
-        // Windows" recovery path — so the manager's next restart re-resolves the
+        // Fully disable the WSL backend (both flags, matching the "Switch to
+        // Windows" recovery path) so the manager's next restart re-resolves the
         // primary as Windows and reconcile won't register a secondary WSL backend
         // against the same broken setup. Clearing wslBackendEnabled alone would
         // leave a stale wslOnly:true that silently re-traps the user in wsl-only
@@ -292,7 +292,7 @@ export const layer = Layer.effect(
       // Window creation errors propagating out of handleBackendReady must
       // not block the readiness callback (that would prevent restartAttempt
       // from being reset), so we absorb them here. The window service only
-      // logs on success, so log the failure here before swallowing it —
+      // logs on success, so log the failure here before swallowing it;
       // otherwise a post-readiness window-open failure vanishes silently and
       // is near-impossible to diagnose in production.
       onReady: (httpBaseUrl) =>

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
+  agentConversationState,
   conversationRows,
   messageDelivery,
   reconcileAgentMessages,
@@ -306,4 +307,19 @@ describe("typing slot", () => {
     expect(step.state.claimed.size).toBe(0);
     expect(step.typingKey).toBeNull();
   });
+});
+
+it("updates contact state through queued, running and finished projections", () => {
+  expect(
+    agentConversationState({ needsInput: false, runStatuses: ["queued"], prior: "idle" }),
+  ).toBe("thinking");
+  expect(
+    agentConversationState({ needsInput: false, runStatuses: ["running"], prior: "idle" }),
+  ).toBe("thinking");
+  expect(
+    agentConversationState({ needsInput: false, runStatuses: ["completed"], prior: "thinking" }),
+  ).toBe("idle");
+  expect(
+    agentConversationState({ needsInput: true, runStatuses: ["waiting"], prior: "thinking" }),
+  ).toBe("blocked");
 });

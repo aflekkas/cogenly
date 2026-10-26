@@ -171,13 +171,13 @@ function interruptedRunMessage(
   return cut;
 }
 
-/** An open item closed by recovery. A secret card also closes its form, so it takes no answer. */
+/** Recovery closes runtime work, while private cards remain answerable. */
 const cancelledItem = (
   item: OrchestrationV2ThreadProjection["turnItems"][number],
   now: DateTime.Utc,
 ): OrchestrationV2ThreadProjection["turnItems"][number] =>
   item.type === "secret_request" && item.secretStatus === "pending"
-    ? { ...item, status: "cancelled", secretStatus: "cancelled", completedAt: now, updatedAt: now }
+    ? item
     : { ...item, status: "cancelled", completedAt: now, updatedAt: now };
 
 /**

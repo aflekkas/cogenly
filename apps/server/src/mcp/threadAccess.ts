@@ -15,6 +15,7 @@ import type { OrchestratorV2Error } from "../orchestration-v2/Orchestrator.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as OrchestrationMcp from "./OrchestratorMcpService.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
+import { assertRunOwnership } from "./runOwnership.ts";
 
 export const unavailable = () =>
   new OrchestratorMcpFailure({
@@ -122,19 +123,7 @@ export const assertTargetWithinLimits = (
  * archived, so a provider token that outlived its session cannot act. An
  * OAuth client has no run; its session and ceiling are its authority.
  */
-export function assertLiveCaller({ caller, scope }: Caller) {
-  if (caller === undefined) return Effect.void;
-  return caller.archivedAt !== null ||
-    caller.activeRunId === null ||
-    caller.providerInstanceId !== scope.thread?.providerInstanceId
-    ? Effect.fail(
-        new OrchestratorMcpFailure({
-          code: "parent_not_active",
-          message: "The calling provider no longer owns an active thread run.",
-        }),
-      )
-    : Effect.void;
-}
+export const assertLiveCaller = (context: Caller) => assertRunOwnership(context);
 
 /**
  * Actions that change the environment itself (projects, preferences) need full

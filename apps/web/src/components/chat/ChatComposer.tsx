@@ -230,6 +230,9 @@ import {
   integrationContextRecord,
 } from "~/lib/composerContextRecords";
 import { matchComposerMentionItems } from "@cogenly/client-runtime/composerThreadItems";
+import { formatThreadLink } from "@cogenly/shared/threadLinks";
+import { pairedMachineIds } from "~/machines/machines.logic";
+import { useEnvironmentMachineList } from "~/machines/useMachines";
 import { useAgents } from "~/agents/agentsClient";
 import { useThreadKindResolver } from "~/hooks/useThreadKind";
 import { useEnvironmentProjectLabels } from "~/projectLabels/useProjectLabels";
@@ -1239,8 +1242,8 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   const size = props.size ?? "sm";
   const interactionModeTooltip =
     props.interactionMode === "plan"
-      ? "Plan mode — click to return to normal build mode"
-      : "Default mode — click to enter plan mode";
+      ? "Plan mode. Click to return to normal build mode"
+      : "Default mode. Click to enter plan mode";
 
   return (
     <>
@@ -1298,6 +1301,8 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   isRunning: boolean;
   canInterrupt: boolean;
   followUpBehavior: "queue" | "steer";
+  /** The provider is waiting out a rate limit: the send action reads as queueing. */
+  providerBackoffActive?: boolean;
   alternateShortcutLabel: string | null;
   showPlanFollowUpPrompt: boolean;
   promptHasText: boolean;
@@ -1342,6 +1347,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         isRunning={props.isRunning}
         canInterrupt={props.canInterrupt}
         followUpBehavior={props.followUpBehavior}
+        providerBackoffActive={props.providerBackoffActive ?? false}
         alternateShortcutLabel={props.alternateShortcutLabel}
         showPlanFollowUpPrompt={props.showPlanFollowUpPrompt}
         promptHasText={props.promptHasText}
@@ -1480,6 +1486,8 @@ export interface ChatComposerProps {
   sendDisabledReason: string | null;
   isPreparingWorktree: boolean;
   bannerItems: readonly (ComposerBannerStackItem | ComposerBannerStackContent)[];
+  /** The provider is waiting out a rate limit: sends queue instead of steering. */
+  providerBackoffActive?: boolean;
   /** Tokens a stale session would re-read; null when the thread is not offered compaction. */
   resumeCompactionTokens: number | null;
   /** The Compact chip is off, so the next send keeps full history. */
@@ -2506,6 +2514,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const { labels: mentionProjectFolders } = useEnvironmentProjectLabels(
     isPathTrigger ? environmentId : null,
   );
+  // Paired machines hold every thread under the same id, so `@` offers their tasks too.
+  const mentionMachineList = useEnvironmentMachineList(isPathTrigger ? environmentId : null);
   // Sources are kept to the thread's project, the same set its agent can call.
   const { currentId: composerProjectLabelId } = useComposerProjectFolder({
     environmentId,
@@ -2547,6 +2557,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               updatedAt: shell.updatedAt,
               archivedAt: shell.archivedAt,
               kind: resolveThreadKind(shell),
+              runsOn: shell.source.ownerMachine ?? shell.environmentId,
             })),
             agents: mentionAgents.map((agent) => ({
               environmentId: agent.environmentId,
@@ -2563,6 +2574,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             })),
             sources: mentionSources,
             environmentId,
+            pairedEnvironmentIds: pairedMachineIds(mentionMachineList),
             excludeThreadId: activeThreadId,
             query: composerTrigger.query,
           }),
@@ -2572,6 +2584,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       environmentId,
       environmentThreadShells,
       mentionAgents,
+      mentionMachineList,
       mentionProjectFolders,
       mentionSources,
       resolveThreadKind,
@@ -4140,8 +4153,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       if (trigger.kind !== "path") return;
       const shell = readThreadShell(item.thread);
       if (!shell) return;
-      const record = threadContextRecord(item.thread, shell.title);
-      const replacement = `${formatInlineContextReference(linkContextReference(record))} `;
+      // The canonical link names the thread by id alone, which every paired machine resolves,
+      // so the same reference goes in whichever machine the composer's thread runs on.
+      const replacement = `${formatThreadLink(shell.id, shell.title)} `;
       const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
         snapshot.value,
         trigger.rangeEnd,
@@ -4151,9 +4165,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd),
       });
       if (applied) {
-        addComposerDraftThreadContexts(attachmentDraftTarget, [record], {
-          appendReference: false,
-        });
         setComposerHighlightedItemId(null);
       }
       return;
@@ -4279,7 +4290,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     // A send while a pasted image is still compressing would strand that
     // image: the turn snapshot wouldn't include it, and it would surface
-    // in the *next* draft instead. Only oversized images hit this — small
+    // in the *next* draft instead. Only oversized images hit this; small
     // files clear the pending counter within a microtask.
     if (activeThreadId && (pendingImageCompressionsRef.current.get(attachmentTargetKey) ?? 0) > 0) {
       event?.preventDefault();
@@ -4316,6 +4327,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               running: phase === "running",
               alternateModifier: false,
               activeTurnDefault: settings.followUpBehavior,
+              backingOff: props.providerBackoffActive === true,
             }),
           submissionIntent,
         );
@@ -4341,6 +4353,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         running: phase === "running",
         alternateModifier: event.metaKey || event.ctrlKey,
         activeTurnDefault: settings.followUpBehavior,
+        backingOff: props.providerBackoffActive === true,
       }),
     );
   };
@@ -4352,6 +4365,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         running: phase === "running",
         alternateModifier: false,
         activeTurnDefault: settings.followUpBehavior,
+        backingOff: props.providerBackoffActive === true,
       }),
     );
   };
@@ -4523,6 +4537,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           running: phase === "running",
           alternateModifier: submissionIntent === "alternate",
           activeTurnDefault: settings.followUpBehavior,
+          backingOff: props.providerBackoffActive === true,
         }),
         submissionIntent,
       );
@@ -4694,9 +4709,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       restingHiddenBlockCount >
         (planModeUiEnabled ? 1 : 0) + (showProjectPicker ? 1 : 0) + (showSourcesPicker ? 1 : 0),
   });
-  // Sources is the last block, so it is the first to fold. A picker whose trigger folds away
-  // (or unfolds, when it sits on the overflow trigger) closes rather than float off nothing.
-  const sourcesBlockFolded = restingHiddenBlockCount > 0;
+  // Sources folds right after the project, which sits after it. A picker whose trigger folds
+  // away (or unfolds, when it sits on the overflow trigger) closes rather than float off nothing.
+  const sourcesBlockFolded = restingHiddenBlockCount > (showProjectPicker ? 1 : 0);
   const sourcesPickerOpen =
     sourcesPicker.open &&
     !composerControlsHidden &&
@@ -4728,42 +4743,39 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           },
         ]
       : []),
-    // The project folds before the model or effort controls give way.
-    ...(showProjectPicker
-      ? [
-          {
-            id: "project",
-            // The divider separates where the agent runs from how it runs.
-            content: (
-              <>
-                <ComposerControlSeparator size={composerControlsCollapsed ? "xs" : "sm"} />
-                <ComposerProjectPicker
-                  environmentId={routeThreadRef.environmentId}
-                  threadId={activeThreadId}
-                  draftId={routeKind === "draft" ? draftId : null}
-                  size={composerControlsCollapsed ? "xs" : "sm"}
-                  disabled={isSendBusy}
-                />
-              </>
-            ),
-          },
-        ]
-      : []),
     ...(showSourcesPicker
       ? [
           {
-            // Last, so it folds first; the overflow menu then offers it.
+            // Folds once the project has; the overflow menu then offers it.
             id: "sources",
             content: (
               <ComposerSourcesPicker
                 environmentId={environmentId}
                 projectLabelId={composerProjectLabelId}
                 size={composerControlsCollapsed ? "xs" : "sm"}
-                disabled={isSendBusy}
                 open={sourcesPickerOpen}
                 anchor={sourcesPicker.anchor}
                 onOpenChange={onSourcesPickerOpenChangeStable}
                 onPick={insertIntegrationSourceStable}
+              />
+            ),
+          },
+        ]
+      : []),
+    // Last, so the project folds first, before sources or the model and effort controls.
+    ...(showProjectPicker
+      ? [
+          {
+            id: "project",
+            content: (
+              <ComposerProjectPicker
+                environmentId={routeThreadRef.environmentId}
+                threadId={activeThreadId}
+                draftId={routeKind === "draft" ? draftId : null}
+                size={composerControlsCollapsed ? "xs" : "sm"}
+                // A draft's first send has already read its pick, so one made mid-send
+                // would be dropped; it stays shut without dimming for that moment.
+                locked={isSendBusy && routeKind === "draft"}
               />
             ),
           },
@@ -4805,7 +4817,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         environmentId={environmentId}
         compact={false}
         isComposerOwned
-        disabled={providerCatalogPending || isSendBusy}
+        // Not tied to a send: the send has already read the model, so a pick made while it
+        // is in flight goes to the next turn, as the effort picker's does.
+        disabled={providerCatalogPending}
         {...(routeKind === "draft" && supportsMultipleModels
           ? {
               ...(multipleModelSelections !== null
@@ -5941,7 +5955,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             key={activeThreadId}
             className="relative z-0"
             items={bannerStackItems}
-            attachedAbove={props.queuedRunsControl}
+            attachedBelow={props.queuedRunsControl}
           />
           <AttachmentPresence
             show={!activityStackItem && Boolean(shownSyncPhase || inlineTasksBadge)}
@@ -6652,7 +6666,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     // The 4px bleed keeps focus rings clear of the scroll clip. The start
                     // also pulls in by a control's px-2.5, so the first control's icon sits
                     // on the prompt's text inset while its hover background bleeds left.
-                    "relative -my-1 -ms-3.5 -me-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+                    "scroll-fade-x relative -my-1 -ms-3.5 -me-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
                   )}
                 >
                   {composerControlsCollapsed ? null : composerControls}
@@ -6666,8 +6680,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     isComposerPrimaryActionsCompact ? "true" : "false"
                   }
                   // Dictation and attach sit as one tight pair; the larger send/stop button
-                  // gets more room so the pair reads as evenly spaced next to it.
-                  className="flex shrink-0 flex-nowrap items-center justify-end gap-2.5"
+                  // gets a little more room so it still reads as its own action.
+                  className="flex shrink-0 flex-nowrap items-center justify-end gap-1.5"
                 >
                   {(settings.dictationEnabled && !isChoiceOnlyPendingQuestion) ||
                   showComposerAttachAction ? (
@@ -6736,6 +6750,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     isRunning={phase === "running"}
                     canInterrupt={canInterrupt}
                     followUpBehavior={settings.followUpBehavior}
+                    providerBackoffActive={props.providerBackoffActive === true}
                     alternateShortcutLabel={shortcutLabelForCommand(
                       keybindings,
                       "composer.sendAlternate",

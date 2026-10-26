@@ -39,13 +39,17 @@ Batches carry events and metadata as plain JSON, and the receiver decodes each
 item, because a newer build's event type must not stall the stream on an older
 one. A thread with an item the receiver cannot decode is held whole: that item
 and every later one for the thread wait in `thread_replication_deferred`, in
-order, while other threads keep applying and the cursor advances. Startup
-replays a held thread once every item of it decodes, so after an update it
-catches up in its original order. Readable events keep their raw JSON when
+order, while other threads keep applying and the cursor advances. Replay runs
+at startup, hourly, on a peer version change, and through machine health Fix.
+A held thread catches up in its original order once every item decodes. Readable events keep their raw JSON when
 schema decoding drops fields; event data, metadata extensions and command
 receipts survive relaying and later ownership changes. Receipts travel with
 events and remap their result sequence to the receiving log. A projection
-failure refuses the batch without advancing its cursor; it never skips history.
+failure quarantines that thread's incoming items with a reason while other threads advance.
+Held incoming history is bounded; a capacity-trimmed quarantine must be discarded, never
+partially replayed. The explicit per-thread health Fix drops only held incoming rows,
+leaves local history intact, and logs the discarded count. Lock timeouts retry without advancing the cursor
+or quarantining the batch.
 
 ## Continuing a thread from another machine
 
@@ -128,6 +132,14 @@ Shared provider session ids include their machine identity, since provider insta
 
 A delegated child and its parent may have different owners. The child owns its
 conversation; task bookkeeping and completion wakes belong to the parent.
+Delegation fetches the child's bounded event pages over a separate peer channel,
+before attaching it and while its result is pending. These pages never advance
+the bulk replication cursors: a backlog on an unrelated thread must not block
+task handles, reads, cancellation, or parent wakes. Parent-side launch intents
+remain durable until attachment commits; failed creation and restart recovery
+cancel unadopted children directly on their owner. Older peers without this
+channel refuse delegation before a child starts.
+
 Replicated terminal events settle that local parent without promoting the
 replicated child's queue. Before publishing a result the parent checks the
 child owner's recovery state, since restart continuations and pending effects

@@ -2,7 +2,7 @@
  * DatabaseBackup - Consistent offline snapshots of the state database.
  *
  * The SQLite online backup API copies through a read-only handle, so the
- * snapshot is consistent even while the server runs — no shutdown needed.
+ * snapshot is consistent even while the server runs, with no shutdown needed.
  * The snapshot lands under a temporary name first and is renamed into place,
  * so an interrupted backup never leaves a partial file behind.
  *

@@ -191,8 +191,8 @@ export function gitHubReactionContent(
 /**
  * The groups GitHub answered with, as the contract carries them. A group with nobody behind it is
  * dropped: GitHub answers with a group per content it knows, including the ones nobody chose. The
- * viewer's own login is left out of `actors` — the page names them "You" instead, and leaving it
- * in would name them twice — but `count` still counts them along with everyone else.
+ * viewer's own login is left out of `actors` (the page names them "You" instead, and leaving it
+ * in would name them twice), but `count` still counts them along with everyone else.
  */
 function toReactions(
   groups: ReadonlyArray<ReactionGroup> | null | undefined,
@@ -284,7 +284,7 @@ export function toPullRequestNodeId(result: {
 }
 
 /**
- * True when the subject named is the pull request itself, or hangs off it — false for anything
+ * True when the subject named is the pull request itself, or hangs off it; false for anything
  * else, including a subject or a pull request this host could not find.
  */
 export function isSubjectOfPullRequest(result: PullRequestSubject.Result): boolean {
@@ -439,7 +439,7 @@ function nextCursorOf(pageInfo: PageInfoFields | null | undefined): string | nul
  *
  * Updating is a permission, so an install that does not report it grants it and lets the host's
  * own refusal explain anything that fails. Authorship is not a permission but a fact about who
- * wrote the thing, and it is read to decide what an author may do to their own change — so an
+ * wrote the thing, and it is read to decide what an author may do to their own change, so an
  * unknown answer is "not the author", which grants nothing it should not.
  */
 /**
@@ -447,7 +447,7 @@ function nextCursorOf(pageInfo: PageInfoFields | null | undefined): string | nul
  *
  * Updating is a permission, so an install that does not report it grants it and lets the host's
  * own refusal explain anything that fails. Authorship is not a permission but a fact about who
- * wrote the thing, and it is read to decide what an author may do to their own change — so an
+ * wrote the thing, and it is read to decide what an author may do to their own change, so an
  * unknown answer is "not the author", which grants nothing it should not.
  */
 function toPullRequestViewerFields(
@@ -760,7 +760,7 @@ function toComments(raw: {
     path: null,
     reviewState: null,
   }));
-  // A review with no body is kept only when its state is the event itself — an approval, a
+  // A review with no body is kept only when its state is the event itself: an approval, a
   // request for changes, a dismissal. GitHub also opens a bodiless `COMMENTED` review as the
   // container for line comments, and those comments are read from the review threads, so
   // keeping the container too would show a row with a name and nothing under it.
@@ -1349,7 +1349,7 @@ export interface GitHubReviewThreadComments {
    */
   readonly reviewers: ReadonlyArray<PullRequestActor>;
   /**
-   * Avatars by login, for the actors `gh pr view --json` reports without one — which is all of
+   * Avatars by login, for the actors `gh pr view --json` reports without one, which is all of
    * them, since no `gh` JSON field carries an avatar. Collected from everyone this query names,
    * so an app's avatar arrives the same way a person's does.
    */
@@ -1610,7 +1610,7 @@ export interface GitHubRepositoryAccess {
  * An install that reports no permission at all does not count as write. This is the exception to
  * "an unknown permission is granted": write is what merging and closing somebody else's change
  * need, and offering those to a reader who cannot use them wastes the press and reads as the app
- * being wrong. Everything softer — commenting, reviewing, resolving — keeps the granting default,
+ * being wrong. Everything softer (commenting, reviewing, resolving) keeps the granting default,
  * because being unable to say something is the worse failure there.
  *
  * A null permission is not that. GitHub answers null only to a GitHub App installation, and no
@@ -1637,13 +1637,13 @@ function toCanTriage(viewerPermission: string | null | undefined): boolean {
 /**
  * Who a review may be asked of, and who it has already been asked of, in one read.
  *
- * `assignableUsers` is the list GitHub's own reviewer picker is built from — everyone with access
- * to the repository — rather than `collaborators`, which the REST API refuses to anyone without
+ * `assignableUsers` is the list GitHub's own reviewer picker is built from (everyone with access
+ * to the repository) rather than `collaborators`, which the REST API refuses to anyone without
  * push access and which would therefore be empty for exactly the reader most likely to be looking.
  *
  * Teams are asked for only where one has already been requested, so a request to a team can be
  * taken back. The teams a repository could newly be sent to live on the owning organization and
- * need `read:org`, which a repository-scoped token need not carry — and a query GitHub refuses
+ * need `read:org`, which a repository-scoped token need not carry, and a query GitHub refuses
  * fails whole, taking the people down with the teams.
  */
 export interface GitHubBaseComparison {
@@ -1657,8 +1657,8 @@ export interface GitHubBaseComparison {
  * dropped rather than shown as an unusable row: GitHub refuses a review request from the person
  * who opened the pull request, so offering them is offering a failure.
  *
- * Whoever has been asked leads the list even where GitHub does not count them assignable — an
- * outside collaborator, an app — because a request that cannot be seen cannot be taken back.
+ * Whoever has been asked leads the list even where GitHub does not count them assignable (an
+ * outside collaborator, an app), because a request that cannot be seen cannot be taken back.
  * Null for a repository the viewer cannot see.
  */
 export function toReviewerCandidates(
@@ -1727,7 +1727,7 @@ export function buildReviewerRequest(
 
 /**
  * The repository's labels, with the ones already on this pull request marked. A label the pull
- * request wears that the repository no longer defines — deleted since, or past the page — leads
+ * request wears that the repository no longer defines (deleted since, or past the page) leads
  * the list anyway, because a label that cannot be seen cannot be taken off. Null for a repository
  * the viewer cannot see.
  */
@@ -1769,7 +1769,7 @@ export function buildLabelRequest(labels: ReadonlyArray<string>): {
 
 /**
  * Everything GitHub says about what the signed-in account may do here. `canWrite` is about the
- * repository, the other two about this pull request in particular — which is why an author with
+ * repository, the other two about this pull request in particular, which is why an author with
  * only read access can still be told apart from a passer-by.
  */
 export interface GitHubViewerAccess {
@@ -1858,7 +1858,7 @@ function toFilesPatch(entries: ReadonlyArray<unknown>): GitHubPullRequestFilesPa
     if (hunks.length === 0) {
       // A file with no hunks is still a file that changed: a pure rename has none to give, and
       // a binary one has none that can be shown. Both are listed, and only the second is a hole
-      // in the patch — leaving them out entirely would drop them from the change altogether.
+      // in the patch; leaving them out entirely would drop them from the change altogether.
       const additions = value.additions ?? 0;
       const deletions = value.deletions ?? 0;
       if (additions + deletions > 0) {
@@ -1942,8 +1942,8 @@ const RawStackPullRequestSchema = Schema.Struct({
 
 /**
  * A stack as `GET /repos/{owner}/{repo}/stacks` answers it, in a public preview whose shape may
- * still move. Only what a stack is made of is required — where it lives, what it stands on, and
- * its pull requests — and `base` is accepted both as the ref object the preview sends today and
+ * still move. Only what a stack is made of is required (where it lives, what it stands on, and
+ * its pull requests), and `base` is accepted both as the ref object the preview sends today and
  * as the bare branch name it started out as.
  */
 const RawStackSchema = Schema.Struct({

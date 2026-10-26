@@ -1,4 +1,6 @@
 import {
+  AgentKey,
+  AgentUpdateInput,
   AgentBuilderStartInput,
   AgentBuilderStartResult,
   AgentListItem,
@@ -16,12 +18,14 @@ import * as Invocation from "../mcp/McpInvocationContext.ts";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import * as Labels from "../projectLabels/ProjectLabelService.ts";
 import * as Service from "./AgentService.ts";
+import * as AgentStore from "./AgentStore.ts";
 
 const shared = {
   failure: OrchestratorMcpFailure,
   failureMode: "return" as const,
   dependencies: [
     Service.AgentService,
+    AgentStore.AgentStore,
     Invocation.McpInvocationContext,
     Threads.ThreadManagementService,
   ],
@@ -61,7 +65,21 @@ const SetProject = Tool.make("update_agent_project", {
   parameters: AgentSetProjectInput,
   success: AgentMutationResult,
 }).annotate(Tool.Destructive, false);
-export const toolkit = Toolkit.make(List, BuilderStart, SetProject);
+const Update = Tool.make("update_agent", {
+  ...shared,
+  description:
+    "Edit a persistent agent by id. Omitted fields stay unchanged. Change its name, face, responsibility, instructions, model, fallback chain, daily run cap or notifications. Only owner chats may change permissions or runtime mode. Edits are sent to the online owner machine.",
+  parameters: AgentUpdateInput,
+  success: AgentMutationResult,
+}).annotate(Tool.Destructive, false);
+const Delete = Tool.make("delete_agent", {
+  ...shared,
+  description:
+    "Delete a persistent agent by id, stopping its work and removing its triggers and proposed open items. Confirmed open items return to the user. Persistent agents need the delete grant.",
+  parameters: AgentKey,
+  success: Schema.Struct({ deleted: Schema.Boolean }),
+}).annotate(Tool.Destructive, true);
+export const toolkit = Toolkit.make(List, BuilderStart, SetProject, Update, Delete);
 const hasMessage = (cause: unknown): cause is { message: string } =>
   typeof cause === "object" && cause !== null && "message" in cause;
 const unavailable = (cause: unknown) =>
@@ -69,7 +87,31 @@ const unavailable = (cause: unknown) =>
     code: "orchestration_error",
     message: hasMessage(cause) ? cause.message : "Could not reach agent management.",
   });
+/** The persistent agent calling through this thread, if any. Owner chats have none. */
+const callerAgentId = Effect.gen(function* () {
+  const scope = yield* Invocation.McpInvocationContext;
+  if (scope.thread === undefined) return undefined;
+  const store = yield* AgentStore.AgentStore;
+  const agent = yield* store
+    .forThread(scope.thread.threadId)
+    .pipe(Effect.orElseSucceed(() => null));
+  return agent?.id;
+});
 export const handlers = Access.toLayer(toolkit, {
+  update_agent: Access.writes((input) =>
+    Effect.gen(function* () {
+      return yield* (yield* Service.AgentService)
+        .update(input, yield* callerAgentId)
+        .pipe(Effect.mapError(unavailable));
+    }),
+  ),
+  delete_agent: Access.writes((input) =>
+    Effect.gen(function* () {
+      return yield* (yield* Service.AgentService)
+        .delete(input.id, yield* callerAgentId)
+        .pipe(Effect.mapError(unavailable));
+    }),
+  ),
   list_agents: Access.reads(() =>
     Effect.gen(function* () {
       const { agents } = yield* (yield* Service.AgentService)

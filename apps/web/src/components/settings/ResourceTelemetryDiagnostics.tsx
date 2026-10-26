@@ -504,7 +504,7 @@ function ProcessActions({
   onSignal: (process: ResourceTelemetryProcess, signal: ServerProcessSignal) => void;
 }) {
   if (!canSignalProcess(process)) {
-    return <span className="text-3xs text-muted-foreground/35">—</span>;
+    return null;
   }
   const isSignaling = signalingKeys.has(processIdentityKey(process));
   return (
@@ -745,7 +745,7 @@ function HistoryProcessTable({
 
 function AttributionTable({ entries }: { entries: ReadonlyArray<ResourceAttributionEntry> }) {
   return (
-    <div className="overflow-x-auto border-t border-border/60">
+    <div className="scroll-fade-x overflow-x-auto border-t border-border/60">
       <table className="w-full min-w-[720px] table-fixed text-left text-xs">
         <colgroup>
           <col className="w-[22%]" />

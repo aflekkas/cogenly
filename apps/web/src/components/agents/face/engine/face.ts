@@ -4,7 +4,7 @@ import { clamp, createRng, loopNoise } from "./math";
  * Les yeux sont peints sur une sphere, pas poses a plat.
  *
  * Mesure sur la video : l'oeil le plus proche du bord fait 0.69 fois la largeur
- * de l'autre, et son aire 0.663 fois — exactement le facteur de profondeur
+ * de l'autre, et son aire 0.663 fois, exactement le facteur de profondeur
  * (z = 0.669) d'un point de sphere a cette distance du centre. On modelise donc
  * une vraie orientation de tete : chaque oeil recupere le repere tangent de la
  * sphere, projete en orthographique. La compression et l'inclinaison en

@@ -1,5 +1,6 @@
-import { isPublicIntegrationPath } from "../integrations/publicEndpoint.ts";
-import { Integration, IntegrationAuth } from "@cogenly/contracts";
+import { isPublicIntegrationUrl } from "../integrations/publicEndpoint.ts";
+import { Integration, IntegrationAuth, integrationCatalogEntryFor } from "@cogenly/contracts";
+import { parseCredentialRef } from "../integrations/IntegrationCredentials.ts";
 import * as Schema from "effect/Schema";
 
 /** Why a definition stays on this machine; never include its potentially secret URL. */
@@ -15,7 +16,7 @@ export function integrationNotSyncedReason(integration: Pick<Integration, "trans
     if (url.searchParams.size > 0)
       return "Not synced: URL query parameters may contain credentials.";
     if (url.hash) return "Not synced: URL fragments may contain credentials.";
-    if (!isPublicIntegrationPath(url.pathname))
+    if (!isPublicIntegrationUrl(url) && !integrationCatalogEntryFor(integration))
       return "Not synced: URL paths may contain credentials.";
   } catch {
     return "Not synced: invalid endpoint URL.";
@@ -23,8 +24,28 @@ export function integrationNotSyncedReason(integration: Pick<Integration, "trans
   return undefined;
 }
 
-/** A web definition contains no command, headers, client credentials or local grant. */
+/** Templates contain vault references and protocol prefixes, never literal credentials. */
+const headerTemplate = Schema.String.check(
+  Schema.makeFilter(
+    (value) =>
+      value === "" ||
+      (/^(?:Bearer |Basic )?(?:\{\{credential:[^{}]+\}\})+$/.test(value) &&
+        [...value.matchAll(/\{\{credential:([^{}]+)\}\}/g)].every(
+          (match) => parseCredentialRef(match[1]!) !== undefined,
+        )),
+  ),
+);
+const reference = Schema.String.check(
+  Schema.makeFilter((value) => parseCredentialRef(value) !== undefined),
+);
+
+/** Public definitions carry references; values travel only through encrypted vault sync. */
 export const IntegrationFields = Schema.Struct({
+  icon: Integration.fields.icon,
+  iconUrl: Integration.fields.iconUrl,
+  accountLabel: Integration.fields.accountLabel,
+  headers: Schema.optional(Schema.Record(Schema.String, headerTemplate)),
+  endpointRef: Schema.optional(Schema.NullOr(reference)),
   name: Integration.fields.name,
   displayName: Integration.fields.displayName,
   hint: Integration.fields.hint,
@@ -38,6 +59,8 @@ export const IntegrationFields = Schema.Struct({
     Schema.Struct({
       type: IntegrationAuth.fields.type,
       scope: IntegrationAuth.fields.scope,
+      clientId: IntegrationAuth.fields.clientId,
+      clientSecret: Schema.optional(headerTemplate),
     }),
   ),
   scope: Integration.fields.scope,
@@ -53,6 +76,15 @@ export const integrationFields = (
 ): Record<string, Schema.Json> | undefined =>
   integrationNotSyncedReason(integration) === undefined
     ? {
+        ...(integration.icon === undefined ? {} : { icon: integration.icon }),
+        ...(integration.iconUrl === undefined ? {} : { iconUrl: integration.iconUrl }),
+        accountLabel: integration.accountLabel ?? "",
+        headers: Object.fromEntries(
+          Object.entries(integration.headers).filter(([, value]) =>
+            Schema.is(headerTemplate)(value),
+          ),
+        ),
+        endpointRef: integration.endpointRef ?? null,
         name: integration.name,
         displayName: integration.displayName,
         hint: integration.hint,
@@ -64,6 +96,13 @@ export const integrationFields = (
             : {
                 type: integration.auth.type,
                 ...(integration.auth.scope === undefined ? {} : { scope: integration.auth.scope }),
+                ...(integration.auth.clientId === undefined
+                  ? {}
+                  : { clientId: integration.auth.clientId }),
+                ...(integration.auth.clientSecret === undefined ||
+                !Schema.is(headerTemplate)(integration.auth.clientSecret)
+                  ? {}
+                  : { clientSecret: integration.auth.clientSecret }),
               },
         scope: integration.scope,
         enabled: integration.enabled,

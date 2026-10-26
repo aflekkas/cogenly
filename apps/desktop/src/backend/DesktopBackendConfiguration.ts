@@ -154,7 +154,7 @@ const mergeWslEnv = (
   const existing = existingWslEnv?.trim() ?? "";
 
   // Names already declared, so we don't forward a duplicate. We parse the
-  // existing value only for this membership test — the string itself is
+  // existing value only for this membership test; the string itself is
   // preserved verbatim below rather than re-serialized.
   const seenNames = new Set(
     existing
@@ -165,9 +165,9 @@ const mergeWslEnv = (
 
   const additions = forwardedEnvNames.filter((name) => !seenNames.has(name));
 
-  // Preserve the user's WSLENV exactly as Windows handed it to us — empty
+  // Preserve the user's WSLENV exactly as Windows handed it to us (empty
   // "::" segments and duplicate entries are harmless no-ops to WSL and not
-  // ours to normalize — and only append the secrets we need to forward
+  // ours to normalize), and only append the secrets we need to forward
   // across the wsl.exe boundary.
   const parts = [existing, ...additions].filter((part) => part.length > 0);
   return parts.length > 0 ? parts.join(":") : undefined;
@@ -305,7 +305,7 @@ interface WslPreflightFailure {
   readonly _tag: "Failed";
   readonly reason: string;
   // Fatal: the WSL distro is misconfigured (no node, wrong version, missing
-  // build tools) and retrying won't help — surface it and (wsl-only) fall back
+  // build tools) and retrying won't help, so surface it and (wsl-only) fall back
   // to Windows. Non-fatal: transient (WSL not ready yet, wslpath while it
   // boots), with a bounded window for self-healing before fallback.
   readonly fatal: boolean;
@@ -427,7 +427,7 @@ const runWslPreflight = Effect.fn("desktop.backendConfiguration.wslPreflight")(f
   // through the mounted attempt: if the mounted tree works the cache is the
   // broken part and gets invalidated, and if the mounted tree returns its own
   // fatal verdict the cached reason is the more actionable one to report.
-  // A transient mounted failure is neither — it rules nothing out, so it stays
+  // A transient mounted failure is neither: it rules nothing out, so it stays
   // retryable and the staged verdict waits for an attempt that can answer.
   let stagedFailure: { readonly runtimeId: string; readonly reason: string } | undefined;
   const failedStaged = (failure: { readonly reason: string }) =>
@@ -813,7 +813,7 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
     } satisfies DesktopBackendManager.DesktopBackendStartConfig;
   }
 
-  // The WSL server spawns commands its providers reference by name — `npm`/`npx`
+  // The WSL server spawns commands its providers reference by name: `npm`/`npx`
   // for provider updates, and the installed CLIs themselves (e.g. `codex`). Those
   // live on the user's login-shell PATH, which `wsl.exe --exec` does NOT put on
   // the process PATH, so `npm install -g ...` fails with NotFound. Pass the
@@ -863,7 +863,7 @@ export const make = Effect.gen(function* () {
   // SynchronizedRef (not a plain Ref) so the read-generate-write is atomic.
   // crypto.randomBytes is a yield point, and resolvePrimary + resolveWsl can
   // resolve concurrently; with a plain Ref both could observe None, generate
-  // distinct secrets, and one would overwrite the other — leaving the two
+  // distinct secrets, and one would overwrite the other, leaving the two
   // backends deriving mismatched tokens and breaking the shared-token
   // invariant the renderer relies on. modifyEffect serializes the whole
   // get-or-create so the first caller wins and the rest reuse its secret.
@@ -950,8 +950,8 @@ export const make = Effect.gen(function* () {
 
   // Single source of truth for what the primary actually runs as. Both
   // the start-config dispatch and the renderer-facing label derive from
-  // this, so they can't disagree — e.g. the label reading "WSL" while the
-  // config silently fell back to Windows because WSL is unavailable.
+  // this, so they can't disagree (e.g. the label reading "WSL" while the
+  // config silently fell back to Windows because WSL is unavailable).
   // Dispatch happens at resolve time so toggling wsl-only between restarts
   // is picked up on the next start cycle (the pool's primary instance is
   // created once at layer init, but configResolve fires on each restart).

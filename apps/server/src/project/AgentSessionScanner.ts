@@ -186,7 +186,7 @@ export class AgentSessionScanner extends Context.Service<
      * Discover every directory the configured Claude and Codex homes have run
      * a session in. Candidates are returned newest-first; the client decides
      * which ones to import and how far back to look. Fails with the contract
-     * error directly — there is no server-local context worth wrapping.
+     * error directly; there is no server-local context worth wrapping.
      */
     readonly scan: Effect.Effect<AgentSessionScanResult, AgentSessionScanError>;
     readonly recentThreads: (

@@ -311,6 +311,9 @@ import {
   ServerProcessResourceHistoryResult,
   ServerSignalProcessInput,
   ServerSignalProcessResult,
+  ServerAgentProcessesResult,
+  ServerKillAgentProcessInput,
+  ServerKillAgentProcessResult,
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
 } from "./server.ts";
@@ -325,13 +328,6 @@ import {
   ProviderConsumeResetCreditInput,
   ProviderConsumeResetCreditResult,
 } from "./providerUsageLimits.ts";
-import {
-  UsageLimitHandoffAcceptInput,
-  UsageLimitHandoffAcceptResult,
-  UsageLimitHandoffError,
-  UsageLimitHandoffRecommendation,
-  UsageLimitHandoffRecommendInput,
-} from "./usageLimitHandoff.ts";
 import { UsagePricing, UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
 import {
   StorageCleanupReport,
@@ -359,7 +355,11 @@ import {
   ScheduledTaskUpsertInput,
   ScheduledTaskMutationResult,
 } from "./scheduledTask.ts";
-import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
+import {
+  LoginRequestAnswerInput,
+  SecretRequestAnswerInput,
+  SecretRequestError,
+} from "./secretRequest.ts";
 import {
   ProjectCloneActionInput,
   ProjectCloneActionResult,
@@ -521,6 +521,8 @@ export const WS_METHODS = {
   serverRetryResourceTelemetry: "server.retryResourceTelemetry",
   serverCheckOtlpEndpoint: "server.checkOtlpEndpoint",
   serverSignalProcess: "server.signalProcess",
+  serverGetAgentProcesses: "server.getAgentProcesses",
+  serverKillAgentProcess: "server.killAgentProcess",
   serverReportClientActivity: "server.reportClientActivity",
   serverReportHostPowerState: "server.reportHostPowerState",
   serverGetBackgroundPolicy: "server.getBackgroundPolicy",
@@ -564,6 +566,8 @@ export const WS_METHODS = {
   projectLabelsAdoptRepository: "projectLabels.adoptRepository",
   projectLabelsListOrphanFolders: "projectLabels.listOrphanFolders",
   projectLabelsAdoptOrphanFolder: "projectLabels.adoptOrphanFolder",
+  projectLabelsTrashOrphanFolder: "projectLabels.trashOrphanFolder",
+  /** @deprecated Renamed to `projectLabels.trashOrphanFolder`; kept for 0.3.2 clients. */
   projectLabelsRemoveOrphanFolder: "projectLabels.removeOrphanFolder",
   projectLabelsListResources: "projectLabels.listResources",
   projectLabelsSubscribeResources: "projectLabels.subscribeResources",
@@ -615,6 +619,7 @@ export const WS_METHODS = {
   scheduledTasksRunNow: "scheduledTasks.runNow",
   scheduledTasksRotateWebhookToken: "scheduledTasks.rotateWebhookToken",
   secretsAnswerRequest: "secrets.answerRequest",
+  secretsAnswerLoginRequest: "secrets.answerLoginRequest",
   accountsConnect: "accounts.connect",
   accountsUse: "accounts.use",
   accountsRemoveAccess: "accounts.removeAccess",
@@ -638,8 +643,6 @@ export const WS_METHODS = {
   repoMcpTrustSubscribe: "repoMcpTrust.subscribe",
   repoMcpTrustRespond: "repoMcpTrust.respond",
   integrationsList: "integrations.list",
-  integrationsPreviewNative: "integrations.previewNative",
-  integrationsImportNative: "integrations.importNative",
   integrationsCreate: "integrations.create",
   integrationsUpdate: "integrations.update",
   integrationsDelete: "integrations.delete",
@@ -779,7 +782,7 @@ const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProviders, 
   payload: Schema.Struct({
     /**
      * When supplied, only refresh this specific provider instance. When
-     * omitted, refresh all configured instances — the legacy `refresh()`
+     * omitted, refresh all configured instances, the legacy `refresh()`
      * behaviour retained for transports that still dispatch untargeted
      * refreshes.
      */
@@ -1023,6 +1026,19 @@ const WsServerRefreshUsageRatesRpc = Rpc.make(WS_METHODS.serverRefreshUsageRates
 const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess, {
   payload: ServerSignalProcessInput,
   success: ServerSignalProcessResult,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsServerGetAgentProcessesRpc = Rpc.make(WS_METHODS.serverGetAgentProcesses, {
+  payload: Schema.Struct({}),
+  success: ServerAgentProcessesResult,
+  error: EnvironmentAuthorizationError,
+});
+
+/** Kills one agent command's whole process tree, terminal or orphan alike. */
+const WsServerKillAgentProcessRpc = Rpc.make(WS_METHODS.serverKillAgentProcess, {
+  payload: ServerKillAgentProcessInput,
+  success: ServerKillAgentProcessResult,
   error: EnvironmentAuthorizationError,
 });
 
@@ -1860,24 +1876,6 @@ const WsOrchestrationV2StopWorkflowRpc = Rpc.make(ORCHESTRATION_V2_WS_METHODS.st
   error: Schema.Union([OrchestrationV2StopWorkflowError, EnvironmentAuthorizationError]),
 });
 
-const WsOrchestrationV2RecommendUsageLimitHandoffRpc = Rpc.make(
-  ORCHESTRATION_V2_WS_METHODS.recommendUsageLimitHandoff,
-  {
-    payload: UsageLimitHandoffRecommendInput,
-    success: Schema.NullOr(UsageLimitHandoffRecommendation),
-    error: Schema.Union([UsageLimitHandoffError, EnvironmentAuthorizationError]),
-  },
-);
-
-const WsOrchestrationV2AcceptUsageLimitHandoffRpc = Rpc.make(
-  ORCHESTRATION_V2_WS_METHODS.acceptUsageLimitHandoff,
-  {
-    payload: UsageLimitHandoffAcceptInput,
-    success: UsageLimitHandoffAcceptResult,
-    error: Schema.Union([UsageLimitHandoffError, EnvironmentAuthorizationError]),
-  },
-);
-
 const WsOrchestrationV2GetWorkflowScriptRpc = Rpc.make(
   ORCHESTRATION_V2_WS_METHODS.getWorkflowScript,
   {
@@ -2216,9 +2214,15 @@ const WsProjectLabelsAdoptOrphanFolderRpc = Rpc.make(WS_METHODS.projectLabelsAdo
   success: ProjectLabels.ProjectLabelMutationResult,
   error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
 });
+const WsProjectLabelsTrashOrphanFolderRpc = Rpc.make(WS_METHODS.projectLabelsTrashOrphanFolder, {
+  payload: ProjectLabels.ProjectOrphanFolderInput,
+  success: ProjectLabels.ProjectOrphanFolderTrashResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+/** @deprecated Alias of `WsProjectLabelsTrashOrphanFolderRpc` for 0.3.2 clients. */
 const WsProjectLabelsRemoveOrphanFolderRpc = Rpc.make(WS_METHODS.projectLabelsRemoveOrphanFolder, {
   payload: ProjectLabels.ProjectOrphanFolderInput,
-  success: ProjectLabels.ProjectOrphanFolderRemoveResult,
+  success: ProjectLabels.ProjectOrphanFolderTrashResult,
   error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
 });
 const WsProjectLabelsListResourcesRpc = Rpc.make(WS_METHODS.projectLabelsListResources, {
@@ -2303,16 +2307,6 @@ const WsAgentsActivityRpc = Rpc.make(WS_METHODS.agentsActivity, {
   payload: AgentWorkspace.AgentActivityInput,
   success: AgentWorkspace.AgentActivityResult,
   error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
-});
-const WsIntegrationsPreviewNativeRpc = Rpc.make(WS_METHODS.integrationsPreviewNative, {
-  payload: Schema.Struct({}),
-  success: Integrations.IntegrationNativeImportPreview,
-  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
-});
-const WsIntegrationsImportNativeRpc = Rpc.make(WS_METHODS.integrationsImportNative, {
-  payload: Schema.Struct({}),
-  success: Integrations.IntegrationNativeImportResult,
-  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
 });
 const WsRepoMcpTrustSubscribeRpc = Rpc.make(WS_METHODS.repoMcpTrustSubscribe, {
   payload: RepoMcpTrust.RepoMcpTrustThreadInput,
@@ -2727,6 +2721,11 @@ const WsSecretsAnswerRequestRpc = Rpc.make(WS_METHODS.secretsAnswerRequest, {
   error: Schema.Union([SecretRequestError, EnvironmentAuthorizationError]),
 });
 
+const WsSecretsAnswerLoginRequestRpc = Rpc.make(WS_METHODS.secretsAnswerLoginRequest, {
+  payload: LoginRequestAnswerInput,
+  error: Schema.Union([SecretRequestError, EnvironmentAuthorizationError]),
+});
+
 const WsAccountsConnectRpc = Rpc.make(WS_METHODS.accountsConnect, {
   payload: Accounts.AccountThreadConnectInput,
   success: Accounts.AccountConnectResult,
@@ -2894,6 +2893,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetUsageSummaryRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
+  WsServerGetAgentProcessesRpc,
+  WsServerKillAgentProcessRpc,
   WsSearchQueryRpc,
   WsExportCreateRpc,
   WsExportValidateRpc,
@@ -2935,6 +2936,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsAdoptRepositoryRpc,
   WsProjectLabelsListOrphanFoldersRpc,
   WsProjectLabelsAdoptOrphanFolderRpc,
+  WsProjectLabelsTrashOrphanFolderRpc,
   WsProjectLabelsRemoveOrphanFolderRpc,
   WsProjectLabelsListResourcesRpc,
   WsProjectLabelsSubscribeResourcesRpc,
@@ -2950,8 +2952,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsThreadApprovalsSubscribeRpc,
   WsAgentsStartWorkRpc,
   WsAgentsActivityRpc,
-  WsIntegrationsPreviewNativeRpc,
-  WsIntegrationsImportNativeRpc,
   WsRepoMcpTrustSubscribeRpc,
   WsRepoMcpTrustRespondRpc,
   WsIntegrationsListRpc,
@@ -3024,6 +3024,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsScheduledTasksRunNowRpc,
   WsScheduledTasksRotateWebhookTokenRpc,
   WsSecretsAnswerRequestRpc,
+  WsSecretsAnswerLoginRequestRpc,
   WsAccountsConnectRpc,
   WsAccountsUseRpc,
   WsAccountsRemoveAccessRpc,
@@ -3174,8 +3175,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2DispatchCommandRpc,
   WsOrchestrationV2GetWorkflowScriptRpc,
   WsOrchestrationV2StopWorkflowRpc,
-  WsOrchestrationV2RecommendUsageLimitHandoffRpc,
-  WsOrchestrationV2AcceptUsageLimitHandoffRpc,
   WsOrchestrationV2GetTurnItemRpc,
   WsOrchestrationV2GetTurnDiffRpc,
   WsOrchestrationV2GetFullThreadDiffRpc,

@@ -72,7 +72,7 @@ export function resolveSidebarRowAccessibility(input: {
 // nearby thread usually reuses an already-hot subscription. Each prewarmed
 // thread holds a live, fully hydrated detail subscription (all messages and
 // activities, growing as agents work) for as long as the row stays visible,
-// so this limit is a direct renderer-heap and server-load multiplier — keep
+// so this limit is a direct renderer-heap and server-load multiplier. Keep
 // it small; cold opens still render instantly from the cached snapshot.
 const SIDEBAR_THREAD_PREWARM_LIMIT = 3;
 // A small buffer keeps the next few rows warm without leasing every row that
@@ -484,7 +484,7 @@ export function useThreadJumpHintVisibility(): {
 
 /**
  * Effective visited watermark for a thread. Servers with visited tracking
- * project `lastVisitedAt` on the shell and are authoritative — that value is
+ * project `lastVisitedAt` on the shell and are authoritative; that value is
  * shared across every device connected to the environment. Pre-tracking
  * servers omit the field, and the browser's locally persisted watermark keeps
  * working as before.
@@ -493,7 +493,7 @@ export function resolveThreadLastVisitedAt(
   serverLastVisitedAt: string | null | undefined,
   localLastVisitedAt: string | undefined,
 ): string | undefined {
-  // When the server tracks visits it is authoritative — including explicit
+  // When the server tracks visits it is authoritative, including explicit
   // rewinds from mark-unread, which a newer browser-local watermark must not
   // mask. The local value only carries servers without visited tracking.
   if (serverLastVisitedAt === undefined) return localLastVisitedAt;
@@ -642,7 +642,7 @@ export function resolveThreadRowClassName(input: {
 // ── Sidebar v2 status model ─────────────────────────────────────────
 // Six visual states, three colors: color is reserved for "act now"
 // (approval), "in motion" (working), and "broken" (failed). Ready is the
-// unlabeled resting state — the agent stopped and is waiting on the user,
+// unlabeled resting state: the agent stopped and is waiting on the user,
 // whether it finished, asked a question, or proposed a plan. Waiting
 // (runtime status "idle") is the agent stopped with background work that will
 // wake it (subagents, monitors): not the user's turn yet, so it renders grey

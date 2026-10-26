@@ -531,14 +531,14 @@ cd ${shellQuote(linuxServerDir)} && node <<'NODE' >/dev/null 2>&1
 // The sentinel must be a package the CLI bundle leaves external. It used to be
 // "effect", back when the bundle externalized its runtime deps and the whole
 // node_modules tree was unpacked. The bundle now inlines its JS dependencies,
-// so "effect" no longer exists on disk and only the native packages do —
-// resolving node-pty is what actually validates the unpacked tree.
+// so "effect" no longer exists on disk and only the native packages do.
+// Resolving node-pty is what actually validates the unpacked tree.
 try { require.resolve("node-pty/package.json"); } catch (_e) { process.exit(3); }
 const fs = require("node:fs");
 const path = require("node:path");
 const pkgDir = path.dirname(require.resolve("node-pty/package.json"));
 // node-pty 1.x is N-API based, so a single Linux pty.node is ABI-stable across
-// Node versions — require() succeeding IS the real compatibility test. Look in
+// Node versions, so require() succeeding IS the real compatibility test. Look in
 // the same places node-pty's own loader does.
 const candidates = [
   path.join(pkgDir, "build", "Release", "pty.node"),
@@ -776,7 +776,7 @@ const ensureNodePtyImpl = (
     }
 
     // The packages the server bundle leaves external (node-pty and the other
-    // native addons) couldn't be resolved on the WSL filesystem — a packaging
+    // native addons) couldn't be resolved on the WSL filesystem, a packaging
     // regression, since those must be unpacked from the asar. Fatal so wsl-only
     // mode falls back to Windows and dual mode surfaces the reason inline,
     // instead of the server crash-looping on ERR_MODULE_NOT_FOUND once it
@@ -785,7 +785,7 @@ const ensureNodePtyImpl = (
       return {
         ok: false,
         reason:
-          'WSL server dependencies could not be loaded (for example "node-pty"). The native packages the server needs are not unpacked where the WSL distro\'s Node can read them — this is a packaging problem with this build. Please report it.',
+          'WSL server dependencies could not be loaded (for example "node-pty"). The native packages the server needs are not unpacked where the WSL distro\'s Node can read them. This is a packaging problem with this build. Please report it.',
         fatal: true,
       } as const;
     }
@@ -840,7 +840,7 @@ const ensureNodePtyImpl = (
 
     if (options.allowBuild !== true) {
       // Packaged builds ship a prebuilt Linux node-pty, so no compiler, node-gyp,
-      // or network is needed — and we must not nag the user to install build
+      // or network is needed, and we must not nag the user to install build
       // tools they don't need. Still surface a missing/too-old Node (both the
       // prebuilt and the server require a compatible Node); otherwise reaching
       // here means the bundled binary itself couldn't load, which is almost
@@ -1245,9 +1245,9 @@ export const layer = Layer.effect(
 
     // Probe wsl.exe once at layer init and cache the result, exposing
     // `isAvailable` as a resolved value rather than a re-running effect.
-    // WSL availability is effectively static for the process lifetime — the
+    // WSL availability is effectively static for the process lifetime (the
     // Windows feature isn't added/removed mid-session, and backend mode
-    // changes already require an app restart — so the cached boolean stays
+    // changes already require an app restart), so the cached boolean stays
     // accurate. Crucially this keeps `isAvailable` synchronously resolvable:
     // it's read inside the sync IPC handler getLocalEnvironmentBootstraps
     // (via the primary instance's lazy label -> resolvePrimaryLabel ->
@@ -1266,7 +1266,7 @@ export const layer = Layer.effect(
         Effect.withSpan("desktop.wsl.windowsToWslPath"),
       );
 
-    // Cache user-home results per distro key — folder picker can be opened
+    // Cache user-home results per distro key: the folder picker can be opened
     // many times in a session and the value is stable for the life of the
     // distro. Negative results aren't cached so a transient wsl.exe failure
     // doesn't permanently disable tilde expansion.

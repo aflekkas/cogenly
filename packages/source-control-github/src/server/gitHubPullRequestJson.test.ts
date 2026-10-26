@@ -1822,7 +1822,7 @@ describe("reviewer candidate decoding", () => {
 
   it("keeps a requested team apart from the people, so the request can be taken back", () => {
     // A team is never among the assignable users, and a request that cannot be seen cannot be
-    // undone — so the ones GitHub reports are carried, marked as the teams they are.
+    // undone, so the ones GitHub reports are carried, marked as the teams they are.
     const list = expectSuccess(
       decodeReviewerCandidatesJson(
         candidatesJson({

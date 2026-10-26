@@ -794,7 +794,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
                       size={132}
                       level="M"
                       marginSize={2}
-                      title="Pairing link — scan to open on another device"
+                      title="Pairing link. Scan to open on another device"
                     />
                   </div>
                 ) : null}
@@ -909,7 +909,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
                 size={168}
                 level="M"
                 marginSize={1}
-                title="Pairing link — scan to open on another device"
+                title="Pairing link. Scan to open on another device"
               />
             </div>
           ) : (
@@ -1798,7 +1798,7 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
     const ok = await reconcileCloudState({ managedTunnel: enabled, publish: publishAgentActivity });
     if (ok) {
       // Turning the tunnel off while publishing stays on downgrades the link
-      // rather than removing it — say so instead of claiming an unlink.
+      // rather than removing it, so say so instead of claiming an unlink.
       toastManager.add({
         type: "success",
         title: enabled
@@ -3073,7 +3073,7 @@ export function ConnectionsSettings() {
   // Single picker for "WSL backend off" vs "running on distro X". The
   // dropdown maps "Off" to disable and any distro entry to enable +
   // run on that distro. Splitting these into a separate switch and
-  // dropdown was confusing — they're the same decision.
+  // dropdown was confusing; they're the same decision.
   const handleSelectWslMode = useCallback(
     (value: string) => {
       if (!desktopBridge || !desktopWslState) return;
@@ -3088,7 +3088,7 @@ export function ConnectionsSettings() {
         const wasWslOnly = desktopWslState.wslOnly;
         // Confirm when there's WSL state to lose, OR when wsl-only is
         // on (turning the only running backend off needs to switch
-        // back to Windows and restart — always consequential).
+        // back to Windows and restart, which is always consequential).
         if (hasWslRegistrationToLose || wasWslOnly) {
           setPendingWslChange({ kind: "disable", wasWslOnly });
           return;
@@ -3106,7 +3106,7 @@ export function ConnectionsSettings() {
         setPendingWslChange({ kind: "enable", nextDistro });
         return;
       }
-      // Already enabled — treat as a distro switch. Skip the change if
+      // Already enabled, so treat as a distro switch. Skip the change if
       // the user re-picked the row that's already selected.
       const resolvedCurrent = desktopWslState.distro ?? defaultDistroName;
       if (resolvedCurrent === resolvedNext) return;
@@ -3150,7 +3150,7 @@ export function ConnectionsSettings() {
       // the setting immediately but doesn't tear down or restart
       // anything itself; the renderer warns the user to expect a
       // restart and (in a follow-up) can trigger it automatically.
-      // Always prompt — even enabling is consequential here.
+      // Always prompt: even enabling is consequential here.
       setPendingWslChange({ kind: "wsl-only", nextValue: enabled });
     },
     [desktopBridge, desktopWslState],
@@ -3218,7 +3218,7 @@ export function ConnectionsSettings() {
     // live distro list it no longer has. Without a control here the user would
     // be stranded on a WSL preference they can't clear, so render a recovery
     // row that switches back to Windows. When WSL is unavailable AND unused,
-    // there's nothing to recover — keep the section hidden as before.
+    // there's nothing to recover, so keep the section hidden as before.
     if (!isWslSettingsRowVisible({ state: desktopWslState, error: desktopWslError })) {
       return null;
     }

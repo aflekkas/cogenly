@@ -1,3 +1,4 @@
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import {
   AgentId,
   EnvironmentId,
@@ -9,6 +10,7 @@ import {
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeCrypto } from "@effect/platform-node";
+import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
@@ -29,12 +31,32 @@ import { VAULT_WITHHELD } from "./VaultRedactor.ts";
 import { totp } from "./VaultTotp.ts";
 
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
+import * as CardNotifications from "../orchestration-v2/InlineCardNotifications.ts";
 import * as Workspace from "../agents/AgentWorkspaceService.ts";
 import * as ApprovalChanges from "../agents/ApprovalChanges.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as Agents from "../agents/AgentService.ts";
 import * as Work from "../work/WorkHandoffService.ts";
 import * as Schedules from "../scheduledTasks/ScheduledTaskService.ts";
+
+class Decisions extends Context.Service<
+  Decisions,
+  Array<{ threadId: ThreadId; summary: string }>
+>()("cogenly-server/vault/Vault.test/Decisions") {}
+const decisionsLayer = Layer.unwrap(
+  Effect.sync(() => {
+    const decisions: Array<{ threadId: ThreadId; summary: string }> = [];
+    return Layer.mergeAll(
+      Layer.succeed(Decisions, decisions),
+      Layer.succeed(CardNotifications.InlineCardNotifications, {
+        answered: (input) =>
+          Effect.sync(() => {
+            decisions.push(input);
+          }),
+      }),
+    );
+  }),
+);
 
 const memoryStore = () => {
   const values = new Map<string, Uint8Array>();
@@ -123,7 +145,18 @@ describe("Vault service", () => {
       expect(item.fields).toEqual(["username", "password", "totp"]);
       const listed = yield* vault.list({});
       expect(JSON.stringify(listed)).not.toContain("octo-password-123");
-      expect(JSON.stringify(listed)).not.toContain("octo-user");
+      expect(JSON.stringify(listed)).not.toContain("GEZDGNBVGY3TQOJQ");
+      // A login's username is display text, like an integration's account label.
+      expect(listed.items[0]?.username).toBe("octo-user");
+      expect(listed.sites).toEqual([
+        {
+          host: "github.com",
+          siteName: "GitHub",
+          logins: [
+            { id: item.id, label: "Work GitHub", username: "octo-user", missingUsername: false },
+          ],
+        },
+      ]);
 
       const allowed = yield* vault.use({
         itemId: item.id,
@@ -314,7 +347,7 @@ describe("Vault service", () => {
     ),
   );
 
-  it.effect("thread fills ask the owner and approval grants only that thread", () =>
+  it.effect("an explicit Ask first asks the owner and approval grants only that thread", () =>
     Effect.gen(function* () {
       const vault = yield* Vault.Vault;
       const workspace = yield* Workspace.AgentWorkspaceService;
@@ -322,6 +355,7 @@ describe("Vault service", () => {
         name: "Thread login",
         type: "login",
         allowedDomains: ["example.com"],
+        policy: { mode: "ask", allowedAgentIds: [], allowedDomains: [], ownerSet: true },
         secretFields: { password: "thread-password" },
       });
       const request = {
@@ -347,7 +381,10 @@ describe("Vault service", () => {
           caller: { kind: "thread", threadId: ThreadId.make("other") },
         })).status,
       ).toBe("approval_required");
-      expect((yield* vault.use({ ...request, domain: "evil.test" })).status).toBe("denied");
+      // Outside the item's sites the owner decides again.
+      expect((yield* vault.use({ ...request, domain: "evil.test" })).status).toBe(
+        "approval_required",
+      );
     }).pipe(
       Effect.provide(
         Workspace.layer.pipe(
@@ -358,6 +395,7 @@ describe("Vault service", () => {
               Layer.mock(Agents.AgentService)({}),
               Layer.mock(Work.WorkHandoffService)({}),
               Layer.mock(Schedules.ScheduledTaskService)({}),
+              Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
             ),
           ),
         ),
@@ -370,6 +408,7 @@ describe("Vault service", () => {
       const vault = yield* Vault.Vault;
       const workspace = yield* Workspace.AgentWorkspaceService;
       const sql = yield* SqlClient.SqlClient;
+      const decisions = yield* Decisions;
       const other = ThreadId.make("thread:other");
       const settled = ThreadId.make("thread:settled");
       for (const [id, payload] of [
@@ -382,6 +421,7 @@ describe("Vault service", () => {
         name: "GitHub",
         type: "login",
         allowedDomains: ["github.com"],
+        policy: { mode: "ask", allowedAgentIds: [], allowedDomains: [], ownerSet: true },
         secretFields: { password: "github-password" },
       });
       const fill = (caller: ThreadId) =>
@@ -421,6 +461,8 @@ describe("Vault service", () => {
 
       // Denying keeps the fill refused; asking again raises a fresh card that says so.
       yield* workspace.reject(asked.approvalId);
+      expect(decisions.at(-1)?.summary).toContain("Approval denied");
+      expect(decisions.at(-1)?.threadId).toBe(threadId);
       expect(yield* pendingIds(threadId)).toEqual([]);
       const again = yield* fill(threadId);
       if (again.status !== "approval_required" || !again.approvalId)
@@ -429,6 +471,8 @@ describe("Vault service", () => {
       expect(again.message).toContain("declined");
 
       yield* workspace.approve(again.approvalId);
+      expect(decisions.at(-1)?.summary).toContain("Approval granted");
+      expect(decisions.at(-1)?.summary).toContain("github.com");
       expect(yield* pendingIds()).toEqual([]);
       expect(yield* fill(threadId)).toMatchObject({ status: "allowed", value: "github-password" });
       expect((yield* fill(other)).status).toBe("approval_required");
@@ -440,6 +484,7 @@ describe("Vault service", () => {
     }).pipe(
       Effect.provide(
         Workspace.layer.pipe(
+          Layer.provideMerge(decisionsLayer),
           Layer.provideMerge(layer),
           Layer.provide(
             Layer.mergeAll(
@@ -447,6 +492,7 @@ describe("Vault service", () => {
               Layer.mock(Agents.AgentService)({}),
               Layer.mock(Work.WorkHandoffService)({}),
               Layer.mock(Schedules.ScheduledTaskService)({}),
+              Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
             ),
           ),
           Layer.provideMerge(ApprovalChanges.layer),
@@ -495,6 +541,7 @@ describe("Vault service", () => {
               Layer.mock(Agents.AgentService)({}),
               Layer.mock(Work.WorkHandoffService)({}),
               Layer.mock(Schedules.ScheduledTaskService)({}),
+              Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
             ),
           ),
         ),
@@ -502,48 +549,51 @@ describe("Vault service", () => {
     ),
   );
 
-  it.effect("asks agents by default, then allows after the policy grants them", () =>
-    Effect.gen(function* () {
-      const vault = yield* Vault.Vault;
-      const sql = yield* SqlClient.SqlClient;
-      const agentId = AgentId.make("agent:1");
-      yield* sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap) VALUES (${agentId}, 'thread:agent', '{}', 1, 10)`;
-      yield* sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap) VALUES ('agent:2', 'thread:agent2', '{}', 1, 10)`;
-      const { item } = yield* vault.create({
-        name: "Deploy key",
-        type: "api_key",
-        secretFields: { value: "deploy-key-value-123" },
-      });
-      const asked = yield* vault.use({
-        itemId: item.id,
-        field: "value",
-        caller: { kind: "agent", agentId },
-        threadId,
-      });
-      expect(asked.status).toBe("approval_required");
-      if (asked.status === "approval_required")
-        expect(asked.approvalId).toContain("approval:vault:");
-      const approvals = yield* sql`SELECT status FROM agent_approvals`;
-      expect(approvals).toHaveLength(1);
+  it.effect(
+    "asks agents when the owner chose Ask first, then allows after the policy grants them",
+    () =>
+      Effect.gen(function* () {
+        const vault = yield* Vault.Vault;
+        const sql = yield* SqlClient.SqlClient;
+        const agentId = AgentId.make("agent:1");
+        yield* sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap) VALUES (${agentId}, 'thread:agent', '{}', 1, 10)`;
+        yield* sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap) VALUES ('agent:2', 'thread:agent2', '{}', 1, 10)`;
+        const { item } = yield* vault.create({
+          name: "Deploy key",
+          type: "api_key",
+          policy: { mode: "ask", allowedAgentIds: [], allowedDomains: [], ownerSet: true },
+          secretFields: { value: "deploy-key-value-123" },
+        });
+        const asked = yield* vault.use({
+          itemId: item.id,
+          field: "value",
+          caller: { kind: "agent", agentId },
+          threadId,
+        });
+        expect(asked.status).toBe("approval_required");
+        if (asked.status === "approval_required")
+          expect(asked.approvalId).toContain("approval:vault:");
+        const approvals = yield* sql`SELECT status FROM agent_approvals`;
+        expect(approvals).toHaveLength(1);
 
-      yield* vault.update({
-        id: item.id,
-        policy: { mode: "allow", allowedAgentIds: [agentId], allowedDomains: [] },
-      });
-      const allowed = yield* vault.use({
-        itemId: item.id,
-        field: "value",
-        caller: { kind: "agent", agentId },
-      });
-      expect(allowed).toMatchObject({ status: "allowed", value: "deploy-key-value-123" });
+        yield* vault.update({
+          id: item.id,
+          policy: { mode: "allow", allowedAgentIds: [agentId], allowedDomains: [] },
+        });
+        const allowed = yield* vault.use({
+          itemId: item.id,
+          field: "value",
+          caller: { kind: "agent", agentId },
+        });
+        expect(allowed).toMatchObject({ status: "allowed", value: "deploy-key-value-123" });
 
-      const other = yield* vault.use({
-        itemId: item.id,
-        field: "value",
-        caller: { kind: "agent", agentId: AgentId.make("agent:2") },
-      });
-      expect(other.status).toBe("approval_required");
-    }).pipe(Effect.provide(layer)),
+        const other = yield* vault.use({
+          itemId: item.id,
+          field: "value",
+          caller: { kind: "agent", agentId: AgentId.make("agent:2") },
+        });
+        expect(other.status).toBe("approval_required");
+      }).pipe(Effect.provide(layer)),
   );
 
   it.effect("stores a card in encrypted card fields and fills each by field", () =>
@@ -719,6 +769,7 @@ describe("Vault service", () => {
       const { item } = yield* vault.create({
         name: "revoke",
         type: "note",
+        policy: { mode: "ask", allowedAgentIds: [], allowedDomains: [], ownerSet: true },
         secretFields: { value: "revoked-secret" },
       });
       const request = {
@@ -872,6 +923,332 @@ describe("Vault service", () => {
         .use({ itemId: item.id, field: "value", caller: { kind: "human" } })
         .pipe(Effect.flip);
       expect(missing.reason).toBe("field_missing");
+    }).pipe(Effect.provide(layer)),
+  );
+});
+
+const workspaceLayer = Workspace.layer.pipe(
+  Layer.provideMerge(layer),
+  Layer.provide(
+    Layer.mergeAll(
+      Layer.mock(AgentStore.AgentStore)({}),
+      Layer.mock(Agents.AgentService)({}),
+      Layer.mock(Work.WorkHandoffService)({}),
+      Layer.mock(Schedules.ScheduledTaskService)({}),
+      Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+    ),
+  ),
+);
+
+describe("Vault default access", () => {
+  const fillFrom = (itemId: Vault.VaultUseInput["itemId"], caller: ThreadId, domain: string) => ({
+    itemId,
+    field: "password" as const,
+    caller: { kind: "thread" as const, threadId: caller },
+    threadId: caller,
+    domain,
+    enforceAllowedDomains: true,
+    action: "fill",
+  });
+
+  it.effect("fills on an allowed site without asking, from any chat or agent", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const sql = yield* SqlClient.SqlClient;
+      // Saved the way request_secret's saveToVault stores a login: no policy given.
+      const { item } = yield* vault.saveSecretValue({
+        name: "ADSO member portal",
+        type: "login",
+        domains: ["theadso.my.site.com"],
+        value: "adso-password-1",
+      });
+      expect(item.policy).toEqual({ mode: "allow", allowedAgentIds: [], allowedDomains: [] });
+      expect(yield* vault.use(fillFrom(item.id, threadId, "theadso.my.site.com"))).toMatchObject({
+        status: "allowed",
+        value: "adso-password-1",
+      });
+      expect(
+        yield* vault.use({
+          ...fillFrom(item.id, threadId, "login.theadso.my.site.com"),
+          caller: { kind: "agent", agentId: AgentId.make("agent:any") },
+        }),
+      ).toMatchObject({ status: "allowed" });
+      expect(yield* sql`SELECT id FROM agent_approvals`).toEqual([]);
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("asks on a site outside the allowed ones; approving it keeps any agent allowed", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const workspace = yield* Workspace.AgentWorkspaceService;
+      const { item } = yield* vault.create({
+        name: "ADSO member portal",
+        type: "login",
+        allowedDomains: ["theadso.my.site.com"],
+        secretFields: { username: "ops@example.test", password: "adso-password-2" },
+      });
+      const offSite = yield* vault.use(fillFrom(item.id, threadId, "phish.test"));
+      expect(offSite.status).toBe("approval_required");
+      if (offSite.status !== "approval_required" || !offSite.approvalId)
+        throw new Error("Expected an approval");
+      expect(offSite.message).toContain("not one of this item's allowed sites");
+      yield* workspace.approve(offSite.approvalId);
+      const approved = yield* vault.getMetadata(item.id);
+      expect(approved.policy).toMatchObject({
+        mode: "allow",
+        allowedAgentIds: [],
+        allowedDomains: [],
+        approvedDomains: ["phish.test"],
+      });
+      expect((yield* vault.use(fillFrom(item.id, threadId, "phish.test"))).status).toBe("allowed");
+      // Another chat may still fill on the item's own site without asking.
+      expect(
+        (yield* vault.use(fillFrom(item.id, ThreadId.make("thread:2"), "theadso.my.site.com")))
+          .status,
+      ).toBe("allowed");
+    }).pipe(Effect.provide(workspaceLayer)),
+  );
+
+  it.effect("keeps an explicit Ask first and Block on the item's own site", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const ask = yield* vault.create({
+        name: "Bank",
+        type: "login",
+        allowedDomains: ["bank.test"],
+        policy: { mode: "ask", allowedAgentIds: [], allowedDomains: [], ownerSet: true },
+        secretFields: { password: "bank-password-1" },
+      });
+      expect((yield* vault.use(fillFrom(ask.item.id, threadId, "bank.test"))).status).toBe(
+        "approval_required",
+      );
+      const blocked = yield* vault.create({
+        name: "Payroll",
+        type: "login",
+        allowedDomains: ["payroll.test"],
+        policy: { mode: "deny", allowedAgentIds: [], allowedDomains: [], ownerSet: true },
+        secretFields: { password: "payroll-password-1" },
+      });
+      expect(yield* vault.use(fillFrom(blocked.item.id, threadId, "payroll.test"))).toMatchObject({
+        status: "denied",
+        reason: "policy",
+      });
+      // Block wins off-site too, and the owner can still use it.
+      expect((yield* vault.use(fillFrom(blocked.item.id, threadId, "other.test"))).status).toBe(
+        "denied",
+      );
+      expect(
+        (yield* vault.use({
+          itemId: blocked.item.id,
+          field: "password",
+          caller: { kind: "human" },
+        })).status,
+      ).toBe("allowed");
+    }).pipe(Effect.provide(layer)),
+  );
+});
+
+describe("Vault logins", () => {
+  it.effect("keeps several logins for one site and asks which one when none is named", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const save = (username: string, password: string) =>
+        vault.saveLogin({
+          name: "GitHub",
+          domain: "https://github.com/login",
+          secretFields: { username, password },
+          temporary: false,
+          threadId,
+          agentId: null,
+        });
+      const work = yield* save("octo-work", "work-password-1");
+      const personal = yield* save("octo-home", "home-password-1");
+      expect(work.item.name).toBe("GitHub");
+      expect(personal.item.name).toBe("GitHub");
+      const { sites } = yield* vault.list({});
+      expect(sites).toEqual([
+        {
+          host: "github.com",
+          siteName: "GitHub",
+          logins: [
+            {
+              id: personal.item.id,
+              label: "GitHub · octo-home",
+              username: "octo-home",
+              missingUsername: false,
+            },
+            {
+              id: work.item.id,
+              label: "GitHub · octo-work",
+              username: "octo-work",
+              missingUsername: false,
+            },
+          ],
+        },
+      ]);
+
+      const fill = (selector: Partial<Vault.VaultUseInput>) =>
+        vault.use({
+          field: "password",
+          caller: { kind: "thread", threadId },
+          threadId,
+          domain: "github.com",
+          enforceAllowedDomains: true,
+          ...selector,
+        });
+      const ambiguous = yield* fill({});
+      expect(ambiguous.status).toBe("ambiguous");
+      if (ambiguous.status === "ambiguous") {
+        expect(
+          ambiguous.candidates
+            .map((candidate) => `${candidate.label}|${candidate.username}`)
+            .toSorted(),
+        ).toEqual(["GitHub · octo-home|octo-home", "GitHub · octo-work|octo-work"]);
+        expect(JSON.stringify(ambiguous)).not.toContain("password-1");
+      }
+      // By name alone it is just as ambiguous; a label, username or id picks one.
+      expect((yield* fill({ name: "GitHub" })).status).toBe("ambiguous");
+      expect(yield* fill({ username: "octo-home" })).toMatchObject({
+        status: "allowed",
+        value: "home-password-1",
+      });
+      expect(yield* fill({ label: "GitHub · octo-work" })).toMatchObject({
+        status: "allowed",
+        value: "work-password-1",
+      });
+      expect(yield* fill({ itemId: work.item.id })).toMatchObject({ value: "work-password-1" });
+
+      // Two logins may not share a label on one site.
+      expect(
+        yield* vault
+          .create({
+            name: "GitHub",
+            type: "login",
+            label: "GitHub · octo-work",
+            allowedDomains: ["github.com"],
+            secretFields: { password: "third-password" },
+          })
+          .pipe(Effect.flip),
+      ).toMatchObject({ reason: "label_conflict" });
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("adds the username to a password-only login through an update", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      // The 0.3.2 ADSO case: request_secret saved only the password.
+      const { item } = yield* vault.saveSecretValue({
+        name: "ADSO member portal",
+        type: "login",
+        domains: ["theadso.my.site.com"],
+        value: "adso-password-3",
+      });
+      expect((yield* vault.list({})).sites[0]?.logins[0]).toMatchObject({
+        username: null,
+        missingUsername: true,
+        label: "ADSO member portal",
+      });
+      const saved = yield* vault.saveLogin({
+        name: "ADSO member portal",
+        domain: "https://theadso.my.site.com/s/login",
+        secretFields: { username: "ops@example.test" },
+        updateItemId: item.id,
+        temporary: false,
+        threadId,
+        agentId: null,
+      });
+      expect(saved.updated).toBe(true);
+      expect(saved.item).toMatchObject({
+        username: "ops@example.test",
+        fields: ["username", "password"],
+      });
+      expect((yield* vault.list({})).sites[0]?.logins[0]).toEqual({
+        id: item.id,
+        label: "ADSO member portal · ops@example.test",
+        username: "ops@example.test",
+        missingUsername: false,
+      });
+      // The password survived the merge.
+      expect(
+        yield* vault.use({ itemId: item.id, field: "password", caller: { kind: "human" } }),
+      ).toMatchObject({ value: "adso-password-3" });
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("upgrades logins saved before usernames were display text", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const sql = yield* SqlClient.SqlClient;
+      const full = yield* vault.create({
+        name: "Shop",
+        type: "login",
+        allowedDomains: ["shop.test"],
+        secretFields: { username: "buyer@example.test", password: "shop-password-1" },
+      });
+      const passwordOnly = yield* vault.create({
+        name: "Portal",
+        type: "login",
+        allowedDomains: ["portal.test"],
+        secretFields: { password: "portal-password-1" },
+      });
+      // What an older build wrote: field names only, the username just encrypted.
+      yield* sql`UPDATE vault_items SET metadata_json = '{"fields":["username","password"]}' WHERE id = ${full.item.id}`;
+      expect((yield* vault.getMetadata(full.item.id)).username).toBeUndefined();
+
+      expect(yield* vault.upgradeLogins).toEqual({ usernames: 1 });
+      expect((yield* vault.getMetadata(full.item.id)).username).toBe("buyer@example.test");
+      expect(yield* vault.getMetadata(passwordOnly.item.id)).toMatchObject({
+        fields: ["password"],
+      });
+      const portal = (yield* vault.list({})).sites.find((site) => site.host === "portal.test");
+      expect(portal?.logins[0]?.missingUsername).toBe(true);
+      // Nothing left to upgrade, and the secret body is untouched.
+      expect(yield* vault.upgradeLogins).toEqual({ usernames: 0 });
+      expect(yield* vault.credentialRevision(full.item.id)).toBe(full.revision);
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("keeps passwords out of tool output, usage and stored metadata", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const sql = yield* SqlClient.SqlClient;
+      const { item } = yield* vault.create({
+        name: "Mail",
+        type: "login",
+        allowedDomains: ["mail.test"],
+        secretFields: {
+          username: "reader@example.test",
+          password: "mail-password-1",
+          totpSecret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+        },
+      });
+      yield* vault.use({
+        itemId: item.id,
+        field: "username",
+        caller: { kind: "thread", threadId },
+        threadId,
+        domain: "mail.test",
+        enforceAllowedDomains: true,
+      });
+      yield* vault.use({
+        itemId: item.id,
+        field: "password",
+        caller: { kind: "thread", threadId },
+        threadId,
+        domain: "mail.test",
+        enforceAllowedDomains: true,
+      });
+      // The username stays readable in vault_list output; the password never does.
+      expect(yield* vault.scrubText("reader@example.test mail-password-1")).toBe(
+        "reader@example.test [redacted vault secret]",
+      );
+      const stored = JSON.stringify([
+        yield* sql`SELECT metadata_json, policy_json, allowed_domains_json FROM vault_items`,
+        yield* sql`SELECT * FROM vault_usage`,
+        yield* vault.list({}),
+      ]);
+      expect(stored).not.toContain("mail-password-1");
+      expect(stored).not.toContain("GEZDGNBVGY3TQOJQ");
     }).pipe(Effect.provide(layer)),
   );
 });

@@ -4,17 +4,26 @@ Settings are global and apply to every machine you have paired: change one on yo
 your server gets it too. Projects group your work; they don't have settings of their own. What
 belongs to one project, such as its instructions, repositories and links, is on the project's page.
 
-A layers icon beside a row's title shows whether the value is the built-in default or one you set.
+A setting you have changed shows a reset arrow beside its title that puts back the default.
 
 Some settings belong to one machine, such as where its projects folder is, its background activity,
-or its device hub. On a page with other settings these rows say which machine they change, such
-as "on MacBook", and you can switch the machine there. Pages about one machine's own state,
+or its device hub. On a page with other settings these rows name their machine after the title,
+such as "Background activity · MacBook". With more than one machine connected, pick another
+machine there to change its value. Pages about one machine's own state,
 Providers, Machines, Storage and Diagnostics, start with "Settings for" and a machine: they show
 your primary machine until you pick another.
 
 Before 0.3.2 a setting could be overridden for one project. Those overrides no longer apply:
 every project now uses the global value. A repository's own actions moved to its Repository page.
 The old per-project values are kept in `legacy-project-settings.json` beside `settings.json`.
+
+## Providers on paired machines
+
+Add or edit a provider in **Settings → Providers** and its identity and model preferences follow you to your paired machines. CLI locations and sensitive environment values stay with their machine; use the vault for shared secrets.
+
+The provider's account section shows where it is signed in. Choose **Sign in on** a paired machine to start its official CLI login, then complete the sign-in in your browser here. Codex uses a device code; Claude may ask you to paste the code from its sign-in page. Each machine keeps an independent login, so a token refresh on one cannot consume a copied refresh token on another. Signing out affects the selected machine. Credentials use each official CLI's storage. On Linux, Claude protects its credential file with file permissions; use an encrypted disk if you need encryption at rest.
+
+A new additional account gets a separate CLI home on each machine. Muse and other providers that do not advertise in-app authentication still require their own setup on that machine.
 
 ## Worktree branch names
 

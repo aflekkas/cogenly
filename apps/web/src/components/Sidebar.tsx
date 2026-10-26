@@ -15,6 +15,7 @@ import { requestCustomSnooze } from "./CustomSnoozeDialog";
 import { WorkRowStatusMarker } from "./work/WorkRowStatusMarker";
 import { useAtomValue } from "@effect/atom-react";
 import { replaceComposerContextReferences } from "@cogenly/shared/composerContextReferences";
+import { threadLinksToPlainText } from "@cogenly/shared/threadLinks";
 import * as Schema from "effect/Schema";
 import { canSnooze, threadWokeAt } from "@cogenly/client-runtime/state/thread-settled";
 import { createInboxReturnTracker } from "@cogenly/client-runtime/state/thread-inbox";
@@ -473,7 +474,7 @@ function SidebarProviderStack(props: {
       displayName={currentEntry.displayName}
       accentColor={currentEntry.accentColor}
       showBadge={showInstanceBadge}
-      iconClassName="size-3.5"
+      size="sm"
       indicatorBackground="var(--provider-stack-ring)"
     />
   );
@@ -495,7 +496,7 @@ function SidebarProviderStack(props: {
           <ProviderInstanceIcon
             driverKind={entry.driverKind}
             displayName={entry.displayName}
-            iconClassName="size-3"
+            size="xs"
           />
         ),
       },
@@ -684,7 +685,7 @@ function SidebarThreadListProviders(props: ComponentProps<typeof SidebarSortCont
 
 // One unsent draft session the user has invested content in. Two lines,
 // nothing else: project name, then the typed prompt. All the draft's
-// settings (model, env mode, branch, worktree) still travel with it —
+// settings (model, env mode, branch, worktree) still travel with it;
 // clicking is a plain navigation to /draft/$draftId, which touches nothing.
 // While the draft is open the row renders a frozen snapshot (see
 // SidebarDraftBlock); memoized so per-keystroke block re-renders skip it
@@ -710,7 +711,9 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
 }) {
   const { composer, draftId, onContextMenu, onDiscard, onNavigate } = props;
   const promptPreview =
-    replaceComposerContextReferences(composer.prompt, (occurrence) => occurrence.label)
+    threadLinksToPlainText(
+      replaceComposerContextReferences(composer.prompt, (occurrence) => occurrence.label),
+    )
       .trim()
       .split("\n", 1)[0] ?? "";
   // images mirrors persistedAttachments once rehydration finishes; before
@@ -1917,7 +1920,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               >
                 {variantAction === "unsnooze" && props.snoozeWakeLabelText !== null ? (
                   // Snoozed rows show when they come BACK, not when they were
-                  // last touched — the return ticket is the row's whole story.
+                  // last touched. The return ticket is the row's whole story.
                   <span className="text-xs text-info-foreground tabular-nums">
                     {props.snoozeWakeLabelText}
                   </span>
@@ -2301,19 +2304,22 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               </span>
             ) : null}
             {/* The environment the thread runs in, always named (even with
-                  one machine), then the provider glyph, which names the model. */}
-            <span className="ml-auto inline-flex min-w-0 items-center gap-1.5">
-              {props.environmentLabel ? (
-                <span className="inline-flex min-w-0 max-w-24 items-center gap-1">
-                  <EnvironmentMachineIcon
-                    aria-hidden
-                    kind={props.environmentMachine}
-                    className="size-3 shrink-0"
-                  />
-                  <span className="truncate">{props.environmentLabel}</span>
-                </span>
-              ) : null}
+                  one machine), then the provider glyph, which names the model.
+                  Both sit in the shortcut slot so they read as one group: left
+                  outside it, the slot's minimum width opened a gap before a
+                  lone glyph. */}
+            <span className="ml-auto inline-flex min-w-0 items-center">
               <SidebarShortcutSlot label={props.jumpLabel}>
+                {props.environmentLabel ? (
+                  <span className="inline-flex min-w-0 max-w-24 items-center gap-1">
+                    <EnvironmentMachineIcon
+                      aria-hidden
+                      kind={props.environmentMachine}
+                      className="size-3 shrink-0"
+                    />
+                    <span className="truncate">{props.environmentLabel}</span>
+                  </span>
+                ) : null}
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -3133,7 +3139,7 @@ export default function Sidebar() {
     if (snoozedShelfExpanded) return snoozedThreads;
     // The open thread must never vanish behind the collapsed shelf: a
     // snoozed thread reached by route (deep link, open before snoozing
-    // elsewhere) keeps its row — with highlight and wake affordance — same
+    // elsewhere) keeps its row (with highlight and wake affordance), the same
     // exception the settled tail's paging makes.
     if (routeThreadKey === null) return EMPTY_THREADS;
     const routeThread = snoozedThreads.find(
@@ -3260,7 +3266,7 @@ export default function Sidebar() {
     [orderedThreads],
   );
   // Rows call back into the click handler without carrying the ordered list as
-  // a prop — a fresh array identity per shell update would defeat every row's
+  // a prop: a fresh array identity per shell update would defeat every row's
   // memoization. The ref keeps shift-range-select working against the list as
   // rendered at click time.
   const orderedThreadKeysRef = useRef(orderedThreadKeys);
@@ -3575,7 +3581,7 @@ export default function Sidebar() {
             }
             return;
           }
-          // Only move forward if the user is still on the settled thread —
+          // Only move forward if the user is still on the settled thread;
           // a navigation made during the await wins over ours.
           if (
             shouldNavigateAfterThreadPark({
@@ -3597,7 +3603,7 @@ export default function Sidebar() {
   );
   // The thread.settle shortcut parks the open thread through this same path.
   useEffect(() => registerSettleAndAdvance(attemptSettle), [attemptSettle]);
-  // Post-settle navigation must skip threads settling in this same batch —
+  // Post-settle navigation must skip threads settling in this same batch,
   // they are all leaving the card block together. Rows that are already
   // explicitly settled are skipped: nothing to do on a valid mixed selection.
   const settleThreads = useCallback(
@@ -4331,7 +4337,7 @@ export default function Sidebar() {
     workRowsOrderKey,
     collapsedInSpace,
   ]);
-  // One snooze per thread at a time — same double-dispatch guard as settle.
+  // One snooze per thread at a time, the same double-dispatch guard as settle.
   const snoozingThreadKeysRef = useRef(new Set<string>());
   const performSnooze = useCallback(
     async (
@@ -4345,7 +4351,7 @@ export default function Sidebar() {
       }
       snoozingThreadKeysRef.current.add(threadKey);
       try {
-        // Snoozing the open thread moves you forward, same as settle —
+        // Snoozing the open thread moves you forward, same as settle:
         // both park the thread you're done with for now.
         const navigateAfterSnooze = planForwardNavigation(threadKey, opts.coSnoozingKeys);
         const result = await snoozeThread(threadRef, preset.snoozedUntil);
@@ -4355,7 +4361,7 @@ export default function Sidebar() {
             ? ({ status: "interrupted" } as const)
             : ({ status: "failure", error: squashAtomCommandFailure(result) } as const);
         }
-        // Only move forward if the user is still on the snoozed thread —
+        // Only move forward if the user is still on the snoozed thread;
         // a navigation made during the await wins over ours.
         if (
           shouldNavigateAfterThreadPark({
@@ -4415,7 +4421,7 @@ export default function Sidebar() {
       if (threadKeys.length === 0) return;
       const count = threadKeys.length;
       // Snooze (N) is offered when every selected thread can actually take
-      // it — a mixed selection with blocked-on-you work would half-apply.
+      // it; a mixed selection with blocked-on-you work would half-apply.
       const selectionNow = new Date();
       const selectedThreads = threadKeys.flatMap((threadKey) => {
         const thread = threadByKeyRef.current.get(threadKey);
@@ -4584,7 +4590,7 @@ export default function Sidebar() {
             : snoozePresets.find((candidate) => `snooze:${candidate.id}` === clicked.value);
         if (preset) {
           // Post-snooze navigation must skip threads snoozing in this same
-          // batch — they are all leaving the card block together.
+          // batch, since they are all leaving the card block together.
           const coSnoozingKeys = new Set(threadKeys);
           clearSelection();
           const outcomes = await Promise.all(
@@ -5162,7 +5168,7 @@ export default function Sidebar() {
   );
 
   // Thread jump (cmd+1..9) and prev/next traversal reuse the same commands as
-  // v1 — the keybinding layer is shared, only the ordered list differs.
+  // v1; the keybinding layer is shared, only the ordered list differs.
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat || isCommandPaletteOpen() || isModelPickerOpen()) {

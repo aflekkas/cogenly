@@ -163,7 +163,7 @@ function previewRecord(body: string, index: number): PreviewAnnotationContextRec
   const lines = body.split("\n");
   // A legacy comment was written verbatim, so it can run over several lines and hold blank
   // lines and markup of its own. Its value is every line up to the next field or the block that
-  // follows it — anything else is text the author typed, and dropping it loses instructions the
+  // follows it. Anything else is text the author typed, and dropping it loses instructions the
   // chip that replaces this block cannot show.
   const FIELD_PREFIXES = ["Preview annotation:", "Id: ", "Page: ", "Comment: ", "Targets: "];
   const BLOCK_DELIMITER =

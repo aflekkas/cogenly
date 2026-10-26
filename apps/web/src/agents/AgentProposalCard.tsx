@@ -1,5 +1,13 @@
-import type { EnvironmentId, ProjectLabelId } from "@cogenly/contracts";
 import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectPopup,
+  SelectItem,
+} from "~/components/ui/select";
+import type { EnvironmentId, ProjectLabelId, MachineInfo } from "@cogenly/contracts";
+import {
+  MonitorIcon,
   FlagIcon,
   FolderIcon,
   PlugIcon,
@@ -8,7 +16,7 @@ import {
   ZapIcon,
   type LucideIcon,
 } from "lucide-react";
-import { useState, type ReactNode, type Ref } from "react";
+import { useEffect, useState, type ReactNode, type Ref } from "react";
 import { AgentFace } from "~/components/agents/face";
 import { avatarFaceProps } from "~/components/agents/face/agentAvatar.logic";
 import { WorkLogCollapse } from "~/components/chat/WorkLog";
@@ -64,14 +72,21 @@ export function AgentProposalCard({
   proposal,
   seed,
   modelName,
+  owner,
   project,
   creating,
   onCreate,
+  onFaceChange,
   ref,
 }: {
   proposal: AgentProposal;
   seed: string;
   modelName: string | null;
+  owner: {
+    machines: ReadonlyArray<MachineInfo>;
+    value: EnvironmentId | null;
+    onChange: (id: EnvironmentId) => void;
+  };
   /** Where the agent will be filed; null until the builder thread exists. */
   project: {
     environmentId: EnvironmentId;
@@ -80,10 +95,13 @@ export function AgentProposalCard({
   } | null;
   creating: boolean;
   onCreate: () => void;
+  /** The face's entrance starting and settling, so another face of the agent can play along. */
+  onFaceChange?: (state: "created" | "idle") => void;
   ref?: Ref<HTMLDivElement>;
 }) {
   // The face plays its "created" entrance once, then idles.
   const [settled, setSettled] = useState(false);
+  useEffect(() => onFaceChange?.(settled ? "idle" : "created"), [onFaceChange, settled]);
   const creatable = canCreateProposal(proposal);
   const grants = PERMISSION_OPTIONS.filter((option) =>
     proposal.permissions.includes(option.key),
@@ -147,6 +165,34 @@ export function AgentProposalCard({
         </Row>
         <Row icon={ShieldCheckIcon} label="Can also" present={grants.length > 0}>
           <Morph value={grants.join(", ")} />
+        </Row>
+        <Row icon={MonitorIcon} label="Runs on" present={creatable && owner.value !== null}>
+          <Select
+            value={owner.value}
+            onValueChange={(value) => {
+              if (value) owner.onChange(value);
+            }}
+            disabled={creating}
+          >
+            <SelectTrigger size="sm">
+              <SelectValue>
+                {owner.machines.find((machine) => machine.environmentId === owner.value)?.name ??
+                  "This machine"}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup>
+              {owner.machines.map((machine) => (
+                <SelectItem
+                  key={machine.environmentId}
+                  value={machine.environmentId}
+                  disabled={!machine.online || machine.pairing === "revoked"}
+                >
+                  {machine.name}
+                  {machine.online ? "" : " (offline)"}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
         </Row>
         <Row icon={FolderIcon} label="Project" present={project !== null && creatable}>
           {project ? <ProposalProject {...project} disabled={creating} /> : null}

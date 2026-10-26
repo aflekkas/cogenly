@@ -1,5 +1,5 @@
 /**
- * ProviderHost — what a provider package may ask of the server it runs in.
+ * ProviderHost: what a provider package may ask of the server it runs in.
  *
  * Drivers and adapters run inside a Cogenly server but must not import it. The
  * server provides this one service; everything a provider needs from its

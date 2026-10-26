@@ -295,7 +295,7 @@ export function PreviewMoreMenu({
         </MenuItem>
         <MenuSeparator />
         {/*
-          Grouped so the heading has a `MenuGroup` ancestor — `MenuGroupLabel`
+          Grouped so the heading has a `MenuGroup` ancestor: `MenuGroupLabel`
           reads its context and throws without one. The heading also answers
           which profile the tab is in, which is otherwise invisible: it is fixed
           at open and nothing else in the chrome shows it.

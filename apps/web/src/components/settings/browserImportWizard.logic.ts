@@ -53,7 +53,7 @@ export type ImportOutcome =
   | { readonly kind: "blocked"; readonly reason: BrowserImportFailureReason };
 
 /**
- * The wizard's screens. Every one is a place the user can act from — there are
+ * The wizard's screens. Every one is a place the user can act from; there are
  * no dead ends. `blocked` covers the reasons no local step recovers.
  */
 export type WizardStep =

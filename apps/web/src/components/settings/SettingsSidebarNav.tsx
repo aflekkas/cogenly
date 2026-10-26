@@ -46,7 +46,10 @@ import {
 } from "../sidebar/SidebarList";
 import { SidebarListColumn } from "../sidebar/SidebarListColumn";
 import { SidebarSearchDock, type SidebarDockAction } from "../sidebar/SidebarSearchDock";
-import { sidebarListEdge } from "../sidebar/sidebarListAnchor.logic";
+import { sidebarListEdge, stepSearchResultIndex } from "../sidebar/sidebarListAnchor.logic";
+import { BadgeDot } from "../ui/badge-dot";
+import { useSettingsAttentionByPage } from "../../machines/machineHealthAlertsStore";
+import { SETTINGS_PAGE_NEEDS_ATTENTION_LABEL } from "./settingsAttention.logic";
 import { scrollToSettingsTarget } from "./settingsLayout";
 import {
   searchSettings,
@@ -124,6 +127,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [activeResultIndex, setActiveResultIndex] = useState(0);
+  const attentionByPage = useSettingsAttentionByPage();
   const searchableItems = useAvailableSettingsSearchItems(scopeSearch);
   const results = useMemo(() => searchSettings(query, searchableItems), [query, searchableItems]);
   const isSearching = query.trim().length > 0;
@@ -234,14 +238,12 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
         return;
       }
       if (results.length === 0) return;
-      if (event.key === "ArrowDown") {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
-        setActiveResultIndex((index) => (index + 1) % results.length);
-        return;
-      }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setActiveResultIndex((index) => (index - 1 + results.length) % results.length);
+        const key = event.key;
+        setActiveResultIndex((index) =>
+          stepSearchResultIndex(key, index, results.length, searchEdge),
+        );
         return;
       }
       if (event.key === "Enter") {
@@ -250,7 +252,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
         if (result) handleSearchResultClick(result);
       }
     },
-    [activeResultIndex, clearSearch, handleSearchResultClick, isSearching, results],
+    [activeResultIndex, clearSearch, handleSearchResultClick, isSearching, results, searchEdge],
   );
   // The same search dock, in the same place, as every other tab (above the
   // list, or below it in the bottom layout); Settings has no create action.
@@ -287,8 +289,9 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
         fixedFooter={sidebarLayout === "bottom" ? searchDock : null}
       >
         {isSearching ? (
-          // Results sit by the dock, like thread search in the other tabs:
-          // reading down from it, or stacked up against it in the bottom layout.
+          // Results sit by the dock with the best match nearest the input:
+          // reading down from it, or in the bottom layout stacked up against
+          // it like a command palette, so the rows render in reverse rank.
           <SidebarListColumn listKey="settings:search" edge={searchEdge}>
             {hasResults ? (
               <SidebarList
@@ -296,10 +299,16 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                 role="listbox"
                 aria-label="Settings search results"
               >
-                {results.map((item, index) => {
+                {(searchEdge === "bottom" ? results.toReversed() : results).map((item, row) => {
+                  const index = searchEdge === "bottom" ? results.length - 1 - row : row;
                   const Icon = SETTINGS_SECTION_ICONS[item.to];
                   return (
-                    <li key={item.id} role="presentation" className="list-none">
+                    // A row a new query brings in fades in; one that stays put doesn't.
+                    <li
+                      key={item.id}
+                      role="presentation"
+                      className="list-none transition-opacity duration-(--motion-duration-fast) ease-out starting:opacity-0"
+                    >
                       <button
                         type="button"
                         id={`settings-search-result-${item.id}`}
@@ -354,11 +363,17 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                 ...group.paths.map((to) => {
                   const Icon = SETTINGS_SECTION_ICONS[to];
                   const isActive = to === activeNavPath;
+                  const attention = attentionByPage.get(to) ?? null;
                   return (
                     <li key={to} className="list-none">
                       <button
                         type="button"
                         aria-current={isActive ? "page" : undefined}
+                        aria-label={
+                          attention === null
+                            ? undefined
+                            : `${SETTINGS_SECTION_LABELS[to]}, ${SETTINGS_PAGE_NEEDS_ATTENTION_LABEL}`
+                        }
                         className={sidebarRowClassName({ selected: isActive })}
                         onClick={() => handleSectionClick(to)}
                       >
@@ -371,6 +386,8 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                         >
                           {SETTINGS_SECTION_LABELS[to]}
                         </span>
+                        {/* The page behind the rail's Settings dot (settingsAttention.logic). */}
+                        <BadgeDot tone={attention} size="md" className="shrink-0" />
                       </button>
                     </li>
                   );

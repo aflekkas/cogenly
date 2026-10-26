@@ -1,3 +1,4 @@
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 /**
  * Machines: this server, the hub it dials, and the spokes that dial it. The
  * one service every transport calls (WebSocket RPC, MCP, CLI). A server is
@@ -36,7 +37,7 @@ import * as HubLink from "./HubLink.ts";
 import * as MachineIdentity from "./MachineIdentity.ts";
 import { relateHubMachine, toMachineInfo } from "./machineInfo.ts";
 import { hubPublicKey } from "./peerCrypto.ts";
-import { normalizePeerRoute } from "./peerRoutes.ts";
+import { advertisedPeerRoutes } from "./peerRoutes.ts";
 import * as PeerHub from "./PeerHub.ts";
 
 export class Machines extends Context.Service<
@@ -113,6 +114,7 @@ const make = Effect.gen(function* () {
               }),
             )
           : relateHubMachine(fromHub)),
+        serverVersion: fromHub?.serverVersion ?? view.link.hub.serverVersion,
         online: hubOnline,
         lastSeenAt: hubOnline ? null : view.link.lastSeenAt,
         pairedAt: view.link.pairedAt,
@@ -140,7 +142,7 @@ const make = Effect.gen(function* () {
     const link: MachineLinkState =
       spokes.length === 0 ? { _tag: "standalone" } : { _tag: "hub", spokes: spokes.length };
     return { machines: [thisMachine, ...spokes], link };
-  }).pipe(Effect.withSpan("Machines.list"));
+  }).pipe(NodeSqliteClient.readOnly, Effect.withSpan("Machines.list"));
 
   // The initial list runs alongside the change subscriptions, not before
   // them, so a change landing in between is not missed.
@@ -201,15 +203,7 @@ const make = Effect.gen(function* () {
       Effect.mapError(storage),
     );
     // Tailnet first: it is encrypted and follows the machine between networks.
-    const routes = (yield* endpoints.resolve())
-      .toSorted((left, right) => Number(right.kind === "tailnet") - Number(left.kind === "tailnet"))
-      .flatMap((endpoint) => {
-        try {
-          return [normalizePeerRoute(endpoint.httpBaseUrl)];
-        } catch {
-          return [];
-        }
-      });
+    const routes = advertisedPeerRoutes(yield* endpoints.resolve());
     return {
       grant: grant.credential,
       hubEnvironmentId: self.environmentId,

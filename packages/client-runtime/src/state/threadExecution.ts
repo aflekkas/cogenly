@@ -316,6 +316,89 @@ export function deriveThreadRuntime(
   };
 }
 
+/** When a provider names no wait, the backoff window assumed for display. */
+export const PROVIDER_BACKOFF_FALLBACK_MS = 60_000;
+
+export interface ProviderBackoff {
+  /** "OpenAI" for Codex, "Anthropic" for Claude, else the driver name. */
+  readonly serviceLabel: string;
+  /** When the provider is expected to try again, epoch milliseconds. */
+  readonly retryAtMs: number;
+  readonly attempt: number;
+  readonly maxAttempts: number | null;
+}
+
+const BACKOFF_SERVICE_LABELS: Record<string, string> = {
+  codex: "OpenAI",
+  claude: "Anthropic",
+};
+
+/**
+ * The rate-limit backoff the thread's active run is in, from the running
+ * retry item the adapters record while the provider waits out a 429. Null
+ * once the retry time has passed: the provider is trying again.
+ */
+export function deriveProviderBackoff(
+  projection: OrchestrationV2ThreadProjection,
+  nowMs: number,
+): ProviderBackoff | null {
+  const run = latestMatchingRun(projection, (candidate) =>
+    ACTIVITY_RUN_STATUSES.has(candidate.status),
+  );
+  if (run === null) return null;
+  const item = projection.turnItems.findLast(
+    (candidate) =>
+      candidate.runId === run.id &&
+      candidate.type === "error" &&
+      candidate.status === "running" &&
+      candidate.retry !== undefined &&
+      candidate.failure.class === "usage_limit" &&
+      (candidate.failure.limitKind === "rate_limit" ||
+        candidate.failure.code === "rateLimitExceeded"),
+  );
+  if (item === undefined || item.type !== "error" || item.retry === undefined) return null;
+  const startedMs = DateTime.toEpochMillis(item.startedAt ?? item.updatedAt);
+  const resetMs =
+    item.failure.resetAt === null || item.failure.resetAt === undefined
+      ? Number.NaN
+      : Date.parse(item.failure.resetAt);
+  const retryAtMs =
+    item.retry.retryDelayMs !== null && item.retry.retryDelayMs > 0
+      ? startedMs + item.retry.retryDelayMs
+      : Number.isFinite(resetMs)
+        ? resetMs
+        : startedMs + PROVIDER_BACKOFF_FALLBACK_MS;
+  if (nowMs >= retryAtMs) return null;
+  const providerThread = projection.providerThreads.find(
+    (candidate) => candidate.id === run.providerThreadId,
+  );
+  const session =
+    providerThread?.providerSessionId === null || providerThread?.providerSessionId === undefined
+      ? undefined
+      : projection.providerSessions.find(
+          (candidate) => candidate.id === providerThread.providerSessionId,
+        );
+  const driver = session?.driver ?? run.providerInstanceId;
+  return {
+    serviceLabel: BACKOFF_SERVICE_LABELS[driver] ?? driver,
+    retryAtMs,
+    attempt: item.retry.attempt,
+    maxAttempts: item.retry.maxAttempts,
+  };
+}
+
+/** "Rate-limited by OpenAI · retrying at 13:41:33" for the shared status line. */
+export function formatProviderBackoff(backoff: ProviderBackoff, nowMs: number): string {
+  const at = DateTime.toDate(DateTime.makeUnsafe(backoff.retryAtMs)).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  const remaining = formatDuration(Math.max(1_000, backoff.retryAtMs - nowMs));
+  return `Rate-limited by ${backoff.serviceLabel} · retrying at ${at} (in ${remaining})`;
+}
+
 export function threadRuntimeHasInterruptibleRun(
   runtime: ThreadRuntimeSummary | null | undefined,
 ): boolean {

@@ -465,7 +465,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   @keyframes skeleton {
     /* The single loading-bar breath used by every skeleton: one opacity pulse
        per container, stepped so however many bars sit under it, the compositor
-       draws a handful of discrete frames per cycle rather than one per vsync —
+       draws a handful of discrete frames per cycle rather than one per vsync,
        which on a 120Hz display is the difference between ~14 and ~288 updates. */
     0%,
     42% {
@@ -1073,6 +1073,23 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   }
 }
 
+/* A result row that arrives while its list is already open (a keystroke
+   widened the composer menu's matches) fades in where it lands. */
+@utility animate-row-enter {
+  animation: message-send-fade var(--motion-duration-base) --theme(--ease-out) both;
+}
+
+/* Rows a keystroke dropped, fading out while the panel's edge glides over them. */
+@utility animate-row-leave {
+  animation: row-leave-fade var(--motion-duration-base) --theme(--ease-out) both;
+}
+
+@keyframes row-leave-fade {
+  to {
+    opacity: 0;
+  }
+}
+
 /* A floating panel (popover, menu, command palette, composer drawer) gliding to
    its content's new height. useAnimatedPanelHeight (components/ui) measures
    the content and sets the px height and data-panel-height; only changes after
@@ -1175,7 +1192,10 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
    by scroll-driven animations over the first and last --scroll-fade-size of
    travel, so a container that does not overflow (inactive timeline) keeps its
    initial 0px stops and shows no fade, and nothing runs on scroll events.
-   Browsers without scroll timelines get no fade at all. ScrollArea turns this
+   The fade ramps with scroll distance rather than time, so it needs no motion
+   token and reduced motion keeps it. Browsers without scroll timelines get the
+   same stops from lib/scrollFadeFallback.ts, which writes them inline; the
+   masks stay outside @supports so those stops apply. ScrollArea turns this
    on by default; native scrollers add scroll-fade-y, scroll-fade-x or
    scroll-fade. A native vertical scrollbar sits inside the mask, so
    scroll-fade-y keeps its lane opaque with --scroll-fade-lane (the app's
@@ -1255,7 +1275,6 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
 
 @utility scroll-fade-y {
   @supports (animation-timeline: scroll()) {
-    --scroll-fade-lane: var(--app-scrollbar-width);
     animation:
       scroll-fade-start-y linear both,
       scroll-fade-end-y linear both;
@@ -1263,6 +1282,9 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
     animation-range:
       0 var(--scroll-fade-start-size, var(--scroll-fade-size)),
       calc(100% - var(--scroll-fade-size)) 100%;
+  }
+  & {
+    --scroll-fade-lane: var(--app-scrollbar-width);
     -webkit-mask-image:
       linear-gradient(
         to bottom,
@@ -1323,6 +1345,8 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
     animation-range:
       0 var(--scroll-fade-size),
       calc(100% - var(--scroll-fade-size)) 100%;
+  }
+  & {
     -webkit-mask-image: linear-gradient(
       to right,
       transparent,
@@ -1352,10 +1376,12 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
     animation-timeline:
       scroll(self block), scroll(self block), scroll(self inline), scroll(self inline);
     animation-range:
-      0 var(--scroll-fade-size),
+      0 var(--scroll-fade-start-size, var(--scroll-fade-size)),
       calc(100% - var(--scroll-fade-size)) 100%,
       0 var(--scroll-fade-size),
       calc(100% - var(--scroll-fade-size)) 100%;
+  }
+  & {
     -webkit-mask-image:
       linear-gradient(
         to bottom,
@@ -2987,7 +3013,7 @@ code {
   list-style-type: none;
 }
 
-/* Markdown assumes inline images — GitHub comments lay button images out in a row — and the
+/* Markdown assumes inline images (GitHub comments lay button images out in a row), and the
    Tailwind preflight's block-level img would stack them one per line. */
 .chat-markdown img {
   display: inline-block;
@@ -3136,7 +3162,7 @@ code {
 /* Diagnostics-style tables: row separators only, uppercase headers, and a
    scroll-fade container for horizontal overflow. The root chat-markdown
    wrapping rules (overflow-wrap: anywhere) would let columns shrink to single
-   characters and defeat the overflow — restore word-boundary wrapping so the
+   characters and defeat the overflow. Restore word-boundary wrapping so the
    min column width is the longest word. */
 .chat-markdown table {
   width: 100%;

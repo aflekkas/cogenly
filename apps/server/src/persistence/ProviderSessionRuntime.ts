@@ -429,7 +429,7 @@ export const make = Effect.gen(function* () {
       ),
       Effect.flatMap((rows) =>
         // Skip rows that no longer decode (e.g. written by an older build)
-        // instead of failing the whole list — one stale row must not disable
+        // instead of failing the whole list. One stale row must not disable
         // every consumer that enumerates sessions, such as the reaper.
         Effect.forEach(rows, (row) =>
           decodeRuntimeRow(row).pipe(

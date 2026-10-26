@@ -2,14 +2,14 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 import { RuntimeMode } from "./providerPolicy.ts";
 import { Agent } from "./agent.ts";
-import { ScheduledTask } from "./scheduledTask.ts";
+import { ScheduledTaskFields } from "./scheduledTask.ts";
 import { OrchestrationV2ThreadShell } from "./orchestrationV2.ts";
 
 const legacyModes = ["approval-required", "auto-accept-edits", "auto", "full-access"] as const;
 const recordCodecs = [
   RuntimeMode,
   Agent.fields.runtimeMode,
-  ScheduledTask.fields.runtimeMode,
+  ScheduledTaskFields.runtimeMode,
   OrchestrationV2ThreadShell.fields.runtimeMode,
 ].map((schema) => ({
   decode: Schema.decodeUnknownSync(schema),

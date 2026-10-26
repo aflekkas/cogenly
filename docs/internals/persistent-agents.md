@@ -32,14 +32,19 @@ Ordinary chats require confirmed tags and can opt out through `context.setEnable
 Selected references are persisted per provider run for inspection without copying
 source bodies into the audit record.
 
-After forty conversation runs since the last full handoff, startup opens a fresh native
-session through the existing resume-fallback and `full_thread_summary` delivery path.
-It carries the last twenty conversational items and a persisted, bounded extractive
-summary of older texts. Memory and standing instructions are injected into that session
-as on every turn. The complete application transcript remains an audit history; rotating
-native sessions bounds provider context, not database retention. Summaries use bounded
-text extracts, without spending extra provider turns, and can lose nuance from long
-messages. Facts that must survive should be remembered explicitly.
+Native sessions are disposable, but rotating one must never discard open state. The
+[handoff service](../../apps/server/src/agents/AgentHandoff.ts) prepares a cited narrative
+in the server's scope before rotation is due. At the boundary it renders exact database
+state and validates it before permitting either a periodic rotation or a model switch.
+Missing, stale or oversized briefs preserve the old session; model switches retry rather
+than starting without a valid brief. Exact state travels outside retrieval/history budgets,
+which are allowed to omit evidence. Brief revisions remain inspectable in agent Details.
+Core memory also travels outside retrieval budgets on every turn.
+
+The reconciler sweeps results arriving inside completed conversation turns into frozen
+inbox batches. Those use the existing queue and stable command receipts; passive postbacks
+remain passive. Delegated child completion already owns its delivery and is not duplicated
+by this sweep. A failed send retries the same batch, rather than recomputing its contents.
 
 Autonomous job reservations are transactional, limited to one active job per agent,
 and capped per UTC day. Agents cannot be paused: failure backoff starts at one minute and

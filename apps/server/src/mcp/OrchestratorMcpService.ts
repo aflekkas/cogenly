@@ -1,3 +1,5 @@
+import { assertRunOwnership } from "./runOwnership.ts";
+import { derivePendingBackgroundWork } from "@cogenly/shared/orchestrationV2PendingBackgroundWork";
 import * as AccountConnections from "../accounts/AccountConnections.ts";
 import {
   CommandId,
@@ -23,6 +25,9 @@ import {
   type OrchestratorMcpInteractionMode,
   type OrchestratorMcpMachineProvider,
   type OrchestratorMcpDeleteScheduledTaskInput,
+  type OrchestrationV2LoginRequest,
+  type OrchestratorMcpRequestLoginInput,
+  type OrchestratorMcpRequestLoginResult,
   type OrchestratorMcpRequestSecretInput,
   type OrchestratorMcpRequestSecretResult,
   type OrchestratorMcpDeleteScheduledTaskResult,
@@ -59,6 +64,7 @@ import {
   type ScheduledTaskUpsertInput,
   type ServerProvider,
   ThreadId,
+  VaultItemId,
 } from "@cogenly/contracts";
 import { latestExecutedRun, runRanAfter } from "@cogenly/shared/orchestrationV2ThreadError";
 import { applyModelEffortDefaults } from "@cogenly/shared/model";
@@ -101,7 +107,7 @@ import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { limitRecoveryStatus } from "../orchestration-v2/UsageLimitRecoveryWorker.ts";
-import { providerUsageHeadroom } from "../orchestration-v2/UsageLimitHandoff.ts";
+import { providerUsageHeadroom } from "../orchestration-v2/providerUsageHeadroom.ts";
 import {
   clientRuntimeModeCeiling,
   type McpInvocationScope,
@@ -111,7 +117,9 @@ import {
 import { formatThreadLink } from "@cogenly/shared/threadLinks";
 import * as Metrics from "../observability/Metrics.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
+import { normalizeHost } from "../vault/VaultPolicy.ts";
 import * as Vault from "../vault/Vault.ts";
+import * as SiteIconCache from "../assets/SiteIconCache.ts";
 
 const DEFAULT_WAIT_TIMEOUT_MS = 10 * 60 * 1_000;
 const MAX_WAIT_TIMEOUT_MS = 60 * 60 * 1_000;
@@ -127,9 +135,15 @@ const TASK_WAKE_EVENTS = [
 /** A person answers the card, so a slower poll is plenty. */
 const SECRET_REQUEST_POLL_INTERVAL_MS = 500;
 const DEFAULT_THREAD_LIST_LIMIT = 50;
-const DEFAULT_THREAD_READ_LIMIT = 50;
+/**
+ * A default `thread_read` page is context the caller pays for on every later
+ * turn, so it stays small: 20 items at 2k chars. Callers page explicitly
+ * with `afterPosition`/`limit`/`maxCharsPerItem` (and `itemId`/`textOffset`
+ * for one long item) when they need more.
+ */
+const DEFAULT_THREAD_READ_LIMIT = 20;
 const DEFAULT_THREAD_RUN_LIMIT = 10;
-const DEFAULT_THREAD_ITEM_MAX_CHARS = 20_000;
+const DEFAULT_THREAD_ITEM_MAX_CHARS = 2_000;
 
 interface ResolvedTarget {
   readonly modelSelection: ModelSelection;
@@ -185,6 +199,14 @@ export interface OrchestratorMcpServiceShape {
     scope: McpInvocationScope,
     input: OrchestratorMcpRequestSecretInput,
   ) => Effect.Effect<OrchestratorMcpRequestSecretResult, OrchestratorMcpFailure>;
+  /**
+   * Asks the user to sign in to a site through a card in the calling thread
+   * and waits. The answer is saved to the vault; the result names the item.
+   */
+  readonly requestLogin: (
+    scope: McpInvocationScope,
+    input: OrchestratorMcpRequestLoginInput,
+  ) => Effect.Effect<OrchestratorMcpRequestLoginResult, OrchestratorMcpFailure>;
   readonly listThreads: (
     scope: McpInvocationScope,
     input: OrchestratorMcpThreadListInput,
@@ -859,7 +881,9 @@ function turnItemText(item: OrchestrationV2TurnItem): string | null {
     case "thread_created":
       return `Created thread ${item.targetThreadId} with ${item.targetProviderInstanceId} (${item.targetModel}).`;
     case "secret_request":
-      return `Asked the user for ${item.label}: ${item.secretStatus}.`;
+      return item.login
+        ? `Asked the user to sign in to ${item.login.siteName ?? item.login.origin}: ${item.secretStatus}${item.login.savedItemName ? ` (vault item ${item.login.savedItemName})` : ""}.`
+        : `Asked the user for ${item.label}: ${item.secretStatus}.`;
     case "subagent":
       return item.result ?? item.progress ?? item.prompt;
     case "dynamic_tool":
@@ -953,7 +977,43 @@ const make = Effect.gen(function* () {
       : Effect.succeed(project.defaultModelSelection);
   const secretRequests = yield* SecretRequests.SecretRequests;
   const vault = yield* Vault.Vault;
+  const siteIcons = yield* Effect.serviceOption(SiteIconCache.SiteIconCache);
   const accountConnections = yield* AccountConnections.AccountConnections;
+
+  /** The tool wait is bounded; the durable card remains answerable after it returns. */
+  const awaitSecretCard = (input: {
+    readonly threadId: ThreadId;
+    readonly turnItemId: TurnItemId;
+    readonly timeoutMs: number | undefined;
+  }) =>
+    Effect.gen(function* () {
+      const wait = Effect.gen(function* () {
+        while (true) {
+          const projection = yield* threadManagement
+            .getThreadRecords(input.threadId, ["turnItems"], {
+              turnItemTypes: ["secret_request"],
+              messageRoles: [],
+            })
+            .pipe(
+              Effect.mapError(() =>
+                failure("orchestration_error", "Unable to read the secret request."),
+              ),
+            );
+          const item = projection.turnItems.find((candidate) => candidate.id === input.turnItemId);
+          if (item?.type === "secret_request" && item.secretStatus !== "pending")
+            return item.secretStatus;
+          yield* Effect.sleep(Duration.millis(SECRET_REQUEST_POLL_INTERVAL_MS));
+        }
+      });
+      const answered = yield* wait.pipe(
+        Effect.timeoutOption(
+          Duration.millis(
+            Math.min(input.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS, MAX_WAIT_TIMEOUT_MS),
+          ),
+        ),
+      );
+      return Option.isSome(answered) ? answered.value : ("timed_out" as const);
+    });
 
   const requireCapability = (scope: McpInvocationScope) =>
     scope.capabilities.has("orchestration")
@@ -979,7 +1039,11 @@ const make = Effect.gen(function* () {
           "contextTransfers",
           "turnItems",
         ],
-        { turnItemTypes: [], messageRoles: ["user"] },
+        {
+          turnItemTypes: ["command_execution", "dynamic_tool", "subagent"],
+          turnItemStatuses: ["pending", "running", "waiting"],
+          messageRoles: ["user"],
+        },
       )
       .pipe(
         Effect.mapError((error) =>
@@ -1007,7 +1071,11 @@ const make = Effect.gen(function* () {
           "contextTransfers",
           "turnItems",
         ],
-        { turnItemTypes: [], messageRoles: ["user"] },
+        {
+          turnItemTypes: ["command_execution", "dynamic_tool", "subagent"],
+          turnItemStatuses: ["pending", "running", "waiting"],
+          messageRoles: ["user"],
+        },
       )
       .pipe(Effect.mapError(threadManagementFailure));
 
@@ -1091,7 +1159,9 @@ const make = Effect.gen(function* () {
    */
   const assertLiveCallerForOtherThread = (
     scope: McpInvocationScope,
-    parent: Pick<OrchestrationV2ThreadProjection, "thread" | "runs"> | undefined,
+    parent:
+      | Pick<OrchestrationV2ThreadProjection, "thread" | "runs" | "providerThreads" | "turnItems">
+      | undefined,
     target: Pick<OrchestrationV2ThreadProjection, "thread">,
   ) =>
     parent === undefined || target.thread.id === parent.thread.id
@@ -1101,26 +1171,68 @@ const make = Effect.gen(function* () {
   /** Scheduled work outside the caller's own project needs the same live run. */
   const assertLiveCallerForOtherProject = (
     scope: McpInvocationScope,
-    parent: Pick<OrchestrationV2ThreadProjection, "thread" | "runs"> | undefined,
+    parent:
+      | Pick<OrchestrationV2ThreadProjection, "thread" | "runs" | "providerThreads" | "turnItems">
+      | undefined,
     projectId: ProjectId,
   ) =>
     parent === undefined || projectId === parent.thread.projectId
       ? Effect.void
       : assertLiveCaller(scope, parent);
 
-  const assertLiveCaller = (
+  const assertLiveCaller = Effect.fn("OrchestratorMcpService.assertLiveCaller")(function* (
     scope: McpInvocationScope,
-    parent: Pick<OrchestrationV2ThreadProjection, "thread" | "runs">,
-  ) => {
-    const activeRun = ThreadManagementService.latestActiveRun(parent);
-    return parent.thread.archivedAt !== null ||
-      activeRun === undefined ||
-      activeRun.providerInstanceId !== scope.thread?.providerInstanceId
-      ? Effect.fail(
-          failure("parent_not_active", "The calling provider no longer owns an active thread run."),
-        )
-      : Effect.void;
-  };
+    parent: Pick<
+      OrchestrationV2ThreadProjection,
+      "thread" | "runs" | "providerThreads" | "turnItems"
+    >,
+  ) {
+    const activeRun = parent.runs
+      .filter(
+        (run) =>
+          run.status === "preparing" || run.status === "starting" || run.status === "running",
+      )
+      .toSorted((a, b) => b.ordinal - a.ordinal)[0];
+    const latestRun = parent.runs
+      .filter((run) => run.status !== "queued")
+      .toSorted((a, b) => b.ordinal - a.ordinal)[0];
+    yield* assertRunOwnership({
+      caller: {
+        ...parent.thread,
+        providerInstanceId: activeRun?.providerInstanceId ?? parent.thread.providerInstanceId,
+        activeRunId: activeRun?.id ?? null,
+        latestRunId: latestRun?.id ?? null,
+        pendingBackgroundTasks: derivePendingBackgroundWork({
+          latestRun,
+          providerThreads: parent.providerThreads,
+          turnItems: parent.turnItems,
+          activeProviderThreadId: parent.thread.activeProviderThreadId,
+          runs: parent.runs,
+          pullRequests: parent.thread.pullRequests,
+        }),
+      },
+      scope,
+      threads: threadManagement,
+    });
+  });
+
+  const ownedRun = Effect.fn("OrchestratorMcpService.ownedRun")(function* (
+    scope: McpInvocationScope,
+    parent: Pick<
+      OrchestrationV2ThreadProjection,
+      "thread" | "runs" | "providerThreads" | "turnItems"
+    >,
+  ) {
+    yield* assertLiveCaller(scope, parent);
+    return (
+      ThreadManagementService.latestActiveRun({
+        runs: parent.runs.filter((run) => run.status !== "waiting"),
+      }) ??
+      parent.runs
+        .filter((run) => run.status !== "queued")
+        .toSorted((a, b) => b.ordinal - a.ordinal)[0]
+    );
+  });
 
   const loadReadableThread = (scope: McpInvocationScope, threadId: ThreadId) =>
     Effect.gen(function* () {
@@ -1225,7 +1337,7 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Instance ids the adapter registry resolves — the same lookup a
+   * Instance ids the adapter registry resolves, the same lookup a
    * `delegated_task.request` performs when it runs. Capability reporting and
    * target resolution must not advertise a set narrower (or wider) than what
    * dispatch can actually serve.
@@ -1717,7 +1829,9 @@ const make = Effect.gen(function* () {
   const summarizeScheduledTask = (
     scope: McpInvocationScope,
     caller: {
-      readonly parent: Pick<OrchestrationV2ThreadProjection, "thread" | "runs"> | undefined;
+      readonly parent:
+        | Pick<OrchestrationV2ThreadProjection, "thread" | "runs" | "providerThreads" | "turnItems">
+        | undefined;
       readonly limits: {
         readonly runtimeMode: RuntimeMode;
         readonly interactionMode: ProviderInteractionMode;
@@ -1941,7 +2055,7 @@ const make = Effect.gen(function* () {
         // The card is shown in, and answered from, the caller's own thread.
         const { scope: threadScope, parent } = yield* loadThreadCaller(scope, "request_secret");
         const threadId = threadScope.thread.threadId;
-        const run = ThreadManagementService.latestActiveRun(parent);
+        const run = yield* ownedRun(threadScope, parent);
         if (
           run === undefined ||
           run.rootNodeId === null ||
@@ -1964,28 +2078,34 @@ const make = Effect.gen(function* () {
           : undefined;
         const runId = run.id;
         const nodeId = run.rootNodeId;
-        // The answer is consumed when it is stored, so a taken name must fail
-        // before the user types anything rather than after.
-        if (input.saveToVault) {
-          const name = input.saveToVault.name;
-          const { items } = yield* vault
-            .list({})
-            .pipe(
-              Effect.mapError(() => failure("orchestration_error", "Unable to read the vault.")),
-            );
-          if (items.some((item) => item.name === name)) {
-            return yield* failure(
-              "invalid_request",
-              `A vault item named "${name}" already exists. Pick another name, or use the existing item.`,
-            );
-          }
-        }
         const key = yield* requestKey(input.clientRequestId);
-        // Turn item ids are global; scope the key to this thread. A retry with
-        // the same clientRequestId finds this card, answered or not.
         const turnItemId = TurnItemId.make(
           `turn-item:secret-request:${stablePart(threadId)}:${stablePart(key)}`,
         );
+        if (input.saveToVault) {
+          const previous = yield* threadManagement
+            .getThreadRecords(threadId, ["turnItems"], {
+              turnItemTypes: ["secret_request"],
+              messageRoles: [],
+            })
+            .pipe(
+              Effect.mapError(() =>
+                failure("orchestration_error", "Unable to read the private request."),
+              ),
+            );
+          if (!previous.turnItems.some((item) => item.id === turnItemId)) {
+            const { items } = yield* vault
+              .list({})
+              .pipe(
+                Effect.mapError(() => failure("orchestration_error", "Unable to read the vault.")),
+              );
+            if (items.some((item) => item.name === input.saveToVault!.name))
+              return yield* failure(
+                "invalid_request",
+                "That vault item name is already taken. Choose another name or use the existing item.",
+              );
+          }
+        }
         yield* accountConnections
           .bindSecretRequest(threadScope.thread, turnItemId, input.saveToAccount?.connectionId)
           .pipe(Effect.mapError((cause) => failure("invalid_request", cause.message)));
@@ -2045,6 +2165,7 @@ const make = Effect.gen(function* () {
               reason: accountTarget ? `${accountTarget.reason} ${input.reason}` : input.reason,
               ...(input.placeholder === undefined ? {} : { placeholder: input.placeholder }),
               secretStatus,
+              ...(input.saveToVault ? { secretVault: input.saveToVault } : {}),
             })
             .pipe(
               Effect.mapError((error) =>
@@ -2055,77 +2176,32 @@ const make = Effect.gen(function* () {
               ),
             );
         yield* record("pending");
-        // Only this call can hand the agent its ref, so the card must not
-        // outlive it: a timeout, a failed wait or an aborted call closes it as
-        // cancelled. If even that fails, the server still refuses an answer
-        // once the run ends, and an unused value expires.
-        const closeCard = record("cancelled").pipe(
-          Effect.catch((error) =>
-            Effect.logWarning("Could not close a secret request card", { error: error.message }),
-          ),
-        );
-
-        // The user answers the card (secrets.answerRequest), or it ends with
-        // the run; poll it like a delegated task.
-        const answered = yield* Effect.gen(function* () {
-          while (true) {
-            const projection = yield* threadManagement
-              .getThreadRecords(threadId, ["runs", "turnItems"], {
-                turnItemTypes: ["secret_request"],
-                messageRoles: [],
-              })
-              .pipe(
-                Effect.mapError((error) =>
-                  failure(
-                    "orchestration_error",
-                    `Unable to read the secret request: ${errorMessage(error)}`,
-                  ),
-                ),
-              );
-            const item = projection.turnItems.find((candidate) => candidate.id === turnItemId);
-            if (item?.type === "secret_request" && item.secretStatus !== "pending") {
-              return item.secretStatus;
-            }
-            const current = projection.runs.find((candidate) => candidate.id === runId);
-            if (
-              current === undefined ||
-              ThreadManagementService.isTerminalRunStatus(current.status)
-            ) {
-              yield* record("cancelled");
-              return "cancelled" as const;
-            }
-            yield* Effect.sleep(Duration.millis(SECRET_REQUEST_POLL_INTERVAL_MS));
-          }
-        }).pipe(
-          Effect.timeoutOption(
-            Duration.millis(
-              Math.min(input.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS, MAX_WAIT_TIMEOUT_MS),
-            ),
-          ),
-          Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : closeCard)),
-        );
-        if (Option.isNone(answered)) yield* closeCard;
-        // An answer that raced the timeout still wins: the card is answered once.
-        const status = Option.isSome(answered)
-          ? answered.value
-          : yield* threadManagement
-              .getThreadRecords(threadId, ["turnItems"], {
-                turnItemTypes: ["secret_request"],
-                messageRoles: [],
-              })
-              .pipe(
-                Effect.map((records) => {
-                  const item = records.turnItems.find((candidate) => candidate.id === turnItemId);
-                  return item?.type === "secret_request" &&
-                    (item.secretStatus === "saved" || item.secretStatus === "declined")
-                    ? item.secretStatus
-                    : ("timed_out" as const);
-                }),
-                Effect.orElseSucceed(() => "timed_out" as const),
-              );
+        const status = yield* awaitSecretCard({
+          threadId,
+          turnItemId,
+          timeoutMs: input.timeoutMs,
+        });
         yield* Effect.annotateCurrentSpan({ "secret_request.status": status });
         yield* Metrics.increment(Metrics.secretRequestsTotal, { status });
         if (status !== "saved") return { status };
+        const answeredCard = yield* threadManagement
+          .getThreadRecords(threadId, ["turnItems"], {
+            turnItemTypes: ["secret_request"],
+            messageRoles: [],
+          })
+          .pipe(
+            Effect.mapError(() =>
+              failure("orchestration_error", "Unable to read the saved secret request."),
+            ),
+          );
+        const savedCard = answeredCard.turnItems.find((item) => item.id === turnItemId);
+        if (savedCard?.type === "secret_request" && savedCard.secretVault?.savedItemId) {
+          return {
+            status,
+            vaultItemId: savedCard.secretVault.savedItemId,
+            vaultItemName: savedCard.secretVault.savedItemName,
+          };
+        }
         // Saved means the value was stored before the card said so; a missing
         // value is a storage fault, not an answer the agent can act on.
         const secretRef = yield* secretRequests.savedRef({ threadId: threadId, turnItemId });
@@ -2169,6 +2245,158 @@ const make = Effect.gen(function* () {
         }
         return { status, secretRef: secretRef.value };
       }).pipe(Effect.withSpan("OrchestratorMcpService.requestSecret")),
+
+    requestLogin: (scope, input) =>
+      Effect.gen(function* () {
+        // The card is shown in, and answered from, the caller's own thread.
+        const { scope: threadScope, parent } = yield* loadThreadCaller(scope, "request_login");
+        const threadId = threadScope.thread.threadId;
+        const run = ThreadManagementService.latestActiveRun(parent);
+        if (
+          run === undefined ||
+          run.rootNodeId === null ||
+          run.providerInstanceId !== threadScope.thread.providerInstanceId
+        ) {
+          return yield* failure(
+            "parent_not_active",
+            "Asking the user to sign in requires an active run owned by this MCP provider session.",
+          );
+        }
+        const runId = run.id;
+        const nodeId = run.rootNodeId;
+        const host = normalizeHost(input.site);
+        if (!host)
+          return yield* failure(
+            "invalid_request",
+            "site must be a URL or host name, e.g. github.com.",
+          );
+        const origin = Option.match(Option.liftThrowable(() => new URL(input.site))(), {
+          onNone: () => `https://${host}`,
+          onSome: (url) =>
+            url.protocol === "http:" || url.protocol === "https:" ? url.origin : `https://${host}`,
+        });
+        // An update must name one login this thread can see, by id, label or
+        // username, checked before the user types anything.
+        const target = input.updateItemId?.trim();
+        const findUpdate = (selector: Vault.VaultLoginSelector) =>
+          vault
+            .findLogin({ ...selector, domain: host, threadId })
+            .pipe(
+              Effect.mapError(() => failure("orchestration_error", "Unable to read the vault.")),
+            );
+        const found = !target
+          ? undefined
+          : target.startsWith("vault:")
+            ? yield* findUpdate({ itemId: VaultItemId.make(target) })
+            : yield* findUpdate({ label: target }).pipe(
+                Effect.flatMap((byLabel) =>
+                  byLabel.status === "not_found"
+                    ? findUpdate({ username: target })
+                    : Effect.succeed(byLabel),
+                ),
+              );
+        if (found?.status === "ambiguous") {
+          return yield* failure(
+            "invalid_request",
+            `Several vault logins match ${target}: ${found.candidates
+              .map((candidate) => `${candidate.label} (id ${candidate.id})`)
+              .join(", ")}. Pass the id of the one to update.`,
+          );
+        }
+        const updateTarget = found?.status === "found" ? found.item : undefined;
+        if (target && updateTarget?.type !== "login") {
+          return yield* failure(
+            "invalid_request",
+            `No vault login matches ${target}. Use an id, label or username from vault_list, or omit updateItemId to save a new login.`,
+          );
+        }
+        const login: OrchestrationV2LoginRequest = {
+          origin,
+          ...(input.siteName === undefined ? {} : { siteName: input.siteName }),
+          ...(input.usernameHint?.trim() ? { usernameHint: input.usernameHint.trim() } : {}),
+          fields: [
+            ...new Set<OrchestrationV2LoginRequest["fields"][number]>(
+              input.fields ?? ["username", "password"],
+            ),
+          ],
+          ...(updateTarget
+            ? { updateItemId: updateTarget.id, updateItemName: updateTarget.name }
+            : {}),
+        };
+        const key = yield* requestKey(input.clientRequestId);
+        // Turn item ids are global; scope the key to this thread. A retry with
+        // the same clientRequestId finds this card, answered or not.
+        const turnItemId = TurnItemId.make(
+          `turn-item:login-request:${stablePart(threadId)}:${stablePart(key)}`,
+        );
+        const record = (secretStatus: "pending" | "cancelled") =>
+          threadManagement
+            .dispatch({
+              type: "secret_request.record",
+              commandId: stableCommandId({
+                scope,
+                requestKey: key,
+                operation: `login-${secretStatus}`,
+              }),
+              threadId,
+              runId,
+              nodeId,
+              turnItemId,
+              label: `Sign in to ${input.siteName ?? host}`,
+              reason: input.reason,
+              secretStatus,
+              login,
+            })
+            .pipe(
+              Effect.mapError((error) =>
+                failure(
+                  "orchestration_error",
+                  `Could not record the sign-in request: ${errorMessage(error)}`,
+                ),
+              ),
+            );
+        yield* record("pending");
+        // The card shows the site's icon; one the agent supplied replaces the favicon.
+        if (input.iconUrl !== undefined && Option.isSome(siteIcons))
+          yield* siteIcons.value.provide(host, input.iconUrl);
+        const status = yield* awaitSecretCard({
+          threadId,
+          turnItemId,
+          timeoutMs: input.timeoutMs,
+        });
+        yield* Effect.annotateCurrentSpan({ "login_request.status": status });
+        yield* Metrics.increment(Metrics.secretRequestsTotal, { status });
+        if (status !== "saved") return { status };
+        // Saved means the vault item existed before the card said so.
+        const saved = yield* threadManagement
+          .getThreadRecords(threadId, ["turnItems"], {
+            turnItemTypes: ["secret_request"],
+            messageRoles: [],
+          })
+          .pipe(
+            Effect.map((records) => {
+              const item = records.turnItems.find((candidate) => candidate.id === turnItemId);
+              return item?.type === "secret_request" ? item.login : undefined;
+            }),
+            Effect.mapError(() =>
+              failure("orchestration_error", "Unable to read the sign-in request."),
+            ),
+          );
+        if (saved?.savedItemId === undefined || saved.savedItemName === undefined) {
+          return yield* failure(
+            "orchestration_error",
+            "The user saved the login, but its vault item could not be found. Check vault_list.",
+          );
+        }
+        return {
+          status,
+          vaultItemId: saved.savedItemId,
+          vaultItemName: saved.savedItemName,
+          domain: host,
+          updated: saved.updateItemId !== undefined,
+          kept: saved.kept ?? true,
+        };
+      }).pipe(Effect.withSpan("OrchestratorMcpService.requestLogin")),
 
     capabilities: (scope) =>
       Effect.gen(function* () {
@@ -2280,9 +2508,7 @@ const make = Effect.gen(function* () {
         const machine = yield* resolveMachine(input.machine).pipe(
           Effect.mapError((error) => failure("invalid_request", error.message)),
         );
-        const parentRun = parent.runs
-          .filter(ThreadManagementService.isActiveRun)
-          .toSorted((left, right) => right.ordinal - left.ordinal)[0];
+        const parentRun = yield* ownedRun(scope, parent);
         if (
           parentRun === undefined ||
           parentRun.rootNodeId === null ||
@@ -2646,7 +2872,7 @@ const make = Effect.gen(function* () {
     createThreads: (callerScope, input) =>
       Effect.gen(function* () {
         const { scope, parent } = yield* loadThreadCaller(callerScope, "create_threads");
-        const parentRun = ThreadManagementService.latestActiveRun(parent);
+        const parentRun = yield* ownedRun(scope, parent);
         if (
           parentRun === undefined ||
           parentRun.rootNodeId === null ||

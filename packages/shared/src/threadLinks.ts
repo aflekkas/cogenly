@@ -115,6 +115,43 @@ export function hasThreadLinks(markdown: string): boolean {
   return THREAD_LINK_HREF_PREFIXES.some((prefix) => markdown.includes(`](${prefix}`));
 }
 
+const THREAD_LINK = /\[([^\]\n]*)\]\(((?:cogenly|t3)-thread:\/\/v1\/[^\s)]+)\)/g;
+
+export interface ThreadLinkOccurrence {
+  readonly threadId: ThreadId;
+  /** The label as written; clients show the thread's current title instead. */
+  readonly label: string;
+  readonly source: string;
+  readonly start: number;
+  readonly end: number;
+}
+
+/** Each thread link as its label, for previews and titles that show plain text. */
+export function threadLinksToPlainText(text: string): string {
+  if (!hasThreadLinks(text)) return text;
+  return text.replace(THREAD_LINK, (source: string, label: string, href: string) =>
+    parseThreadLinkHref(href) === null ? source : label.trim() || source,
+  );
+}
+
+/** Every thread link in `text`, in order. The composer shows each one as a chip. */
+export function collectThreadLinks(text: string): ThreadLinkOccurrence[] {
+  if (!hasThreadLinks(text)) return [];
+  const links: ThreadLinkOccurrence[] = [];
+  for (const match of text.matchAll(THREAD_LINK)) {
+    const threadId = parseThreadLinkHref(match[2]!);
+    if (threadId === null) continue;
+    links.push({
+      threadId,
+      label: match[1]!.trim(),
+      source: match[0],
+      start: match.index,
+      end: match.index + match[0].length,
+    });
+  }
+  return links;
+}
+
 /**
  * Relabels each thread link with `title(threadId)`, pointing it at the thread that title came from.
  * A link it returns nothing for keeps its label.

@@ -80,7 +80,7 @@ function parseAgent(entry: unknown): OrchestrationV2WorkflowAgent | null {
 /**
  * Reads the Workflow tool's structured result. A background launch answers the
  * model with an acknowledgement rather than the run's output, and that
- * acknowledgement is the only place the run's filesystem handles appear —
+ * acknowledgement is the only place the run's filesystem handles appear;
  * nothing later on the event stream repeats them.
  */
 export function parseClaudeWorkflowRunHandles(
@@ -118,7 +118,7 @@ function parseClaudeWorkflowProgress(message: unknown): {
 /**
  * Folds one frame into the coordinator's workflow state. A frame without a
  * snapshot still carries usage, so totals keep climbing between snapshots.
- * A phase only ever joins the plan — the provider re-sends the full plan on
+ * A phase only ever joins the plan. The provider re-sends the full plan on
  * every snapshot, but a late frame that omits an already-seen phase must not
  * shorten the arc the user is looking at.
  *

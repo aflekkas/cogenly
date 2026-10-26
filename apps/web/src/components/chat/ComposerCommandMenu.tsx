@@ -8,6 +8,7 @@ import type {
   ComposerMentionItem,
 } from "@cogenly/client-runtime/composerThreadItems";
 import {
+  type EnvironmentId,
   type ProjectEntry,
   type ProviderDriverKind,
   type PullRequestContextMetadata,
@@ -27,7 +28,7 @@ import {
   UserRoundIcon,
   type LucideIcon,
 } from "lucide-react";
-import { memo, useLayoutEffect, useRef } from "react";
+import { memo, useLayoutEffect, useRef, useState } from "react";
 
 import { type ComposerSlashCommand, type ComposerTriggerKind } from "../../composer-logic";
 import { useAnimatedPanelHeight } from "../ui/animated-panel-height";
@@ -40,11 +41,18 @@ import {
   SearchListRowLabel,
   SearchListRowText,
   SearchListRowTrailing,
+  searchListRowVariants,
 } from "../ui/search-list";
+import { useMachineLabel } from "../../machines/useMachineLabel";
+import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { IntegrationSourceRowContent } from "./ComposerSourcesPicker";
 import { ComposerBanner } from "./ComposerBanner";
-import { composerMenuEmptyText, composerMenuSections } from "./ComposerCommandMenu.logic";
+import {
+  composerMenuEmptyText,
+  composerMenuRowChanges,
+  composerMenuSections,
+} from "./ComposerCommandMenu.logic";
 
 export type ComposerCommandItem =
   | {
@@ -104,6 +112,9 @@ const MENU_GROUP_PRESENTATION: Record<ComposerMenuGroup, { label: string; icon: 
   files: { label: "Files and folders", icon: FileIcon },
 };
 
+/** About a full drawer of rows (`max-h-72`): more would sit past its top edge. */
+const LEAVING_ROWS_MAX = 9;
+
 function menuGroupOf(item: ComposerCommandItem): ComposerMenuGroup | null {
   return "group" in item ? item.group : null;
 }
@@ -120,9 +131,29 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
   onSelect: (item: ComposerCommandItem) => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
-  // The drawer sits on the composer by its bottom edge, so a height change grows it upward.
+  // The drawer sits on the composer by its bottom edge and hugs its rows, so a height change only
+  // glides the top edge. The rows are laid out from the bottom, so the ones by the input hold still
+  // while the top edge reveals or clips the rows above them.
   const panel = useAnimatedPanelHeight();
   const { sections, showHeadings } = composerMenuSections(props.items, menuGroupOf);
+  // Rows a keystroke brought fade in; rows it dropped stay drawn above the new ones, fading, while
+  // the top edge glides down over them, so a shrinking drawer never shows bare surface. A larger
+  // drawer clips them. Rows on screen when the menu opens arrive with it.
+  const [shownItems, setShownItems] = useState(props.items);
+  const [arrived, setArrived] = useState<ReadonlySet<string>>(() => new Set());
+  const [leaving, setLeaving] = useState<{ rows: ComposerCommandItem[]; generation: number }>({
+    rows: [],
+    generation: 0,
+  });
+  if (shownItems !== props.items) {
+    setShownItems(props.items);
+    const changes = composerMenuRowChanges(shownItems, props.items, LEAVING_ROWS_MAX);
+    setArrived(changes.arrived);
+    // Rows still fading from an earlier keystroke finish unless this one drops others.
+    if (changes.leaving.length > 0) {
+      setLeaving({ rows: changes.leaving, generation: leaving.generation + 1 });
+    }
+  }
 
   useLayoutEffect(() => {
     if (!props.activeItemId || !listRef.current) return;
@@ -145,13 +176,36 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
       <ComposerBanner.Surface
         ref={listRef}
         {...panel.panelProps}
-        className="panel-height-motion min-h-0 w-full **:data-[slot=scroll-area-scrollbar]:data-[orientation=vertical]:my-4"
+        className="panel-height-motion flex min-h-0 w-full flex-col justify-end **:data-[slot=scroll-area-scrollbar]:data-[orientation=vertical]:my-4"
         data-composer-command-drawer="true"
       >
         <div
           ref={panel.contentRef}
-          className="flex flex-col pb-(--chat-composer-attachment-overlap)"
+          className="relative flex shrink-0 flex-col pb-(--chat-composer-attachment-overlap)"
         >
+          {leaving.rows.length > 0 ? (
+            <div
+              key={leaving.generation}
+              aria-hidden="true"
+              inert
+              // Overlaps the list's top padding so the rows keep their old spacing.
+              className="animate-row-leave pointer-events-none absolute inset-x-0 bottom-[calc(100%-(--spacing(2)))] flex flex-col px-2"
+              data-composer-leaving-rows=""
+              onAnimationEnd={(event) => {
+                if (event.target === event.currentTarget) setLeaving({ ...leaving, rows: [] });
+              }}
+            >
+              {leaving.rows.map((item) => (
+                <div key={item.id} className={searchListRowVariants({ highlight: "none" })}>
+                  <ComposerCommandRowContent
+                    item={item}
+                    triggerKind={props.triggerKind}
+                    resolvedTheme={props.resolvedTheme}
+                  />
+                </div>
+              ))}
+            </div>
+          ) : null}
           {props.items.length > 0 ? (
             <CommandList
               id={props.listId}
@@ -176,6 +230,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
                         triggerKind={props.triggerKind}
                         resolvedTheme={props.resolvedTheme}
                         isActive={props.activeItemId === item.id}
+                        arrived={arrived.has(item.id)}
                         onHighlight={props.onHighlightedItemChange}
                         onSelect={props.onSelect}
                       />
@@ -207,13 +262,28 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
   triggerKind: ComposerTriggerKind | null;
   resolvedTheme: "light" | "dark";
   isActive: boolean;
+  /** Read once at mount: the keystroke that rendered this row brought it, so it fades in. */
+  arrived: boolean;
   onHighlight: (itemId: string | null) => void;
   onSelect: (item: ComposerCommandItem) => void;
 }) {
-  const skillSourceKind =
-    props.item.type === "skill" ? resolveProviderSkillSourceKind(props.item.skill) : null;
-  const isSlashSkill =
-    props.triggerKind === "slash-command" && props.item.type === "skill" ? props.item.skill : null;
+  const rowRef = useRef<HTMLDivElement>(null);
+  // A row that moves to another section remounts; it was already on screen, so it does not fade.
+  const [fadeIn] = useState(props.arrived);
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    if (!row || !fadeIn) return;
+    // Dropped once played: a later keystroke that reorders the rows moves this node, which would
+    // restart the fade.
+    const settle = (event: AnimationEvent) => {
+      if (event.target !== row) return;
+      row.classList.remove("animate-row-enter");
+      row.removeEventListener("animationend", settle);
+    };
+    row.classList.add("animate-row-enter");
+    row.addEventListener("animationend", settle);
+    return () => row.removeEventListener("animationend", settle);
+  }, [fadeIn]);
 
   return (
     <CommandItem
@@ -222,6 +292,7 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
       value={props.item.id}
       data-composer-item-id={props.item.id}
       active={props.isActive}
+      ref={rowRef}
       onMouseMove={() => {
         if (!props.isActive) props.onHighlight(props.item.id);
       }}
@@ -232,6 +303,28 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
         props.onSelect(props.item);
       }}
     >
+      <ComposerCommandRowContent
+        item={props.item}
+        triggerKind={props.triggerKind}
+        resolvedTheme={props.resolvedTheme}
+      />
+    </CommandItem>
+  );
+});
+
+/** A row's icon, text and badge, shared by the pickable rows and the ones fading out. */
+function ComposerCommandRowContent(props: {
+  item: ComposerCommandItem;
+  triggerKind: ComposerTriggerKind | null;
+  resolvedTheme: "light" | "dark";
+}) {
+  const skillSourceKind =
+    props.item.type === "skill" ? resolveProviderSkillSourceKind(props.item.skill) : null;
+  const isSlashSkill =
+    props.triggerKind === "slash-command" && props.item.type === "skill" ? props.item.skill : null;
+
+  return (
+    <>
       {props.item.type === "integration" ? (
         <IntegrationSourceRowContent source={props.item.source} />
       ) : null}
@@ -276,9 +369,12 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
           />
         </SearchListRowTrailing>
       ) : null}
-    </CommandItem>
+      {props.item.type === "thread" && props.item.runsOn !== null ? (
+        <ThreadMachineBadge machineId={props.item.runsOn} via={props.item.thread.environmentId} />
+      ) : null}
+    </>
   );
-});
+}
 
 function MentionItemIcon(props: { group: ComposerMentionGroup }) {
   const Icon = MENU_GROUP_PRESENTATION[props.group].icon;
@@ -314,6 +410,20 @@ const SKILL_SOURCE_LABEL_BY_KIND: Record<ProviderSkillSourceKind, string> = {
   system: "System",
   other: "Provider",
 };
+
+/** The machine a task or chat from another paired machine runs on. */
+function ThreadMachineBadge(props: { machineId: EnvironmentId; via: EnvironmentId }) {
+  const machine = useMachineLabel(props.machineId, props.via);
+  if (machine === null) return null;
+  return (
+    <SearchListRowTrailing>
+      <SearchListRowBadge>
+        <EnvironmentMachineIcon aria-hidden kind={machine.kind} />
+        {machine.name}
+      </SearchListRowBadge>
+    </SearchListRowTrailing>
+  );
+}
 
 function SkillSourceBadge(props: { kind: ProviderSkillSourceKind; showSkillSuffix: boolean }) {
   const Icon = SKILL_SOURCE_ICON_BY_KIND[props.kind];

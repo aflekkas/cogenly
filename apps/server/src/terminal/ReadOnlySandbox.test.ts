@@ -1,3 +1,5 @@
+import * as NodeNet from "node:net";
+import { ProviderDriverKind, ProviderInstanceId } from "@cogenly/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
@@ -9,9 +11,63 @@ import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as PtyAdapter from "@cogenly/shared/PtyAdapter";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as ProcessRunner from "../processRunner.ts";
+import * as ServerConfig from "../config.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as ReadOnlySandbox from "./ReadOnlySandbox.ts";
 import * as Manager from "./Manager.ts";
 import * as NodePtyAdapter from "./NodePtyAdapter.ts";
+import {
+  apparmorBwrapProfile,
+  apparmorBwrapProfilePath,
+  apparmorProfileInstallCommand,
+} from "./sandboxProvisioning.ts";
+
+/** Fake host: bwrap present, AppArmor sysctl on, probe blocked until the profile loads. */
+const appArmorFixture = (
+  fs: FileSystem.FileSystem,
+  directory: string,
+  options: { readonly profileExists: boolean; readonly allowSudo: boolean },
+) => {
+  const calls: ProcessRunner.ProcessRunInput[] = [];
+  const state = { loaded: false };
+  const output = (stdout: string, stderr: string, code: number) => ({
+    stdout,
+    stderr,
+    code: ChildProcessSpawner.ExitCode(code),
+    timedOut: false,
+    stdoutTruncated: false,
+    stderrTruncated: false,
+    stdoutInvalidUtf8: false,
+    stderrInvalidUtf8: false,
+  });
+  const runner = ProcessRunner.ProcessRunner.of({
+    run: (input) =>
+      Effect.sync(() => {
+        calls.push(input);
+        if (input.command === "/bin/sh")
+          return state.loaded
+            ? output("readable", "", 0)
+            : output("", "bwrap: Creating new namespace failed: Operation not permitted", 1);
+        if (input.command === "sudo" && input.args.join(" ") === "-n true")
+          return output("", "", options.allowSudo ? 0 : 1);
+        if (input.args.includes("apparmor_parser")) {
+          state.loaded = true;
+          return output("", "", 0);
+        }
+        return output("", "", 0);
+      }),
+  });
+  const fakeFs = FileSystem.FileSystem.of({
+    ...isolatedFileSystem(fs, directory),
+    readFileString: (path, opts) =>
+      path === "/proc/sys/kernel/apparmor_restrict_unprivileged_userns"
+        ? Effect.succeed("1")
+        : fs.readFileString(path, opts),
+    exists: (path) =>
+      path === apparmorBwrapProfilePath ? Effect.succeed(options.profileExists) : fs.exists(path),
+  });
+  return { calls, runner, fakeFs };
+};
 
 // Keep package fixtures independent of bubblewrap installed on the test host.
 const isolatedFileSystem = (fs: FileSystem.FileSystem, directory: string) =>
@@ -188,6 +244,114 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "darwin")(
   },
 );
 
+describe.skipIf(!["darwin", "linux"].includes(HostProcess.Platform.defaultValue()))(
+  "behavioral credential masks (requires sandbox-exec or bwrap; skipped elsewhere)",
+  () => {
+    it.effect("hides Cogenly state and provider homes but keeps workspaces readable", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* fs.realPath(
+          yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-mask-test-" }),
+        );
+        const home = `${root}/home`;
+        const baseDir = `${home}/.cogenly`;
+        yield* fs.makeDirectory(`${home}/.ssh`, { recursive: true });
+        yield* fs.writeFileString(`${home}/.ssh/id_ed25519`, "ssh-secret");
+        yield* fs.makeDirectory(`${root}/provider-home`, { recursive: true });
+        yield* fs.writeFileString(`${root}/provider-home/auth.json`, "provider-secret");
+        const project = `${root}/project`;
+        yield* fs.makeDirectory(project, { recursive: true });
+        yield* fs.writeFileString(`${project}/notes`, "project contents");
+        const listener = yield* Effect.acquireRelease(
+          Effect.callback<NodeNet.Server>((resume) => {
+            const server = NodeNet.createServer((socket) => socket.end());
+            server.listen(0, "127.0.0.1", () => resume(Effect.succeed(server)));
+          }),
+          (server) =>
+            Effect.callback<void>((resume) => {
+              server.close(() => resume(Effect.void));
+            }),
+        );
+        const port = (listener.address() as NodeNet.AddressInfo).port;
+        const config = yield* ServerConfig.ServerConfig.pipe(
+          Effect.provide(ServerConfig.layerTest(project, baseDir)),
+        );
+        yield* fs.makeDirectory(config.secretsDir, { recursive: true });
+        yield* fs.writeFileString(`${config.secretsDir}/vault-key.bin`, "vault-secret");
+        yield* fs.writeFileString(config.dbPath, "database-secret");
+        const worktree = `${config.worktreesDir}/repo`;
+        yield* fs.makeDirectory(worktree, { recursive: true });
+        yield* fs.writeFileString(`${worktree}/readme`, "worktree contents");
+        const settings = yield* ServerSettings.ServerSettingsService.pipe(
+          Effect.provide(ServerSettings.layerTest()),
+        );
+        yield* settings.updateProviderInstance({
+          operation: "create",
+          instanceId: ProviderInstanceId.make("codex-work"),
+          instance: {
+            driver: ProviderDriverKind.make("codex"),
+            config: { homePath: `${root}/provider-home` },
+          },
+        });
+        const sandbox = yield* ReadOnlySandbox.make.pipe(
+          Effect.provideService(ServerConfig.ServerConfig, { ...config, port }),
+          Effect.provideService(ServerSettings.ServerSettingsService, settings),
+          Effect.provideService(HostProcess.HomeDirectory, home),
+        );
+        if (HostProcess.Platform.defaultValue() === "darwin")
+          expect(sandbox.status.available).toBe(true);
+        // Linux CI hosts often block unprivileged user namespaces; nothing to exercise there.
+        if (!sandbox.status.available) return;
+        const runner = yield* ProcessRunner.ProcessRunner;
+        const read = (file: string, cwd = project) =>
+          sandbox.prepare({ shell: "/bin/sh", args: ["-c", 'cat "$1"', "read", file], cwd }).pipe(
+            Effect.flatMap((launch) =>
+              runner.run({
+                command: launch.shell,
+                args: launch.args,
+                cwd,
+                env: { PATH: "/usr/bin:/bin", ...launch.env },
+                timeout: "5 seconds",
+                maxOutputBytes: 4096,
+              }),
+            ),
+          );
+        for (const secret of [
+          `${config.secretsDir}/vault-key.bin`,
+          config.dbPath,
+          `${home}/.ssh/id_ed25519`,
+          `${root}/provider-home/auth.json`,
+        ]) {
+          const result = yield* read(secret);
+          expect(result.code, secret).not.toBe(0);
+          expect(result.stdout).not.toContain("secret");
+        }
+        expect((yield* read(`${project}/notes`)).stdout).toBe("project contents");
+        expect((yield* read(`${worktree}/readme`, worktree)).stdout).toBe("worktree contents");
+        if (HostProcess.Platform.defaultValue() === "darwin") {
+          const launch = yield* sandbox.prepare({
+            shell: "/bin/sh",
+            args: ["-c", `/usr/bin/nc -z 127.0.0.1 ${port}`],
+            cwd: project,
+          });
+          const connect = yield* runner.run({
+            command: launch.shell,
+            args: launch.args,
+            cwd: project,
+            env: { PATH: "/usr/bin:/bin", ...launch.env },
+            timeout: "5 seconds",
+            maxOutputBytes: 4096,
+          });
+          expect(connect.code).not.toBe(0);
+        }
+      }).pipe(
+        Effect.provide(ProcessRunner.layer.pipe(Layer.provideMerge(NodeServices.layer))),
+        Effect.scoped,
+      ),
+    );
+  },
+);
+
 it.effect.each([
   "sudo",
   "root",
@@ -333,6 +497,109 @@ it.effect.each([
   }).pipe(
     Effect.provideService(HostProcess.Platform, "linux"),
     Effect.provideService(HostProcess.Architecture, "x64"),
+    Effect.provide(NodeServices.layer),
+    Effect.scoped,
+  ),
+);
+
+it.effect("AppArmor setup without sudo returns the exact profile commands and writes nothing", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-apparmor-test-" });
+    yield* fs.writeFileString(`${directory}/bwrap`, "");
+    yield* fs.chmod(`${directory}/bwrap`, 0o755);
+    const fixture = appArmorFixture(fs, directory, { profileExists: false, allowSudo: false });
+    const sandbox = yield* ReadOnlySandbox.make.pipe(
+      Effect.provideService(HostProcess.Environment, { PATH: directory }),
+      Effect.provideService(FileSystem.FileSystem, fixture.fakeFs),
+      Effect.provideService(ProcessRunner.ProcessRunner, fixture.runner),
+    );
+    expect(sandbox.status).toMatchObject({ available: false, failure: "apparmor-userns" });
+    const before = fixture.calls.length;
+    const result = yield* sandbox.setup;
+    expect(result.available).toBe(false);
+    expect(result.command).toBe(apparmorProfileInstallCommand(`${directory}/bwrap`, false));
+    expect(result.message).toContain(result.command!);
+    const setupCalls = fixture.calls.slice(before);
+    expect(setupCalls.filter((call) => call.command !== "/bin/sh")).toEqual([
+      expect.objectContaining({ command: "sudo", args: ["-n", "true"] }),
+    ]);
+    expect(setupCalls.some((call) => call.args.includes("tee"))).toBe(false);
+  }).pipe(
+    Effect.provideService(HostProcess.Platform, "linux"),
+    Effect.provideService(HostProcess.Architecture, "x64"),
+    Effect.provideService(HostProcess.UserId, 1000),
+    Effect.provide(NodeServices.layer),
+    Effect.scoped,
+  ),
+);
+
+it.effect("AppArmor setup installs and reloads the profile, then is idempotent", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-apparmor-test-" });
+    yield* fs.writeFileString(`${directory}/bwrap`, "");
+    yield* fs.chmod(`${directory}/bwrap`, 0o755);
+    const fixture = appArmorFixture(fs, directory, { profileExists: false, allowSudo: true });
+    const sandbox = yield* ReadOnlySandbox.make.pipe(
+      Effect.provideService(HostProcess.Environment, { PATH: directory }),
+      Effect.provideService(FileSystem.FileSystem, fixture.fakeFs),
+      Effect.provideService(ProcessRunner.ProcessRunner, fixture.runner),
+    );
+    expect(sandbox.status).toMatchObject({ available: false, failure: "apparmor-userns" });
+    const result = yield* sandbox.setup;
+    expect(result.available).toBe(true);
+    expect(sandbox.status.available).toBe(true);
+    const tee = fixture.calls.find((call) => call.args.includes("tee"));
+    expect(tee).toMatchObject({
+      command: "sudo",
+      args: ["-n", "--", "tee", apparmorBwrapProfilePath],
+    });
+    expect(tee?.stdin).toBe(apparmorBwrapProfile(`${directory}/bwrap`));
+    expect(
+      fixture.calls.some(
+        (call) =>
+          call.command === "sudo" &&
+          call.args.join(" ") === `-n -- apparmor_parser -r ${apparmorBwrapProfilePath}`,
+      ),
+    ).toBe(true);
+    expect(fixture.calls.some((call) => call.args.includes("install"))).toBe(false);
+    const writes = fixture.calls.filter((call) => call.args.includes("tee")).length;
+    yield* sandbox.setup;
+    expect(fixture.calls.filter((call) => call.args.includes("tee"))).toHaveLength(writes);
+  }).pipe(
+    Effect.provideService(HostProcess.Platform, "linux"),
+    Effect.provideService(HostProcess.Architecture, "x64"),
+    Effect.provideService(HostProcess.UserId, 1000),
+    Effect.provide(NodeServices.layer),
+    Effect.scoped,
+  ),
+);
+
+it.effect("AppArmor setup does nothing when the profile already exists", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-apparmor-test-" });
+    yield* fs.writeFileString(`${directory}/bwrap`, "");
+    yield* fs.chmod(`${directory}/bwrap`, 0o755);
+    const fixture = appArmorFixture(fs, directory, { profileExists: true, allowSudo: true });
+    const sandbox = yield* ReadOnlySandbox.make.pipe(
+      Effect.provideService(HostProcess.Environment, { PATH: directory }),
+      Effect.provideService(FileSystem.FileSystem, fixture.fakeFs),
+      Effect.provideService(ProcessRunner.ProcessRunner, fixture.runner),
+    );
+    expect(sandbox.status).toMatchObject({ available: false, failure: "apparmor-userns" });
+    const before = fixture.calls.length;
+    const result = yield* sandbox.setup;
+    expect(result.available).toBe(false);
+    expect(result.message).toContain("already exists, so it was left unchanged");
+    expect(result.command).toBeNull();
+    const setupCalls = fixture.calls.slice(before);
+    expect(setupCalls.every((call) => call.command === "/bin/sh")).toBe(true);
+  }).pipe(
+    Effect.provideService(HostProcess.Platform, "linux"),
+    Effect.provideService(HostProcess.Architecture, "x64"),
+    Effect.provideService(HostProcess.UserId, 1000),
     Effect.provide(NodeServices.layer),
     Effect.scoped,
   ),

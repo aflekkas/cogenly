@@ -15,10 +15,11 @@ to keep a large paste editable in the composer instead.
 ## The new chat greeting
 
 The line above an empty chat's composer is written by your text generation model a
-few times a day (morning, afternoon, and evening) from the titles of what you have
-been working on. Without a connected provider, or late at night, the built-in
-greetings appear instead. To keep only the built-in greetings and make no model
-calls for them, turn off **Settings → General → AI greetings**.
+few times a day, including late at night, using recent work titles when available.
+If generation fails, the built-in greeting appears while Cogenly waits before
+retrying. Repeated failures appear in machine health; check the text generation
+model and its provider sign-in in Settings. To keep only the built-in greetings
+and make no model calls for them, turn off **Settings → General → AI greetings**.
 
 ## Formatting
 
@@ -61,12 +62,13 @@ On web and desktop, choose **Settings → General → Follow-up behavior** to qu
 new messages for a later turn or steer the running turn immediately. The setting
 applies to this client; already queued messages keep their place. Queued messages
 are saved on the server and can be edited, reordered, or removed above the composer.
+They start as soon as the thread's own turn ends; subagents and monitors do not block delivery.
 `Cmd+Enter` on macOS or `Ctrl+Enter` on Windows and Linux uses the opposite action:
 it steers when your default is Queue and queues when your default is Steer.
 
 Use `Cmd+Shift+Enter` on macOS or `Ctrl+Shift+Enter` on Windows and Linux to send
-the oldest queued message as a steer. This leaves the current draft intact and
-requires an active turn that supports steering. Change
+the oldest queued message now. It steers a running turn that supports steering,
+or starts a turn when idle, leaving the current draft intact. Change
 `thread.steerQueuedMessage` in **Settings → Keybindings** to use another shortcut.
 
 Press `Option+Up` on macOS or `Alt+Up` on Windows and Linux with the cursor at the
@@ -200,10 +202,10 @@ switch the button to a queue icon. Click while holding that key, or press `Cmd+E
 
 Queued messages appear above the composer. Rows show a thumbnail of any attached image alongside
 the text. Drag a row by its handle to reorder it, use the handle's arrow keys, promote the message
-to a steer, or remove it.
+to a steer, send it now when idle, or remove it.
 
 If the server restarts, saved queued messages keep their order and are held. Press
-**Resume** in an empty composer on web or desktop, to continue. You can edit, reorder, or remove held messages without starting them.
+**Resume** in an empty composer on web or desktop to continue, or **Send now** on a queued message. A later successful turn also releases old failure or restart holds. An explicit Stop keeps the queue held until you send or resume it.
 
 The pencil on a queued row opens that message in the composer for editing. The original message
 stays in the queue until you save, and its row is highlighted while you edit. The message's
@@ -267,12 +269,13 @@ the repository by text. Choose a result to insert it as a chip.
 Typing `@` finds more than files. The menu groups Work tasks and chats by title, agents and
 project folders by name, [sources](#sources) by service and account, and files and folders,
 closest matches first and then the most recent.
-`@` on its own shows a few recent ones from each group. Everything it offers is on the same
-server.
+`@` on its own shows a few recent ones from each group. Tasks and chats come from every
+paired machine, marked with the machine that runs them; everything else is on the same server.
 
-Another thread can be context too. Pick it from the `@` menu, or on web and desktop drag a
-thread out of the sidebar and drop it on the composer; a multi-selection drops together. The chip shows the thread's current title and
-opens it when selected. Your prompt only carries a reference: the agent reads the thread's
+Another thread can be context too. Pick it from the `@` menu, paste a thread link, or on web
+and desktop drag a thread out of the sidebar and drop it on the composer; a multi-selection
+drops together. The chip shows the thread's current title and opens it when selected. Your
+prompt only carries a reference: the agent reads the thread's
 history on demand, so attaching a long thread costs nothing until the agent looks. Attaching a
 thread does not change it, and the agent cannot send messages to it unless you ask.
 

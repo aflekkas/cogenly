@@ -85,6 +85,20 @@ export function forgetSpaceRoute(memory: SpaceRouteMemory, space: SidebarSpace):
   return rest;
 }
 
+/** Forgets `space`'s page when it shows `thread`, as when that thread's agent is deleted. */
+export function forgetSpaceRouteToThread(
+  memory: SpaceRouteMemory,
+  space: SidebarSpace,
+  thread: { readonly environmentId: string; readonly threadId: string },
+): SpaceRouteMemory {
+  const route = memory[space]?.route;
+  return route?.kind === "thread" &&
+    route.environmentId === thread.environmentId &&
+    route.threadId === thread.threadId
+    ? forgetSpaceRoute(memory, space)
+    : memory;
+}
+
 /**
  * Whether a remembered page can still be shown: "gone" when its thread was
  * deleted or archived, moved to another space, or its project or draft no
@@ -92,6 +106,23 @@ export function forgetSpaceRoute(memory: SpaceRouteMemory, space: SidebarSpace):
  * which still returns there and lets the page show its own loading state.
  */
 export type SpaceRouteAvailability = "available" | "gone" | "unknown";
+
+/**
+ * Whether a remembered thread can still be shown in `space`. An agent
+ * conversation outlives its agent, so it is gone once the agent is no longer
+ * listed (`agentListed` false), and unknown while the agents list loads (null).
+ */
+export function threadRouteAvailability(input: {
+  readonly space: SidebarSpace;
+  readonly mode: SidebarThreadMode;
+  readonly archived: boolean;
+  readonly agentListed: boolean | null;
+}): SpaceRouteAvailability {
+  if (input.archived || input.mode !== input.space) return "gone";
+  if (input.mode !== "agents") return "available";
+  if (input.agentListed === null) return "unknown";
+  return input.agentListed ? "available" : "gone";
+}
 
 /** Where switching to `space` returns, or null to land on it afresh. */
 export function resolveSpaceReturn(

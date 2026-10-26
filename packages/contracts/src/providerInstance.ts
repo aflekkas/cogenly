@@ -9,7 +9,7 @@
  *
  *   - `ProviderInstanceId` is the routing key (a user-defined slug).
  *     Threads, sessions, runtime events, and persisted bindings reference
- *     instance ids — never driver kinds — so a user can configure multiple
+ *     instance ids (never driver kinds), so a user can configure multiple
  *     instances of the same driver (e.g. `codex_personal` + `codex_work`),
  *     each with independent driver-specific configuration.
  *
@@ -37,7 +37,7 @@ import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 const PROVIDER_SLUG_MAX_CHARS = 64;
 /**
- * Slug pattern shared by driver kinds and instance ids — letters, digits,
+ * Slug pattern shared by driver kinds and instance ids: letters, digits,
  * dashes, underscores. The first character must be a letter so slugs remain
  * JS-identifier friendly when used as object keys, log fields, or telemetry
  * attributes. Mixed case is permitted so historical driver kinds (e.g.
@@ -54,7 +54,7 @@ const slugSchema = TrimmedNonEmptyString.check(
 );
 
 /**
- * `ProviderDriverKind` — open branded slug naming a driver implementation.
+ * `ProviderDriverKind`: open branded slug naming a driver implementation.
  *
  * Constraints (validated at the schema layer):
  *   - starts with a letter
@@ -73,7 +73,7 @@ export const isProviderDriverKind = (value: unknown): value is ProviderDriverKin
   isProviderDriverKindValue(value);
 
 /**
- * `ProviderInstanceId` — user-defined routing key for a configured provider
+ * `ProviderInstanceId`: user-defined routing key for a configured provider
  * instance. Same slug rules as `ProviderDriverKind`; branded separately so the
  * type system cannot confuse the two.
  */

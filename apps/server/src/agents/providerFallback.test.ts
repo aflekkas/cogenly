@@ -1,4 +1,10 @@
-import { ProviderInstanceId, type Agent, type ModelSelection } from "@cogenly/contracts";
+import {
+  agentFallbackEntries,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type Agent,
+  type ModelSelection,
+} from "@cogenly/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import {
   advanceFallback,
@@ -13,7 +19,7 @@ const sel = (instanceId: string, model = "m"): ModelSelection => ({
   model,
 });
 const primary = sel("claude-personal", "opus");
-const second = sel("claude-uchicago", "opus");
+const second = sel("muse", "m");
 const third = sel("codex", "gpt-5");
 const agent = (over: Partial<Agent> = {}): Agent =>
   ({
@@ -24,6 +30,11 @@ const agent = (over: Partial<Agent> = {}): Agent =>
     fallbackUntil: null,
     ...over,
   }) as Agent;
+const chain = [primary, second, third];
+const providers = chain.map((entry, index) => ({
+  instanceId: entry.instanceId,
+  driver: ProviderDriverKind.make(["claudeAgent", "muse", "codex"][index]!),
+}));
 const NOW = Date.parse("2026-01-01T00:00:00.000Z");
 
 describe("classifyProviderFailure", () => {
@@ -48,16 +59,102 @@ describe("classifyProviderFailure", () => {
 });
 
 describe("decideFallback / advanceFallback", () => {
+  it("keeps retry advancement and stored selection aligned with an incomplete catalog", () => {
+    for (const catalog of [[], providers.slice(1), providers.slice(0, 1)]) {
+      const advance = advanceFallback({
+        chain,
+        providers: catalog,
+        failedIndex: 0,
+        reason: "usage_limit",
+        resetAt: null,
+        nowMs: NOW,
+      });
+      expect(advance?.index).toBe(1);
+      const selected = decideFallback(
+        agent({
+          fallbackIndex: advance!.index,
+          fallbackReason: advance!.reason,
+          fallbackUntil: advance!.until,
+        }),
+        NOW,
+        catalog,
+      );
+      expect(selected).toMatchObject({ index: 1, selection: second, restored: false });
+      expect(
+        advanceFallback({
+          chain,
+          providers: catalog,
+          failedIndex: selected.index,
+          reason: "auth",
+          resetAt: null,
+          nowMs: NOW,
+          existingUntil: advance!.until,
+        }),
+      ).toMatchObject({ index: 2, until: advance!.until });
+    }
+  });
+
+  it("skips a stored same-provider account without changing its config", () => {
+    const school = sel("school", "opus");
+    const stored = agent({ fallbackChain: [school, third], fallbackIndex: 1 });
+    const catalog = [
+      ...providers,
+      { instanceId: school.instanceId, driver: ProviderDriverKind.make("claudeAgent") },
+    ];
+    expect(decideFallback(stored, NOW, catalog)).toMatchObject({ index: 2, selection: third });
+    expect(
+      advanceFallback({
+        chain: [primary, school, third],
+        providers: catalog,
+        failedIndex: 0,
+        reason: "usage_limit",
+        resetAt: null,
+        nowMs: NOW,
+      })?.index,
+    ).toBe(2);
+    expect(
+      advanceFallback({
+        chain: [primary, school],
+        providers: catalog,
+        failedIndex: 0,
+        reason: "auth",
+        resetAt: null,
+        nowMs: NOW,
+      }),
+    ).toBeNull();
+    expect(decideFallback({ ...stored, fallbackChain: [school] }, NOW, catalog)).toMatchObject({
+      index: 0,
+      selection: primary,
+      restored: true,
+    });
+    expect(stored.fallbackChain).toEqual([school, third]);
+    expect(agentFallbackEntries([primary, school, third], catalog)[1]?.skipReason).toBe(
+      "same provider account",
+    );
+    expect(
+      advanceFallback({
+        chain: [primary, school, third],
+        providers: [],
+        failedIndex: 0,
+        reason: "usage_limit",
+        resetAt: null,
+        nowMs: NOW,
+      }),
+    ).toMatchObject({ index: 1 });
+  });
   it("uses the primary entry with no stored fallback, and without a chain", () => {
-    expect(decideFallback(agent(), NOW)).toMatchObject({
+    expect(decideFallback(agent(), NOW, providers)).toMatchObject({
       index: 0,
       selection: primary,
       restored: false,
     });
-    expect(decideFallback(agent({ fallbackChain: [], fallbackIndex: 1 }), NOW).index).toBe(0);
+    expect(
+      decideFallback(agent({ fallbackChain: [], fallbackIndex: 1 }), NOW, providers).index,
+    ).toBe(0);
     expect(
       advanceFallback({
-        chainLength: 1,
+        chain: [primary],
+        providers,
         failedIndex: 0,
         reason: "usage_limit",
         resetAt: null,
@@ -65,14 +162,22 @@ describe("decideFallback / advanceFallback", () => {
       }),
     ).toBeNull();
     expect(
-      advanceFallback({ chainLength: 3, failedIndex: 0, reason: null, resetAt: null, nowMs: NOW }),
+      advanceFallback({
+        chain,
+        providers,
+        failedIndex: 0,
+        reason: null,
+        resetAt: null,
+        nowMs: NOW,
+      }),
     ).toBeNull();
   });
 
   it("advances to the next entry and returns to primary at the known reset", () => {
     const reset = "2026-01-01T10:00:00.000Z";
     const advance = advanceFallback({
-      chainLength: 3,
+      chain,
+      providers,
       failedIndex: 0,
       reason: "usage_limit",
       resetAt: reset,
@@ -84,12 +189,12 @@ describe("decideFallback / advanceFallback", () => {
       fallbackReason: "usage_limit",
       fallbackUntil: advance!.until,
     });
-    expect(decideFallback(fallen, NOW + 1000)).toMatchObject({
+    expect(decideFallback(fallen, NOW + 1000, providers)).toMatchObject({
       index: 1,
       selection: second,
       reason: "usage_limit",
     });
-    expect(decideFallback(fallen, Date.parse(reset))).toMatchObject({
+    expect(decideFallback(fallen, Date.parse(reset), providers)).toMatchObject({
       index: 0,
       selection: primary,
       restored: true,
@@ -98,7 +203,8 @@ describe("decideFallback / advanceFallback", () => {
 
   it("uses the cooldown when no reset is known, and stays on the last entry when exhausted", () => {
     const advance = advanceFallback({
-      chainLength: 3,
+      chain,
+      providers,
       failedIndex: 0,
       reason: "auth",
       resetAt: null,
@@ -109,7 +215,8 @@ describe("decideFallback / advanceFallback", () => {
     expect(advance!.resetAt).toBeNull();
     expect(
       advanceFallback({
-        chainLength: 3,
+        chain,
+        providers,
         failedIndex: 2,
         reason: "auth",
         resetAt: null,
@@ -121,7 +228,7 @@ describe("decideFallback / advanceFallback", () => {
       fallbackReason: "auth",
       fallbackUntil: advance!.until,
     });
-    expect(decideFallback(exhausted, NOW + FALLBACK_COOLDOWN_MS).restored).toBe(true);
+    expect(decideFallback(exhausted, NOW + FALLBACK_COOLDOWN_MS, providers).restored).toBe(true);
   });
 
   it("keeps the return-to-primary time set by the primary failure when a fallback fails", () => {
@@ -129,7 +236,8 @@ describe("decideFallback / advanceFallback", () => {
     // A fallback failing much later, with its own later reset, must not
     // push out when the primary is retried.
     const advance = advanceFallback({
-      chainLength: 3,
+      chain,
+      providers,
       failedIndex: 1,
       reason: "usage_limit",
       resetAt: "2026-01-05T10:00:00.000Z",
@@ -145,7 +253,8 @@ describe("decideFallback / advanceFallback", () => {
     // And without a known reset it must not start a fresh cooldown either.
     expect(
       advanceFallback({
-        chainLength: 3,
+        chain,
+        providers,
         failedIndex: 2,
         reason: "auth",
         resetAt: null,

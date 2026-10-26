@@ -38,6 +38,8 @@ export const MachineProvider = Schema.Struct({
   displayName: TrimmedNonEmptyString,
   enabled: Schema.Boolean,
   auth: ServerProviderAuthStatus,
+  installed: Schema.optionalKey(Schema.Boolean),
+  canAuthenticate: Schema.optionalKey(Schema.Boolean),
 });
 export type MachineProvider = typeof MachineProvider.Type;
 
@@ -59,6 +61,7 @@ export const MachineInfo = Schema.Struct({
   kind: MachineKind,
   hardware: MachineHardware,
   platform: ExecutionEnvironmentPlatformOs,
+  serverVersion: Schema.optional(TrimmedNonEmptyString),
   relation: MachineRelation,
   online: Schema.Boolean,
   /** Null for this machine and for a peer never seen since pairing. */
@@ -360,7 +363,11 @@ export const PeerPush = Schema.Union([
     channel: TrimmedNonEmptyString,
     payload: Schema.Json,
   }),
-  Schema.TaggedStruct("Machines", { machines: Schema.Array(MachineInfo) }),
+  Schema.TaggedStruct("Machines", {
+    machines: Schema.Array(MachineInfo),
+    // Optional for peers released before route refresh was supported.
+    hubRoutes: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  }),
   Schema.TaggedStruct("Unpaired", {}),
 ]);
 export type PeerPush = typeof PeerPush.Type;
@@ -442,3 +449,12 @@ export const PeerRpcGroup = RpcGroup.make(
     error: peerErrors,
   }),
 ).middleware(PeerScopeAuthorization);
+
+/** New autonomous work prefers the paired, online hub; otherwise it stays local. */
+export const defaultAgentOwner = (
+  local: EnvironmentId,
+  machines: ReadonlyArray<Pick<MachineInfo, "environmentId" | "relation" | "online" | "pairing">>,
+): EnvironmentId =>
+  machines.find(
+    (machine) => machine.relation === "hub" && machine.online && machine.pairing === "paired",
+  )?.environmentId ?? local;

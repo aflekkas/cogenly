@@ -29,7 +29,7 @@ export interface ResolveLinkTargetInput {
 /**
  * The target a click resolves to. "app" only comes back when the preference
  * asks for it, the runtime can honour it, the URL is one the in-app browser
- * can load, and the click carried no modifier — the modifier is the one-gesture
+ * can load, and the click carried no modifier. The modifier is the one-gesture
  * way out when the default is in-app, mirroring how change-request links
  * already treat it.
  */
@@ -42,8 +42,8 @@ export function resolveLinkTarget(input: ResolveLinkTargetInput): BrowserLinkTar
 }
 
 /**
- * Only http(s) can load in the in-app browser. Anything else — mailto:,
- * vscode://, a bare fragment — belongs to the shell whatever the preference.
+ * Only http(s) can load in the in-app browser. Anything else (mailto:,
+ * vscode://, a bare fragment) belongs to the shell whatever the preference.
  */
 export function isWebUrl(url: string): boolean {
   try {
@@ -57,7 +57,7 @@ export function isWebUrl(url: string): boolean {
 /**
  * The configured default, once client settings have actually loaded. Before
  * hydration the snapshot is the schema default ("system"), so a link clicked
- * in the first moments after launch would ignore a persisted "app" — opening
+ * in the first moments after launch would ignore a persisted "app". Opening
  * is asynchronous anyway, so waiting costs nothing the user can see.
  * Read failures reject rather than choosing a browser without the saved preference.
  */

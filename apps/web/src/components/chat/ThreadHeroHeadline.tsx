@@ -17,7 +17,7 @@ import { RepositoryRowIcon } from "~/projectLabels/RepositorySourceRows";
 import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
 import { useRepositoryNames } from "~/projectLabels/useRepositoryNames";
 import { useChatGreeting } from "./useChatGreeting";
-import { FadeSwap } from "./StateTransition";
+import { HeroHeadline } from "./HeroHeadline";
 import { useHeroHeadlineMotion } from "./useHeroHeadlineMotion";
 import { WorkHeroCrumbText, WorkHeroSentence } from "./WorkHeroSentence";
 
@@ -112,36 +112,25 @@ export function ThreadHeroHeadline({
   );
 
   return (
-    <div className="@container flex w-full flex-col items-center">
-      <h1
-        ref={headingRef}
-        style={{ fontSize: "clamp(var(--text-xl), 3cqw, var(--text-3xl))" }}
-        aria-label={headingLabel}
-        className="group/hero-headline relative w-full origin-bottom text-balance text-center font-normal text-xl text-foreground tracking-tight"
-      >
-        {/* The new-thread screen's slot, so moving between it and here cross-fades. */}
-        <FadeSwap
-          group="draft-heading"
-          swapKey={isChat ? "chat" : `thread:${thread.environmentId}:${thread.id}`}
-        >
-          {isChat ? (
-            <>
-              <span data-hero-greeting="" className="inline">
-                {greeting}
-              </span>
-              <ComposerProjectPicker
-                appearance="hero"
-                environmentId={thread.environmentId}
-                threadId={thread.id}
-                draftId={null}
-                size="sm"
-              />
-            </>
-          ) : (
-            <WorkHeroSentence project={projectName} repository={repository} />
-          )}
-        </FadeSwap>
-      </h1>
-    </div>
+    <HeroHeadline
+      ref={headingRef}
+      label={headingLabel}
+      swapKey={isChat ? "chat" : `thread:${thread.environmentId}:${thread.id}`}
+    >
+      {isChat ? (
+        <>
+          {greeting}
+          <ComposerProjectPicker
+            appearance="hero"
+            environmentId={thread.environmentId}
+            threadId={thread.id}
+            draftId={null}
+            size="sm"
+          />
+        </>
+      ) : (
+        <WorkHeroSentence project={projectName} repository={repository} />
+      )}
+    </HeroHeadline>
   );
 }

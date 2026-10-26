@@ -32,7 +32,10 @@ describe("buildRuntimeInstructions", () => {
       expect(instructions).toContain("<vault>");
       expect(instructions).toContain("vault_save");
       expect(instructions).toContain("vault_fill");
-      expect(instructions).toContain("Never ask for secrets in chat");
+      expect(instructions).toContain(
+        "Never ask for usernames, passwords, codes or other secrets in chat",
+      );
+      expect(instructions).toContain("request_login");
       expect(instructions).toContain("saveToVault");
     }
   });
@@ -139,7 +142,7 @@ describe("integrations context line", () => {
   it("says provider connectors are off only when there is a line to add it to", () => {
     const connected = [{ name: "linear", displayName: "Linear", status: "connected" as const }];
     expect(buildIntegrationsContextLine(connected, ["notion"], true)).toBe(
-      "Connected integrations: linear (Linear). Use integration_tools / integration_call. Also available to connect: notion. Read integration_setup_guide before integration_add. Use Cogenly integrations. The provider's own MCP servers, connectors, plugins and apps are off; only MCP servers checked into the repository still load.",
+      "Connected integrations: linear (Linear). Use integration_tools / integration_call. Also available to connect: notion. When the user asks for one of these, do not just say it isn't connected: offer to connect it, read integration_setup_guide, then start the connect flow with integration_add (its catalogId) and give the user the sign-in link it returns. Use Cogenly integrations. The provider's own MCP servers, connectors, plugins and apps are off; only MCP servers checked into the repository still load.",
     );
     expect(buildIntegrationsContextLine(connected, ["notion"])).not.toContain("turned off");
     expect(buildIntegrationsContextLine([], [], true)).toBe("");
@@ -188,14 +191,14 @@ describe("integrations context line", () => {
     expect(
       buildIntegrationsContextLine([], ["google-workspace (Gmail, Calendar, Drive)", "slack"]),
     ).toBe(
-      "Integrations available to connect: google-workspace (Gmail, Calendar, Drive), slack. Read integration_setup_guide before integration_add.",
+      "Integrations available to connect: google-workspace (Gmail, Calendar, Drive), slack. When the user asks for one of these, do not just say it isn't connected: offer to connect it, read integration_setup_guide, then start the connect flow with integration_add (its catalogId) and give the user the sign-in link it returns.",
     );
     const line = buildIntegrationsContextLine(
       [{ name: "linear", displayName: "Linear", status: "connected" }],
       ["notion"],
     );
     expect(line).toBe(
-      "Connected integrations: linear (Linear). Use integration_tools / integration_call. Also available to connect: notion. Read integration_setup_guide before integration_add.",
+      "Connected integrations: linear (Linear). Use integration_tools / integration_call. Also available to connect: notion. When the user asks for one of these, do not just say it isn't connected: offer to connect it, read integration_setup_guide, then start the connect flow with integration_add (its catalogId) and give the user the sign-in link it returns.",
     );
     expect(line).not.toContain("\n");
   });

@@ -67,6 +67,7 @@ interface AttachedTab {
   readonly key: DesktopBrowserTabKey;
   readonly debuggee: DesktopBrowserTabDebugger;
   relay: CdpRelayConnection | null;
+  connectionId: string | null;
   /** Where the server wants this tab's downloads; null keeps Electron's own handling. */
   downloadDirectory: string | null;
   /** The guid CDP gave the download that is about to start. */
@@ -139,7 +140,8 @@ export const make = Effect.gen(function* () {
       // A released relay's late replies belong to a connection that is gone.
       (message) => {
         if (tab.relay === relay && tabs.get(keyOf(tab.key)) === tab) {
-          emit({ type: "cdp", ...tab.key, message });
+          if (tab.connectionId)
+            emit({ type: "cdp", ...tab.key, connectionId: tab.connectionId, message });
         }
       },
     );
@@ -167,6 +169,7 @@ export const make = Effect.gen(function* () {
     const tab = tabs.get(id);
     if (!tab) return;
     tabs.delete(id);
+    void tab.relay?.close();
     tab.debuggee.debugger.off("message", tab.onMessage);
     emit({ type: "detached", ...key });
   };
@@ -179,6 +182,7 @@ export const make = Effect.gen(function* () {
       key,
       debuggee,
       relay: null,
+      connectionId: null,
       downloadDirectory: null,
       pendingDownloadGuid: null,
       agentInputAt: Number.NEGATIVE_INFINITY,
@@ -296,9 +300,21 @@ export const make = Effect.gen(function* () {
         );
         return;
       }
+      if (command.value.type === "connect") {
+        const previous = tab.relay;
+        tab.relay = null;
+        tab.connectionId = command.value.connectionId;
+        void previous?.close();
+        return;
+      }
+      // Late commands and releases cannot reach the replacement's sessions.
+      if (tab.connectionId !== command.value.connectionId) return;
       if (command.value.type === "release") {
         // A new server connection starts with a fresh relay and fresh sessions.
+        const previous = tab.relay;
         tab.relay = null;
+        tab.connectionId = null;
+        void previous?.close();
         return;
       }
       if (AGENT_INPUT_COMMAND.test(command.value.message)) tab.agentInputAt = performance.now();
@@ -315,7 +331,10 @@ export const make = Effect.gen(function* () {
     Effect.forEach(
       [...tabs.values()],
       (tab) => {
+        const previous = tab.relay;
         tab.relay = null;
+        tab.connectionId = null;
+        void previous?.close();
         return PubSub.publish(outbox, { type: "attached", ...tab.key });
       },
       { discard: true },

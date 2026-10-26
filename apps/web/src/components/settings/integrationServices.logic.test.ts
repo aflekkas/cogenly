@@ -143,6 +143,24 @@ describe("integrationStatus", () => {
       testResultReason({ status: "disconnected", toolCount: 0, message: "Something odd" }),
     ).toBe("Something odd");
   });
+
+  it("words a failed test from its reason code, never the raw code", () => {
+    expect(
+      testResultReason({
+        status: "disconnected",
+        toolCount: 0,
+        reason: "sign_in_required",
+        message: "Could not connect (sign_in_required).",
+      }),
+    ).toBe("Sign in to this service to use it.");
+    expect(
+      testResultReason({
+        status: "disconnected",
+        toolCount: 0,
+        message: "Could not connect (scope_missing).",
+      }),
+    ).toBe("The grant is missing a required scope. Reconnect to approve the needed permissions.");
+  });
 });
 
 describe("display helpers", () => {
@@ -184,5 +202,12 @@ describe("display helpers", () => {
         labels,
       ),
     ).toBe("Cogenly");
+  });
+  it("names the account only when it adds something to the service's name", () => {
+    expect(integrationTitle({ ...integration, accountLabel: "Spawn Partners" })).toBe(
+      "Gmail · Spawn Partners",
+    );
+    expect(integrationTitle({ ...integration, accountLabel: " gmail " })).toBe("Gmail");
+    expect(integrationTitle(integration)).toBe("Gmail");
   });
 });

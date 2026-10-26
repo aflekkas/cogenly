@@ -8,7 +8,7 @@ import {
 // per-thread sessions already include a random id; scoped sessions must stay put.
 // Split historical shared processes by thread too: those threads can now have
 // different owners after handoff, and must not claim each other's session row.
-const legacySession = /^provider-session:provider-instance:[^:]+:shared$/;
+const legacySession = /^(provider-session:provider-instance:[^:]+:shared)(:machine:[^:]+)?$/;
 
 /** Normalize every session reference in the event contract, leaving native ids and text intact. */
 export const normalizeLegacySession = (
@@ -18,7 +18,7 @@ export const normalizeLegacySession = (
   const scope = (id: ProviderSessionId) =>
     legacySession.test(id)
       ? ProviderSessionId.make(
-          `${id}:machine:${encodeURIComponent(origin)}:thread:${encodeURIComponent(event.threadId)}`,
+          `${id.includes(":machine:") ? id : `${id}:machine:${encodeURIComponent(origin)}`}:thread:${encodeURIComponent(event.threadId)}`,
         )
       : id;
   switch (event.type) {

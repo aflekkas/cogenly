@@ -29,6 +29,7 @@ const thread = (
   kind,
   updatedAt,
   archivedAt: null,
+  runsOn: env,
 });
 
 const base = {
@@ -43,6 +44,7 @@ const base = {
     {
       ...thread("t-other", "Login elsewhere", "work", "2026-10-21T00:00:00.000Z"),
       environmentId: other,
+      runsOn: other,
     },
   ],
   agents: [
@@ -214,6 +216,84 @@ describe("matchComposerMentionItems", () => {
     expect(items.filter((item) => item.group === "tasks").map((item) => item.label)).toEqual([
       "Login page polish",
       "Fix login redirect",
+    ]);
+  });
+});
+
+describe("@ tasks across paired machines", () => {
+  const mac = "mac" as EnvironmentId;
+  const vps = "vps" as EnvironmentId;
+  const stranger = "stranger" as EnvironmentId;
+  // With both machines connected, the client lists each thread once, from the machine that
+  // runs it (`preferredThreadCopies`), so the Mac's tasks arrive under the Mac and the VPS's
+  // under the VPS.
+  const listed: ComposerThreadCandidate[] = [
+    {
+      ...thread("mac-task", "Audit the Mac build", "work", "2026-10-20T00:00:00.000Z"),
+      environmentId: mac,
+      runsOn: mac,
+    },
+    {
+      ...thread("vps-task", "Audit the VPS deploy", "work", "2026-10-21T00:00:00.000Z"),
+      environmentId: vps,
+      runsOn: vps,
+    },
+    {
+      ...thread("odd-task", "Audit someone else", "work", "2026-10-22T00:00:00.000Z"),
+      environmentId: stranger,
+      runsOn: stranger,
+    },
+  ];
+  const tasks = (environmentId: EnvironmentId, paired: ReadonlyArray<EnvironmentId>) =>
+    matchComposerMentionItems({
+      ...base,
+      agents: [],
+      projectFolders: [],
+      threads: listed,
+      environmentId,
+      pairedEnvironmentIds: new Set(paired),
+      query: "audit",
+    }).map((item) => (item.type === "thread" ? [item.label, item.runsOn] : null));
+
+  it("lists the VPS's tasks in a Mac thread, badged with the VPS", () => {
+    expect(tasks(mac, [vps])).toEqual([
+      ["Audit the VPS deploy", vps],
+      ["Audit the Mac build", null],
+    ]);
+  });
+
+  it("lists the Mac's tasks in a thread that runs on the VPS", () => {
+    expect(tasks(vps, [mac])).toEqual([
+      ["Audit the VPS deploy", null],
+      ["Audit the Mac build", mac],
+    ]);
+  });
+
+  it("leaves out a connected server that is not paired, whose agent cannot read the link", () => {
+    expect(tasks(mac, [])).toEqual([["Audit the Mac build", null]]);
+  });
+
+  it("lists a thread once, from the composer's own copy, by thread id alone", () => {
+    const items = matchComposerMentionItems({
+      ...base,
+      threads: [
+        {
+          ...thread("shared", "Audit shared", "work", "2026-10-21T00:00:00.000Z"),
+          environmentId: vps,
+          runsOn: vps,
+        },
+        {
+          ...thread("shared", "Audit shared", "work", "2026-10-21T00:00:00.000Z"),
+          environmentId: mac,
+          runsOn: vps,
+        },
+      ],
+      environmentId: mac,
+      pairedEnvironmentIds: new Set([vps]),
+      query: "audit",
+    });
+    expect(items).toMatchObject([
+      { id: "thread:shared", thread: { environmentId: mac, threadId: "shared" }, runsOn: vps },
     ]);
   });
 });

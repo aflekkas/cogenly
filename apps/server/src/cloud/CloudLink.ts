@@ -1275,7 +1275,7 @@ const make = Effect.gen(function* () {
   );
 
   // Cloudflare bills per provisioned tunnel, so an environment that goes offline
-  // must not leave its tunnel behind. Releasing deletes only the tunnel — the
+  // must not leave its tunnel behind. Releasing deletes only the tunnel: the
   // relay keeps the link and its hostname reservation, and the next startup's
   // link reconcile provisions a replacement tunnel under the same URL.
   const releaseManagedTunnelOnShutdown = Effect.fn(
@@ -1301,7 +1301,7 @@ const make = Effect.gen(function* () {
     // going offline: the service launcher or the desktop app immediately brings
     // a server back (the new version, or the old one after a rollback). Deleting
     // the tunnel here forces that server to provision a replacement UUID, and the
-    // public hostname's route to the new tunnel takes 1-2 minutes to propagate —
+    // public hostname's route to the new tunnel takes 1-2 minutes to propagate,
     // the dominant cost of an update restart. Keep the tunnel instead: the next
     // boot respawns the connector from the stored config and is reachable as
     // soon as it connects, and the reconcile confirms the still-live tunnel
@@ -1336,7 +1336,7 @@ const make = Effect.gen(function* () {
       withRelayClientTracing,
     );
     // ok:false means the relay skipped deletion because a concurrent provision
-    // owns the recorded tunnel now — leave the stored config alone.
+    // owns the recorded tunnel now, so leave the stored config alone.
     if (!response.ok) {
       return false;
     }
@@ -1344,7 +1344,7 @@ const make = Effect.gen(function* () {
     // next start waits for the link reconcile instead of respawning the relay
     // client with a dead token. Kept when the release request fails: the tunnel
     // still exists, so the stored token keeps working across the restart.
-    // Only dropped while it is still the config this shutdown released — a fast
+    // Only dropped while it is still the config this shutdown released: a fast
     // restart may already have reconciled and stored a fresh config for its
     // replacement tunnel, and that one must survive this finalizer.
     const storedConfig = yield* secrets.get(CLOUD_ENDPOINT_RUNTIME_CONFIG);

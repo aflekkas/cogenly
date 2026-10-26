@@ -22,13 +22,13 @@ import { useLastPresent } from "./overlay-presence";
  * content it reveals. Anything that expands in place (timeline rows, work-log
  * groups, settings folds, sidebar sections) uses these three pieces:
  *
- * - `DisclosureChevron` — the glyph. Pass `open` when the caller owns the
+ * - `DisclosureChevron`: the glyph. Pass `open` when the caller owns the
  *   state. Omit it inside a Base UI `CollapsibleTrigger` or a `<details>`
  *   summary and it follows `data-panel-open` / `open` on its own.
- * - `DisclosureTrigger` — a button carrying `aria-expanded`, the focus ring and
+ * - `DisclosureTrigger`: a button carrying `aria-expanded`, the focus ring and
  *   the chevron. Works standalone (`open`, `onClick`) or as a Base UI trigger's
  *   `render` element.
- * - `DisclosurePanel` — grows the content from zero height while fading it in,
+ * - `DisclosurePanel`: grows the content from zero height while fading it in,
  *   and runs the same motion back on close. Opacity only under reduced motion.
  */
 

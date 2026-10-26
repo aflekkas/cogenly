@@ -66,6 +66,53 @@ describe("read-only launch generation", () => {
       "/tmp/project",
     );
   });
+  const masks = {
+    hidden: [
+      { path: "/home/u/.cogenly", kind: "directory" },
+      { path: "/home/u/.cogenly/userdata", kind: "directory" },
+      { path: "/home/u/.claude.json", kind: "file" },
+      { path: "/home/u/.netrc", kind: "missing" },
+      { path: "/home/u/.cogenly/projects/repo/.codex", kind: "directory" },
+    ],
+    reexposed: ["/home/u/.cogenly/worktrees", "/home/u/.cogenly/projects", "/elsewhere"],
+    serverPort: 4773,
+  } as const;
+  it("hides Cogenly state and credentials on macOS, re-exposing workspaces inside them", () => {
+    const profile = macReadOnlyProfile("/private/tmp/lookup", masks);
+    const rules = profile.split("\n");
+    const at = (rule: string) => rules.indexOf(rule);
+    const hide = (path: string) => `(deny file-read* (subpath ${JSON.stringify(path)}))`;
+    const show = (path: string) => `(allow file-read* (subpath ${JSON.stringify(path)}))`;
+    expect(at("(allow file-read*)")).toBeLessThan(at(hide("/home/u/.cogenly")));
+    expect(at(hide("/home/u/.cogenly"))).toBeLessThan(at(show("/home/u/.cogenly/worktrees")));
+    for (const path of ["/home/u/.claude.json", "/home/u/.netrc"])
+      expect(profile).toContain(hide(path));
+    // A secret inside a re-exposed root is hidden again after it.
+    expect(rules.lastIndexOf(hide("/home/u/.cogenly/projects/repo/.codex"))).toBeGreaterThan(
+      at(show("/home/u/.cogenly/projects")),
+    );
+    // Roots outside every hidden path never widen access.
+    expect(profile).not.toContain(show("/elsewhere"));
+    expect(profile).toContain('(deny network-outbound (remote ip "localhost:4773"))');
+    expect(at('(allow network-outbound (remote ip "*:*"))')).toBeLessThan(
+      at('(deny network-outbound (remote ip "localhost:4773"))'),
+    );
+    expect(macReadOnlyProfile("/private/tmp/lookup")).not.toContain("(deny file-read*");
+  });
+  it("masks existing hidden paths with tmpfs or /dev/null on Linux", () => {
+    const args = linuxReadOnlyArguments({ shell: "/bin/sh", args: [], cwd: "/srv", masks });
+    const joined = args.join(" ");
+    expect(joined).toContain("--tmpfs /home/u/.cogenly --ro-bind /dev/null /home/u/.claude.json");
+    expect(joined).toContain("--ro-bind /home/u/.cogenly/worktrees /home/u/.cogenly/worktrees");
+    expect(joined).toContain(
+      "--ro-bind /home/u/.cogenly/projects /home/u/.cogenly/projects --tmpfs /home/u/.cogenly/projects/repo/.codex",
+    );
+    // Missing paths cannot be mounted over, and nested hidden paths are covered already.
+    expect(args).not.toContain("/home/u/.netrc");
+    expect(args).not.toContain("/home/u/.cogenly/userdata");
+    expect(args.indexOf("/home/u/.cogenly")).toBeGreaterThan(args.indexOf("/tmp"));
+    expect(args.indexOf("/home/u/.cogenly")).toBeLessThan(args.indexOf("--seccomp"));
+  });
   it.each([
     ["x64", 0xc000003e, 41, 53, 101],
     ["arm64", 0xc00000b7, 198, 199, 117],

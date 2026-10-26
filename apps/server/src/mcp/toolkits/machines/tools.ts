@@ -1,4 +1,8 @@
 import {
+  ProviderMachineAuthRequest,
+  ProjectId,
+  SecretRef,
+  ProviderAuthState,
   DesktopAppPairedMachine,
   EnvironmentId,
   MachineListResult,
@@ -15,6 +19,8 @@ import { Tool, Toolkit } from "effect/ai";
 import * as Schema from "effect/Schema";
 
 import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
+import * as SecretRequests from "../../../secrets/SecretRequests.ts";
+import * as ProviderAuthService from "../../../provider/ProviderAuthService.ts";
 import * as Machines from "../../../machines/Machines.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as MachineSetup from "../../../tailscale/MachineSetup.ts";
@@ -29,6 +35,23 @@ const callerDependencies = [
 ];
 
 export const MachinesToolkit = Toolkit.make(
+  Tool.make("provider_sign_in", {
+    failure: OrchestratorMcpFailure,
+    failureMode: "return",
+    dependencies: [
+      ProviderAuthService.ProviderAuthService,
+      SecretRequests.SecretRequests,
+      ...callerDependencies,
+    ],
+    parameters: Schema.Struct({
+      request: ProviderMachineAuthRequest,
+      codeRef: Schema.optionalKey(SecretRef),
+      projectId: Schema.optionalKey(ProjectId),
+    }),
+    success: ProviderAuthState,
+    description:
+      "Start, read, finish, cancel or sign out an official provider CLI login on this machine or a paired targetEnvironmentId. Start returns immediately; read for browser instructions and completion. Each machine obtains its own login, so rotating refresh tokens are never copied. Give the user the browser URL and device code, or collect the Claude browser code through request_secret and pass its codeRef with a respond request; the service consumes it without exposing the value. Never print credentials. No approval gate.",
+  }).annotate(Tool.Destructive, false),
   Tool.make("machines_list", {
     failure: OrchestratorMcpFailure,
     failureMode: "return",

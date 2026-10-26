@@ -205,7 +205,7 @@ export const layer: Layer.Layer<
 
     // Thread-state events whose payload is the complete thread: only the
     // newest per thread can influence a replay or an afterSequence catch-up.
-    // thread.created stays out — verify derives the expected thread set from
+    // thread.created stays out: verify derives the expected thread set from
     // it, and it anchors replay ordering. thread.deleted stays out too: clients
     // and waitForThread switch on the event type, not just the payload.
     const SUPERSEDABLE_THREAD_EVENT_TYPES = [

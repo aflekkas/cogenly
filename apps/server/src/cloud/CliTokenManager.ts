@@ -557,7 +557,7 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       // A stored credential that can't be read or refreshed (corrupt, revoked,
       // expired grant) must fall through to a fresh login rather than dead-end
-      // the command — authorizeCli applies the same fallback to device
+      // the command. authorizeCli applies the same fallback to device
       // authorization.
       const token = yield* getExistingNoLock().pipe(
         Effect.orElseSucceed(() => Option.none<PersistedToken>()),

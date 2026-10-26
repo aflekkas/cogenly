@@ -1,4 +1,5 @@
 /** Replaces vault secret values in text shown to agents. Pure helpers. */
+import * as DateTime from "effect/DateTime";
 
 const VAULT_REDACTION = "[redacted vault secret]";
 /** Shorter values need whole-token matching to avoid masking ordinary substrings. */
@@ -19,6 +20,8 @@ export const redactText = (text: string, secrets: Iterable<string>): string => {
 /** Deep-copies a tool result, rewriting every string inside it. */
 const mapStrings = <A>(value: A, rewrite: (text: string) => string): A => {
   const walk = (current: unknown): unknown => {
+    // Schema encoders need the DateTime prototype and its symbol brand intact.
+    if (DateTime.isDateTime(current)) return current;
     if (typeof current === "string") return rewrite(current);
     if (Array.isArray(current)) return current.map(walk);
     if (typeof current === "object" && current !== null)
@@ -56,7 +59,7 @@ const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/
 /**
  * Short secrets (a card CVC, an `MM/YY` expiry) fall below `MIN_SCRUB_LENGTH`,
  * so the pass above would leave them. They are only redacted as whole tokens
- * — not inside a longer word or number — so a CVC of `123` does not blank
+ * (not inside a longer word or number), so a CVC of `123` does not blank
  * every `1234` in unrelated output, while a page echoing the filled CVC on
  * its own is still caught.
  */

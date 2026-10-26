@@ -50,7 +50,7 @@ export interface CookieReadResult {
  * Both engines mark a domain cookie with a leading dot on the host. Electron
  * matches on a URL, so the dot comes off for that; `domain` is passed through
  * only for domain cookies, because supplying it at all makes Electron treat
- * the cookie as one and re-add the dot — widening a host-only cookie to every
+ * the cookie as one and re-add the dot, widening a host-only cookie to every
  * subdomain of the host it was scoped to, and rejecting `__Host-` cookies,
  * which require it to be absent.
  */

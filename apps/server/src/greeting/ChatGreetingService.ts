@@ -3,15 +3,20 @@
  * model from what the user has been working on.
  *
  * At most one greeting per local day and time-of-day bucket (morning,
- * afternoon, evening), plus a rolling daily cap, so a busy day costs about
- * three small calls. Results and failed attempts are persisted in the state
+ * afternoon, evening, late night), plus a rolling daily cap, so a busy day costs at most
+ * four small calls. Results and failed attempts are persisted in the state
  * directory, so reloads, other clients, and restarts reuse them. The prompt
  * carries only a handful of recent thread and project titles plus the
  * weekday and time of day: no message bodies.
  *
  * @module greeting/ChatGreetingService
  */
-import type { ChatGreetingBucket, ChatGreetingInput, ChatGreetingResult } from "@cogenly/contracts";
+import type {
+  MachineHealthItem,
+  ChatGreetingBucket,
+  ChatGreetingInput,
+  ChatGreetingResult,
+} from "@cogenly/contracts";
 import { writeFileStringAtomically } from "@cogenly/shared/atomicWrite";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -32,14 +37,9 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 
 const HOUR_MS = 60 * 60 * 1_000;
-/** Buckets that get a written greeting; late night keeps the built-in lines. */
-const GENERATED_BUCKETS: ReadonlySet<ChatGreetingBucket> = new Set([
-  "morning",
-  "afternoon",
-  "evening",
-]);
-/** Attempts per rolling day. One above the bucket count leaves room for a time zone change. */
+/** Attempts per rolling day, including retries. */
 export const MAX_GREETING_ATTEMPTS_PER_DAY = 4;
+const RETRY_AFTER_MS = 15 * 60_000;
 /** How far back "recent work" reaches, and how many titles the prompt carries. */
 const ACTIVITY_WINDOW_MS = 24 * HOUR_MS;
 const ACTIVITY_THREAD_LIMIT = 6;
@@ -56,10 +56,12 @@ const BUCKET_LABELS: Record<ChatGreetingBucket, string> = {
 
 const GreetingEntry = Schema.Struct({
   key: Schema.String,
-  /** Null records a failed or empty attempt, so the bucket is not retried. */
+  /** Null records a failed attempt; retry after the cooldown. */
   text: Schema.NullOr(Schema.String),
   /** Server clock, epoch millis. */
   at: Schema.Number,
+  attempts: Schema.optionalKey(Schema.Number),
+  failure: Schema.optionalKey(Schema.Literals(["provider-error", "invalid-output", "timeout"])),
 });
 export type GreetingEntry = typeof GreetingEntry.Type;
 const GreetingCacheFile = Schema.Struct({ entries: Schema.Array(GreetingEntry) });
@@ -75,9 +77,8 @@ type GreetingDecision =
   | { readonly type: "skip" };
 
 /**
- * What to do for one request. Disabled, late-night, implausible days, and a
- * spent daily budget all fall back to the built-in greeting; a bucket that was
- * already attempted answers from its entry, even when that attempt failed.
+ * Reuse successful buckets, cool down failures, and bound all attempts across
+ * clients and restarts. Each local day and time bucket gets fresh text.
  */
 export function decideGreeting(input: {
   readonly enabled: boolean;
@@ -88,8 +89,9 @@ export function decideGreeting(input: {
   if (!input.enabled) return { type: "skip" };
   const key = greetingKey(input.request);
   const entry = input.entries.find((candidate) => candidate.key === key);
-  if (entry) return { type: "cached", text: entry.text };
-  if (!GENERATED_BUCKETS.has(input.request.bucket)) return { type: "skip" };
+  if (entry && (entry.text !== null || input.nowMs - entry.at < RETRY_AFTER_MS)) {
+    return { type: "cached", text: entry.text };
+  }
   // A local date is within about a day of the server's clock in any time zone;
   // anything else is a skewed or replayed client that must not buy new calls.
   const dayNoon = Date.parse(`${input.request.day}T12:00:00Z`);
@@ -97,7 +99,11 @@ export function decideGreeting(input: {
     return { type: "skip" };
   }
   const recent = input.entries.filter((candidate) => input.nowMs - candidate.at < 24 * HOUR_MS);
-  if (recent.length >= MAX_GREETING_ATTEMPTS_PER_DAY) return { type: "skip" };
+  if (
+    recent.reduce((total, candidate) => total + (candidate.attempts ?? 1), 0) >=
+    MAX_GREETING_ATTEMPTS_PER_DAY
+  )
+    return { type: "skip" };
   return { type: "generate" };
 }
 
@@ -141,6 +147,7 @@ export class ChatGreetingService extends Context.Service<
   {
     /** The greeting for the client's day and bucket. Never fails; null means the built-in line. */
     readonly get: (input: ChatGreetingInput) => Effect.Effect<ChatGreetingResult>;
+    readonly healthItems: Effect.Effect<ReadonlyArray<MachineHealthItem>>;
   }
 >()("cogenly-server/greeting/ChatGreetingService") {}
 
@@ -200,7 +207,9 @@ const make = Effect.gen(function* () {
     readonly request: ChatGreetingInput;
     readonly recentWork: ReturnType<typeof summarizeRecentWork>;
     readonly deferred: Deferred.Deferred<string | null>;
+    readonly attempts: number;
   }) {
+    let failure: GreetingEntry["failure"];
     const text = yield* settingsService.getSettings.pipe(
       Effect.flatMap((settings) =>
         textGeneration.generateGreeting({
@@ -211,12 +220,39 @@ const make = Effect.gen(function* () {
           modelSelection: settings.textGenerationModelSelection,
         }),
       ),
-      Effect.map((result) => cleanGreeting(result.greeting)),
-      Effect.catchCause((cause) =>
-        Effect.logWarning("Chat greeting generation failed", { cause }).pipe(Effect.as(null)),
+      Effect.map((result) => {
+        const text = cleanGreeting(result.greeting);
+        if (text === null) failure = "invalid-output";
+        return text;
+      }),
+      Effect.timeoutOrElse({
+        duration: "30 seconds",
+        orElse: () =>
+          Effect.sync(() => {
+            failure = "timeout";
+            return null;
+          }),
+      }),
+      Effect.catchCause(() =>
+        Effect.sync(() => {
+          failure = "provider-error";
+          return null;
+        }),
       ),
     );
-    yield* record({ key: input.key, text, at: yield* Clock.currentTimeMillis });
+    if (failure !== undefined) {
+      // Bounded reason appears in Settings diagnostics without exposing provider output.
+      yield* Effect.logWarning(
+        `AI greeting unavailable: ${failure}. Check the text generation model in Settings.`,
+      );
+    }
+    yield* record({
+      key: input.key,
+      text,
+      at: yield* Clock.currentTimeMillis,
+      attempts: input.attempts,
+      ...(failure === undefined ? {} : { failure }),
+    });
     // Clear the in-flight marker before waking waiters, so their next request reads the cache.
     yield* clearInFlight(input.key);
     yield* Deferred.succeed(input.deferred, text);
@@ -234,7 +270,7 @@ const make = Effect.gen(function* () {
     const decision = decideGreeting({ enabled, request, entries: yield* loadEntries, nowMs });
     if (decision.type === "cached") return { type: "done" as const, text: decision.text };
     if (decision.type === "skip") return { type: "done" as const, text: null };
-    // Nothing to talk about: the built-in line is better, and costs nothing.
+    // Recent work is optional: new users still get a day-and-time greeting.
     const recentWork = summarizeRecentWork(
       yield* projections
         .getRecentThreadTitles({
@@ -243,10 +279,12 @@ const make = Effect.gen(function* () {
         })
         .pipe(Effect.orElseSucceed(() => [])),
     );
-    if (recentWork.threads.length === 0) return { type: "done" as const, text: null };
     const deferred = yield* Deferred.make<string | null>();
     yield* Ref.update(inFlight, (map) => new Map(map).set(key, deferred));
-    yield* generate({ key, request, recentWork, deferred }).pipe(
+    const previous = (yield* loadEntries).find((entry) => entry.key === key);
+    const attempts =
+      previous && nowMs - previous.at < 24 * HOUR_MS ? (previous.attempts ?? 1) + 1 : 1;
+    yield* generate({ key, request, recentWork, deferred, attempts }).pipe(
       Effect.ensuring(clearInFlight(key)),
       // Never leave a waiting client hanging, even on a defect.
       Effect.onExit(() => Deferred.succeed(deferred, null)),
@@ -264,7 +302,32 @@ const make = Effect.gen(function* () {
     },
   );
 
-  return ChatGreetingService.of({ get });
+  const healthItems = Effect.gen(function* (): Effect.fn.Return<ReadonlyArray<MachineHealthItem>> {
+    const settings = yield* settingsService.getSettings.pipe(Effect.option);
+    if (Option.isNone(settings) || !settings.value.aiGreetings) return [];
+    const now = yield* Clock.currentTimeMillis;
+    const recent = (yield* loadEntries).filter((entry) => now - entry.at < 24 * HOUR_MS);
+    const latest = recent.toSorted((a, b) => b.at - a.at)[0];
+    const failures = recent
+      .filter((entry) => entry.text === null)
+      .reduce((sum, entry) => sum + (entry.attempts ?? 1), 0);
+    if (!latest || latest.text !== null || failures < 2) return [];
+    return [
+      {
+        key: "ai-greetings",
+        status: "warn",
+        title: "AI greetings keep failing",
+        detail: `Using the built-in greeting (${latest.failure ?? "provider-error"}). Check the text generation model in Settings → Models and its provider sign-in.`,
+        since: DateTime.makeUnsafe(latest.at),
+        target: {
+          _tag: "provider",
+          instanceId: settings.value.textGenerationModelSelection.instanceId,
+        },
+        fix: null,
+      },
+    ];
+  });
+  return ChatGreetingService.of({ get, healthItems: healthItems.pipe(lock.withPermits(1)) });
 });
 
 export const layer = Layer.effect(ChatGreetingService, make);

@@ -8,6 +8,9 @@
  * @module SettingsSync
  */
 import { type ServerSettingsError, SharedStateError } from "@cogenly/contracts";
+import * as Crypto from "effect/Crypto";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -16,6 +19,8 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
+import { readProviderAccountIdentities } from "./providerAccountIdentity.ts";
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { SharedState } from "./SharedState.ts";
 import { UNIVERSAL_SETTINGS_DOCUMENT_ID } from "./settingsDocument.ts";
@@ -41,6 +46,9 @@ const storage = (cause: unknown) =>
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const crypto = yield* Crypto.Crypto;
   const shared = yield* SharedState;
   const settings = yield* ServerSettingsService;
   const permit = yield* Semaphore.make(1);
@@ -61,7 +69,12 @@ const make = Effect.gen(function* () {
         decodeJson(row.value_json),
       ]),
     );
-    return { base, documents };
+    const accounts = yield* readProviderAccountIdentities(yield* settings.getSettings).pipe(
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path),
+      Effect.provideService(Crypto.Crypto, crypto),
+    );
+    return { base, documents, accounts };
   }).pipe(Effect.mapError(storage));
 
   const recordBase = (entries: SettingsReconcilePlan["base"]) =>
@@ -109,8 +122,12 @@ export const layer = Layer.effect(
     const service = yield* make;
     const settings = yield* ServerSettingsService;
     const shared = yield* SharedState;
+    const providers = yield* ProviderRegistry.ProviderRegistry;
     const wake = yield* Queue.sliding<void>(1);
-    yield* Stream.merge(settings.streamChanges, shared.changes).pipe(
+    yield* Stream.merge(
+      Stream.merge(settings.streamChanges, shared.changes),
+      providers.streamChanges,
+    ).pipe(
       Stream.runForEach(() => Queue.offer(wake, undefined)),
       Effect.forkScoped,
     );

@@ -1,6 +1,8 @@
 import {
   AgentId,
+  groupVaultLoginsBySite,
   ProjectLabelId,
+  ThreadId,
   VaultItemId,
   type VaultItemMetadata,
   type VaultUsageEntry,
@@ -14,7 +16,11 @@ import {
   vaultCreateInput,
   vaultDraftFromItem,
   vaultDraftProblem,
+  splitVaultItems,
+  vaultLastUsedText,
   vaultPolicySummary,
+  vaultPolicyWithAccess,
+  vaultSavedFromThread,
   vaultUpdateInput,
   type VaultDraft,
 } from "./vault.logic";
@@ -83,7 +89,8 @@ describe("vaultCreateInput", () => {
     expect(input.label).toBe("Work");
     expect(input.allowedDomains).toEqual(["github.com"]);
     expect(input.secretFields).toEqual({ username: "me", password: "pw" });
-    expect(input.policy).toEqual({ mode: "ask", allowedAgentIds: [], allowedDomains: [] });
+    // A new item starts on the default rule: agents fill it on its sites.
+    expect(input.policy).toEqual({ mode: "allow", allowedAgentIds: [], allowedDomains: [] });
   });
 
   it("stores a card in its own encrypted fields, expiry included", () => {
@@ -133,13 +140,19 @@ describe("vaultCreateInput", () => {
     ).toBe("Enter the full expiry (month and year).");
   });
 
-  it("drops agents and domains from an ask policy", () => {
+  it("drops agents and domains from an ask policy and marks a picked rule as the owner's", () => {
     const agent = AgentId.make("agent-1");
     expect(
       vaultCreateInput(
         draft({ policyMode: "ask", policyAgentIds: [agent], policyDomains: "a.com" }),
       ).policy,
     ).toEqual({ mode: "ask", allowedAgentIds: [], allowedDomains: [] });
+    expect(vaultCreateInput(draft({ policyMode: "deny", policyOwnerSet: true })).policy).toEqual({
+      mode: "deny",
+      allowedAgentIds: [],
+      allowedDomains: [],
+      ownerSet: true,
+    });
     expect(
       vaultCreateInput(
         draft({ policyMode: "allow", policyAgentIds: [agent], policyDomains: "a.com" }),
@@ -203,13 +216,16 @@ describe("vaultUpdateInput", () => {
 describe("vaultPolicySummary", () => {
   const names = new Map([["agent-1", "Scout"]]);
   const agentName = (id: string) => names.get(id);
-  it("describes ask, any agent, and listed agents with domains", () => {
+  it("describes the default, ask, block, and listed agents with domains", () => {
     expect(
       vaultPolicySummary({ mode: "ask", allowedAgentIds: [], allowedDomains: [] }, agentName),
     ).toBe("Asks you first");
     expect(
       vaultPolicySummary({ mode: "allow", allowedAgentIds: [], allowedDomains: [] }, agentName),
-    ).toBe("Any agent may use it");
+    ).toBe("Agents fill it on its sites");
+    expect(
+      vaultPolicySummary({ mode: "deny", allowedAgentIds: [], allowedDomains: [] }, agentName),
+    ).toBe("Blocked for agents");
     expect(
       vaultPolicySummary(
         {
@@ -231,24 +247,133 @@ describe("sortVaultItems", () => {
 });
 
 describe("lastUsedByItem", () => {
-  it("keeps the newest use per item", () => {
-    const use = (itemId: string, at: string): VaultUsageEntry =>
-      ({
-        id: `${itemId}-${at}`,
-        itemId: VaultItemId.make(itemId),
-        threadId: null,
-        agentId: null,
-        action: "fill",
-        domain: null,
-        at,
-        outcome: "allowed",
-      }) as VaultUsageEntry;
+  const use = (
+    itemId: string,
+    at: string,
+    overrides: Partial<VaultUsageEntry> = {},
+  ): VaultUsageEntry =>
+    ({
+      id: `${itemId}-${at}`,
+      itemId: VaultItemId.make(itemId),
+      threadId: null,
+      agentId: null,
+      action: "fill",
+      domain: null,
+      at,
+      outcome: "allowed",
+      ...overrides,
+    }) as VaultUsageEntry;
+
+  it("keeps the newest use per item, preferring one that went through", () => {
     const latest = lastUsedByItem([
       use("a", "2026-10-02T00:00:00.000Z"),
       use("a", "2026-10-05T00:00:00.000Z"),
-      use("b", "2026-10-01T00:00:00.000Z"),
+      use("a", "2026-10-06T00:00:00.000Z", { outcome: "approval_required" }),
+      use("b", "2026-10-01T00:00:00.000Z", { outcome: "denied_domain" }),
     ]);
-    expect(latest.get(VaultItemId.make("a"))).toBe("2026-10-05T00:00:00.000Z");
-    expect(latest.get(VaultItemId.make("b"))).toBe("2026-10-01T00:00:00.000Z");
+    expect(latest.get(VaultItemId.make("a"))?.at).toBe("2026-10-05T00:00:00.000Z");
+    expect(latest.get(VaultItemId.make("b"))?.at).toBe("2026-10-01T00:00:00.000Z");
+  });
+
+  it("says when and by which agent", () => {
+    const agentName = (id: string) => (id === "agent-1" ? "Inbox" : undefined);
+    const relative = () => "2 hours ago";
+    expect(vaultLastUsedText(undefined, agentName, relative)).toBe("Never used");
+    expect(
+      vaultLastUsedText(
+        use("a", "2026-10-05T00:00:00.000Z", { agentId: AgentId.make("agent-1") }),
+        agentName,
+        relative,
+      ),
+    ).toBe("Used 2 hours ago by Inbox");
+    expect(
+      vaultLastUsedText(
+        use("a", "2026-10-05T00:00:00.000Z", { threadId: ThreadId.make("thread:1") }),
+        agentName,
+        relative,
+      ),
+    ).toBe("Used 2 hours ago in a chat");
+  });
+});
+
+describe("vaultPolicyWithAccess", () => {
+  it("changes the mode, keeps approved sites, and marks the choice as the owner's", () => {
+    const policy = {
+      mode: "allow" as const,
+      allowedAgentIds: [AgentId.make("agent-1")],
+      allowedDomains: [],
+      approvedDomains: ["login.example.com"],
+    };
+    expect(vaultPolicyWithAccess(policy, { mode: "ask" })).toEqual({
+      mode: "ask",
+      allowedAgentIds: [],
+      allowedThreadIds: [],
+      allowedDomains: [],
+      approvedDomains: ["login.example.com"],
+      ownerSet: true,
+    });
+    expect(vaultPolicyWithAccess(policy, { agentIds: [] })).toMatchObject({
+      mode: "allow",
+      allowedAgentIds: [],
+      ownerSet: true,
+    });
+  });
+});
+
+describe("groupVaultLoginsBySite", () => {
+  it("groups logins by their first allowed site and leaves other types out", () => {
+    const sites = groupVaultLoginsBySite([
+      item("vault:2", "GitHub", { username: "octo-work", label: "Work" }),
+      item("vault:1", "GitHub", { username: "octo-home" }),
+      item("vault:3", "ADSO member portal", {
+        allowedDomains: ["theadso.my.site.com"],
+        fields: ["password"],
+      }),
+      item("vault:4", "Stripe", { type: "api_key", allowedDomains: [] }),
+    ]);
+    expect(sites).toEqual([
+      {
+        host: "theadso.my.site.com",
+        siteName: "ADSO member portal",
+        logins: [
+          { id: "vault:3", label: "ADSO member portal", username: null, missingUsername: true },
+        ],
+      },
+      {
+        host: "github.com",
+        siteName: "GitHub",
+        logins: [
+          {
+            id: "vault:1",
+            label: "GitHub · octo-home",
+            username: "octo-home",
+            missingUsername: false,
+          },
+          { id: "vault:2", label: "Work", username: "octo-work", missingUsername: false },
+        ],
+      },
+    ]);
+  });
+
+  it("splits logins from the other types for their own list", () => {
+    const { logins, others } = splitVaultItems([
+      item("vault:4", "Stripe", { type: "api_key" }),
+      item("vault:1", "GitHub"),
+    ]);
+    expect(logins.map((entry) => entry.id)).toEqual(["vault:1"]);
+    expect(others.map((entry) => entry.id)).toEqual(["vault:4"]);
+  });
+});
+
+describe("vaultSavedFromThread", () => {
+  it("names the thread a sign-in card saved or updated the item from", () => {
+    const threadId = ThreadId.make("thread:1");
+    expect(vaultSavedFromThread({ action: "saved_from_request", threadId })).toEqual({
+      threadId,
+      updated: false,
+    });
+    expect(vaultSavedFromThread({ action: "updated_from_request", threadId })?.updated).toBe(true);
+    expect(vaultSavedFromThread({ action: "fill", threadId })).toBeNull();
+    expect(vaultSavedFromThread({ action: "saved_from_request", threadId: null })).toBeNull();
   });
 });

@@ -25,7 +25,7 @@ const TailscaleCommandContext = {
 
 /**
  * Failure kinds we can name without quoting the CLI. Anything unrecognized
- * becomes "unknown" rather than falling back to raw text — stderr can contain
+ * becomes "unknown" rather than falling back to raw text, since stderr can contain
  * auth keys (`tskey-…`) and node names, and these labels are logged.
  */
 export const TailscaleStderrDiagnostic = Schema.Literals([
@@ -87,7 +87,7 @@ export class TailscaleCommandExitError extends Schema.TaggedError<TailscaleComma
     stderrLength: Schema.Number,
     // A classified diagnostic, never raw CLI output. `tailscale` prints auth
     // keys and node identifiers into stderr, and this field is surfaced in
-    // dev-runner logs — so it carries only a known-safe label from the closed
+    // dev-runner logs, so it carries only a known-safe label from the closed
     // set below. Callers that need to recognize a specific failure (e.g.
     // `serve off` on a port with no mapping) match on the label.
     stderrDiagnostic: Schema.optional(TailscaleStderrDiagnostic),

@@ -1,6 +1,7 @@
-import type { AssistantCitation } from "@cogenly/contracts";
+import type { AssistantCitation, ThreadId } from "@cogenly/contracts";
 import { collectAssistantCitations } from "@cogenly/shared/assistantCitations";
 import { collectComposerContextReferences } from "@cogenly/shared/composerContextReferences";
+import { collectThreadLinks } from "@cogenly/shared/threadLinks";
 import {
   collectComposerInlineTokens,
   type ComposerInlineToken,
@@ -30,6 +31,13 @@ export type ComposerPromptSegment =
       type: "context-reference";
       kind: string;
       contextId: string;
+      label: string;
+      source: string;
+    }
+  | {
+      /** A `cogenly-thread://` link, kept as written so the sent message carries it. */
+      type: "thread-link";
+      threadId: ThreadId;
       label: string;
       source: string;
     };
@@ -79,12 +87,16 @@ export function collectComposerPromptInlineTokens(text: string) {
   const tokens = collectComposerInlineTokens(text);
   const citations = collectAssistantCitations(text);
   const references = collectComposerContextReferences(text);
-  if (citations.length === 0 && references.length === 0) return tokens;
+  const threadLinks = collectThreadLinks(text);
+  if (citations.length === 0 && references.length === 0 && threadLinks.length === 0) {
+    return tokens;
+  }
 
   // An unfinished @ mention can otherwise consume the start of a link label.
   const links = [
     ...citations.map((match) => ({ ...match, type: "citation" as const })),
     ...references.map((match) => ({ ...match, type: "context-reference" as const })),
+    ...threadLinks.map((match) => ({ ...match, type: "thread-link" as const })),
   ];
   return [
     ...tokens.filter(
@@ -113,6 +125,13 @@ function splitPromptTextIntoComposerSegments(text: string): ComposerPromptSegmen
 
     if (match.type === "citation") {
       segments.push({ type: "citation", citation: match.citation, source: match.source });
+    } else if (match.type === "thread-link") {
+      segments.push({
+        type: "thread-link",
+        threadId: match.threadId,
+        label: match.label,
+        source: match.source,
+      });
     } else if (match.type === "context-reference") {
       segments.push({
         type: "context-reference",

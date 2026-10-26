@@ -187,7 +187,7 @@ describe("etats", () => {
   /**
    * La sequence est le CATALOGUE : les 14 etats releves sur la video, ceux que
    * la palette propose et que la planche montre. Tout etat hors sequence est une
-   * transition d'interface, choisie et non mesuree — il ne doit donc jamais
+   * transition d'interface, choisie et non mesuree. Il ne doit donc jamais
    * apparaitre dans le catalogue, et le rester est precisement ce qu'on verifie.
    */
   it("garde les 14 etats de la video dans la sequence, et rien d autre", () => {
@@ -271,7 +271,7 @@ describe("regard qui suit le pointeur", () => {
   it("remplace le lacet de la pose au lieu de s y ajouter", () => {
     // C'est ce qui rend le changement d'expression fluide : l'appelant n'a pas a
     // retrancher le lacet de l'expression, donc il n'a pas a en connaitre la
-    // valeur — qui, pendant un morph, n'est pas encore celle d'arrivee.
+    // valeur, qui, pendant un morph, n'est pas encore celle d'arrivee.
     // Deux expressions qui ne different QUE par leur lacet : l'abscisse d'un oeil
     // depend aussi du tangage et de l'ecart des yeux, donc les faire varier
     // ensemble ne prouverait rien.
@@ -363,7 +363,7 @@ describe("robustesse du regard", () => {
     /**
      * Le moteur GARDE la derniere cible : un `NaN` pose une seule fois se
      * propagerait a chaque image et le bot ne se reposerait plus jamais. Arrive
-     * pour de vrai — `getBoundingClientRect` sur une boite de taille nulle donne
+     * pour de vrai : `getBoundingClientRect` sur une boite de taille nulle donne
      * `0 / 0` chez l'appelant.
      */
     const sain = new BotEngine(100, "idle");
@@ -458,7 +458,7 @@ describe("reset", () => {
  * changement.
  *
  * Mesure : le deplacement d'un oeil sur les deux images qui suivent un changement. Un
- * changement ESPACE en produit 10 a 14 px, et c'est voulu — l'`easeOutQuint` releve sur la
+ * changement ESPACE en produit 10 a 14 px, et c'est voulu : l'`easeOutQuint` releve sur la
  * video demarre raide. Ce qui ne l'etait pas, c'est les 26 a 43 px d'un changement en plein
  * fondu.
  */
@@ -534,7 +534,7 @@ describe("changement d etat pendant un fondu", () => {
   /**
    * Et la lecture ESPACEE ne change pas : les blocs d'un montage durent au moins le plus
    * long fondu, donc rien n'y est jamais fige. Verifie sur la sequence complete, image par
-   * image — c'est ce qui protege les animations relevees.
+   * image. C'est ce qui protege les animations relevees.
    */
   it("ne change rien a une lecture espacee", () => {
     const suite: Array<[StateId, number]> = [

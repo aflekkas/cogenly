@@ -1,3 +1,4 @@
+import * as SetupRequests from "../../../integrations/IntegrationSetupRequests.ts";
 import {
   IntegrationAddInput,
   IntegrationError,
@@ -24,37 +25,31 @@ import { IntegrationsToolkit } from "./tools.ts";
 const isIntegrationError = Schema.is(IntegrationError);
 const decodeAdd = Schema.decodeUnknownEffect(IntegrationAddInput);
 
-/** A failure in the same words Settings uses for it, with a link there. */
-const failureAt =
-  (origin: string | undefined) =>
-  (cause: unknown): OrchestratorMcpFailure => {
-    if (!isIntegrationError(cause))
-      return new OrchestratorMcpFailure({
-        code: "orchestration_error",
-        message: "The integration request could not be completed.",
-      });
-    const waiting = Integrations.refreshWaitMessage(cause);
-    if (waiting !== undefined)
-      return new OrchestratorMcpFailure({
-        code: "invalid_request",
-        message: `${waiting} The integration works again once that machine is online and its refreshed sign-in syncs here; try again later.`,
-      });
-    const { message, transient } = agentFailureMessage(cause, origin);
+/** A failure in the same words Settings uses for it; the inline card carries the fix. */
+const failure = (cause: unknown): OrchestratorMcpFailure => {
+  if (!isIntegrationError(cause))
     return new OrchestratorMcpFailure({
-      code: transient ? "orchestration_error" : "invalid_request",
-      message,
+      code: "orchestration_error",
+      message: "The integration request could not be completed.",
     });
-  };
+  const waiting = Integrations.refreshWaitMessage(cause);
+  if (waiting !== undefined)
+    return new OrchestratorMcpFailure({
+      code: "invalid_request",
+      message: `${waiting} The integration works again once that machine is online and its refreshed sign-in syncs here; try again later.`,
+    });
+  const { message, transient } = agentFailureMessage(cause);
+  return new OrchestratorMcpFailure({
+    code: transient ? "orchestration_error" : "invalid_request",
+    message,
+  });
+};
 
 /** A catalog request's next step (an account label, a vault reference) is the agent's message. */
-const catalogFailureAt =
-  (origin: string | undefined) =>
-  (cause: unknown): OrchestratorMcpFailure =>
-    isIntegrationError(cause) &&
-    cause.reason === "invalid_request" &&
-    typeof cause.cause === "string"
-      ? new OrchestratorMcpFailure({ code: "invalid_request", message: cause.cause })
-      : failureAt(origin)(cause);
+const catalogFailure = (cause: unknown): OrchestratorMcpFailure =>
+  isIntegrationError(cause) && cause.reason === "invalid_request" && typeof cause.cause === "string"
+    ? new OrchestratorMcpFailure({ code: "invalid_request", message: cause.cause })
+    : failure(cause);
 
 /**
  * The caller's project scope: a thread caller sees integrations for its
@@ -85,7 +80,8 @@ const byName = (name: string, fail: (cause: unknown) => OrchestratorMcpFailure) 
     if (found === undefined) {
       return yield* new OrchestratorMcpFailure({
         code: "invalid_request",
-        message: "No connected integration with that name is available in this project.",
+        message:
+          "No connected integration with that name is available in this project. If the user wants this service, offer to connect it: read integration_setup_guide, then call integration_add with its catalogId (slack, github, linear, notion, google-workspace, wispr-flow or fathom) and give the user the sign-in link it returns, instead of only reporting that it is not connected.",
       });
     }
     return found.integration;
@@ -101,21 +97,27 @@ const addedByAgent = (fail: (cause: unknown) => OrchestratorMcpFailure) =>
     return { id: agent?.id ?? scope.thread.threadId, name: agent?.name ?? "Coding agent" };
   });
 
+/** Live runtime keeps the agent waiting on the durable inline card. */
+const finishSetup = (
+  scope: Invocation.McpInvocationScope,
+  result: import("@cogenly/contracts").IntegrationConnectResult,
+  accountLabel?: string,
+) =>
+  Effect.serviceOption(SetupRequests.IntegrationSetupRequests).pipe(
+    Effect.flatMap((requests) =>
+      Option.isSome(requests)
+        ? requests.value.finish(scope, result, accountLabel)
+        : Effect.succeed(result),
+    ),
+  );
+
 export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
-  integration_native_preview: McpToolAccess.writesEnvironment(() =>
-    Effect.gen(function* () {
-      const scope = yield* Invocation.McpInvocationContext;
-      return yield* (yield* Integrations.Integrations)
-        .previewNative()
-        .pipe(Effect.mapError(failureAt(scope.httpOrigin)));
-    }),
-  ),
   integration_install_runtime: McpToolAccess.writesEnvironment((input) =>
     Effect.gen(function* () {
       const scope = yield* Invocation.McpInvocationContext;
       return yield* (yield* Integrations.Integrations)
         .installRuntime(input.runtime)
-        .pipe(Effect.mapError(failureAt(scope.httpOrigin)));
+        .pipe(Effect.mapError(failure));
     }),
   ),
   integration_setup_guide: McpToolAccess.reads((input) =>
@@ -126,22 +128,34 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
   integration_test: McpToolAccess.writesWithCapability((input) =>
     Effect.gen(function* () {
       const scope = yield* Invocation.McpInvocationContext;
-      const integration = yield* byName(input.name, failureAt(scope.httpOrigin));
+      const integration = yield* byName(input.name, failure);
       return yield* (yield* Integrations.Integrations)
         .testConnection(integration.id, yield* callerLabel)
-        .pipe(Effect.mapError(failureAt(scope.httpOrigin)));
+        .pipe(Effect.mapError(failure));
     }),
   ),
-  integrations_list: McpToolAccess.reads(() =>
+  integrations_list: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const service = yield* Integrations.Integrations;
       const scope = yield* Invocation.McpInvocationContext;
       const label = yield* callerLabel;
       const { integrations } = yield* (
         label === undefined ? service.list() : service.listForProject(label)
-      ).pipe(Effect.mapError(failureAt(scope.httpOrigin)));
+      ).pipe(Effect.mapError(failure));
+      const summaries = integrations.map((summary) => agentSummary(summary));
+      // The default answer is context the caller pays for on every later
+      // turn. Setup notes (up to 4k chars each) only matter when repairing
+      // an integration, so they wait for detail:true.
+      if (input.detail === true) return { integrations: summaries };
       return {
-        integrations: integrations.map((summary) => agentSummary(summary, scope.httpOrigin)),
+        integrations: summaries.map((summary) => {
+          const {
+            setupNotes: _setupNotes,
+            setupNotesUpdatedAt: _updatedAt,
+            ...integration
+          } = summary.integration;
+          return { ...summary, integration };
+        }),
       };
     }),
   ),
@@ -152,9 +166,7 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
       const service = yield* Integrations.Integrations;
       const scope = yield* Invocation.McpInvocationContext;
       const label = yield* callerLabel;
-      return yield* service
-        .listTools(input.name, label)
-        .pipe(Effect.mapError(failureAt(scope.httpOrigin)));
+      return yield* service.listTools(input.name, label).pipe(Effect.mapError(failure));
     }),
   ),
   integration_call: McpToolAccess.writesWithCapability((input) =>
@@ -164,7 +176,7 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
       const label = yield* callerLabel;
       return yield* service
         .callTool(input.name, input.tool, input.arguments, label)
-        .pipe(Effect.mapError(failureAt(scope.httpOrigin)));
+        .pipe(Effect.mapError(failure));
     }),
   ),
   // The result is the account plus its sign-in link, or the step that comes first.
@@ -172,8 +184,8 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
     Effect.gen(function* () {
       const service = yield* Integrations.Integrations;
       const scope = yield* Invocation.McpInvocationContext;
-      const fail = failureAt(scope.httpOrigin);
-      const context = { origin: scope.httpOrigin, accountLabel: input.accountLabel };
+      const fail = failure;
+      const context = { accountLabel: input.accountLabel };
       const decoded =
         input.catalogId === undefined
           ? yield* decodeAdd(input).pipe(
@@ -197,12 +209,12 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
       if (request !== undefined) {
         const connected = yield* service
           .connectFromCatalog(request, {
-            origin: { origin: scope.httpOrigin, fromAgent: true },
+            origin: { origin: scope.httpOrigin, fromAgent: true, threadId: scope.thread?.threadId },
             addedByAgent: yield* addedByAgent(fail),
             fromAgent: true,
           })
-          .pipe(Effect.mapError(catalogFailureAt(scope.httpOrigin)));
-        return withAgentNextStep(connected, context);
+          .pipe(Effect.mapError(catalogFailure));
+        return withAgentNextStep(yield* finishSetup(scope, connected, input.accountLabel), context);
       }
       if (decoded === undefined || "preset" in decoded)
         return yield* new OrchestratorMcpFailure({
@@ -211,22 +223,35 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
         });
       const { integration } = yield* service
         .create(decoded, { addedByAgent: yield* addedByAgent(fail), fromAgent: true })
-        .pipe(Effect.mapError(fail));
+        .pipe(
+          Effect.catchTags({
+            IntegrationError: (error) =>
+              Effect.serviceOption(SetupRequests.IntegrationSetupRequests).pipe(
+                Effect.flatMap((requests) =>
+                  Option.isSome(requests)
+                    ? requests.value.approveCreate(scope, decoded, error)
+                    : Effect.fail(error),
+                ),
+              ),
+          }),
+          Effect.mapError((error) => (isIntegrationError(error) ? fail(error) : error)),
+        );
       const prepared = yield* service
         .prepareSignIn(integration.id, {
           origin: scope.httpOrigin,
           fromAgent: true,
           callbackOrigin: input.callbackOrigin,
+          threadId: scope.thread?.threadId,
         })
         .pipe(Effect.mapError(fail));
-      return withAgentNextStep(prepared, context);
+      return withAgentNextStep(yield* finishSetup(scope, prepared, input.accountLabel), context);
     }),
   ),
   integration_update: McpToolAccess.writesEnvironment((input) =>
     Effect.gen(function* () {
       const service = yield* Integrations.Integrations;
       const scope = yield* Invocation.McpInvocationContext;
-      const fail = failureAt(scope.httpOrigin);
+      const fail = failure;
       const current = yield* byName(input.name, fail);
       const label = yield* callerLabel;
       const agents = yield* AgentStore.AgentStore;
@@ -249,6 +274,7 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
             ...(input.hint === undefined ? {} : { hint: input.hint }),
             ...(input.accountLabel === undefined ? {} : { accountLabel: input.accountLabel }),
             ...(input.auth === undefined ? {} : { auth: input.auth }),
+            ...(input.setupNotes === undefined ? {} : { setupNotes: input.setupNotes }),
           },
           {
             preserveCredentialDestination: agent !== null,
@@ -258,22 +284,35 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
             preserveScope: agent !== null,
           },
         )
-        .pipe(Effect.mapError(fail));
+        .pipe(
+          Effect.catchTags({
+            IntegrationError: (error) =>
+              Effect.serviceOption(SetupRequests.IntegrationSetupRequests).pipe(
+                Effect.flatMap((requests) =>
+                  Option.isSome(requests)
+                    ? requests.value.approveUpdate(scope, current, input, error)
+                    : Effect.fail(error),
+                ),
+              ),
+          }),
+          Effect.mapError((error) => (isIntegrationError(error) ? fail(error) : error)),
+        );
       const prepared = yield* service
         .prepareSignIn(integration.id, {
           origin: scope.httpOrigin,
           fromAgent: true,
           callbackOrigin: input.callbackOrigin,
+          threadId: scope.thread?.threadId,
         })
         .pipe(Effect.mapError(fail));
-      return withAgentNextStep(prepared, { origin: scope.httpOrigin });
+      return withAgentNextStep(yield* finishSetup(scope, prepared));
     }),
   ),
   integration_remove: McpToolAccess.writesEnvironment((input) =>
     Effect.gen(function* () {
       const service = yield* Integrations.Integrations;
       const scope = yield* Invocation.McpInvocationContext;
-      const fail = failureAt(scope.httpOrigin);
+      const fail = failure;
       const current = yield* byName(input.name, fail).pipe(
         Effect.catch(() => Effect.succeed(undefined)),
       );

@@ -1,5 +1,6 @@
 import { resolveThreadWorkingStartedAt } from "@cogenly/client-runtime/state/models";
 import {
+  isAgentInternalMessage,
   type AssetResource,
   type ComputerUsePermission,
   type OrchestrationV2ExecutionNode,
@@ -415,14 +416,19 @@ export function providerErrorPresentation(
     item.retry.maxAttempts === null
       ? `${item.retry.attempt}`
       : `${item.retry.attempt}/${item.retry.maxAttempts}`;
+  const rateLimited =
+    item.failure.class === "usage_limit" &&
+    (item.failure.limitKind === "rate_limit" || item.failure.code === "rateLimitExceeded");
   const label =
-    item.status === "running"
-      ? `Retrying provider (${progress})`
-      : item.status === "completed"
-        ? `Provider recovered (${progress} retries)`
-        : item.status === "failed"
-          ? `${item.failure.class === "usage_limit" ? "Usage limit reached" : "Provider error"} after ${progress} retries`
-          : `Provider retry stopped (${progress})`;
+    item.status === "running" && rateLimited
+      ? `Rate-limited · retrying (${progress})`
+      : item.status === "running"
+        ? `Retrying provider (${progress})`
+        : item.status === "completed"
+          ? `Provider recovered (${progress} retries)`
+          : item.status === "failed"
+            ? `${item.failure.class === "usage_limit" ? "Usage limit reached" : "Provider error"} after ${progress} retries`
+            : `Provider retry stopped (${progress})`;
   const retryDelay =
     item.status === "running" && item.retry.retryDelayMs !== null && item.retry.retryDelayMs > 0
       ? item.retry.retryDelayMs < 1_000
@@ -663,7 +669,11 @@ function buildTimelineEntries(input: TimelineEntriesInput): TimelineEntry[] {
     if (turnItemIsWorkspacePreparation(item)) continue;
     // Task progress belongs in the composer, not between conversation entries.
     if (item.type === "todo_list" || item.type === "checkpoint") continue;
-    if (item.type === "user_message" && foldedAnswerMessageIds.has(item.messageId)) continue;
+    if (
+      item.type === "user_message" &&
+      (foldedAnswerMessageIds.has(item.messageId) || isAgentInternalMessage(item.messageId))
+    )
+      continue;
     const createdAt = projectedItemCreatedAt(row);
     const attempt = resolveAttempt(item);
     const attemptMetadata = attempt === undefined ? {} : { attempt };
@@ -805,7 +815,7 @@ function buildTimelineEntries(input: TimelineEntriesInput): TimelineEntry[] {
 
   const retainedMessageIds = new Set([...committedMessageIds, ...foldedAnswerMessageIds]);
   for (const message of input.anchoredMessages ?? []) {
-    if (retainedMessageIds.has(message.id)) continue;
+    if (retainedMessageIds.has(message.id) || isAgentInternalMessage(message.id)) continue;
     retainedMessageIds.add(message.id);
     const entry: TimelineEntry = {
       id: message.id,

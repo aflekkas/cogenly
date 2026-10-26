@@ -20,6 +20,7 @@ import {
 } from "@cogenly/contracts";
 import type { AuthEnvironmentScope, DpopFailureReason } from "@cogenly/contracts";
 import { parseOAuthScope } from "@cogenly/shared/oauthScope";
+import { isLocalLoopbackHost } from "@cogenly/shared/hostClassification";
 import { causeErrorTag } from "@cogenly/shared/observability";
 import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
@@ -27,6 +28,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { identity } from "effect/Function";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Cookies from "effect/http/Cookies";
 import * as HttpEffect from "effect/http/HttpEffect";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
@@ -199,13 +201,43 @@ export function failEnvironmentInternal(reason: EnvironmentInternalErrorReason, 
   });
 }
 
-const appendSessionCookie = (cookieName: string, token: string, expiresAt: DateTime.DateTime) =>
+/**
+ * Whether the client reached us over HTTPS. TLS is terminated in front of
+ * this plain-HTTP server (Tailscale Serve or a local proxy), which connects
+ * from loopback and sets `X-Forwarded-Proto`; that header is trusted only
+ * from a loopback peer, matching `peerIngress`. Loopback http dev stays
+ * insecure-cookie friendly.
+ */
+export const isSecureRequest = (request: {
+  readonly headers: Record<string, string | undefined>;
+  readonly remoteAddress?: string | undefined;
+}): boolean => {
+  const remote = request.remoteAddress?.replace(/^::ffff:/, "");
+  return (
+    remote !== undefined &&
+    isLocalLoopbackHost(remote) &&
+    request.headers["x-forwarded-proto"] === "https"
+  );
+};
+const requestIsSecure = (request: HttpServerRequest.HttpServerRequest): boolean =>
+  isSecureRequest({
+    headers: request.headers,
+    remoteAddress: Option.getOrUndefined(request.remoteAddress),
+  });
+
+const appendSessionCookie = (
+  cookieName: string,
+  token: string,
+  expiresAt: DateTime.DateTime,
+  secure: boolean,
+) =>
   Effect.fromResult(
     Cookies.set(Cookies.empty, cookieName, token, {
       expires: DateTime.toDate(expiresAt),
       httpOnly: true,
       path: "/",
       sameSite: "lax",
+      ...(secure ? { secure: true } : {}),
     }),
   ).pipe(
     Effect.catch(() => failEnvironmentInternal("browser_session_cookie_failed")),
@@ -285,7 +317,12 @@ export const layer = HttpApiBuilder.group(
               result.sessionMethod === "browser-session-cookie" &&
               result.expiresAt
             ) {
-              yield* appendSessionCookie(sessions.cookieName, credential.token, result.expiresAt);
+              yield* appendSessionCookie(
+                sessions.cookieName,
+                credential.token,
+                result.expiresAt,
+                requestIsSecure(request),
+              );
               yield* appendCredentialResponseHeaders;
             }
             return result;
@@ -315,12 +352,14 @@ export const layer = HttpApiBuilder.group(
                 : undefined,
             );
             const cookieName = result.cookieName ?? sessions.cookieName;
+            const secure = requestIsSecure(request);
             const selectedCookie = yield* Effect.fromResult(
               Cookies.set(Cookies.empty, cookieName, result.sessionToken, {
                 expires: DateTime.toDate(result.response.expiresAt),
                 httpOnly: true,
                 path: "/",
                 sameSite: "lax",
+                ...(secure ? { secure: true } : {}),
               }),
             ).pipe(Effect.catch(() => failEnvironmentInternal("browser_session_cookie_failed")));
             const sessionCookies = result.expireNormalCookie
@@ -329,6 +368,7 @@ export const layer = HttpApiBuilder.group(
                     httpOnly: true,
                     path: "/",
                     sameSite: "lax",
+                    ...(secure ? { secure: true } : {}),
                   }),
                 ).pipe(Effect.catch(() => failEnvironmentInternal("browser_session_cookie_failed")))
               : selectedCookie;

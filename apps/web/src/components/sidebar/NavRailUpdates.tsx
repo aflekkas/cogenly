@@ -225,7 +225,7 @@ function RowIcon({ row }: { row: UpdateRowView }) {
         driverKind={row.driver}
         displayName={row.name}
         className="size-5 shrink-0"
-        iconClassName="size-4"
+        size="md"
       />
     );
   }

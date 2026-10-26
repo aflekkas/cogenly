@@ -241,7 +241,7 @@ function formatProjectMemberActionLabel(
   }
 
   return member.environmentLabel
-    ? `${member.environmentLabel} — ${member.workspaceRoot}`
+    ? `${member.environmentLabel}: ${member.workspaceRoot}`
     : member.workspaceRoot;
 }
 
@@ -494,7 +494,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       // cmd/ctrl/shift double-clicks are multi-select intent, not rename.
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       // Ignore double-clicks bubbling from nested controls (PR status, port,
-      // archive buttons) — only the row body should enter inline rename.
+      // archive buttons); only the row body should enter inline rename.
       if ((event.target as HTMLElement).closest("button, a")) return;
       event.preventDefault();
       startThreadRename(threadKey, thread.title);

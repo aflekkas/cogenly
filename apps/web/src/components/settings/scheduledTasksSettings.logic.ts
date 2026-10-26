@@ -35,6 +35,18 @@ export function scheduledTaskLastRun(
       return { text: `Ran${when}`, tone: null };
     case "failed":
       return { text: `Failed${when}`, tone: "error" };
+    case "skipped_busy":
+      return { text: `Deferred${when}, the agent is busy`, tone: "warning" };
+    case "skipped_backoff":
+      return { text: `Skipped${when}, the agent is backing off`, tone: "warning" };
+    case "skipped_daily_cap":
+      return { text: `Skipped${when}, daily run cap reached`, tone: "warning" };
+    case "skipped_not_owner":
+      return { text: `Skipped${when}, this machine does not own the agent`, tone: "warning" };
+    case "skipped_disabled":
+      return { text: `Skipped${when}, the agent is paused`, tone: "warning" };
+    case "skipped_ineligible":
+      return { text: `Skipped${when}, trigger is no longer eligible`, tone: "warning" };
     case "skipped_already_queued":
       return { text: `Skipped${when}, the last run was still queued`, tone: "warning" };
   }

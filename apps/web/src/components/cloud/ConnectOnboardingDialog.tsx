@@ -33,7 +33,7 @@ import { WizardSteps, WizardPopup, WizardHeader, WizardPanel, WizardFooter } fro
 
 /**
  * Post-sign-in onboarding wizard for Cogenly Connect. Opens on every in-session
- * sign-in — sign-out removes the connected relay environments, so each new
+ * sign-in, since sign-out removes the connected relay environments, so each new
  * session starts with no devices to reach. It first prompts to publish this
  * environment (managed tunnel + agent activity, both defaulting on) when the
  * current session is authorized to manage the relay link, then lists the
@@ -72,7 +72,7 @@ function ConfiguredConnectOnboardingDialog() {
   const canManageRelay = canReadRelay && canWriteRelay;
   // The publish step is only offered when we know the answer; opening the
   // wizard before the session state resolves would let the step set change
-  // mid-flight. A failed session read still opens the wizard — it just means
+  // mid-flight. A failed session read still opens the wizard; it just means
   // no publish step.
   const sessionScopesKnown =
     primaryEnvironmentId === null ? environmentsReady : primarySessionState._tag !== "Initial";
@@ -102,13 +102,13 @@ function ConfiguredConnectOnboardingDialog() {
   const optOutAccounts = optOutState.optOutAccounts;
 
   // Every sign-in or account switch that completes during this session
-  // requests the wizard — account transitions clear the connected relay
+  // requests the wizard: account transitions clear the connected relay
   // environments, so each new session starts with no devices to reach. A cold
   // load observes undefined → account and must not re-prompt.
   useEffect(() => {
     if (!isLoaded) return;
     // A loaded-but-incomplete snapshot (signed in, user id not yet populated)
-    // must not be recorded as signed-out — the next render would then look
+    // must not be recorded as signed-out, or the next render would then look
     // like a fresh sign-in on a cold load.
     if (isSignedIn && !userId) return;
     const previousAccount = observedAccountRef.current;
@@ -120,7 +120,7 @@ function ConfiguredConnectOnboardingDialog() {
   }, [isLoaded, isSignedIn, userId]);
 
   // A manageable session implies a primary environment, so when the scopes
-  // allow publishing, wait for the connection target too — otherwise the
+  // allow publishing, wait for the connection target too; otherwise the
   // wizard could open on the devices step moments before the publish step
   // becomes available and freeze there.
   const publishStepDecided = !canManageRelay || controller.linkState.target !== null;
@@ -152,7 +152,7 @@ function ConfiguredConnectOnboardingDialog() {
   ]);
 
   // Signing out (or switching accounts) mid-wizard invalidates everything the
-  // wizard would do — close it and let the sign-in trigger re-evaluate.
+  // wizard would do, so close it and let the sign-in trigger re-evaluate.
   useEffect(() => {
     if (openForAccount !== null && (!isSignedIn || userId !== openForAccount)) {
       setOpenForAccount(null);
@@ -164,7 +164,7 @@ function ConfiguredConnectOnboardingDialog() {
 
   // Toggles default on, but an environment that is already linked should show
   // its actual configuration instead of silently proposing to rewrite it.
-  // Only when the link belongs to the account being onboarded, though — after
+  // Only when the link belongs to the account being onboarded, though: after
   // an account switch the cached link state can still describe the previous
   // account's setup.
   const linkStateData = controller.linkState.data;
@@ -209,7 +209,7 @@ function ConfiguredConnectOnboardingDialog() {
       return;
     }
     if (linkStateData === null || controller.linkState.error !== null) return;
-    // The wizard only ever enables — with both toggles off there is nothing to
+    // The wizard only ever enables. With both toggles off there is nothing to
     // apply, and an existing link must not be torn down from onboarding.
     if (!exposeEnvironment && !publishAgentActivity) {
       setStep("devices");
@@ -246,7 +246,7 @@ function ConfiguredConnectOnboardingDialog() {
           title="Set up Cogenly Connect"
           description={
             <>
-              Mesh your devices together — publish this machine and connect the rest, all in one
+              Mesh your devices together: publish this machine and connect the rest, all in one
               place.
             </>
           }

@@ -293,8 +293,8 @@ describe("deliverDelegatedTaskFailureNotice", () => {
       expect(notice.id).toBe("message:delegated-task-failure:task:browser:run:browser");
       expect(notice.createdBy).toBe("agent");
       expect(notice.text).toContain("usage limit");
-      expect(notice.text).toContain("thread_limit_handoff (threadId thread:browser)");
-      expect(notice.text).toContain(`resume it after ${resetAt}`);
+      expect(notice.text).not.toMatch(/thread_limit_handoff|another account|headroom/);
+      expect(notice.text).toContain(`Resume it after ${resetAt}`);
       expect(notice.notification).toMatchObject({
         source: {
           kind: "delegated_task",

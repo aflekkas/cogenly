@@ -41,7 +41,7 @@ const MENTION_TOKEN_REGEX = /(^|\s)@(?:"((?:\\.|[^"\\])*)"|([^\s@"]+))(?=\s)/g;
 /**
  * The label body is bounded rather than `*`. Unbounded, every whitespace in
  * the composer is a candidate start: the engine scans the rest of the text for
- * a closing `]`, fails, and rescans from the next whitespace — quadratic on
+ * a closing `]`, fails, and rescans from the next whitespace, quadratic on
  * input like " [[[[[…". A cap makes each attempt constant-bounded.
  *
  * Only a basename ever survives the `label !== basename` check below, so this

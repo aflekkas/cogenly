@@ -51,23 +51,38 @@ export const VaultSecretFields = Schema.Struct({
 export type VaultSecretFields = typeof VaultSecretFields.Type;
 
 /**
- * Who may use an item without asking. `ask` (the default) makes an agent's
- * first use create an owner approval; approving records an `allow` for that
- * thread or persistent agent (and the approved domain, when one was involved).
+ * Who may use an item without asking. `allow` with empty lists (the default)
+ * lets any thread or agent fill it on the item's allowed sites; a fill on any
+ * other site still asks the owner. `ask` makes every agent use create an owner
+ * approval, and approving records an `allow` for that thread or persistent
+ * agent. `deny` (Block) refuses agents outright.
  */
 export const VaultPolicy = Schema.Struct({
-  mode: Schema.Literals(["ask", "allow"]),
+  mode: Schema.Literals(["ask", "allow", "deny"]),
   allowedAgentIds: Schema.Array(AgentId),
   allowedThreadIds: Schema.optional(Schema.Array(ThreadId)),
   allowedDomains: Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(253))),
+  /** Sites beyond the item's allowed sites where the owner approved a fill. */
+  approvedDomains: Schema.optional(
+    Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(253))),
+  ),
+  /** The owner picked this rule by hand; a change of default never touches it. */
+  ownerSet: Schema.optional(Schema.Boolean),
 });
 export type VaultPolicy = typeof VaultPolicy.Type;
 
 export const defaultVaultPolicy: VaultPolicy = {
-  mode: "ask",
+  mode: "allow",
   allowedAgentIds: [],
   allowedDomains: [],
 };
+
+/** The default rule: any agent, on the item's allowed sites, without asking. */
+export const isDefaultVaultPolicy = (policy: VaultPolicy) =>
+  policy.mode === "allow" &&
+  policy.allowedAgentIds.length === 0 &&
+  (policy.allowedThreadIds ?? []).length === 0 &&
+  policy.allowedDomains.length === 0;
 
 /**
  * Whether an item may copy to machines this one shares its vault with.
@@ -83,6 +98,9 @@ export type VaultItemPortability = typeof VaultItemPortability.Type;
 export const VaultPortabilityReason = Schema.Literals(["local_integration", "machine_credential"]);
 export type VaultPortabilityReason = typeof VaultPortabilityReason.Type;
 
+/** An agent-supplied site icon: an https URL or a small image data URL. */
+export const VaultIconUrl = TrimmedNonEmptyString.check(Schema.isMaxLength(256 * 1024));
+
 const vaultItemFields = {
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   type: VaultItemType,
@@ -94,7 +112,10 @@ const vaultItemFields = {
   policy: VaultPolicy,
 };
 
-/** Plaintext metadata; never carries a secret value or a username. */
+/** Longest login username kept as display text; a longer one stays only encrypted. */
+export const VAULT_LOGIN_USERNAME_MAX_LENGTH = 320;
+
+/** Plaintext metadata; never carries a secret value. */
 export const VaultItemMetadata = Schema.Struct({
   id: VaultItemId,
   ...vaultItemFields,
@@ -103,6 +124,16 @@ export const VaultItemMetadata = Schema.Struct({
   credentialId: Schema.optional(TrimmedNonEmptyString),
   /** Names of secret fields present, e.g. ["username", "password", "totp"]. */
   fields: Schema.Array(VaultField),
+  /**
+   * A login's username or email, as display text: it tells several logins for
+   * one site apart, like an integration's account label. Only logins carry it;
+   * the password, one-time code secret and note stay encrypted.
+   */
+  username: Schema.optional(
+    Schema.String.check(Schema.isMaxLength(VAULT_LOGIN_USERNAME_MAX_LENGTH)),
+  ),
+  /** Integrations (by id) this login signs in to; local to this machine. */
+  integrationIds: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   /**
    * Last 4 digits of a card number, for telling cards apart in lists. This is
    * the one secret-derived fragment kept in plaintext: like `label` it is
@@ -127,6 +158,11 @@ export const VaultCreateInput = Schema.Struct({
   /** Defaults to `shared`. */
   portability: Schema.optional(VaultItemPortability),
   secretFields: VaultSecretFields,
+  /**
+   * A login's site icon (an https image URL or an image data URL), cached as
+   * that site's icon instead of the favicon the server would fetch.
+   */
+  iconUrl: Schema.optional(VaultIconUrl),
 });
 export type VaultCreateInput = typeof VaultCreateInput.Type;
 
@@ -141,16 +177,103 @@ export const VaultUpdateInput = Schema.Struct({
   portability: Schema.optional(VaultItemPortability),
   /** Merged into the stored fields; an empty string removes that field. */
   secretFields: Schema.optional(VaultSecretFields),
+  /** Replaces the integrations this login signs in to; logins only. */
+  integrationIds: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  /** See `VaultListInput.supportsDenyPolicy`; also keeps Block on an older client's save. */
+  supportsDenyPolicy: Schema.optional(Schema.Boolean),
 });
 export type VaultUpdateInput = typeof VaultUpdateInput.Type;
 
 export const VaultListInput = Schema.Struct({
   scopeProjectId: Schema.optional(ProjectLabelId),
+  /**
+   * The client decodes the `deny` (Block) policy mode. Clients from before it
+   * (0.3.2 and older) leave it out and get Block items as `ask`, which they
+   * can decode; the server still refuses agents for them.
+   */
+  supportsDenyPolicy: Schema.optional(Schema.Boolean),
 });
 export type VaultListInput = typeof VaultListInput.Type;
 
-export const VaultListResult = Schema.Struct({ items: Schema.Array(VaultItemMetadata) });
+/** One saved login as lists and disambiguation show it: never a secret. */
+export const VaultLoginSummary = Schema.Struct({
+  id: VaultItemId,
+  label: Schema.String,
+  username: Schema.NullOr(Schema.String),
+  /** A password-only login: the owner should add the username or email. */
+  missingUsername: Schema.Boolean,
+});
+export type VaultLoginSummary = typeof VaultLoginSummary.Type;
+
+/** The logins saved for one site, by its primary host. */
+export const VaultLoginSite = Schema.Struct({
+  host: Schema.NullOr(Schema.String),
+  siteName: Schema.String,
+  logins: Schema.Array(VaultLoginSummary),
+});
+export type VaultLoginSite = typeof VaultLoginSite.Type;
+
+export const VaultListResult = Schema.Struct({
+  items: Schema.Array(VaultItemMetadata),
+  /** Logins grouped by site; absent from servers that predate it. */
+  sites: Schema.optional(Schema.Array(VaultLoginSite)),
+});
 export type VaultListResult = typeof VaultListResult.Type;
+
+/** The host a login is for: its first allowed domain. */
+export const vaultLoginHost = (item: Pick<VaultItemMetadata, "allowedDomains">): string | null =>
+  item.allowedDomains[0]?.toLowerCase() ?? null;
+
+/** The default label of a login: "<Site> · <username>", or the site alone. */
+export const defaultVaultLoginLabel = (siteName: string, username: string | null | undefined) =>
+  username ? `${siteName} · ${username}` : siteName;
+
+/** A login's label as shown: the owner's, else the default. */
+export const vaultLoginLabel = (item: Pick<VaultItemMetadata, "name" | "label" | "username">) =>
+  item.label ?? defaultVaultLoginLabel(item.name, item.username);
+
+/** A login that has a password but no username or email saved with it. */
+export const vaultLoginMissingUsername = (item: Pick<VaultItemMetadata, "type" | "fields">) =>
+  item.type === "login" && !item.fields.includes("username");
+
+export const vaultLoginSummary = (item: VaultItemMetadata): VaultLoginSummary => ({
+  id: item.id,
+  label: vaultLoginLabel(item),
+  username: item.username ?? null,
+  missingUsername: vaultLoginMissingUsername(item),
+});
+
+/**
+ * Logins grouped by site (primary host, else name), sites and logins in
+ * alphabetical order. Other item types are left out.
+ */
+export const groupVaultLoginsBySite = (
+  items: ReadonlyArray<VaultItemMetadata>,
+): Array<VaultLoginSite> => {
+  const sites = new Map<
+    string,
+    { host: string | null; siteName: string; items: Array<VaultItemMetadata> }
+  >();
+  for (const item of items) {
+    if (item.type !== "login") continue;
+    const host = vaultLoginHost(item);
+    const key = host ?? `name:${item.name.toLowerCase()}`;
+    const site = sites.get(key) ?? { host, siteName: item.name, items: [] };
+    site.items.push(item);
+    sites.set(key, site);
+  }
+  const byText = (left: string, right: string) =>
+    left.localeCompare(right, undefined, { sensitivity: "base" });
+  return [...sites.values()]
+    .sort((left, right) => byText(left.siteName, right.siteName))
+    .map((site) => ({
+      host: site.host,
+      siteName: site.siteName,
+      logins: site.items
+        .map(vaultLoginSummary)
+        .sort((left, right) => byText(left.label, right.label) || byText(left.id, right.id)),
+    }));
+};
 
 export const VaultItemResult = Schema.Struct({ item: VaultItemMetadata });
 export type VaultItemResult = typeof VaultItemResult.Type;
@@ -191,8 +314,8 @@ export type VaultUsageListResult = typeof VaultUsageListResult.Type;
 
 /**
  * Vault sharing with one directly paired machine (docs/internals/vault-sync.md).
- * `waiting_for_peer`: this machine shares, the other has not turned it on, so
- * nothing is released to it or accepted from it yet.
+ * `waiting_for_peer` is retained for older servers; new servers report not_shared
+ * when either machine opts out. Both sides otherwise default on.
  * `key_changed`: the other machine now presents a different vault key than the
  * one pinned here. Re-pairing clears the pin; the UI tells the owner to do that.
  */
@@ -209,6 +332,8 @@ export const VaultPeerSharing = Schema.Struct({
   label: Schema.String,
   online: Schema.Boolean,
   state: VaultPeerSharingState,
+  /** Local opt-out switch; absent on older servers. */
+  sharingEnabled: Schema.optionalKey(Schema.Boolean),
   /** Whether the other machine shares with this one; null when it could not be asked. */
   peerSharing: Schema.NullOr(Schema.Boolean),
   /** Synced items whose current revision this machine has passed to that peer. */
@@ -249,6 +374,7 @@ const VAULT_FAILURE_MESSAGES = {
   not_found: "That vault item does not exist.",
   ambiguous_name: "More than one vault item has that name; use its id.",
   name_conflict: "A vault item with that name already exists in this scope.",
+  label_conflict: "Another login for this site already has that label.",
   invalid_input: "That vault item is not valid.",
   field_missing: "That vault item has no such field.",
   domain_not_allowed: "This vault item may not be used on that domain.",

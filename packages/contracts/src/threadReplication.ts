@@ -95,7 +95,7 @@ export type ThreadReplicationBatch = typeof ThreadReplicationBatch.Type;
 export class ThreadReplicationError extends Schema.TaggedError<ThreadReplicationError>()(
   "ThreadReplicationError",
   {
-    reason: Schema.Literals(["storage", "invalid-cursor", "invalid-batch"]),
+    reason: Schema.Literals(["storage", "busy", "invalid-cursor", "invalid-batch"]),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
@@ -148,6 +148,7 @@ export const ThreadCommandForward = makePeerChannel({
   payload: Schema.Struct({
     command: OrchestrationV2ServerCommand,
     files: Schema.Array(ThreadAttachmentFile),
+    priority: Schema.optional(Schema.Boolean),
   }),
   success: Schema.Struct({ eventIds: Schema.Array(EventId) }),
   error: ThreadRemoteError,
@@ -490,8 +491,9 @@ export type ThreadLaunchPortable = typeof ThreadLaunchPortable.Type;
  * Start a new thread on `target`, which owns it from its first event and
  * runs its first turn. Sent to the target, or to the hub, which relays it.
  * The same command id (and thread id, when the caller chose one) makes a
- * retry return the thread the first attempt created. The target pushes the
- * new thread's events to the caller before it replies.
+ * retry return the thread the first attempt created. With priority, the
+ * caller fetches the child through ThreadDelegatedRead; otherwise the target
+ * pushes history before replying. Older peers ignore the optional flag.
  */
 export const ThreadLaunchRemote = makePeerChannel({
   name: "threads.launch.v1",
@@ -502,6 +504,7 @@ export const ThreadLaunchRemote = makePeerChannel({
     threadId: Schema.optional(ThreadId),
     project: ThreadLaunchProject,
     launch: ThreadLaunchPortable,
+    priority: Schema.optional(Schema.Boolean),
     bundle: Schema.optional(ThreadRepositoryBundle),
     /** Files of the initial message's attachments, by their names here. */
     files: Schema.Array(ThreadAttachmentFile),
@@ -567,10 +570,25 @@ export const ThreadAgentCreate = makePeerChannel({
   payload: Schema.Struct({
     target: EnvironmentId,
     agentId: AgentId,
+    /** Set when a persistent agent (not the owner) authored this edit; the owner machine enforces it. */
+    callerAgentId: Schema.optionalKey(AgentId),
     project: ThreadLaunchProject,
     input: Schema.Struct(PortableAgentFields),
   }),
   success: AgentMutationResult,
+  error: ThreadRemoteError,
+});
+
+/** Agent deletion executes on the owner, then syncs its tombstone to the caller. */
+export const ThreadAgentDelete = makePeerChannel({
+  name: "threads.agent-delete.v1",
+  scope: AuthPeerDelegateScope,
+  payload: Schema.Struct({
+    target: EnvironmentId,
+    agentId: AgentId,
+    callerAgentId: Schema.optionalKey(AgentId),
+  }),
+  success: Schema.Struct({ deleted: Schema.Boolean }),
   error: ThreadRemoteError,
 });
 
@@ -636,5 +654,18 @@ export const ThreadForkRequest = makePeerChannel({
     creationSource: OrchestrationV2CreationSource,
   }),
   success: ThreadForkMachineResult,
+  error: ThreadRemoteError,
+});
+
+/** Fetch one thread ahead of bulk sync without acknowledging any bulk cursor. */
+export const ThreadDelegatedRead = makePeerChannel({
+  name: "threads.delegated-read.v1",
+  scope: AuthPeerDelegateScope,
+  payload: Schema.Struct({
+    target: EnvironmentId,
+    threadId: ThreadId,
+    after: ThreadReplicationCursor,
+  }),
+  success: ThreadReplicationBatch,
   error: ThreadRemoteError,
 });

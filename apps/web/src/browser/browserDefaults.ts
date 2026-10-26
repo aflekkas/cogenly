@@ -75,7 +75,7 @@ export function getBrowserDefaults(): BrowserDefaults {
  * The defaults, once client settings have actually loaded.
  *
  * Opening a preview is asynchronous anyway, and before hydration the snapshot
- * is the schema defaults rather than the user's — a tab opened in that window
+ * is the schema defaults rather than the user's; a tab opened in that window
  * would be born at the wrong viewport, zoom and appearance and never corrected.
  * Read failures reject so a new tab cannot use the wrong profile or viewport.
  */
@@ -140,7 +140,7 @@ export function browserDefaultOpenProfileId(
  *
  * A configured non-fill default is what the user said they want to look at, so
  * it wins. When the default is fill there is no stated preference to honour, so
- * fall back to fitting the panel — and only when the panel hasn't been measured
+ * fall back to fitting the panel, and only when the panel hasn't been measured
  * yet does a fixed size apply.
  */
 export const FALLBACK_RESPONSIVE_VIEWPORT_SIZE = { width: 1024, height: 768 } as const;

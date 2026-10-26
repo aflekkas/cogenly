@@ -9,8 +9,8 @@ function isAtLeastAsNew(candidate: string | null, kept: string | null): boolean 
 /**
  * One row per check rather than one per run of it.
  *
- * A host's rollup is a list of runs, not a list of checks: while a workflow is being re-run — or
- * while a second run of it is already live — the same check arrives twice, and both copies reach
+ * A host's rollup is a list of runs, not a list of checks: while a workflow is being re-run (or
+ * while a second run of it is already live), the same check arrives twice, and both copies reach
  * the reader as what looks like a duplicate. Nothing in a check carries an id, so the name is what
  * identifies it, qualified by the workflow it belongs to since two workflows are free to name a
  * job the same thing.
@@ -23,7 +23,7 @@ function isAtLeastAsNew(candidate: string | null, kept: string | null): boolean 
  * mid-read replaces a row where it stands instead of reshuffling the list under the reader.
  *
  * Two checks that survive under the same name are then genuinely different ones, since they came
- * from different workflows — each is shown as `workflow / name`, the way GitHub writes it itself.
+ * from different workflows. Each is shown as `workflow / name`, the way GitHub writes it itself.
  * A survivor whose workflow the host did not name keeps its bare name rather than being qualified
  * with nothing.
  */

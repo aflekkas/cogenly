@@ -24,7 +24,6 @@ import {
 } from "../components/ui/dialog";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
-import { Radio, RadioGroup } from "../components/ui/radio-group";
 import {
   Select,
   SelectItem,
@@ -42,8 +41,8 @@ import {
   vaultTypeHasDomains,
   type VaultDraft,
   type VaultFormField,
-  type VaultPolicyMode,
 } from "./vault.logic";
+import { VaultAccessOptions } from "./VaultAccessOptions";
 
 const ALL_PROJECTS = "all";
 
@@ -67,6 +66,8 @@ const METADATA_FIELD = {
 export function VaultItemDialog(props: {
   readonly item: VaultItemMetadata | null;
   readonly defaultScopeProjectId: ProjectLabelId | null;
+  /** The type a new item starts as; "Add login" opens it as a login. */
+  readonly defaultType?: VaultItemType;
   readonly labels: ReadonlyArray<ProjectLabelWithRepositories>;
   readonly agents: ReadonlyArray<{ readonly id: AgentId; readonly name: string }>;
   /** Whether this machine shares with others, so keeping an item here means something. */
@@ -77,7 +78,10 @@ export function VaultItemDialog(props: {
   const mode = props.item ? "edit" : "create";
   const idPrefix = useId();
   const [draft, setDraft] = useState(() =>
-    vaultDraftFromItem(props.item, { scopeProjectId: props.defaultScopeProjectId }),
+    vaultDraftFromItem(props.item, {
+      scopeProjectId: props.defaultScopeProjectId,
+      ...(props.defaultType ? { type: props.defaultType } : {}),
+    }),
   );
   const [saving, setSaving] = useState(false);
   const problem = vaultDraftProblem(draft, mode);
@@ -154,12 +158,14 @@ export function VaultItemDialog(props: {
                     autoFocus
                     value={draft.name}
                     maxLength={200}
-                    placeholder="github"
+                    placeholder={draft.type === "login" ? "GitHub" : "github"}
                     aria-describedby={`${idPrefix}-name-hint`}
                     onChange={(event) => update({ name: event.currentTarget.value })}
                   />
                   <p id={`${idPrefix}-name-hint`} className="text-xs text-muted-foreground">
-                    Agents ask for the item by this name.
+                    {draft.type === "login"
+                      ? "The site's name. Several logins for one site share it."
+                      : "Agents ask for the item by this name."}
                   </p>
                 </div>
               </div>
@@ -213,8 +219,8 @@ export function VaultItemDialog(props: {
                     onChange={(event) => update({ allowedDomains: event.currentTarget.value })}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Comma separated. Agents can only fill this item on these sites and their
-                    subdomains.
+                    Comma separated. Agents fill this item on these sites and their subdomains; any
+                    other site asks you first.
                   </p>
                 </div>
               ) : null}
@@ -308,68 +314,19 @@ function VaultPolicyFields(props: {
   readonly agents: ReadonlyArray<{ readonly id: AgentId; readonly name: string }>;
   readonly onChange: (patch: Partial<VaultDraft>) => void;
 }) {
-  const { draft, onChange } = props;
-  const labelId = `${props.idPrefix}-policy`;
-  const toggleAgent = (id: AgentId, checked: boolean) =>
-    onChange({
-      policyAgentIds: checked
-        ? [...draft.policyAgentIds, id]
-        : draft.policyAgentIds.filter((other) => other !== id),
-    });
   return (
-    <div className="space-y-2">
-      <Label id={labelId} render={<div />}>
-        Access
-      </Label>
-      <RadioGroup
-        aria-labelledby={labelId}
-        value={draft.policyMode}
-        onValueChange={(value) => onChange({ policyMode: value as VaultPolicyMode })}
-      >
-        <label className="flex items-center gap-2 text-sm">
-          <Radio value="ask" />
-          Ask me before an agent uses it
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <Radio value="allow" />
-          Let agents use it without asking
-        </label>
-      </RadioGroup>
-      {draft.policyMode === "allow" ? (
-        <div className="reveal-motion space-y-3 ps-6">
-          {props.agents.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              You have no agents yet, so this allows any agent you create.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {props.agents.map((agent) => (
-                <label key={agent.id} className="flex items-center gap-2 text-sm">
-                  <Checkbox
-                    checked={draft.policyAgentIds.includes(agent.id)}
-                    onCheckedChange={(checked) => toggleAgent(agent.id, checked === true)}
-                  />
-                  {agent.name}
-                </label>
-              ))}
-              <p className="text-xs text-muted-foreground">
-                {draft.policyAgentIds.length === 0
-                  ? "None selected allows every agent."
-                  : "Other agents still ask first."}
-              </p>
-            </div>
-          )}
-          <div className="space-y-1.5">
-            <Label htmlFor={`${props.idPrefix}-policy-domains`}>Only on these sites</Label>
-            <Input
-              id={`${props.idPrefix}-policy-domains`}
-              value={draft.policyDomains}
-              placeholder="Any site"
-              onChange={(event) => onChange({ policyDomains: event.currentTarget.value })}
-            />
-          </div>
-        </div>
-      ) : null}
-    </div>
+    <VaultAccessOptions
+      idPrefix={props.idPrefix}
+      mode={props.draft.policyMode}
+      agentIds={props.draft.policyAgentIds}
+      agents={props.agents}
+      onChange={(patch) =>
+        props.onChange({
+          ...(patch.mode === undefined ? {} : { policyMode: patch.mode }),
+          ...(patch.agentIds === undefined ? {} : { policyAgentIds: patch.agentIds }),
+          policyOwnerSet: true,
+        })
+      }
+    />
   );
 }

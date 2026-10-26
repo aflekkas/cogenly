@@ -36,11 +36,23 @@ function writeRemembered(key: string, text: string): void {
 
 /**
  * The new-chat greeting: written by the environment's text generation model a
- * few times a day when AI greetings are on, otherwise the built-in line. Fixed
- * when the screen opens, apart from a written greeting arriving.
+ * few times a day when AI greetings are on, otherwise the built-in line.
+ * Refreshes when the local day or time bucket changes, even on an open home screen.
  */
 export function useChatGreeting(environmentId: EnvironmentId | null): string {
-  const [now] = useState(() => new Date());
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    // A home screen left open overnight must request the new day's greeting.
+    const timer = window.setInterval(() => {
+      const next = new Date();
+      setNow((previous) => {
+        const before = chatGreetingRequest(previous);
+        const after = chatGreetingRequest(next);
+        return before.day === after.day && before.bucket === after.bucket ? previous : next;
+      });
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const fallback = useMemo(() => chatGreeting(now), [now]);
   const request = useMemo(() => chatGreetingRequest(now), [now]);
   const environment = useEnvironment(environmentId);
@@ -50,7 +62,7 @@ export function useChatGreeting(environmentId: EnvironmentId | null): string {
     !isSpecialGreetingDay(now);
   const key =
     environmentId === null ? null : rememberedKey(environmentId, request.day, request.bucket);
-  const [remembered] = useState(() => (key === null ? null : readRemembered(key)));
+  const remembered = useMemo(() => (key === null ? null : readRemembered(key)), [key]);
   const query = useEnvironmentQuery(
     enabled && environmentId !== null
       ? serverEnvironment.chatGreeting({ environmentId, input: request })

@@ -10,6 +10,7 @@ import {
   ProjectId,
   ProjectLabelError,
   ThreadId,
+  ThreadDelegatedRead,
   type ServerProvider,
 } from "@cogenly/contracts";
 import * as Deferred from "effect/Deferred";
@@ -35,6 +36,7 @@ import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as ThreadFork from "./ThreadFork.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as Machines from "../machines/Machines.ts";
+import * as PeerChannels from "../machines/PeerChannels.ts";
 import { startMachine } from "../machines/testkit.ts";
 import { idleThreadProjection, liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
 import * as EffectOutbox from "../orchestration-v2/EffectOutbox.ts";
@@ -88,6 +90,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
   },
   realFiling = false,
   lifecycle?: {
+    readonly legacyDelegation?: boolean;
     readonly afterLaunch?: () => Effect.Effect<void>;
     readonly git?: Git.GitVcsDriver["Service"];
     readonly checkoutRoot?: () => Effect.Effect<string>;
@@ -210,7 +213,18 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
           projection: yield* projections.getThreadProjection(id),
           resumed: false,
         };
-      }).pipe(Effect.orDie),
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ThreadLaunch.ThreadLaunchError({
+              operation: input.machine === undefined ? "create-thread" : "launch-remote",
+              commandId: input.commandId,
+              projectId: input.projectId,
+              ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
+              cause,
+            }),
+        ),
+      ),
   });
   const replicationContext = yield* inStores(Layer.build(ThreadReplication.layer));
   const replication = yield* ThreadReplication.ThreadReplication.pipe(
@@ -421,6 +435,15 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
             ),
           ),
         );
+  const channels = yield* machine.run(PeerChannels.PeerChannels);
+  const scheduled = new Map<string, Effect.Effect<void>>();
+  const register: Scheduler.Scheduler["Service"]["register"] = Effect.fnUntraced(function* <E, R>(
+    name: string,
+    work: Effect.Effect<void, E, R>,
+  ) {
+    const services = yield* Effect.context<R>();
+    scheduled.set(name, work.pipe(Effect.provideContext(services), Effect.orDie));
+  });
   const context = yield* inStores(
     Layer.build(
       Layer.mergeAll(
@@ -474,11 +497,33 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
         Layer.provide(repositoryCheckout),
         Layer.provide(identities),
         Layer.provide(folders),
-        Layer.provideMerge(SharedSync.layer.pipe(Layer.provideMerge(SharedState.layer))),
-        Layer.provide(
-          Layer.succeed(Machines.Machines, { ...machine.machines, subscribe: Stream.never }),
+        Layer.provideMerge(
+          SharedSync.layer.pipe(
+            Layer.provideMerge(
+              Layer.effect(
+                SharedState.SharedState,
+                Effect.gen(function* () {
+                  const state = yield* SharedState.SharedState;
+                  // Like thread replication above, fixture passes are explicit.
+                  return { ...state, changes: Stream.never };
+                }),
+              ).pipe(Layer.provide(SharedState.layer)),
+            ),
+          ),
         ),
-        Layer.provide(Layer.succeed(Scheduler.Scheduler, { register: () => Effect.void })),
+        Layer.provide(
+          Layer.merge(
+            Layer.succeed(Machines.Machines, { ...machine.machines, subscribe: Stream.never }),
+            Layer.succeed(PeerChannels.PeerChannels, {
+              ...channels,
+              register: (channel, handler) =>
+                lifecycle?.legacyDelegation === true && channel.name === ThreadDelegatedRead.name
+                  ? Effect.void
+                  : channels.register(channel, handler),
+            }),
+          ),
+        ),
+        Layer.provide(Layer.succeed(Scheduler.Scheduler, { register })),
         Layer.provide(threads),
         Layer.provide(
           Option.isSome(engine)
@@ -511,6 +556,8 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
   );
   return {
     ...machine,
+    tick: (name: string) =>
+      scheduled.get(name) ?? Effect.die(new Error(`Missing scheduler source: ${name}`)),
     engine,
     preparationFinished: Deferred.await(preparationFinished),
     forks:
@@ -533,6 +580,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
     remoteLaunch,
     launched,
     restartReplication,
+    scheduled,
     sink,
     projections,
     sql,

@@ -3,6 +3,8 @@
 import {
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   type PreviewAutomationClickInput,
+  type PreviewAutomationOutputOptions,
+  type PreviewAutomationObservation,
   type PreviewAutomationConsoleEntry,
   type PreviewAutomationDragInput,
   type PreviewAutomationEvaluateInput,
@@ -17,9 +19,19 @@ import {
   type PreviewAutomationUploadInput,
   type PreviewAutomationWaitForInput,
 } from "@cogenly/contracts";
+import * as Effect from "effect/Effect";
 import { constVoid } from "effect/Function";
 import type { CDPSession, Locator, Page } from "playwright-core";
 import * as NodeCrypto from "node:crypto";
+import { redactPreview } from "./PreviewRedactor.ts";
+import {
+  MASK_WITHHELD_NOTE,
+  VAULT_FILLED_ATTRIBUTE,
+  rememberCredential,
+  credentialsFor,
+  withMaskedPage,
+} from "./ScreenshotMask.ts";
+import { compactElements } from "./BrowserOutput.ts";
 import { BrowserControlInterrupted } from "./SessionControl.ts";
 
 const MAX_EVALUATION_BYTES = 64_000;
@@ -33,9 +45,9 @@ export class ServerBrowserOperationError extends Error {
   readonly detail: unknown;
 
   constructor(tag: string, message: string, detail?: unknown) {
-    super(message);
+    super(redactPreview(message));
     this.tag = tag;
-    this.detail = detail;
+    this.detail = redactPreview(detail);
   }
 }
 
@@ -102,6 +114,12 @@ const targetLocator = (
     /\\.|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`/g,
     " ",
   );
+  if (engines.includes(",") && /(?:^|[,>])\s*(?:aria-ref|role|text)\s*=/.test(engines)) {
+    throw new ServerBrowserOperationError(
+      "PreviewAutomationInvalidSelectorError",
+      "Comma lists support CSS selectors only (e.g. input[type=checkbox], label). Use one snapshot aria-ref locator per call; role= and text= locators cannot be comma-joined.",
+    );
+  }
   if (/(?:^|>>)\s*\*?aria-ref\s*=/.test(engines)) {
     const ref = /^\s*aria-ref\s*=\s*(\S+)\s*$/.exec(selector)?.[1];
     const nativeRef = ref === undefined ? undefined : pageRefs.get(page)?.refs.get(ref);
@@ -116,6 +134,52 @@ const targetLocator = (
   }
   // Playwright's strict locators reject ambiguous controls rather than acting on row one.
   return page.locator(selector);
+};
+
+/** Reads one credential only for server-side vault storage; never use this for preview output. */
+export const capture = <A, E, R>(
+  page: Page,
+  input: { locator: string; attribute?: string | undefined },
+  save: (value: string) => Effect.Effect<A, E, R>,
+): Effect.Effect<A, E | ServerBrowserOperationError, R> =>
+  Effect.tryPromise({
+    try: async () => {
+      const value = await targetLocator(page, input)!.evaluate(
+        (element, attribute) => {
+          if (attribute) return element.getAttribute(attribute);
+          if ("value" in element) return String(element.value);
+          return element.textContent;
+        },
+        input.attribute,
+        { timeout: DEFAULT_TIMEOUT_MS },
+      );
+      if (!value?.trim()) throw new Error("empty capture");
+      return value;
+    },
+    // Selector errors can contain page values. Keep them out of errors and logs.
+    catch: () =>
+      new ServerBrowserOperationError(
+        "PreviewAutomationExecutionError",
+        "Could not capture the selected credential. Check the locator and attribute.",
+      ),
+  }).pipe(Effect.flatMap(save));
+
+/** Password values are collected separately from agent code so plain passwords are also masked. */
+export const passwordValues = async (page: Page): Promise<string[]> =>
+  page
+    .locator('input[type="password"]')
+    .evaluateAll((elements) =>
+      elements.map((element) => (element as unknown as { value: string }).value).filter(Boolean),
+    );
+
+/**
+ * Every credential value this page is known to hold, for redaction and
+ * screenshot masks. Password fields read before an action stay known after a
+ * "show password" toggle turns them into text.
+ */
+export const credentialValues = async (page: Page): Promise<string[]> => {
+  for (const value of await passwordValues(page)) rememberCredential(page, value);
+  return credentialsFor(page);
 };
 
 /** An element's box in viewport CSS pixels. */
@@ -206,21 +270,38 @@ export const snapshot = async (input: {
   readonly consoleEntries: ReadonlyArray<PreviewAutomationConsoleEntry>;
   readonly networkEntries: ReadonlyArray<PreviewAutomationNetworkEntry>;
   readonly actionTimeline: PreviewAutomationSnapshot["actionTimeline"];
+  readonly scope?: string | undefined;
+  readonly includeScreenshot?: boolean;
+  readonly save?: boolean;
 }): Promise<PreviewAutomationSnapshot> => {
-  const viewport = input.page.viewportSize() ?? { width: 1280, height: 800 };
-  const scale = Math.min(1, MAX_SCREENSHOT_WIDTH / (viewport.width * input.renderScale));
   const state = refsFor(input.page);
-  invalidateRefs(input.page);
   const generation = state.generation;
+  const root = input.scope ? targetLocator(input.page, { locator: input.scope }) : null;
   const [page, tree, data] = await Promise.all([
-    input.page.evaluate(SNAPSHOT_SCRIPT) as Promise<
+    (root
+      ? root.evaluate((element) => ({
+          url: element.ownerDocument.URL,
+          title: element.ownerDocument.title,
+          loading: element.ownerDocument.readyState !== "complete",
+          visibleText: (
+            (element as unknown as { innerText?: string }).innerText ??
+            element.textContent ??
+            ""
+          ).slice(0, 20_000),
+          interactiveElements: [],
+        }))
+      : input.page.evaluate(SNAPSHOT_SCRIPT)) as Promise<
       Pick<
         PreviewAutomationSnapshot,
         "url" | "title" | "loading" | "visibleText" | "interactiveElements"
       >
     >,
-    input.page.ariaSnapshot({ mode: "ai", boxes: true, timeout: DEFAULT_TIMEOUT_MS }),
-    captureViewport(input.page, input.cdp, { format: "png", scale }),
+    (root ?? input.page).ariaSnapshot({
+      mode: "ai",
+      boxes: true,
+      timeout: DEFAULT_TIMEOUT_MS,
+    }),
+    input.includeScreenshot === false ? {} : screenshot(input),
   ]);
   if (state.generation !== generation) {
     throw new ServerBrowserOperationError(
@@ -241,12 +322,112 @@ export const snapshot = async (input: {
     consoleEntries: [...input.consoleEntries],
     networkEntries: [...input.networkEntries],
     actionTimeline: [...input.actionTimeline],
-    screenshot: {
-      mimeType: "image/png",
-      data,
-      width: Math.round(viewport.width * input.renderScale * scale),
-      height: Math.round(viewport.height * input.renderScale * scale),
+    ...data,
+  };
+};
+
+/** Images are optional evidence: capture failures never discard a successful structured read. */
+export const screenshot = async (input: {
+  page: Page;
+  cdp: CDPSession;
+  renderScale: number;
+  save?: boolean | undefined;
+}): Promise<Pick<PreviewAutomationSnapshot, "screenshot" | "screenshotError">> => {
+  const viewport = input.page.viewportSize() ?? { width: 1280, height: 800 };
+  const scale = Math.min(1, MAX_SCREENSHOT_WIDTH / (viewport.width * input.renderScale));
+  try {
+    const data = await withMaskedPage(
+      input.page,
+      () => credentialValues(input.page),
+      () =>
+        captureViewport(input.page, input.cdp, {
+          format: input.save ? "png" : "jpeg",
+          ...(input.save ? {} : { quality: 70 }),
+          scale,
+        }),
+    );
+    if (data === null) return { screenshotError: MASK_WITHHELD_NOTE };
+    return {
+      screenshot: {
+        mimeType: input.save ? "image/png" : "image/jpeg",
+        data,
+        width: Math.round(viewport.width * input.renderScale * scale),
+        height: Math.round(viewport.height * input.renderScale * scale),
+      },
+    };
+  } catch {
+    return {
+      screenshotError: "Screenshot capture failed; structured page data is still available.",
+    };
+  }
+};
+
+/** Read bounded data through the same evaluation deadline and vault safety gate as evaluate. */
+export const extract = (
+  cdp: CDPSession,
+  input: import("@cogenly/contracts").PreviewAutomationExtractInput,
+  timeoutMs: number,
+) =>
+  evaluate(
+    cdp,
+    {
+      expression: `(() => {
+    const matches = document.querySelectorAll(${JSON.stringify(input.selector)});
+    return { items: Array.from(matches).slice(0, ${input.limit ?? 50}).map(element => ({
+      text: (element.innerText ?? element.textContent ?? "").trim().slice(0, 1000),
+      attributes: Object.fromEntries(${JSON.stringify(input.attributes ?? [])}.map(name => [name, element.getAttribute(name)?.slice(0, 1000) ?? null]))
+    })), total: matches.length, omitted: Math.max(0, matches.length - ${input.limit ?? 50}) };
+  })()`,
     },
+    timeoutMs,
+  );
+
+/** A bounded semantic observation with no screenshot, history, or duplicated body text. */
+export const observe = async (
+  page: Page,
+  options: PreviewAutomationOutputOptions = {},
+): Promise<PreviewAutomationObservation> => {
+  const state = refsFor(page);
+  const generation = state.generation;
+  const root = options.scope ? targetLocator(page, { locator: options.scope })! : page;
+  const [tree, title, pageState] = await Promise.all([
+    root.ariaSnapshot({
+      mode: "ai",
+      boxes: options.viewportOnly !== false,
+      timeout: DEFAULT_TIMEOUT_MS,
+    }),
+    page.title(),
+    page.evaluate(
+      `({ loading: document.readyState !== "complete", visual: Array.from(document.querySelectorAll("canvas")).some(el => { const r = el.getBoundingClientRect(); return r.width > 100 && r.height > 100 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth; }) })`,
+    ) as Promise<{ loading: boolean; visual: boolean }>,
+  ]);
+  if (state.generation !== generation)
+    throw new ServerBrowserOperationError(
+      "PreviewAutomationExecutionError",
+      "The page changed while reading it. Take another snapshot.",
+    );
+  const referenced = tree.replace(/\[ref=((?:f\d+)?e\d+)\]/g, (_match, nativeRef: string) => {
+    const ref = `t3-${generation}-${nativeRef}`;
+    state.refs.set(ref, nativeRef);
+    return `[ref=${ref}]`;
+  });
+  const compact = compactElements(
+    referenced,
+    options.viewportOnly === false
+      ? undefined
+      : (page.viewportSize() ?? { width: 1280, height: 800 }),
+  );
+  return {
+    url: page.url().slice(0, 2048),
+    title: title.slice(0, 2048),
+    loading: pageState.loading,
+    ...compact,
+    ...(compact.elements.length === 0 || pageState.visual
+      ? {
+          guidance:
+            "Structured view may omit visual content. Request preview_snapshot includeImage=true for visual or canvas checks.",
+        }
+      : {}),
   };
 };
 
@@ -258,9 +439,36 @@ export const click = async (
   page: Page,
   input: PreviewAutomationClickInput,
   pointer: PointerReporter = noPointer,
-): Promise<{ readonly x: number; readonly y: number }> => {
+): Promise<{
+  readonly x: number;
+  readonly y: number;
+  readonly clicked?: string | undefined;
+  readonly strategy?: string;
+}> => {
   const timeout = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const locator = targetLocator(page, input);
+  const checkable =
+    locator === null
+      ? null
+      : await locator.evaluate(
+          (element) => {
+            const input = element.matches('input[type="checkbox"], input[type="radio"]')
+              ? element
+              : (element.querySelector('input[type="checkbox"], input[type="radio"]') ??
+                (element.closest("label") as unknown as { control?: typeof element } | null)
+                  ?.control);
+            if (input?.tagName !== "INPUT") return null;
+            const control = input as unknown as {
+              type: string;
+              checked: boolean;
+              disabled: boolean;
+            };
+            if (!["checkbox", "radio"].includes(control.type)) return null;
+            return { checked: control.checked, disabled: control.disabled, type: control.type };
+          },
+          undefined,
+          { timeout },
+        );
   const point = await targetPoint(page, locator, input, timeout);
   await pointer(point, "click");
   const options = { button: input.button ?? "left", clickCount: input.clickCount ?? 1 } as const;
@@ -278,7 +486,42 @@ export const click = async (
   } finally {
     page.off("dialog", onDialog);
   }
-  return point;
+  let strategy = "pointer";
+  if (
+    locator &&
+    checkable &&
+    !checkable.disabled &&
+    options.button === "left" &&
+    options.clickCount === 1
+  ) {
+    const fallback = await locator.evaluate(
+      (element, before) => {
+        const control = element.matches('input[type="checkbox"], input[type="radio"]')
+          ? element
+          : (element.querySelector('input[type="checkbox"], input[type="radio"]') ??
+            (element.closest("label") as unknown as { control?: typeof element } | null)?.control);
+        if (control?.tagName !== "INPUT") return false;
+        const input = control as unknown as {
+          type: string;
+          checked: boolean;
+          disabled: boolean;
+          click: () => void;
+        };
+        if (
+          input.disabled ||
+          input.checked !== before.checked ||
+          (input.type === "radio" && before.checked)
+        )
+          return false;
+        input.click();
+        return true;
+      },
+      checkable,
+      { timeout },
+    );
+    if (fallback) strategy = "input.click";
+  }
+  return { ...point, ...(locator ? { clicked: input.locator ?? input.selector, strategy } : {}) };
 };
 
 export const type = async (
@@ -292,8 +535,10 @@ export const type = async (
   if (locator !== null) await pointer(await targetPoint(page, locator, {}, timeout), "move");
   if (input.expectedOrigin !== undefined) {
     const target = locator ?? page.locator("*:focus").last();
+    // Remembered before typing: a fill that times out may still have typed.
+    rememberCredential(page, input.text);
     const delivered = await target.evaluate(
-      (element, { origin, text }) => {
+      (element, { origin, text, filledAttribute }) => {
         const view = element.ownerDocument.defaultView;
         try {
           if (!view || view.location.origin !== origin || view.top?.location.origin !== origin)
@@ -318,13 +563,15 @@ export const type = async (
         const setter = prototype && Object.getOwnPropertyDescriptor(prototype, "value")?.set;
         if (!setter && !control.isContentEditable) return "target";
         control.focus?.();
+        // Screenshots keep this field masked even after the page reveals it.
+        element.setAttribute(filledAttribute, "");
         if (setter) setter.call(element, text);
         else control.textContent = text;
         element.dispatchEvent(new view.Event("input", { bubbles: true }));
         element.dispatchEvent(new view.Event("change", { bubbles: true }));
         return "filled";
       },
-      { origin: input.expectedOrigin, text: input.text },
+      { origin: input.expectedOrigin, text: input.text, filledAttribute: VAULT_FILLED_ATTRIBUTE },
       { timeout },
     );
     if (delivered !== "filled")
@@ -556,7 +803,7 @@ export const evaluate = async (
   if (result.exceptionDetails) {
     throw new ServerBrowserOperationError(
       "PreviewAutomationExecutionError",
-      result.exceptionDetails.exception?.description ?? result.exceptionDetails.text,
+      "Page evaluation failed. Inspect the page without reading credential values.",
     );
   }
   const value =
@@ -569,7 +816,7 @@ export const evaluate = async (
       { maximumBytes: MAX_EVALUATION_BYTES },
     );
   }
-  return value;
+  return redactPreview(value);
 };
 
 export const waitFor = async (page: Page, input: PreviewAutomationWaitForInput) => {

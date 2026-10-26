@@ -73,30 +73,20 @@ describe("terminalToolsAuthorized", () => {
     expect(terminalToolsAuthorized({ ...base, enabled: false })).toBe(false);
     expect(terminalToolsAuthorized({ ...base, builderMode: true })).toBe(false);
   });
-  it("requires every sensitive grant for persistent agents", () => {
-    expect(terminalToolsAuthorized({ ...base, agentPermissions: defaultAgentPermissions })).toBe(
-      false,
-    );
-    const granted = {
-      ...defaultAgentPermissions,
-      send: true,
-      create_pr: true,
-      merge: true,
-      deploy: true,
-      delete: true,
+  it("allows default agents in the sandbox and requires read and execute", () => {
+    const input = {
+      ...base,
+      agentPermissions: defaultAgentPermissions,
+      readOnlySandboxAvailable: true,
     };
-    expect(terminalToolsAuthorized({ ...base, agentPermissions: granted })).toBe(true);
-    for (const grant of [
-      "read",
-      "execute",
-      "send",
-      "create_pr",
-      "merge",
-      "deploy",
-      "delete",
-    ] as const) {
+    expect(terminalLaunchPolicy(input)).toBe("readOnlyLookup");
+    expect(terminalToolsAuthorized({ ...input, readOnlySandboxAvailable: false })).toBe(false);
+    for (const grant of ["read", "execute"] as const) {
       expect(
-        terminalToolsAuthorized({ ...base, agentPermissions: { ...granted, [grant]: false } }),
+        terminalToolsAuthorized({
+          ...input,
+          agentPermissions: { ...defaultAgentPermissions, [grant]: false },
+        }),
       ).toBe(false);
     }
   });

@@ -551,6 +551,8 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
   readonly projectCheckoutPending?: boolean;
   /** For a `repository-icon`: what RepositoryIconResolver found. */
   readonly repositoryIcon?: RepositoryIconResolver.RepositoryIcon;
+  /** For a `site-icon`: the file SiteIconCache holds for the host, or null. */
+  readonly siteIconPath?: string | null;
 }) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -862,6 +864,30 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       }
       break;
     }
+    case "site-icon": {
+      // Served like a repository's icon file; none is the fallback marker.
+      const iconFile =
+        input.siteIconPath === undefined || input.siteIconPath === null
+          ? null
+          : yield* resolveCanonicalFile(input.siteIconPath).pipe(Effect.orElseSucceed(() => null));
+      if (iconFile !== null && isProjectFaviconPath(iconFile)) {
+        claims = { version: 1, kind: "project-favicon-external", filePath: iconFile, expiresAt };
+        // The cache names files by host digest and source; the mtime revs the URL on refetch.
+        const info = yield* fileSystem.stat(iconFile).pipe(Effect.option);
+        const mtime = Option.getOrUndefined(Option.flatMap(info, (stat) => stat.mtime));
+        fileName = `${PROJECT_FAVICON_VERSION_PREFIX}${mtime?.getTime() ?? 0}-${path.basename(iconFile)}`;
+      } else {
+        claims = {
+          version: 1,
+          kind: "project-favicon",
+          workspaceRoot: "",
+          relativePath: null,
+          expiresAt,
+        };
+        fileName = PROJECT_FAVICON_FALLBACK_MARKER;
+      }
+      break;
+    }
     case "native-app-icon": {
       claims = {
         version: 1,
@@ -911,7 +937,8 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
   if (
     claims.kind === "project-favicon" ||
     claims.kind === "project-favicon-external" ||
-    input.resource._tag === "repository-icon"
+    input.resource._tag === "repository-icon" ||
+    input.resource._tag === "site-icon"
   ) {
     const issuedAt = yield* Clock.currentTimeMillis;
     expiresAt =

@@ -1,3 +1,4 @@
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 import {
   EnvironmentId,
   HybridClock,
@@ -88,8 +89,8 @@ export class SharedState extends Context.Service<
 
 /**
  * Fields a machine may change on an agent or schedule it does not own.
- * Everything else — permissions, instructions, prompt, provider/model,
- * runtime mode and trigger fields — is owner-only, so a paired machine
+ * Everything else (permissions, instructions, prompt, provider/model,
+ * runtime mode and trigger fields) is owner-only, so a paired machine
  * cannot rewrite another machine's autonomous work.
  */
 const NON_OWNER_EDITABLE_FIELDS: Readonly<Record<"agent" | "schedule", ReadonlySet<string>>> = {
@@ -367,55 +368,61 @@ const make = Effect.gen(function* () {
         Effect.tap((changed) => (changed ? notify : Effect.void)),
         Effect.asVoid,
       );
-  const cursors = Effect.fn("SharedState.cursors")(function* (peer: EnvironmentId) {
-    const rows = yield* sql<{
-      received: number;
-      acknowledged: number;
-    }>`SELECT received,acknowledged FROM shared_peer_cursors WHERE environment_id=${peer}`;
-    return rows[0] ?? { received: 0, acknowledged: 0 };
-  }, Effect.mapError(storage));
-  const readBatch = Effect.fn("SharedState.readBatch")(function* (
-    after: number,
-    target: EnvironmentId,
-    localOnly: boolean,
-  ) {
-    const latest = yield* sql<{
-      cursor: number;
-    }>`SELECT COALESCE(MAX(cursor),0) AS cursor FROM shared_changes`;
-    if (!Number.isSafeInteger(after) || after < 0 || after > latest[0]!.cursor)
-      return yield* new SharedStateError({ reason: "invalid-cursor" });
-    const rows = yield* sql<{
-      cursor: number;
-      change_json: string;
-    }>`SELECT cursor,change_json FROM shared_changes WHERE cursor>${after} ORDER BY cursor LIMIT ${SHARED_BATCH_LIMIT}`;
-    const changes: SharedDocumentChange[] = [];
-    let cursor = after,
-      bytes = 0;
-    for (const row of rows) {
-      const change = yield* decodeChange(row.change_json).pipe(
-        Effect.catchTags({
-          SchemaError: () =>
-            Effect.logWarning("Skipping undecodable shared change", { cursor: row.cursor }).pipe(
-              Effect.as(undefined),
-            ),
-        }),
-      );
-      if (!change) {
+  const cursors = Effect.fn("SharedState.cursors")(
+    function* (peer: EnvironmentId) {
+      const rows = yield* sql<{
+        received: number;
+        acknowledged: number;
+      }>`SELECT received,acknowledged FROM shared_peer_cursors WHERE environment_id=${peer}`;
+      return rows[0] ?? { received: 0, acknowledged: 0 };
+    },
+    NodeSqliteClient.readOnly,
+    Effect.mapError(storage),
+  );
+  const readBatch = Effect.fn("SharedState.readBatch")(
+    function* (after: number, target: EnvironmentId, localOnly: boolean) {
+      const latest = yield* sql<{
+        cursor: number;
+      }>`SELECT COALESCE(MAX(cursor),0) AS cursor FROM shared_changes`;
+      if (!Number.isSafeInteger(after) || after < 0 || after > latest[0]!.cursor)
+        return yield* new SharedStateError({ reason: "invalid-cursor" });
+      const rows = yield* sql<{
+        cursor: number;
+        change_json: string;
+      }>`SELECT cursor,change_json FROM shared_changes WHERE cursor>${after} ORDER BY cursor LIMIT ${SHARED_BATCH_LIMIT}`;
+      const changes: SharedDocumentChange[] = [];
+      let cursor = after,
+        bytes = 0;
+      for (const row of rows) {
+        yield* NodeSqliteClient.eventLoopTurn;
+        const change = yield* decodeChange(row.change_json).pipe(
+          Effect.catchTags({
+            SchemaError: () =>
+              Effect.logWarning("Skipping undecodable shared change", { cursor: row.cursor }).pipe(
+                Effect.as(undefined),
+              ),
+          }),
+        );
+        if (!change) {
+          cursor = row.cursor;
+          continue;
+        }
+        if (change.updatedBy !== target && (!localOnly || change.updatedBy === environmentId)) {
+          const size = new TextEncoder().encode(row.change_json).length;
+          // Domain text has no aggregate byte limit. Send a large document alone so
+          // it cannot wedge the cursor, while keeping ordinary coalesced batches small.
+          if (changes.length > 0 && bytes + size > Math.min(SHARED_BATCH_BYTES, 64 * 1024) - 1024)
+            break;
+          changes.push(change);
+          bytes += size;
+        }
         cursor = row.cursor;
-        continue;
       }
-      if (change.updatedBy !== target && (!localOnly || change.updatedBy === environmentId)) {
-        const size = new TextEncoder().encode(row.change_json).length;
-        // Domain text has no aggregate byte limit. Send a large document alone so
-        // it cannot wedge the cursor, while keeping ordinary coalesced batches small.
-        if (changes.length > 0 && bytes + size > SHARED_BATCH_BYTES - 1024) break;
-        changes.push(change);
-        bytes += size;
-      }
-      cursor = row.cursor;
-    }
-    return { after, cursor, changes };
-  }, Effect.mapError(storage));
+      return { after, cursor, changes };
+    },
+    NodeSqliteClient.readOnly,
+    Effect.mapError(storage),
+  );
   const defer = (change: SharedDocumentChangeWire, source: EnvironmentId, trustedRelay: boolean) =>
     Effect.gen(function* () {
       yield* Effect.logWarning("Keeping a shared change this build cannot read for a later one", {

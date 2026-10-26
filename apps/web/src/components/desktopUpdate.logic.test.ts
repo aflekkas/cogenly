@@ -22,7 +22,7 @@ it("offers download guidance when an unsigned Mac cannot update in place", () =>
     downloadPercent: null,
     checkedAt: null,
     message:
-      "Update available — download. Cogenly is running from its disk image. Drag it to Applications and open it from there to update in place.",
+      "Update available to download. Cogenly is running from its disk image. Drag it to Applications and open it from there to update in place.",
     errorContext: null,
     canRetry: false,
     manualDownloadUrl:

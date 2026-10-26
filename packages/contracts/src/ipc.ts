@@ -36,7 +36,7 @@ export interface ContextMenuItem<T extends string = string> {
   label: string;
   destructive?: boolean;
   disabled?: boolean;
-  /** Renders as a non-interactive section header label. Web fallback only — stripped on desktop native menus. */
+  /** Renders as a non-interactive section header label. Web fallback only; stripped on desktop native menus. */
   header?: boolean;
   /**
    * Icon keyword resolved by the web fallback. Stripped on desktop native
@@ -438,7 +438,7 @@ export interface DesktopWslState {
   distros: readonly DesktopWslDistro[];
   // Reason the dual-mode WSL backend last failed preflight (no node, wrong
   // version, missing build tools), or null. Surfaced inline in Connections
-  // settings. Always null in wsl-only mode — that path shows a dialog and
+  // settings. Always null in wsl-only mode; that path shows a dialog and
   // falls back to Windows instead.
   preflightError: string | null;
 }
@@ -585,7 +585,7 @@ export interface DesktopPreviewWebviewConfig {
   webPreferences: string;
   /**
    * Absolute `file://`-style URL to the picker preload bundle. Set to null
-   * when the bundle isn't present (older builds, broken install) — the
+   * when the bundle isn't present (older builds, broken install); the
    * renderer must then disable element-pick affordances.
    */
   preloadUrl: string | null;
@@ -706,7 +706,7 @@ export const PickedElementStackFrameSchema: Schema.Codec<PickedElementStackFrame
 
 /**
  * A successful element pick from the preview webview. All fields are
- * best-effort — pages that don't ship a React fiber tree (or aren't running
+ * best-effort: pages that don't ship a React fiber tree (or aren't running
  * in dev) will still produce a usable payload (selector + html preview),
  * just without component / source attribution.
  */
@@ -727,7 +727,7 @@ export interface PickedElementPayload {
   source: PickedElementStackFrame | null;
   /** Full owner-stack frames; can be empty. Useful for richer context. */
   stack: ReadonlyArray<PickedElementStackFrame>;
-  /** Author CSS only (UA defaults stripped) — react-grab's `styles`. */
+  /** Author CSS only (UA defaults stripped), react-grab's `styles`. */
   styles: string;
   /** Wall-clock pick time as ISO-8601 string. */
   pickedAt: string;

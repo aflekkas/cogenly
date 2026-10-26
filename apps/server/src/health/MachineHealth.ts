@@ -1,3 +1,4 @@
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 // @effect-diagnostics nodeBuiltinImport:off -- Effect's FileSystem has no statfs; free disk space needs node:fs.
 /**
  * MachineHealth: the state of each subsystem an always-on machine depends on,
@@ -15,6 +16,7 @@ import * as NodeFSP from "node:fs/promises";
 
 import {
   type EnvironmentId,
+  ThreadId,
   type ChatSandboxSetupResult,
   MachineHealthError,
   type MachineHealthCheck,
@@ -50,17 +52,22 @@ import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTasks from "../scheduledTasks/ScheduledTaskService.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import { forkParked } from "../serverActivation.ts";
+import * as ThreadReplication from "../threadSync/ThreadReplication.ts";
 import * as SharedSync from "../sync/SharedSync.ts";
 import * as MachineSetup from "../tailscale/MachineSetup.ts";
 import * as TailscaleServeMode from "../tailscale/TailscaleServeMode.ts";
 import * as ThreadSync from "../threadSync/ThreadSync.ts";
 import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
+import * as ChatGreetingService from "../greeting/ChatGreetingService.ts";
 import * as HealthCanary from "./HealthCanary.ts";
 import * as ComputerUseService from "../computerUse/ComputerUseService.ts";
-import { readStaleRuns } from "./staleRuns.ts";
+import { readRateLimitStreaks } from "./rateLimitStreaks.ts";
+import { readStaleRuns, readStuckQueues } from "./staleRuns.ts";
+import * as AgentProcesses from "../process/AgentProcesses.ts";
 import {
   type SyncPeerProgress,
   type SyncPeerSample,
+  agentProcessesCheck,
   bootServiceCheck,
   computerUseCheck,
   chatSandboxCheck,
@@ -71,11 +78,14 @@ import {
   integrationsCheck,
   machineLinksCheck,
   providersCheck,
+  rateLimitItems,
   sameReportContent,
   scheduledTasksCheck,
   serverCheck,
   stuckRunsCheck,
+  stuckQueuesItems,
   syncCheck,
+  quarantinedThreadItem,
   tailscaleServeCheck,
   trackSyncProgress,
   unknownCheck,
@@ -91,6 +101,7 @@ export class MachineHealth extends Context.Service<
   {
     /** This machine's report. Never fails: a check that cannot run is `unknown`. */
     readonly report: Effect.Effect<MachineHealthReport>;
+    readonly discardQuarantined: (threadId: string) => Effect.Effect<number, MachineHealthError>;
     readonly setupSandbox: Effect.Effect<ChatSandboxSetupResult>;
     /** This machine, or a paired one read over the peer link. */
     readonly reportFor: (
@@ -260,8 +271,10 @@ const make = Effect.gen(function* () {
   const serveMode = yield* TailscaleServeMode.TailscaleServeMode;
   const launcher = yield* ServiceLauncherClient.ServiceLauncherClient;
   const canary = yield* HealthCanary.HealthCanary;
+  const greetings = yield* ChatGreetingService.ChatGreetingService;
   const computerUse = yield* ComputerUseService.ComputerUse;
   const sandbox = yield* ReadOnlySandbox.ReadOnlySandbox;
+  const agentProcesses = yield* AgentProcesses.AgentProcesses;
 
   const freeSpace = yield* Effect.cachedWithTTL(
     Effect.tryPromise(() => NodeFSP.statfs(config.stateDir)).pipe(
@@ -284,11 +297,13 @@ const make = Effect.gen(function* () {
     sql<{ readonly page_count: number }>`PRAGMA page_count`,
     sql<{ readonly page_size: number }>`PRAGMA page_size`,
   ]).pipe(
+    NodeSqliteClient.readOnly,
     Effect.map(([count, size]) => {
       const pages = count[0]?.page_count;
       const pageSize = size[0]?.page_size;
       return databaseCheck({
         answered: true,
+        writerWorkerUnavailable: NodeSqliteClient.load(sql)?.writerWorkerUnavailable ?? false,
         sizeBytes: pages === undefined || pageSize === undefined ? null : pages * pageSize,
       });
     }),
@@ -305,7 +320,9 @@ const make = Effect.gen(function* () {
   );
 
   /** Sync progress per peer, remembered between samples; in memory since this start. */
+  const replication = yield* ThreadReplication.ThreadReplication;
   const syncProgress = new Map<EnvironmentId, SyncPeerProgress>();
+  const syncRates = new Map<EnvironmentId, { acknowledged: number; at: number }>();
 
   const sampleSync = (peers: ReadonlyArray<MachineInfo>, nowMs: number) =>
     Effect.gen(function* () {
@@ -326,17 +343,27 @@ const make = Effect.gen(function* () {
             readonly meta_ack: number | null;
             readonly held_changes: number;
             readonly held_threads: number;
+            readonly quarantined: number;
           }>`SELECT
               (SELECT acknowledged FROM shared_peer_cursors WHERE environment_id = ${id}) AS shared_ack,
               (SELECT acknowledged_events FROM thread_replication_cursors WHERE environment_id = ${id}) AS events_ack,
               (SELECT acknowledged_meta FROM thread_replication_cursors WHERE environment_id = ${id}) AS meta_ack,
               (SELECT COUNT(*) FROM shared_deferred_changes WHERE source_env = ${id})
                 + (SELECT COUNT(*) FROM thread_replication_deferred WHERE source_env = ${id}) AS held_changes,
-              (SELECT COUNT(DISTINCT thread_id) FROM thread_replication_deferred WHERE source_env = ${id}) AS held_threads`)[0];
+              (SELECT COUNT(DISTINCT thread_id) FROM thread_replication_deferred WHERE source_env = ${id}) AS held_threads,
+              (SELECT COUNT(*) FROM thread_replication_deferred WHERE source_env = ${id} AND reason IS NOT NULL) AS quarantined`)[0];
           const sharedAck = row?.shared_ack ?? 0;
           const eventsAck = row?.events_ack ?? 0;
           const metaAck = row?.meta_ack ?? 0;
+          const acknowledged = sharedAck + eventsAck + metaAck;
+          const previous = syncRates.get(id);
+          const ratePerSecond =
+            previous !== undefined && nowMs > previous.at
+              ? (Math.max(0, acknowledged - previous.acknowledged) * 1000) / (nowMs - previous.at)
+              : 0;
+          syncRates.set(id, { acknowledged, at: nowMs });
           const sample: SyncPeerSample = {
+            ratePerSecond,
             environmentId: id,
             name: peer.name,
             online: peer.online,
@@ -347,20 +374,57 @@ const make = Effect.gen(function* () {
             acknowledged: `${sharedAck}:${eventsAck}:${metaAck}`,
             heldChanges: row?.held_changes ?? 0,
             heldThreads: row?.held_threads ?? 0,
+            quarantined: row?.quarantined ?? 0,
           };
           const progress = trackSyncProgress(syncProgress.get(id), sample, nowMs);
           syncProgress.set(id, progress);
           return { sample, progress };
         }),
       );
-      return syncCheck({ peers: samples, nowMs });
-    });
+      const base = syncCheck({ peers: samples, nowMs });
+      const quarantines = yield* sql<{
+        thread_id: string;
+        title: string | null;
+        count: number;
+        bytes: number;
+      }>`
+        SELECT d.thread_id, COALESCE(json_extract(t.payload_json, '$.title'),
+          (SELECT json_extract(h.item_json, '$.payload.title') FROM thread_replication_deferred h
+            WHERE h.thread_id = d.thread_id AND h.item_kind = 'event'
+              AND json_extract(h.item_json, '$.type') = 'thread.created' LIMIT 1)) AS title,
+          COUNT(*) AS count, SUM(length(CAST(d.item_json AS BLOB))) AS bytes
+        FROM thread_replication_deferred d LEFT JOIN orchestration_v2_projection_threads t ON t.thread_id = d.thread_id
+        GROUP BY d.thread_id HAVING MAX(d.reason IS NOT NULL) = 1`;
+      return {
+        ...base,
+        status: quarantines.length > 0 ? ("fail" as const) : base.status,
+        items: [
+          ...base.items.filter((entry) => !entry.key.startsWith("sync:quarantined:")),
+          ...quarantines.map((row) =>
+            quarantinedThreadItem({
+              threadId: ThreadId.make(row.thread_id),
+              title: row.title,
+              count: row.count,
+              bytes: row.bytes,
+            }),
+          ),
+        ],
+      };
+    }).pipe(NodeSqliteClient.readOnly);
 
   const activeRuns = (now: DateTime.Utc) =>
-    readStaleRuns(now).pipe(
-      Effect.provideService(SqlClient.SqlClient, sql),
-      Effect.map((active) => stuckRunsCheck({ active, now })),
-    );
+    Effect.gen(function* () {
+      const active = yield* readStaleRuns(now);
+      const queues = yield* readStuckQueues(now);
+      const check = stuckRunsCheck({ active, now });
+      if (queues.length === 0) return check;
+      return {
+        ...check,
+        status: check.status === "fail" ? ("fail" as const) : ("warn" as const),
+        summary: "Work needs attention",
+        items: [...check.items, ...stuckQueuesItems(queues)],
+      };
+    }).pipe(NodeSqliteClient.readOnly, Effect.provideService(SqlClient.SqlClient, sql));
 
   const evaluate: Effect.Effect<MachineHealthReport> = Effect.gen(function* () {
     const now = yield* DateTime.now;
@@ -397,7 +461,26 @@ const make = Effect.gen(function* () {
         guarded("disk", Effect.map(freeSpace, diskCheck)),
         guarded(
           "providers",
-          Effect.map(providers.getProviders, (list) => providersCheck({ providers: list, now })),
+          Effect.gen(function* () {
+            const providerList = yield* providers.getProviders;
+            const check = providersCheck({ providers: providerList, now });
+            const items = yield* greetings.healthItems;
+            const rateLimited = rateLimitItems({
+              providers: providerList,
+              streaks: yield* readRateLimitStreaks(now).pipe(
+                Effect.provideService(SqlClient.SqlClient, sql),
+                Effect.catch(() => Effect.succeed([])),
+              ),
+            });
+            const extra = [...items, ...rateLimited];
+            return {
+              ...check,
+              status: check.status === "ok" && extra.length > 0 ? ("warn" as const) : check.status,
+              summary:
+                items.length > 0 ? `${check.summary} AI greetings keep failing.` : check.summary,
+              items: [...check.items, ...extra],
+            };
+          }),
         ),
         fromView("machine-links", (list) =>
           Effect.succeed(machineLinksCheck({ machines: list.machines, link: list.link, now })),
@@ -434,6 +517,7 @@ const make = Effect.gen(function* () {
         ),
         guarded("canary", canary.check),
         guarded("computer-use", Effect.map(computerUse.status(), computerUseCheck)),
+        guarded("agent-processes", Effect.map(agentProcesses.snapshot, agentProcessesCheck)),
       ],
       { concurrency: "unbounded" },
     );
@@ -486,6 +570,7 @@ const make = Effect.gen(function* () {
         (machine) => machine.environmentId === input.environmentId,
       );
       if (peer === undefined) return yield* new MachineHealthError({ reason: "not-paired" });
+      yield* replication.replayHeld;
       if (!peer.online) return yield* unavailable();
       yield* Effect.all(
         [sharedSync.sync(peer.environmentId), threadSync.sync(peer.environmentId)],
@@ -502,6 +587,8 @@ const make = Effect.gen(function* () {
     reportFor,
     subscribe,
     retrySync,
+    discardQuarantined: (threadId) =>
+      replication.discardQuarantined(threadId).pipe(Effect.mapError(unavailable)),
     setupSandbox: sandbox.setup.pipe(Effect.tap(() => report)),
   });
 });

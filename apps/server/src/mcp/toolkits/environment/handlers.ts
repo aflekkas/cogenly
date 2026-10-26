@@ -1,4 +1,5 @@
 import {
+  AuthOrchestrationOperateScope,
   type MachineHealthError,
   OrchestratorMcpFailure,
   UNIVERSAL_CLIENT_PREFERENCE_KEYS,
@@ -26,7 +27,6 @@ export function preferences(settings: ServerSettings) {
     newWorktreesStartFromOrigin,
     enableAgentTerminals,
     enableProviderUpdateChecks,
-    useProviderConnectors,
     projectsRoot,
     modelEffortDefaults,
     backgroundActivity,
@@ -40,7 +40,6 @@ export function preferences(settings: ServerSettings) {
     newWorktreesStartFromOrigin,
     enableAgentTerminals,
     enableProviderUpdateChecks,
-    useProviderConnectors,
     projectsRoot,
     modelEffortDefaults,
     backgroundActivity: { profile: backgroundActivity.profile },
@@ -124,8 +123,11 @@ export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
   machine_health_fix: McpToolAccess.writesEnvironmentAsWork((input) =>
     Effect.gen(function* () {
       const fixes = yield* MachineHealthFixes.MachineHealthFixes;
+      // MCP callers hold no environment:maintain authority; privileged fixes
+      // (update, sandbox setup, killing processes) stay with the owner client.
+      const mcpCallerScopes = [AuthOrchestrationOperateScope] as const;
       if (input.itemKeys !== undefined)
-        return yield* fixes.fix({ ...input, itemKeys: input.itemKeys });
+        return yield* fixes.fix({ ...input, itemKeys: input.itemKeys }, mcpCallerScopes);
       const health = yield* MachineHealth.MachineHealth;
       const report = yield* health.reportFor(input);
       const itemKeys = directlyFixableItemKeys(report);
@@ -138,7 +140,7 @@ export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
               "Nothing on that machine has a direct fix right now. machine_health lists what needs investigating.",
             outcomes: [],
           }
-        : yield* fixes.fix({ ...input, itemKeys: [first, ...rest] });
+        : yield* fixes.fix({ ...input, itemKeys: [first, ...rest] }, mcpCallerScopes);
     }).pipe(Effect.mapError(healthFailure)),
   ),
   machine_health: McpToolAccess.reads((input) =>

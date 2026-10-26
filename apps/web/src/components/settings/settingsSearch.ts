@@ -320,6 +320,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [
       "secrets passwords logins credentials api keys cards notes one-time codes totp approvals access ask first usage log recent activity",
       "share vault sharing sync synced other machines this machine only keep on this machine",
+      "logins sign in username email favicon site allow block missing username add email integration signs in with",
     ],
   },
   {
@@ -678,18 +679,10 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "integration-add",
     // Its row waits for the account list; the section is always there.
     targetId: "integration-services",
-    title: "Connect a service",
+    title: "Add integration",
     to: "/settings/integrations",
     searchTerms: [
-      "connect with an agent new service account custom mcp server setup oauth client id secret api key personal access token slack app manifest google cloud install uv",
-    ],
-  },
-  {
-    id: "provider-connectors",
-    title: "Use only Cogenly integrations",
-    to: "/settings/integrations",
-    searchTerms: [
-      "claude.ai connectors chatgpt apps codex plugins mcp servers duplicate native gmail slack notion linear repo .mcp.json",
+      "connect a service with an agent new account custom mcp server setup oauth client id secret api key personal access token slack app manifest google cloud install uv",
     ],
   },
   {
@@ -1031,7 +1024,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/project-tags",
     searchTerms: [
       "folders new project archive github org sources files agents repositories",
-      "orphan folders without a project outside adopt make project remove empty projects root",
+      "leftover folders orphan unused without a project deleted project turn into project adopt move to trash remove clean up tidy projects root",
     ],
   },
 ] as const satisfies ReadonlyArray<SettingsSearchItem>;

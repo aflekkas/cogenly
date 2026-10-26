@@ -179,7 +179,7 @@ export function getLatestThreadForProject<
 // Pinned threads carry an optional pinOrderKey (a base-26 string). The
 // pinned block sorts keyed threads by plain string comparison, so a drag
 // (web) or Move up/down (mobile) writes ONE key to ONE thread on that
-// thread's own server — neighbors, possibly living on other servers, are
+// thread's own server. Neighbors, possibly living on other servers, are
 // never touched, and every client connected to the same servers converges
 // on the same order.
 const PIN_ORDER_DIGITS = "abcdefghijklmnopqrstuvwxyz";
@@ -210,7 +210,7 @@ function pinOrderMidpoint(a: string, b: string): string {
     return PIN_ORDER_DIGITS.charAt(Math.round((digitA + digitB) / 2));
   }
   // Consecutive leading digits: either b has spare digits to shorten into,
-  // or we extend a (never producing a trailing minimum digit — the base
+  // or we extend a (never producing a trailing minimum digit; the base
   // case midpoint("", "") is the middle of the alphabet).
   if (b.length > 1) return b.charAt(0);
   return PIN_ORDER_DIGITS.charAt(digitA) + pinOrderMidpoint(a.slice(1), "");
@@ -218,7 +218,7 @@ function pinOrderMidpoint(a: string, b: string): string {
 
 /** Key that sorts strictly between two neighbors; null bounds mean "top of
     the pinned block" / "bottom of the keyed run". Returns null instead of
-    throwing when existing keys are corrupt or out of order — callers fall
+    throwing when existing keys are corrupt or out of order; callers fall
     back to rewriting the section. */
 export function pinOrderKeyBetween(before: string | null, after: string | null): string | null {
   const a = before ?? "";
@@ -258,7 +258,7 @@ export function generateSpreadPinOrderKeys(count: number): string[] {
  * Assignments needed to realize a new pinned order. When the moved thread
  * sits between two keyed (or absent) neighbors, this is a single write to
  * the moved thread. When a neighbor is keyless (threads pinned before
- * reordering shipped), the whole section gets fresh spread keys — a
+ * reordering shipped), the whole section gets fresh spread keys, a
  * one-time materialization; every move after that is single-write. Active
  * reordering uses the same planner with activeOrderKey values.
  */
@@ -299,7 +299,7 @@ export function planPinnedReorder(input: {
 
 /**
  * Pinned block order: user-arranged keys first (string comparison, id
- * tiebreak), then keyless threads newest-created first — so threads on
+ * tiebreak), then keyless threads newest-created first, so threads on
  * servers that predate reordering keep the static creation order at the
  * bottom of the block instead of breaking the section.
  */
@@ -309,7 +309,7 @@ export function sortPinnedThreadsByOrderKey<
     readonly createdAt: string;
     readonly pinOrderKey?: string | null | undefined;
     /** Thread ids are only unique within an environment, and the pinned
-        block merges environments — the tiebreak needs both parts or two
+        block merges environments, so the tiebreak needs both parts or two
         clients could render equal-key threads in stream-arrival order. */
     readonly environmentId?: string | undefined;
   },

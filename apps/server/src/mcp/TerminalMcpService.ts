@@ -19,6 +19,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
+import * as AgentProcesses from "../process/AgentProcesses.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import { assertLiveCaller, loadCaller, unavailable } from "./threadAccess.ts";
 
@@ -33,6 +34,7 @@ type RunInput = {
   readonly cwd?: string | undefined;
   readonly timeoutMs?: number | undefined;
   readonly background?: boolean | undefined;
+  readonly keepRunning?: boolean | undefined;
 };
 
 /** @effect-expect-leaking McpInvocationContext -- each HTTP request provides its authenticated caller. */
@@ -79,6 +81,7 @@ const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const threads = yield* ThreadManagement.ThreadManagementService;
+  const processes = yield* AgentProcesses.AgentProcesses;
   const access = Effect.gen(function* () {
     const invocation = yield* McpInvocationContext.McpInvocationContext;
     const scope = yield* McpInvocationContext.requireThreadScope(invocation, "Terminal tools");
@@ -115,7 +118,7 @@ const make = Effect.gen(function* () {
       );
     if (terminalPolicy === null)
       return yield* denied(
-        "Agent terminals require enabled tools, full-access/default mode and all sensitive agent grants.",
+        "Agent terminals require enabled tools, full-access/default mode, read and execute grants, and an available sandbox for limited agents.",
       );
     return { ...context, terminalPolicy };
   });
@@ -164,6 +167,8 @@ const make = Effect.gen(function* () {
                 worktreePath: thread.worktreePath,
                 providerInstanceId: scope.thread.providerInstanceId,
                 background: true,
+                // A foreground wait kills on timeout, so only a background command is kept.
+                keepRunning: input.background === true && input.keepRunning === true,
                 prepareCredentials: (terminalId) =>
                   credentials.launch(
                     { threadId, providerInstanceId: scope.thread.providerInstanceId },
@@ -224,7 +229,19 @@ const make = Effect.gen(function* () {
     kill: (input) =>
       Effect.gen(function* () {
         const { threadId } = yield* access;
-        yield* manager.killAgent({ ...input, threadId }).pipe(Effect.mapError(unavailable));
+        const identity = { terminalId: input.terminalId, threadId };
+        yield* manager.killAgent(identity).pipe(
+          // A terminal evicted after it exited can still have children running.
+          Effect.catch(() =>
+            processes
+              .terminate(identity)
+              .pipe(
+                Effect.flatMap((pids) =>
+                  pids.length > 0 ? Effect.void : Effect.fail(unavailable()),
+                ),
+              ),
+          ),
+        );
         return {};
       }),
     list: () =>

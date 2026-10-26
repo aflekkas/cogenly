@@ -1,4 +1,5 @@
 import * as ReadOnlySandbox from "./ReadOnlySandbox.ts";
+import * as AgentProcesses from "../process/AgentProcesses.ts";
 import * as Vault from "../vault/Vault.ts";
 import type { CredentialDelivery } from "../accounts/CliCredentials.ts";
 import type { AccountError } from "@cogenly/contracts";
@@ -166,6 +167,8 @@ export class TerminalManager extends Context.Service<
         readonly command: string;
         readonly background?: boolean;
         readonly timeoutMs?: number;
+        /** Survives stop, settle, idle reaping and restarts; archive and delete still kill it. */
+        readonly keepRunning?: boolean;
         readonly prepareCredentials?: (
           terminalId: string,
         ) => Effect.Effect<CredentialDelivery, AccountError>;
@@ -188,8 +191,18 @@ export class TerminalManager extends Context.Service<
     readonly killAgent: (input: {
       readonly threadId: string;
       readonly terminalId: string;
+      /** Records the kill in the agent process log under this reason. */
+      readonly reason?: AgentProcesses.AgentProcessReapReason;
     }) => Effect.Effect<void, TerminalError>;
-    readonly stopAgents: (threadId: string, before?: string) => Effect.Effect<void, TerminalError>;
+    /**
+     * Kills the thread's agent terminals and their whole process trees. Ones
+     * started after `before` stay. Keep-running ones stay unless included.
+     */
+    readonly stopAgents: (
+      threadId: string,
+      before?: string,
+      options?: { readonly includeKeepRunning?: boolean },
+    ) => Effect.Effect<void, TerminalError>;
 
     /** Open or attach to a user terminal; agent ids are reserved for runAgent. */
     readonly open: (
@@ -334,6 +347,7 @@ interface AgentTerminalOpenInput extends TerminalOpenInput {
   readonly redactOutput?: CredentialDelivery["redactOutput"];
   readonly agentCommand?: string;
   readonly sandboxLaunch?: ReadOnlySandbox.SandboxLaunch;
+  readonly keepRunning?: boolean;
 }
 
 interface TerminalSessionState {
@@ -343,6 +357,7 @@ interface TerminalSessionState {
     readonly redactOutput?: CredentialDelivery["redactOutput"];
     readonly output: AgentOutput;
     readonly startedAt: string;
+    readonly keepRunning: boolean;
     timedOut: boolean;
   };
   threadId: string;
@@ -480,6 +495,7 @@ function summary(session: TerminalSessionState): TerminalSummary {
       ? {
           startedAt: session.agent.startedAt,
           command: session.agent.command.slice(0, TERMINAL_COMMAND_MAX_LENGTH),
+          ...(session.agent.keepRunning ? { keepRunning: true } : {}),
         }
       : {}),
   };
@@ -1452,6 +1468,8 @@ interface TerminalManagerOptions {
   subprocessPollIntervalMs?: number;
   processKillGraceMs?: number;
   maxRetainedInactiveSessions?: number;
+  /** The agent process ledger; defaults to the `AgentProcesses` reference. */
+  processes?: AgentProcesses.AgentProcessesShape;
   registerTerminalProcesses?: (input: {
     readonly threadId: string;
     readonly terminalId: string;
@@ -1560,8 +1578,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   const historyByteLimit = options.historyByteLimit ?? DEFAULT_HISTORY_BYTE_LIMIT;
   const platform = yield* HostProcess.Platform;
   const agentScope = yield* AgentScope;
+  const processes = options.processes ?? (yield* AgentProcesses.AgentProcesses);
   // Terminals must inherit the user's full environment (minus the blocklist
-  // applied in createTerminalSpawnEnv) — an allowlist here silently strips
+  // applied in createTerminalSpawnEnv); an allowlist here silently strips
   // things like PSModulePath, DISPLAY, proxies, and toolchain variables.
   // `options.env` is the test seam.
   const baseEnv = options.env ?? process.env;
@@ -1778,11 +1797,16 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     process: PtyAdapter.PtyProcess,
     threadId: string,
     terminalId: string,
+    /** Kills the rest of an agent's tree: its scope and descendants that left the group. */
+    killTree: Effect.Effect<unknown> = Effect.void,
   ) {
     // Uninterruptible: once SIGTERM is sent, the SIGKILL after the grace
     // period must land even if the caller that started the kill is cancelled.
     const fiber = yield* Effect.uninterruptible(
-      runKillEscalation(process, threadId, terminalId),
+      Effect.all([runKillEscalation(process, threadId, terminalId), killTree], {
+        concurrency: 2,
+        discard: true,
+      }),
     ).pipe(
       Effect.ensuring(
         modifyManagerState((state) => {
@@ -2265,8 +2289,10 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         continue;
       }
 
-      if (session.agent && action.process) {
-        // The command shell exited; do not leave its background children behind.
+      // The command shell exited; do not leave its background children behind,
+      // including ones that left its group (killed below, once the exit is out).
+      const killLeftovers = session.agent !== undefined && !session.agent.keepRunning;
+      if (killLeftovers && action.process) {
         yield* Effect.sync(() => action.process?.kill("SIGKILL"));
       }
       yield* clearKillFiber(action.process);
@@ -2283,6 +2309,8 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         exitSignal: action.exitSignal,
       });
       yield* evictInactiveSessionsIfNeeded();
+      // The tree kill waits out a grace, so it runs in the worker scope.
+      if (killLeftovers) yield* killAgentTree(session).pipe(Effect.forkIn(workerScope));
       return;
     }
   });
@@ -2326,7 +2354,22 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     session.processEventDrainFiber = holder.fiber;
   };
 
-  const stopProcess = Effect.fn("terminal.stopProcess")(function* (session: TerminalSessionState) {
+  const killAgentTree = (
+    session: TerminalSessionState,
+    reason?: AgentProcesses.AgentProcessReapReason,
+  ) =>
+    session.agent === undefined
+      ? Effect.void
+      : processes.terminate({
+          threadId: session.threadId,
+          terminalId: session.terminalId,
+          reason,
+        });
+
+  const stopProcess = Effect.fn("terminal.stopProcess")(function* (
+    session: TerminalSessionState,
+    reason?: AgentProcesses.AgentProcessReapReason,
+  ) {
     const process = session.process;
     if (!process) return;
 
@@ -2335,7 +2378,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       // Flush both redactors through the ordered drain before anything is
       // detached or cleared: each redactor holds back a tail that could
       // still become a secret, and only its final flush releases that
-      // tail — redacted, or as the non-secret text it turned out to be.
+      // tail, redacted or as the non-secret text it turned out to be.
       // Dropping the queue here would silently lose that text.
       let shouldFork = false;
       const tail = session.agent?.redactOutput?.("", true);
@@ -2387,7 +2430,12 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       threadId: session.threadId,
       terminalId: session.terminalId,
     });
-    yield* startKillEscalation(process, session.threadId, session.terminalId);
+    yield* startKillEscalation(
+      process,
+      session.threadId,
+      session.terminalId,
+      killAgentTree(session, reason),
+    );
     yield* evictInactiveSessionsIfNeeded();
   });
 
@@ -2398,7 +2446,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     index = 0,
     lastError: PtyAdapter.PtySpawnError | null = null,
   ): Effect.fn.Return<
-    { process: PtyAdapter.PtyProcess; shellLabel: string },
+    { process: PtyAdapter.PtyProcess; shellLabel: string; scopeUnit: string | undefined },
     PtyAdapter.PtySpawnError
   > {
     if (index >= shellCandidates.length) {
@@ -2425,7 +2473,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       args: candidate.args ?? [],
       name: "terminal",
       env: spawnEnv,
-      survivesRestart: session.agent === undefined,
+      // A kept agent command lives in the shared slice, so the next server's
+      // sweep of its own slice leaves it running.
+      survivesRestart: session.agent === undefined || session.agent.keepRunning,
     });
     const attempt = yield* Effect.result(
       options.ptyAdapter.spawn({
@@ -2442,6 +2492,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       return {
         process: attempt.success,
         shellLabel: formatShellCandidate(candidate),
+        scopeUnit: launch.unit,
       };
     }
 
@@ -2563,6 +2614,24 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
               eventStamp = advanceEventSequence(session);
               return [undefined, state] as const;
             });
+
+            // Subscribe before registering: registration reads the process
+            // table and writes the ledger, and a fast command can write and
+            // exit during that I/O. node-pty drops data with no listener but
+            // retains the exit, so registering first lost the output while
+            // still reporting exit 0. Queued events drain after startup below.
+            if (session.agent) {
+              // The PTY makes the shell a session and group leader, so its PID
+              // is the group the ledger kills.
+              yield* processes.register({
+                threadId: session.threadId,
+                terminalId: session.terminalId,
+                command: session.agent.command,
+                pid: processPid,
+                scopeUnit: spawnResult.scopeUnit,
+                keepRunning: session.agent.keepRunning,
+              });
+            }
 
             yield* publishEvent({
               type: eventType,
@@ -2725,6 +2794,15 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         terminalId: session.terminalId,
         processIds: next.processIds,
       });
+      // Remembered so a descendant that leaves the group, or outlives its
+      // parent, can still be killed with the tree.
+      if (session.agent) {
+        yield* processes.observe({
+          threadId: session.threadId,
+          terminalId: session.terminalId,
+          pids: next.processIds,
+        });
+      }
       const nextChildLabel = next.hasRunningSubprocess ? next.childCommand : null;
       const event = yield* modifyManagerState((state) => {
         const liveSession: Option.Option<TerminalSessionState> = Option.fromNullishOr(
@@ -2818,7 +2896,15 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         cleanupProcessHandles(session);
         if (!session.process) return;
         yield* clearKillFiber(session.process);
-        yield* runKillEscalation(session.process, session.threadId, session.terminalId);
+        // A kept command's escaped descendants stay, listed as orphans for the
+        // next server; everything else in an agent's tree goes now.
+        yield* Effect.all(
+          [
+            runKillEscalation(session.process, session.threadId, session.terminalId),
+            session.agent?.keepRunning === true ? Effect.void : killAgentTree(session),
+          ],
+          { concurrency: 2, discard: true },
+        );
       });
 
       const pendingKills = yield* readManagerState;
@@ -2861,6 +2947,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
                 ...(input.redactOutput ? { redactOutput: input.redactOutput } : {}),
                 output: new AgentOutput(),
                 startedAt: yield* nowIso,
+                keepRunning: input.keepRunning === true,
                 timedOut: false,
               },
             }),
@@ -3475,9 +3562,15 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       input.threadId,
       Effect.gen(function* () {
         const session = yield* requireSession(input.threadId, input.terminalId);
-        if (!session.agent) return yield* new TerminalSessionLookupError(input);
+        if (!session.agent)
+          return yield* new TerminalSessionLookupError({
+            threadId: input.threadId,
+            terminalId: input.terminalId,
+          });
         const process = session.process;
-        yield* stopProcess(session);
+        yield* stopProcess(session, input.reason);
+        // The shell may be gone while children it left behind still run.
+        if (!process) yield* killAgentTree(session, input.reason);
         // stopProcess already started the SIGTERM → SIGKILL escalation in the
         // worker scope; await it (bounded) instead of interrupting and
         // re-running it inline, which delayed the SIGKILL by a second grace.
@@ -3501,16 +3594,17 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       ),
     );
 
-  const stopAgents: TerminalManager["Service"]["stopAgents"] = (threadId, before) =>
+  const stopAgents: TerminalManager["Service"]["stopAgents"] = (threadId, before, options) =>
     sessionsForThread(threadId).pipe(
       Effect.flatMap((sessions) =>
         Effect.forEach(
           sessions.filter(
             (session) =>
               session.agent !== undefined &&
+              (options?.includeKeepRunning === true || !session.agent.keepRunning) &&
               (before === undefined || session.agent.startedAt <= before),
           ),
-          (session) => killAgent({ threadId, terminalId: session.terminalId }),
+          (session) => killAgent({ threadId, terminalId: session.terminalId, reason: "stopped" }),
           { discard: true },
         ),
       ),
@@ -3582,6 +3676,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           env: { ...resolved.env, ...delivery?.env },
           ...(delivery?.redactOutput ? { redactOutput: delivery.redactOutput } : {}),
           agentCommand: input.command,
+          keepRunning: input.keepRunning === true,
           ...(sandboxLaunch ? { sandboxLaunch } : {}),
         }).pipe(
           Effect.onError(() =>

@@ -58,7 +58,7 @@ is the state database, plus `settings.json`, `secrets/`, `logs/`, and
 
 The server binds loopback by default. Use Tailscale first: it keeps Cogenly
 private to your tailnet with no open ports. A public reverse proxy is an
-explicit public-mode option, not the default path — only choose it when you
+explicit public-mode option, not the default path. Only choose it when you
 want Cogenly reachable from the internet.
 
 Tailscale Serve (HTTPS on your tailnet, no open ports):
@@ -67,7 +67,7 @@ Tailscale Serve (HTTPS on your tailnet, no open ports):
 cogenly serve --tailscale-serve   # or once: cogenly pair --tailscale
 ```
 
-Public mode — reverse proxy (Caddy example; the server stays on loopback,
+Public mode with a reverse proxy (Caddy example; the server stays on loopback,
 but the proxy makes it internet-facing):
 
 ```caddy
@@ -123,7 +123,7 @@ fall-back times fire once.
 
 ### Backups
 
-The server backs itself up nightly — no cron needed. Each run writes
+The server backs itself up nightly, with no cron needed. Each run writes
 `<home>/backups/<timestamp>/` with a consistent snapshot of the state
 database (taken through SQLite's online backup API, safe while the server
 runs), plus `settings.json` and `secrets/`. Backup directories are `0700`

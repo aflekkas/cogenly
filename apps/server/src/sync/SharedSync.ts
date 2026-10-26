@@ -1,3 +1,6 @@
+import * as Clock from "effect/Clock";
+import * as Queue from "effect/Queue";
+import * as BackfillBudget from "./BackfillBudget.ts";
 import {
   SharedChangesApply,
   SharedChangesRead,
@@ -30,6 +33,10 @@ const make = Effect.gen(function* () {
   const channels = yield* PeerChannels.PeerChannels;
   const scheduler = yield* Scheduler.Scheduler;
   const permit = yield* Semaphore.make(1);
+  const receivePermit = yield* Semaphore.make(1);
+  const sendBudget = yield* BackfillBudget.make;
+  const receiveBudget = yield* BackfillBudget.make;
+  const pending = yield* Queue.sliding<void>(1);
   const topology = machines.list.pipe(
     Effect.mapError((cause) => new SharedStateError({ reason: "storage", cause })),
   );
@@ -43,12 +50,19 @@ const make = Effect.gen(function* () {
     batch: SharedChangeBatch,
     source: EnvironmentId,
   ) {
+    yield* receiveBudget.ready;
+    const started = yield* Clock.currentTimeMillis;
     const view = yield* topology;
     const trustedRelay = view.link._tag === "spoke" && view.link.hubEnvironmentId === source;
     // Former hubs may still own documents after re-pairing. Execution paths
     // require the local machine to be the owner even when it is no longer paired.
-    return yield* state.receive(batch, source, trustedRelay);
-  });
+    const result = yield* state.receive(batch, source, trustedRelay);
+    yield* receiveBudget.completed(
+      batch.changes.length,
+      (yield* Clock.currentTimeMillis) - started,
+    );
+    return result;
+  }, receivePermit.withPermits(1));
   yield* channels.register(SharedChangesApply, (batch, caller) =>
     receive(batch, caller.environmentId),
   );
@@ -71,28 +85,45 @@ const make = Effect.gen(function* () {
       yield* state.bootstrap(
         `${peer}:${paired?.pairedAt ? DateTime.toEpochMillis(paired.pairedAt) : 0}`,
       );
-      // A busy link yields after 64 bounded batches; its durable cursor resumes next tick.
-      for (let count = 0; count < 64; count++) {
-        const cursors = yield* state.cursors(peer);
-        const outgoing = yield* state.readBatch(cursors.acknowledged, peer, spoke);
-        if (outgoing.cursor === outgoing.after) break;
-        const result = yield* machines
-          .call(peer, SharedChangesApply, outgoing)
-          .pipe(Effect.timeout("15 seconds"));
-        // Only a committed batch is an acknowledgement; don't trust an arbitrary peer cursor.
-        if (result.acknowledged < outgoing.cursor)
-          return yield* new SharedStateError({ reason: "invalid-cursor" });
-        yield* state.acknowledge(peer, result.acknowledged);
+      const moreOutgoing = yield* BackfillBudget.runPass(
+        Effect.gen(function* () {
+          yield* sendBudget.ready;
+          const started = yield* Clock.currentTimeMillis;
+          const cursors = yield* state.cursors(peer);
+          const outgoing = yield* state.readBatch(cursors.acknowledged, peer, spoke);
+          if (outgoing.cursor === outgoing.after) return false;
+          const result = yield* machines
+            .call(peer, SharedChangesApply, outgoing)
+            .pipe(Effect.timeout("15 seconds"));
+          // Only a committed batch is an acknowledgement; don't trust an arbitrary peer cursor.
+          if (result.acknowledged < outgoing.cursor)
+            return yield* new SharedStateError({ reason: "invalid-cursor" });
+          yield* state.acknowledge(peer, result.acknowledged);
+          yield* sendBudget.completed(
+            outgoing.changes.length,
+            (yield* Clock.currentTimeMillis) - started,
+          );
+          return true;
+        }),
+      );
+      if (moreOutgoing) {
+        yield* Queue.offer(pending, undefined);
+        return;
       }
-      for (let count = 0; count < 64; count++) {
-        const after = (yield* state.cursors(peer)).received;
-        const batch = yield* machines
-          .call(peer, SharedChangesRead, { after })
-          .pipe(Effect.timeout("15 seconds"));
-        if (batch.after !== after) return yield* new SharedStateError({ reason: "invalid-cursor" });
-        if (batch.cursor === after) break;
-        yield* receive(batch, peer);
-      }
+      const moreIncoming = yield* BackfillBudget.runPass(
+        Effect.gen(function* () {
+          const after = (yield* state.cursors(peer)).received;
+          const batch = yield* machines
+            .call(peer, SharedChangesRead, { after })
+            .pipe(Effect.timeout("15 seconds"));
+          if (batch.after !== after)
+            return yield* new SharedStateError({ reason: "invalid-cursor" });
+          if (batch.cursor === after) return false;
+          yield* receive(batch, peer);
+          return true;
+        }),
+      );
+      if (moreIncoming) yield* Queue.offer(pending, undefined);
     }).pipe(
       Effect.mapError((cause) =>
         isSharedStateError(cause) ? cause : new SharedStateError({ reason: "storage", cause }),
@@ -122,9 +153,10 @@ const make = Effect.gen(function* () {
   );
   yield* scheduler.register("shared-documents", safeCatchUp);
   yield* Stream.merge(machines.subscribe.pipe(Stream.as(undefined)), state.changes).pipe(
-    Stream.runForEach(() => safeCatchUp),
+    Stream.runForEach(() => Queue.offer(pending, undefined)),
     Effect.forkScoped,
   );
+  yield* Queue.take(pending).pipe(Effect.andThen(safeCatchUp), Effect.forever, Effect.forkScoped);
   return SharedSync.of({ sync });
 });
 const isSharedStateError = Schema.is(SharedStateError);

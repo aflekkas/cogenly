@@ -1,3 +1,4 @@
+import { AgentHandoffBrief } from "./agent.ts";
 import { AgentEventContext } from "./agentEvent.ts";
 import { ProjectLabelId } from "./projectLabel.ts";
 import * as Schema from "effect/Schema";
@@ -217,6 +218,7 @@ export const AgentActivityRun = Schema.Struct({
 });
 export const AgentActivityInput = Schema.Struct({ agentId: AgentId });
 export const AgentActivityResult = Schema.Struct({
+  handoffBriefs: Schema.optional(Schema.Array(AgentHandoffBrief)),
   runs: Schema.Array(AgentActivityRun),
   actions: Schema.Array(AgentRunAction),
 });

@@ -9,7 +9,7 @@
  * the persistence boundary is responsible for materializing a concrete
  * instance id before any hot routing path sees the binding.
  *
- * The column is nullable on purpose — backfilling it during the migration
+ * The column is nullable on purpose: backfilling it during the migration
  * would require knowing which configured instance "owned" each historical
  * session, and that mapping is ambiguous when the user later configures
  * multiple instances of the same driver. Keeping that compatibility at the

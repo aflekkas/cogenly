@@ -64,7 +64,6 @@ import { constVoid } from "effect/Function";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
-import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Exit from "effect/Exit";
 import * as Scope from "effect/Scope";
@@ -81,6 +80,9 @@ import type {
 } from "playwright-core";
 
 import { PENDING_ATTACHMENT_THREAD_SEGMENT } from "../attachmentStore.ts";
+import * as Vault from "../vault/Vault.ts";
+import * as ScreenshotMask from "./ScreenshotMask.ts";
+import { redactPreview } from "./PreviewRedactor.ts";
 import * as ServerConfig from "../config.ts";
 import { resolveRootCliCommand } from "../cli/invocation.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -88,6 +90,7 @@ import * as PreviewAutomationBroker from "../mcp/PreviewAutomationBroker.ts";
 import * as DesktopBrowserChannel from "./DesktopBrowserChannel.ts";
 import * as PreviewManager from "./Manager.ts";
 import * as ServerBrowserPage from "./ServerBrowserPage.ts";
+import { actionOutput, observationChanges } from "./BrowserOutput.ts";
 import * as ServerBrowserPick from "./ServerBrowserPick.ts";
 import * as PreviewBrowser from "./PreviewBrowser.ts";
 import * as PreviewBrowserHost from "./PreviewBrowserHost.ts";
@@ -110,8 +113,7 @@ const SCREENCAST_SETTLE_MS = 200;
 const SCREENCAST_MOTION_FRAMES = 4;
 const SCREENCAST_MOTION_WINDOW_MS = 300;
 const SCREENCAST_MOTION_QUALITY = 50;
-const HOST_RECONNECT_DELAY = "1 second";
-/** How long a new tab waits for the desktop app to mount it before running headless. */
+/** How long an agent waits for the desktop panel to attach or show its existing page. */
 const DESKTOP_ATTACH_TIMEOUT = "10 seconds";
 const VIEWER_OUTPUT_LIMIT = 64;
 const RECORDING_SCREENCAST = { format: "jpeg", quality: 90, everyNthFrame: 1 } as const;
@@ -249,6 +251,18 @@ export interface ServerBrowserViewer {
 export class ServerBrowser extends Context.Service<
   ServerBrowser,
   {
+    readonly capture: (
+      input: import("@cogenly/contracts").PreviewVaultCaptureInput & {
+        readonly threadId: ThreadId;
+        readonly agentSessionId: string;
+      },
+    ) => Effect.Effect<
+      import("@cogenly/contracts").VaultItemResult,
+      | import("@cogenly/contracts").VaultError
+      | ServerBrowserTabNotFoundError
+      | ServerBrowserLaunchError
+      | ServerBrowserPage.ServerBrowserOperationError
+    >;
     readonly attachViewer: (input: {
       readonly threadId: string;
       readonly tabId: string;
@@ -328,6 +342,13 @@ interface Recording {
   readonly startedAt: string;
   /** Frames still being handed to the encoder; stopping waits for them. */
   readonly framesInFlight: Set<Promise<void>>;
+  /**
+   * Credential masks held for the whole recording, so viewers also see them
+   * masked meanwhile. Removed when the recording stops.
+   */
+  readonly mask: ScreenshotMask.PageMask;
+  /** Frames dropped because their masks were unconfirmed or had just changed. */
+  readonly withheld: { count: number };
 }
 
 interface ServerTab {
@@ -338,9 +359,10 @@ interface ServerTab {
   /** Sessions of the page's frames that run in their own process. */
   readonly frameSessions: Map<Frame, CDPSession>;
   readonly createdAt: number;
-  /** The agent's latest request on this tab; idle agent tabs close. */
+  /** The agent's latest request on this tab; tabs remain until explicitly closed. */
   usedAt: number;
   readonly viewers: Set<ViewerState>;
+  readonly panelWaiters: Set<(shown: boolean) => void>;
   readonly consoleEntries: Array<PreviewAutomationConsoleEntry>;
   readonly networkEntries: Array<PreviewAutomationNetworkEntry>;
   readonly actionTimeline: Array<PreviewAutomationActionEvent>;
@@ -352,6 +374,7 @@ interface ServerTab {
    * page; the desktop owns its size, storage, and window.
    */
   readonly desktop: { readonly close: () => Promise<void> } | null;
+  automationFault: boolean;
   readonly profileId: string | undefined;
   /** Set when a page in another tab opened this one with `window.open` or a link. */
   readonly openerTabId: string | undefined;
@@ -425,11 +448,8 @@ const DESKTOP_PERMISSION_CHANGE_TIMEOUT_MS = 5_000;
 
 const AGENT_TAB_LIMIT = 8;
 const SERVER_TAB_LIMIT = 32;
-/** Agent tabs nobody watches close after this long without an agent request. */
-const AGENT_TAB_IDLE_MS = 30 * 60 * 1000;
 /** How often one tab may ask the panel to show it. */
 const PANEL_REVEAL_INTERVAL_MS = 5_000;
-const IDLE_SWEEP_INTERVAL = "1 minute";
 
 const DOWNLOAD_LIMIT = 20;
 /** How long an aborted navigation waits for the download that usually explains it. */
@@ -539,6 +559,7 @@ const CLIPBOARD_SCRIPT = `(() => {
 })();`;
 
 const make = Effect.gen(function* () {
+  const vault = yield* Vault.Vault;
   const config = yield* ServerConfig.ServerConfig;
   const host = { platform: yield* HostProcess.Platform, arch: yield* HostProcess.Architecture };
   const manager = yield* PreviewManager.PreviewManager;
@@ -785,6 +806,7 @@ const make = Effect.gen(function* () {
     tabs.delete(key);
     if (closeSession) revealRequestedAt.delete(key);
     tab.closing = true;
+    for (const complete of tab.panelWaiters) complete(false);
     clearAbortedNavigation(tab);
     // A desktop page outlives the connection unless its session closed with it.
     const end =
@@ -888,9 +910,23 @@ const make = Effect.gen(function* () {
       requestPanelReveal(snapshot.threadId, snapshot.tabId);
     }
     const desktop =
-      adopted === undefined && (await desktopRenders(snapshot))
+      adopted === undefined &&
+      snapshot.serverRendering !== "stream" &&
+      (await desktopRenders(snapshot))
         ? await connectDesktop(snapshot)
         : null;
+    if (!desktop && snapshot.serverRendering === "native") {
+      throw new ServerBrowserPage.ServerBrowserOperationError(
+        "PreviewAutomationExecutionError",
+        `The desktop browser panel did not attach for tab ${snapshot.tabId} within 10 seconds. Cogenly requested it automatically. Retry preview_open with tabId=${snapshot.tabId}; keep this tab open and do not ask the user to show the panel.`,
+      );
+    }
+    await Effect.runPromise(
+      manager.reportServerRendering({
+        ...snapshot,
+        serverRendering: desktop ? "native" : "stream",
+      }),
+    );
     // An agent tab without a profile (no client reported one) keeps throwaway storage.
     const isolatedContext =
       Targeting.tabBacking({
@@ -934,12 +970,14 @@ const make = Effect.gen(function* () {
       createdAt: Date.now(),
       usedAt: Date.now(),
       viewers: new Set(),
+      panelWaiters: new Set(),
       consoleEntries: [],
       networkEntries: [],
       actionTimeline: [],
       control,
       isolatedContext,
       desktop: desktop === null ? null : { close: desktop.close },
+      automationFault: false,
       profileId: snapshot.profileId,
       openerTabId: adopted?.openerTabId,
       downloads: [],
@@ -1544,14 +1582,6 @@ const make = Effect.gen(function* () {
       );
   };
 
-  /** Closes agent tabs that no one watches and the agent stopped using. */
-  const closeIdleAgentTabs = () => {
-    const cutoff = Date.now() - AGENT_TAB_IDLE_MS;
-    for (const tab of tabs.values()) {
-      if (tab.control.agentId !== null && !isShown(tab) && tab.usedAt < cutoff) dropTab(tab, true);
-    }
-  };
-
   /**
    * The tab a request without a tabId means: the caller's newest tab, else the
    * thread's tab the user is looking at or used last, so "this page" works.
@@ -1673,10 +1703,12 @@ const make = Effect.gen(function* () {
   const statusWithTitle = async (
     tab: ServerTab | undefined,
     agentSessionId?: string,
+    recover = true,
   ): Promise<PreviewAutomationStatus> => {
     if (!tab) {
       return {
         available: false,
+        automation: { connected: false, state: "disconnected" },
         visible: false,
         tabId: null,
         url: null,
@@ -1690,7 +1722,11 @@ const make = Effect.gen(function* () {
     const sitePermissions = await desktopSitePermissions(tab);
     const summary = withPermissionNotice(tabSummary(tab), sitePermissions);
     const status = {
-      available: true,
+      available: !tab.automationFault,
+      automation: {
+        connected: !tab.automationFault,
+        state: tab.automationFault ? ("unresponsive" as const) : ("ready" as const),
+      },
       visible: summary.visible,
       tabId: tab.tabId,
       url: url === "about:blank" ? null : url,
@@ -1722,7 +1758,8 @@ const make = Effect.gen(function* () {
           ownedByCaller: candidate.control.agentId === agentSessionId,
           visible: isShown(candidate),
           ...(candidate.profileId === undefined ? {} : { profileId: candidate.profileId }),
-          rendering: candidate.desktop === null ? ("background" as const) : ("panel" as const),
+          rendering: Targeting.tabRenderingStatus(targetable(candidate), desktopChannel.available)
+            .rendering,
         })),
       ...profileStatus(),
       downloads: tab.downloads.map(({ fileName, path, sizeBytes, url, completedAt }) => ({
@@ -1734,7 +1771,21 @@ const make = Effect.gen(function* () {
       })),
     };
     if (status.url === null || tab.dialog) return status;
-    return { ...status, title: (await tab.page.title().catch(() => "")) || null };
+    const title = await Effect.runPromise(
+      Effect.tryPromise(() => tab.page.title()).pipe(
+        Effect.timeoutOption("500 millis"),
+        Effect.orElseSucceed(() => Option.none<string>()),
+      ),
+    );
+    if (Option.isSome(title) && !tab.automationFault)
+      return { ...status, title: title.value || null };
+    if (tab.desktop && recover) dropTab(tab, false, "reconnect");
+    return {
+      ...status,
+      available: false,
+      automation: { connected: false, state: "unresponsive" },
+      notice: `The tab is open but its automation connection is unresponsive. ${tab.desktop ? "Desktop automation reconnects on the next call. " : ""}Keep this tab open; do not reload or recreate it.`,
+    };
   };
 
   const resolveNavigationUrl = (input: PreviewAutomationNavigateInput) => {
@@ -1797,33 +1848,53 @@ const make = Effect.gen(function* () {
       if (tab.recording) return tab.recording;
       const encoder = await contexts.scratchPage();
       let session: CDPSession | null = null;
+      const mask = ScreenshotMask.maskPage(tab.page, () =>
+        ServerBrowserPage.credentialValues(tab.page),
+      );
+      const withheld = { count: 0 };
+      const unconfirmed = { confirmed: false, added: 0 };
       try {
         await encoder.evaluate(ServerBrowserPage.RECORDING_ENCODER_SCRIPT);
         // Seed idle pages before returning so an immediate stop has a frame to encode.
-        const firstFrame = await ServerBrowserPage.captureViewport(tab.page, tab.cdp, {
-          format: "jpeg",
-          quality: RECORDING_SCREENCAST.quality,
-          scale: 1,
-        });
-        await encoder.evaluate(
-          ([data, width]) =>
-            (globalThis as unknown as EncoderWindow).__t3Recorder.frame(data, width),
-          [firstFrame, tab.page.viewportSize()?.width ?? UNATTACHED_FILL_VIEWPORT.width] as const,
-        );
+        if ((await mask.refresh().catch(() => unconfirmed)).confirmed) {
+          const firstFrame = await ServerBrowserPage.captureViewport(tab.page, tab.cdp, {
+            format: "jpeg",
+            quality: RECORDING_SCREENCAST.quality,
+            scale: 1,
+          });
+          await encoder.evaluate(
+            ([data, width]) =>
+              (globalThis as unknown as EncoderWindow).__t3Recorder.frame(data, width),
+            [firstFrame, tab.page.viewportSize()?.width ?? UNATTACHED_FILL_VIEWPORT.width] as const,
+          );
+        } else withheld.count += 1;
         const opened = await tab.page.context().newCDPSession(tab.page);
         session = opened;
         const framesInFlight = new Set<Promise<void>>();
+        let refreshing = false;
         opened.on("Page.screencastFrame", (frame) => {
           const cssWidth = tab.page.viewportSize()?.width ?? frame.metadata.deviceWidth;
-          const delivered: Promise<void> = encoder
-            .evaluate(
+          // Chromium sends the next frame only after this one's ack, so a frame
+          // shows the masks of the refresh before it. A frame that predates a
+          // newly added mask, or arrives mid-refresh, is dropped.
+          const deliver = async () => {
+            if (refreshing) return void (withheld.count += 1);
+            refreshing = true;
+            const masked = await mask
+              .refresh()
+              .catch(() => unconfirmed)
+              .finally(() => {
+                refreshing = false;
+              });
+            if (!masked.confirmed || masked.added > 0) return void (withheld.count += 1);
+            const accepted = await encoder.evaluate(
               ([data, width]) =>
                 (globalThis as unknown as EncoderWindow).__t3Recorder.frame(data, width),
               [frame.data, cssWidth] as const,
-            )
-            .then(async (accepted) => {
-              if (!accepted) await opened.send("Page.stopScreencast");
-            })
+            );
+            if (!accepted) await opened.send("Page.stopScreencast");
+          };
+          const delivered: Promise<void> = deliver()
             .catch(constVoid)
             .finally(() => {
               framesInFlight.delete(delivered);
@@ -1840,13 +1911,16 @@ const make = Effect.gen(function* () {
           session: opened,
           startedAt: new Date().toISOString(),
           framesInFlight,
+          mask,
+          withheld,
         };
         tab.recording = recording;
         return recording;
       } catch (cause) {
-        // A start that fails partway must not leave its encoder page behind.
+        // A start that fails partway must not leave its encoder page or masks behind.
         await encoder.close().catch(constVoid);
         await session?.detach().catch(constVoid);
+        await mask.restore();
         throw cause;
       }
     }).finally(() => {
@@ -1866,6 +1940,9 @@ const make = Effect.gen(function* () {
           ...[...tab.viewers].map((viewer) => viewer.pause()),
           recording?.session.send("Page.stopScreencast").catch(constVoid),
         ]);
+        // A recording frame still refreshing its masks would record this
+        // capture's temporary masks as the page's own styles.
+        await Promise.all(recording?.framesInFlight ?? []);
         return await capture();
       } finally {
         tab.capturing -= 1;
@@ -1915,13 +1992,16 @@ const make = Effect.gen(function* () {
         }
       } finally {
         await recording.encoder.close().catch(constVoid);
+        await recording.mask.restore();
         tab.recording = null;
       }
       const data = Buffer.concat(chunks);
       if (!mimeType || data.byteLength === 0) {
         throw new ServerBrowserPage.ServerBrowserOperationError(
           "PreviewAutomationExecutionError",
-          "The recording captured no frames.",
+          recording.withheld.count > 0
+            ? `The recording captured no frames. ${ScreenshotMask.MASK_WITHHELD_NOTE}`
+            : "The recording captured no frames.",
         );
       }
       // Use the desktop upload location so the MCP handler can claim the recording.
@@ -2051,7 +2131,7 @@ const make = Effect.gen(function* () {
 
   /**
    * Any request, even a failed one, keeps the agent's tabs on the thread from
-   * idling out. The tab it targeted becomes the thread's most recently used.
+   * losing their recent-use order. The tab it targeted becomes the thread's most recently used.
    */
   const markUsed = (request: PreviewAutomationRequest) => {
     const now = Date.now();
@@ -2064,16 +2144,66 @@ const make = Effect.gen(function* () {
     }
   };
 
+  const waitForPanel = async (tab: ServerTab) => {
+    if (tab.desktop || !desktopChannel.available || isShown(tab)) return;
+    const shown = await Effect.runPromise(
+      Effect.callback<boolean>((resume) => {
+        const complete = (visible: boolean) => {
+          tab.panelWaiters.delete(complete);
+          resume(Effect.succeed(visible));
+        };
+        tab.panelWaiters.add(complete);
+        if (isShown(tab) || tab.closing) complete(!tab.closing);
+        return Effect.sync(() => {
+          tab.panelWaiters.delete(complete);
+        });
+      }).pipe(Effect.timeoutOption(DESKTOP_ATTACH_TIMEOUT)),
+    );
+    if (Option.isNone(shown) || !shown.value) {
+      throw new ServerBrowserPage.ServerBrowserOperationError(
+        "PreviewAutomationExecutionError",
+        `The browser panel did not show tab ${tab.tabId} within 10 seconds. Its page and login are preserved. Retry preview_open with tabId=${tab.tabId}; do not ask the user to show the panel.`,
+      );
+    }
+  };
+
   const runOperation = async (request: PreviewAutomationRequest): Promise<unknown> => {
     const input = request.input;
     switch (request.operation) {
-      case "status":
+      case "status": {
+        if (request.tabId !== undefined && !tabs.has(tabKey(request.threadId, request.tabId))) {
+          const { sessions } = await Effect.runPromise(
+            manager.list({ threadId: request.threadId }),
+          );
+          const saved = sessions.find((session) => session.tabId === request.tabId);
+          if (
+            saved?.serverRendering === "native" &&
+            !(await Effect.runPromise(desktopChannel.isAttached(saved)))
+          ) {
+            return {
+              available: false,
+              automation: { connected: false, state: "disconnected" },
+              tabId: saved.tabId,
+              visible: shownReport?.has(tabKey(saved.threadId, saved.tabId)) ?? false,
+              url: saved.navStatus._tag === "Idle" ? null : saved.navStatus.url,
+              title: saved.navStatus._tag === "Idle" ? null : saved.navStatus.title,
+              loading: saved.navStatus._tag === "Loading",
+              rendering: "panel",
+              notice:
+                "The desktop tab's debugger is disconnected. Automation reconnects when it is available again. Keep this tab open; do not reload or recreate it.",
+              ...profileStatus(),
+            };
+          }
+          if (saved) await Effect.runPromise(findTab(request.threadId, request.tabId));
+        }
         return statusWithTitle(
           request.tabId === undefined
             ? latestThreadTab(request.threadId, request.agentSessionId)
             : tabs.get(tabKey(request.threadId, request.tabId)),
           request.agentSessionId,
+          request.timeoutMs > 500,
         );
+      }
       case "open": {
         if (!request.agentSessionId)
           throw new BrowserControlInterrupted(
@@ -2114,7 +2244,6 @@ const make = Effect.gen(function* () {
         const navigationTimeout = Math.min(request.timeoutMs, NAVIGATION_TIMEOUT_MS);
         const profileId = existing ? undefined : resolveOpenProfile(open.profileId);
         if (!existing) {
-          closeIdleAgentTabs();
           assertTabCapacity(request.agentSessionId);
         }
         const background = (open.open ?? open.show) === false;
@@ -2132,6 +2261,11 @@ const make = Effect.gen(function* () {
                   ...(url ? { url } : {}),
                   ...(profileId === undefined ? {} : { profileId }),
                   runtime: "server",
+                  ...(background
+                    ? { serverRendering: "stream" as const }
+                    : desktopChannel.available
+                      ? { serverRendering: "native" as const }
+                      : {}),
                   reveal: false,
                   automationOwner: request.agentSessionId,
                 }),
@@ -2176,7 +2310,14 @@ const make = Effect.gen(function* () {
               .waitForLoadState("load", { timeout: navigationTimeout })
               .catch(constVoid);
           }
-          return statusWithTitle(tab, request.agentSessionId);
+          if (reveal !== false) await waitForPanel(tab);
+          const status = await statusWithTitle(tab, request.agentSessionId);
+          if (!status.available)
+            throw new ServerBrowserPage.ServerBrowserOperationError(
+              "PreviewAutomationExecutionError",
+              `Tab ${tab.tabId} attached but its automation is unresponsive. Retry preview_open with tabId=${tab.tabId}; keep the same tab open.`,
+            );
+          return Targeting.openHandoffStatus(status);
         });
       }
       case "recordingStop": {
@@ -2266,7 +2407,7 @@ const make = Effect.gen(function* () {
             "A browser dialog is pending. Read preview_status.",
             "dialogPending",
           );
-        return executeTabOperation(tab, request);
+        return executeWithOutput(tab, request);
       });
     }
     return agentAction(tab, agentSessionId, async () => {
@@ -2277,10 +2418,96 @@ const make = Effect.gen(function* () {
         );
       const generation = tab.control.generation;
       try {
-        return await executeTabOperation(tab, request);
+        return await executeWithOutput(tab, request);
       } finally {
         if (generation !== tab.control.generation) ServerBrowserPage.invalidateRefs(tab.page);
       }
+    });
+  };
+
+  const outputActions = new Set([
+    "navigate",
+    "click",
+    "type",
+    "hover",
+    "select",
+    "drag",
+    "upload",
+    "press",
+    "scroll",
+    "waitFor",
+  ]);
+  const snapshotBaselines = new WeakMap<
+    ServerTab,
+    Map<string, import("@cogenly/contracts").PreviewAutomationObservation>
+  >();
+  const baselineKey = (
+    request: PreviewAutomationRequest,
+    options: import("@cogenly/contracts").PreviewAutomationOutputOptions,
+  ) => `${request.agentSessionId}:${options.scope ?? ""}:${options.viewportOnly !== false}`;
+  const rememberOutput = (
+    tab: ServerTab,
+    key: string,
+    view: import("@cogenly/contracts").PreviewAutomationObservation,
+  ) => {
+    let baselines = snapshotBaselines.get(tab);
+    if (!baselines) {
+      baselines = new Map();
+      snapshotBaselines.set(tab, baselines);
+    }
+    baselines.delete(key);
+    baselines.set(key, view);
+    // Bound per-tab memory even when agents keep requesting different subtrees.
+    if (baselines.size > 16) baselines.delete(baselines.keys().next().value!);
+  };
+  const compactOutput = async (
+    tab: ServerTab,
+    options: import("@cogenly/contracts").PreviewAutomationOutputOptions,
+  ) => {
+    const view = await ServerBrowserPage.observe(tab.page, options);
+    const errors = [
+      ...tab.consoleEntries
+        .filter((entry) => entry.level === "error")
+        .slice(-5)
+        .map((entry) => entry.text.slice(0, 500)),
+      ...tab.networkEntries
+        .filter((entry) => entry.failed)
+        .slice(-5)
+        .map((entry) => (entry.errorText ?? "Network request failed").slice(0, 500)),
+    ];
+    return { ...view, ...(errors.length ? { errors } : {}) };
+  };
+  const executeWithOutput = async (tab: ServerTab, request: PreviewAutomationRequest) => {
+    // Includes vault-filled values, which stay secret after a page reveals them.
+    const passwords = await ServerBrowserPage.credentialValues(tab.page);
+    const result = await executeRawWithOutput(tab, request);
+    return redactPreview(result, [
+      ...passwords,
+      ...(await ServerBrowserPage.credentialValues(tab.page)),
+    ]);
+  };
+  const executeRawWithOutput = async (tab: ServerTab, request: PreviewAutomationRequest) => {
+    if (!outputActions.has(request.operation)) return executeTabOperation(tab, request);
+    const options = request.input as import("@cogenly/contracts").PreviewAutomationOutputOptions;
+    const key = baselineKey(request, options);
+    return actionOutput({
+      mode: options.output ?? "changes",
+      before: snapshotBaselines.get(tab)?.get(key),
+      action: () => executeTabOperation(tab, request),
+      read: async () => {
+        if (options.output === "full")
+          return ServerBrowserPage.snapshot({
+            ...tab,
+            renderScale: RENDER_SCALE,
+            includeScreenshot: false,
+            scope: options.scope,
+          });
+        const view = await compactOutput(tab, options);
+        rememberOutput(tab, key, view);
+        return view;
+      },
+      dialog: () =>
+        tab.dialog ? { type: tab.dialog.type(), message: tab.dialog.message() } : undefined,
     });
   };
 
@@ -2322,9 +2549,32 @@ const make = Effect.gen(function* () {
         return { tabId: tab.tabId, colorScheme };
       }
       case "snapshot": {
-        return withScreencastsPaused(tab, () =>
-          ServerBrowserPage.snapshot({ ...tab, renderScale: RENDER_SCALE }),
+        const options = input as import("@cogenly/contracts").PreviewAutomationSnapshotInput;
+        const includeScreenshot = options.includeImage === true || options.save === true;
+        if (options.output === "none" && !includeScreenshot) return {};
+        const full = options.output === "full";
+        let structured: import("@cogenly/contracts").PreviewAutomationObservation =
+          options.output === "none"
+            ? { url: tab.page.url() }
+            : full
+              ? await ServerBrowserPage.snapshot({
+                  ...tab,
+                  renderScale: RENDER_SCALE,
+                  includeScreenshot: false,
+                  scope: options.scope,
+                })
+              : await compactOutput(tab, options);
+        if (options.output !== "none" && !full) {
+          const key = baselineKey(request, options);
+          const before = snapshotBaselines.get(tab)?.get(key);
+          rememberOutput(tab, key, structured);
+          if (options.output === "changes") structured = observationChanges(before, structured);
+        }
+        if (!includeScreenshot) return structured;
+        const captured = await withScreencastsPaused(tab, () =>
+          ServerBrowserPage.screenshot({ ...tab, renderScale: RENDER_SCALE, save: options.save }),
         );
+        return { ...structured, ...captured };
       }
       case "click": {
         const clickInput = input as PreviewAutomationClickInput;
@@ -2369,6 +2619,14 @@ const make = Effect.gen(function* () {
             pointerFor(tab),
           ),
         );
+      case "extract":
+        return {
+          value: await ServerBrowserPage.extract(
+            tab.cdp,
+            input as import("@cogenly/contracts").PreviewAutomationExtractInput,
+            request.timeoutMs,
+          ),
+        };
       case "evaluate":
         return ServerBrowserPage.evaluate(
           tab.cdp,
@@ -2384,13 +2642,61 @@ const make = Effect.gen(function* () {
     }
   };
 
+  const requestTimeout = (request: PreviewAutomationRequest, unresponsive = true) => {
+    const tab =
+      request.tabId === undefined
+        ? latestThreadTab(request.threadId, request.agentSessionId)
+        : tabs.get(tabKey(request.threadId, request.tabId));
+    const detail = {
+      ...(tab ? { tabId: tab.tabId } : {}),
+      rendering: tab && (tab.desktop || tab.viewers.size > 0) ? "panel" : "background",
+      visible: tab ? isShown(tab) : false,
+      loading: tab?.loading ?? false,
+      automationConnected: !unresponsive,
+    };
+    if (tab && unresponsive) tab.automationFault = true;
+    // Reconnect automation only. The desktop owns the page and its login.
+    if (tab?.desktop && unresponsive) dropTab(tab, false, "reconnect");
+    return new ServerBrowserPage.ServerBrowserOperationError(
+      "PreviewAutomationTimeoutError",
+      unresponsive
+        ? "Browser automation stopped responding. Read preview_status before retrying; keep the existing tab open."
+        : "The browser operation timed out. Read preview_status before retrying; keep the existing tab open.",
+      detail,
+    );
+  };
+
   const handleRequest = (connectionId: string, request: PreviewAutomationRequest) =>
     Effect.tryPromise({
       try: () => runOperation(request).finally(() => markUsed(request)),
       catch: ServerBrowserPage.toOperationError,
     }).pipe(
+      // Let Playwright report an ordinary operation timeout before diagnosing
+      // an unresponsive connection; the broker allows a further 1s for delivery.
+      Effect.timeoutOption(request.timeoutMs + 250),
+      Effect.flatMap((result) =>
+        Option.isSome(result)
+          ? Effect.succeed(result.value)
+          : Effect.fail(
+              requestTimeout(request, request.operation !== "status" || request.timeoutMs > 500),
+            ),
+      ),
+      Effect.mapError((error) =>
+        error.tag === "PreviewAutomationTimeoutError" && error.detail === undefined
+          ? requestTimeout(request, false)
+          : error,
+      ),
       Effect.match({
-        onSuccess: (result) => ({ ok: true as const, result }),
+        onSuccess: (result) => {
+          if (request.operation === "snapshot" || request.operation === "evaluate") {
+            const tab =
+              request.tabId === undefined
+                ? latestThreadTab(request.threadId, request.agentSessionId)
+                : tabs.get(tabKey(request.threadId, request.tabId));
+            if (tab) tab.automationFault = false;
+          }
+          return { ok: true as const, result };
+        },
         onFailure: (error) => ({
           ok: false as const,
           error: {
@@ -2750,6 +3056,7 @@ const make = Effect.gen(function* () {
       yield* Effect.acquireRelease(
         Effect.sync(() => {
           tab.viewers.add(viewer);
+          for (const complete of tab.panelWaiters) complete(true);
           reportLiveTabs();
         }),
         () =>
@@ -2931,20 +3238,15 @@ const make = Effect.gen(function* () {
   // rather than on the next viewer or agent, or the tab's URL and title stop
   // reaching every client in the meantime.
   //
-  // A tab that had to start headless (its thread was not open on the desktop)
-  // moves to the desktop's page as soon as it attaches. The headless page has
-  // the server's own cookies; left running, the agent would drive a page the
-  // user never sees, signed out where the panel is signed in.
+  // Headless pages retain their backing and stream into the panel; attachment
+  // must never replace a page that already holds a user's signed-in state.
   yield* desktopChannel.attached.pipe(
     Stream.runForEach((key) =>
       Effect.gen(function* () {
         const existing = tabs.get(tabKey(key.threadId, key.tabId));
-        if (
-          existing &&
-          !Targeting.shouldMoveToDesktop({ rendersOnDesktop: existing.desktop !== null })
-        )
-          return;
-        if (existing) dropTab(existing, false, "reconnect");
+        // A headless tab is streamed into the panel. Swapping its backing page
+        // would discard its DOM, session storage, opener, and signed-in state.
+        if (existing) return;
         const { sessions } = yield* manager.list({ threadId: ThreadId.make(key.threadId) });
         const snapshot = sessions.find(
           (session) => session.tabId === key.tabId && session.runtime === "server",
@@ -2954,43 +3256,26 @@ const make = Effect.gen(function* () {
     ),
     Effect.forkScoped,
   );
-  yield* Effect.sync(closeIdleAgentTabs).pipe(
-    Effect.repeat(Schedule.spaced(IDLE_SWEEP_INTERVAL)),
-    Effect.forkScoped,
-  );
   const environmentId = yield* environment.getEnvironmentId;
-  const hostSession = broker
-    .connect(
+  // Each broker generation owns its in-flight requests. Eviction ends those
+  // fibers and re-registers the host without closing any browsing session.
+  yield* broker
+    .serve(
       {
         clientId: SERVER_HOST_CLIENT_ID,
         environmentId,
         supportedOperations: [...PREVIEW_AUTOMATION_SERVER_OPERATIONS],
       },
+      (event) => {
+        if (event.type === "connected") {
+          hostConnectionId = event.connectionId;
+          return Effect.sync(reportLiveTabs);
+        }
+        return handleRequest(event.connectionId, event.request);
+      },
       { preferred: true },
     )
-    .pipe(
-      Effect.flatMap((events) =>
-        events.pipe(
-          Stream.runForEach((event) => {
-            if (event.type === "connected") {
-              hostConnectionId = event.connectionId;
-              return Effect.sync(reportLiveTabs);
-            }
-            return handleRequest(event.connectionId, event.request).pipe(
-              Effect.forkScoped,
-              Effect.asVoid,
-            );
-          }),
-        ),
-      ),
-    );
-  // The broker disconnects timed-out hosts, including slow first installs. Reconnect.
-  yield* hostSession.pipe(
-    Effect.exit,
-    Effect.andThen(Effect.sleep(HOST_RECONNECT_DELAY)),
-    Effect.forever,
-    Effect.forkScoped,
-  );
+    .pipe(Effect.forkScoped);
   yield* Effect.addFinalizer(() =>
     Effect.promise(async () => {
       await contexts.close();
@@ -3021,6 +3306,37 @@ const make = Effect.gen(function* () {
     );
 
   return ServerBrowser.of({
+    capture: (input) =>
+      Effect.gen(function* () {
+        const tab =
+          input.tabId === undefined
+            ? latestThreadTab(input.threadId, input.agentSessionId)
+            : yield* findTab(input.threadId, input.tabId);
+        if (!tab)
+          return yield* new ServerBrowserTabNotFoundError({
+            threadId: input.threadId,
+            tabId: input.tabId ?? "",
+          });
+        const save = (value: string) =>
+          vault.saveSecretValue({
+            name: input.name,
+            type: input.kind,
+            domains: input.domains ?? [new URL(tab.page.url()).hostname],
+            value,
+          });
+        return yield* ServerBrowserPage.capture(tab.page, input, (value) =>
+          input.clientIdLocator
+            ? ServerBrowserPage.capture(tab.page, { locator: input.clientIdLocator }, (clientId) =>
+                save(
+                  JSON.stringify({
+                    client_id: clientId.trim(),
+                    client_secret: /GOCSPX-[A-Za-z0-9_-]+/.exec(value)?.[0] ?? value.trim(),
+                  }),
+                ),
+              )
+            : save(value),
+        );
+      }),
     attachViewer,
     cookieSources: cookieReader.listSources,
     importCookies: (input) =>

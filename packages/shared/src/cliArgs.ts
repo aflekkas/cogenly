@@ -109,7 +109,7 @@ export function parseCliArgs(
         continue;
       }
 
-      // Known boolean flag — never consumes next token
+      // Known boolean flag: never consumes next token
       if (booleanSet?.has(rest)) {
         flags[rest] = null;
         continue;

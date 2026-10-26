@@ -10,6 +10,7 @@ import type {
   ModelSelection,
   RunId,
   ScheduledTaskSchedule,
+  ScheduledTaskRunStatus,
   ThreadId,
 } from "@cogenly/contracts";
 import type { AgentFaceState } from "~/components/agents/face";
@@ -27,6 +28,7 @@ export interface AgentTrigger {
   prompt: string;
   enabled: boolean;
   schedule: ScheduledTaskSchedule;
+  lastRunStatus?: ScheduledTaskRunStatus;
 }
 export interface AgentMessage {
   id: string;
@@ -73,6 +75,8 @@ export interface AgentRequest {
 }
 export interface AgentContact extends AgentListItem {
   environmentId: EnvironmentId;
+  ownerName?: string | undefined;
+  ownerOnline?: boolean;
   state: AgentFaceState;
   messages: ReadonlyArray<AgentMessage>;
   hasMoreMessages?: boolean;
@@ -90,6 +94,7 @@ export interface AgentContact extends AgentListItem {
   waitingInRun?: boolean;
   /** What the agent is doing right now, from its running tool call, for the typing hint. */
   workingOn?: string | null;
+  preparingHandoff?: boolean;
   /** Its slot in the user-arranged Agents list: its conversation thread's active order key. */
   orderKey?: string | null;
   /** Its conversation can take an order key (not pinned, settled or archived). */

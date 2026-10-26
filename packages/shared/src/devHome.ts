@@ -4,7 +4,7 @@
  *
  * A linked git worktree gets its own (gitignored) `.cogenly`: feature work in a
  * throwaway branch must not share a database with the real app, and an ambient
- * `COGENLY_HOME` counts as an explicit base dir — flipping the state directory
+ * `COGENLY_HOME` counts as an explicit base dir, flipping the state directory
  * from `<base>/dev` to `<base>/userdata`, the live production database.
  */
 
@@ -16,8 +16,8 @@ import * as Path from "effect/Path";
 /**
  * A `.git` file points at the real git directory. A linked worktree's lives at
  * `<common-dir>/worktrees/<name>`; a submodule's at
- * `<super-git-dir>/modules/<name>`. Both are files, so the pointer — not the
- * file-vs-directory distinction alone — is what identifies a worktree.
+ * `<super-git-dir>/modules/<name>`. Both are files, so the pointer (not the
+ * file-vs-directory distinction alone) is what identifies a worktree.
  *
  * The common dir is not necessarily named `.git`: a worktree of a bare repo
  * points at `<repo>.git/worktrees/<name>`, and `$GIT_COMMON_DIR` can be

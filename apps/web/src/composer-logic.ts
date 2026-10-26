@@ -108,7 +108,8 @@ export function expandCollapsedComposerCursor(
     if (
       segment.type === "mention" ||
       segment.type === "citation" ||
-      segment.type === "context-reference"
+      segment.type === "context-reference" ||
+      segment.type === "thread-link"
     ) {
       const expandedLength = segment.source.length;
       if (remaining <= 1) {
@@ -191,7 +192,8 @@ export function collapseExpandedComposerCursor(
     if (
       segment.type === "mention" ||
       segment.type === "citation" ||
-      segment.type === "context-reference"
+      segment.type === "context-reference" ||
+      segment.type === "thread-link"
     ) {
       const expandedLength = segment.source.length;
       if (remaining === 0) {

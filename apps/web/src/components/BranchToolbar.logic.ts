@@ -82,12 +82,17 @@ export function shouldShowComposerContextStrip(input: {
   hasActiveProject: boolean;
   isGitRepo: boolean;
   showEnvironmentIndicator: boolean;
+  /**
+   * Another paired machine runs the thread. The strip is where that machine is
+   * named, so it stays up in active threads too.
+   */
+  runsOnOtherMachine: boolean;
   /** A collapsed composer's controls currently fit in their measured strip host. */
   hostsRestingComposerControls: boolean;
 }): boolean {
   return (
     input.hasActiveProject &&
-    (input.isDraftHeroState || input.persistInActiveThreads) &&
+    (input.isDraftHeroState || input.persistInActiveThreads || input.runsOnOtherMachine) &&
     (input.isGitRepo || input.showEnvironmentIndicator || input.hostsRestingComposerControls)
   );
 }
@@ -138,7 +143,7 @@ export interface PreviousWorktreeSeed {
 // The most recently touched worktree in the project that the composer isn't
 // already pointing at. Backs the "Previous worktree" entry in the workspace
 // selector so a follow-up thread can hop back into the worktree you just
-// worked in without hunting for its branch. Archived threads don't compete —
+// worked in without hunting for its branch. Archived threads don't compete:
 // the rest of the UI hides them, so their worktrees shouldn't resurface here.
 export function resolvePreviousWorktreeSeed(input: {
   threads: ReadonlyArray<{

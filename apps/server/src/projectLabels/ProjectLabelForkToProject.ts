@@ -39,8 +39,8 @@ const isForkableChat = (thread: OrchestrationV2AppThread): boolean =>
 
 /**
  * Explicitly fork a chat with turns into a project: the source chat keeps
- * its history untouched, and the new chat — filed in the target project,
- * carrying the history through a `thread.fork` context transfer — runs with
+ * its history untouched, and the new chat (filed in the target project,
+ * carrying the history through a `thread.fork` context transfer) runs with
  * the project dir as its working directory from its first turn. Plain filing
  * (moveThread) re-homes the same chat instead; this stays for callers that
  * ask for a copy. Turnless chats keep using moveThread, and Work threads

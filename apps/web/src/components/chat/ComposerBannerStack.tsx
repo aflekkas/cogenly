@@ -128,11 +128,14 @@ function NoticeOverflowRow({
 interface ComposerBannerStackProps {
   readonly className?: string;
   readonly items: ReadonlyArray<ComposerBannerStackEntry>;
-  /** Attachments that sit between the stacked notice bars and the front item, such as the queue. */
-  readonly attachedAbove?: ReactNode;
+  /**
+   * Attachments that sit under the front item, nearest the composer, such as
+   * the queue: notices coming and going never move it.
+   */
+  readonly attachedBelow?: ReactNode;
 }
 
-export function ComposerBannerStack({ className, items, attachedAbove }: ComposerBannerStackProps) {
+export function ComposerBannerStack({ className, items, attachedBelow }: ComposerBannerStackProps) {
   const [requestedExitingItemId, setExitingItemId] = useState<string | null>(null);
   const dismissTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const exitingItemId =
@@ -148,8 +151,8 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
     };
   }, []);
 
-  // Activity sits nearest the composer, then urgency and severity; every other
-  // notice is its own attached bar above the queue, the most important lowest.
+  // Activity sits nearest the queue, then urgency and severity; every other
+  // notice is its own attached bar above the front one, the most important lowest.
   // An entry with nothing to draw never gets a card.
   const orderedItems = items
     .filter(hasStackContent)
@@ -221,8 +224,7 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
     return (
       <>
         {stackedBars}
-        {attachedAbove}
-        {null}
+        {attachedBelow}
       </>
     );
   }
@@ -243,7 +245,6 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
   return (
     <>
       {stackedBars}
-      {attachedAbove}
       <ComposerBanner.Attachment
         className={className}
         data-composer-banner-drawer="true"
@@ -283,6 +284,7 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
           ) : null}
         </NoticePresenceFrame>
       </ComposerBanner.Attachment>
+      {attachedBelow}
     </>
   );
 
@@ -345,7 +347,7 @@ function useHeldBars(items: ReadonlyArray<ComposerBannerStackEntry>) {
   return { bars, clearLeft };
 }
 
-/** A notice behind the front one, attached as its own bar above the queue. */
+/** A notice behind the front one, attached as its own bar above it. */
 function StackedNoticeBar({
   item,
   leaving,

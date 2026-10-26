@@ -25,7 +25,7 @@ export interface McpProviderSessionConfig {
    * Whether this credential explicitly grants the Cogenly terminal tools.
    * Optional because a session can start with a credential that never stated
    * terminal availability (the shape a delegated child can start with);
-   * consumers must treat an absent flag as "not granted" — see
+   * consumers must treat an absent flag as "not granted"; see
    * {@link terminalToolsAvailable}.
    */
   readonly terminalToolsAvailable?: boolean;
@@ -82,15 +82,15 @@ export function terminalLaunchPolicy(input: {
     input.interactionMode === "default" &&
     input.builderMode !== true &&
     (input.agentPermissions == null ||
-      (input.agentPermissions.read &&
-        input.agentPermissions.execute &&
-        input.agentPermissions.send &&
-        input.agentPermissions.create_pr &&
-        input.agentPermissions.merge &&
-        input.agentPermissions.deploy &&
-        input.agentPermissions.delete));
+      (input.agentPermissions.read && input.agentPermissions.execute));
   if (!authorized) return null;
-  if (input.chatMode && input.agentPermissions == null)
+  // Persistent agents use the lookup sandbox unless every sensitive action is granted.
+  const limitedAgent =
+    input.agentPermissions != null &&
+    !(["send", "create_pr", "merge", "deploy", "delete"] as const).every(
+      (grant) => input.agentPermissions![grant],
+    );
+  if ((input.chatMode && input.agentPermissions == null) || limitedAgent)
     return input.readOnlySandboxAvailable === true ? "readOnlyLookup" : null;
   return "unrestricted";
 }

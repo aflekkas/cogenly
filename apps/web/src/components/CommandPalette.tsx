@@ -1080,7 +1080,7 @@ function OpenCommandPaletteDialog(props: {
   const browseEnvironment =
     environments.find((environment) => environment.environmentId === browseEnvironmentId) ?? null;
   // A desktop-local secondary backend (today: the WSL backend). The picker is
-  // available against these too — the desktop dispatches pickFolder into the
+  // available against these too: the desktop dispatches pickFolder into the
   // backend's filesystem when routed by its instance id.
   const browseEnvironmentIsDesktopLocal =
     browseEnvironment !== null && isDesktopLocalConnectionTarget(browseEnvironment.entry.target);
@@ -1500,8 +1500,8 @@ function OpenCommandPaletteDialog(props: {
   ]);
 
   // Repositories a project links that are not cloned on their project's
-  // machine: picking one clones it there, like "Clone to set up" in the
-  // repository pickers. Shown only where this connection may clone.
+  // machine: picking one clones it there, like their "Not on <machine>" rows
+  // in the repository pickers. Shown only where this connection may clone.
   const cloneEnvironmentIds = useMemo(
     () => environments.map((environment) => environment.environmentId),
     [environments],
@@ -1536,17 +1536,20 @@ function OpenCommandPaletteDialog(props: {
       ).flatMap((row) => {
         const { project, remote } = row;
         if (project === null || remote === null) return [];
-        const location = projectEnvironmentLocationById.get(project.environmentId);
         return [
           {
             kind: "action" as const,
             value: `clone-repository:${project.environmentId}:${project.key}:${row.key}`,
             searchTerms: [row.name, remote, project.label.name, "clone", "set up"],
             title: row.name,
+            // What picking it does, as the pickers' "Not on <machine>" rows do.
             description: [
-              "Clone to set up",
+              `Not on ${
+                environments.find(
+                  (environment) => environment.environmentId === project.environmentId,
+                )?.label ?? "this machine"
+              } · Clone`,
               project.label.name,
-              ...(location?.kind === "remote" ? [location.label] : []),
             ].join(" · "),
             icon: (
               <RepositoryRowIcon
@@ -1570,12 +1573,7 @@ function OpenCommandPaletteDialog(props: {
           },
         ];
       }),
-    [
-      checkoutRepository,
-      cloneableEnvironmentIds,
-      projectEnvironmentLocationById,
-      repositoryDirectory.active,
-    ],
+    [checkoutRepository, cloneableEnvironmentIds, environments, repositoryDirectory.active],
   );
   const newThreadInGroups = useMemo(
     (): CommandPaletteGroup[] => [

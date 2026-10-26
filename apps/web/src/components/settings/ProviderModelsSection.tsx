@@ -28,7 +28,7 @@ import { CustomModelEditor } from "./CustomModelEditor";
 /**
  * Placeholder text for the "add a custom model" input, keyed by driver
  * kind. Mirrors the prior hardcoded switch in `SettingsPanels.tsx` so the
- * UX is unchanged — only the owning component has moved.
+ * UX is unchanged; only the owning component has moved.
  */
 const CUSTOM_MODEL_PLACEHOLDER_BY_KIND: Partial<Record<ProviderDriverKind, string>> = {
   [ProviderDriverKind.make("codex")]: "gpt-6.7-codex-ultra-preview",

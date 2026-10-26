@@ -7,6 +7,8 @@ import {
   OrchestratorMcpDelegateTaskResult,
   OrchestratorMcpDeleteScheduledTaskInput,
   OrchestratorMcpDeleteScheduledTaskResult,
+  OrchestratorMcpRequestLoginInput,
+  OrchestratorMcpRequestLoginResult,
   OrchestratorMcpRequestSecretInput,
   OrchestratorMcpRequestSecretResult,
   OrchestratorMcpFailure,
@@ -60,7 +62,7 @@ const ScheduledTaskResult = OrchestratorMcpScheduleTaskResult.mapFields((fields)
 
 const OrchestratorCapabilitiesTool = Tool.make("orchestrator_capabilities", {
   description:
-    "List the V2 provider instances and their current models from the same live catalog as the composer, including configured custom models, inherited runtime settings, and app-owned orchestration features available to this caller. Each subscription provider carries usage: state (available, exhausted, unknown), remainingPercent of its tightest window, each window's usedPercent and resetsAt, and stale when the reading is over 30 minutes old. When the user asks you to be smart about usage, prefer an instance with headroom for delegate_task and new threads, and avoid exhausted ones until their reset. machines lists each paired machine; an online one carries its own provider instances in catalog (or catalogError), the ids to pass to delegate_task or create_threads with that machine. For a separate top-level thread in a new or existing worktree, use thread_launch with workspaceStrategy.",
+    "List the V2 provider instances and their current models from the same live catalog as the composer, including configured custom models, inherited runtime settings, and app-owned orchestration features available to this caller. Each subscription provider carries usage: state (available, exhausted, unknown), remainingPercent of its tightest window, each window's usedPercent and resetsAt, and stale when the reading is over 30 minutes old. machines lists each paired machine; an online one carries its own provider instances in catalog (or catalogError), the ids to pass to delegate_task or create_threads with that machine. For a separate top-level thread in a new or existing worktree, use thread_launch with workspaceStrategy.",
   success: OrchestratorMcpCapabilitiesResult,
   failure: OrchestratorMcpFailure,
   failureMode: "return",
@@ -175,7 +177,7 @@ const DeleteScheduledTaskTool = Tool.make("delete_scheduled_task", {
 
 const RequestSecretTool = Tool.make("request_secret", {
   description:
-    "Ask the user for a secret (a token, API key, signing secret, password) through a private card in this thread, and wait for them to answer. The value is kept by the app and NEVER returned to you or shown in the transcript. When saved, the result carries a secretRef: pass it to a tool that accepts one (e.g. schedule_task's signature.secretRef). It works once. For an account_connect pending connection, pass saveToAccount: {connectionId}; service, project, credential kind and use are fixed server-side, and the result returns account/credential ids instead of a secretRef. Never ask for secrets in chat, and never invent one.",
+    "Ask the user for a secret (a token, API key, signing secret, password) through a private card in this thread, and wait for them to answer. The value is kept by the app and NEVER returned to you or shown in the transcript. When saved, the result carries a secretRef: pass it to a tool that accepts one (e.g. schedule_task's signature.secretRef). It works once. For an account_connect pending connection, pass saveToAccount: {connectionId}; service, project, credential kind and use are fixed server-side, and the result returns account/credential ids instead of a secretRef. The tool wait is bounded; the card persists until answered or cancelled and its answer automatically notifies this thread. Say you are waiting on the card; do not ask the user to type continue. Never ask for secrets in chat, and never invent one.",
   parameters: OrchestratorMcpRequestSecretInput,
   success: OrchestratorMcpRequestSecretResult,
   failure: OrchestratorMcpFailure,
@@ -183,6 +185,18 @@ const RequestSecretTool = Tool.make("request_secret", {
   dependencies,
 })
   .annotate(Tool.Title, "Request a secret from the user")
+  .annotate(Tool.Destructive, false);
+
+const RequestLoginTool = Tool.make("request_login", {
+  description:
+    "Ask the user to sign in to a site through a login card in this thread, and wait for them to answer. Use it when a page needs a login and vault_list has none for that site: never ask for usernames, passwords or codes in chat. The user's answer goes straight into the vault as a login allowed on that site; you never see it. When saved, sign in with vault_fill using the returned vaultItemId (username, password, and totp when asked for). If a stored login stops working (e.g. the password changed), call again with updateItemId to replace its secrets. declined means the user chose not to; continue without it rather than asking again unprompted. The tool wait is bounded but the card persists until answered or cancelled. Its answer automatically notifies this thread. Say you are waiting on the card; never ask the user to type continue.",
+  parameters: OrchestratorMcpRequestLoginInput,
+  success: OrchestratorMcpRequestLoginResult,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Title, "Ask the user to sign in")
   .annotate(Tool.Destructive, false);
 
 export const CreateThreadsTool = Tool.make("create_threads", {
@@ -214,7 +228,7 @@ const ThreadListTool = Tool.make("thread_list", {
 
 const ThreadReadTool = Tool.make("thread_read", {
   description:
-    "Read durable state and a paginated timeline from any Cogenly thread in this environment. The default messages view returns user messages, assistant messages, and proposed plans; activity returns all summarized timeline items. Reading an untruncated terminal assistant result from this parent thread's direct app-owned child acknowledges that child's automatic completion delivery. Continue with afterPosition=nextPosition. Recover long item text with itemId and textOffset=nextTextOffset until nextTextOffset is null; offsets count UTF-16 code units. The thread also reports its snooze state. Each thread carries a Markdown `link`; when you mention it to the user, write that link as is. Cogenly opens it in the app and shows the thread's current title.",
+    "Read durable state and a paginated timeline from any Cogenly thread in this environment. The default messages view returns user messages, assistant messages, and proposed plans; activity returns all summarized timeline items. Without explicit paging a call returns at most 20 items at 2,000 characters each; pass limit/maxCharsPerItem and continue with afterPosition=nextPosition only when you need more. Reading an untruncated terminal assistant result from this parent thread's direct app-owned child acknowledges that child's automatic completion delivery. Recover long item text with itemId and textOffset=nextTextOffset until nextTextOffset is null; offsets count UTF-16 code units. The thread also reports its snooze state. Each thread carries a Markdown `link`; when you mention it to the user, write that link as is. Cogenly opens it in the app and shows the thread's current title.",
   parameters: OrchestratorMcpThreadReadInput,
   success: OrchestratorMcpThreadReadResult,
   failure: OrchestratorMcpFailure,
@@ -295,6 +309,7 @@ export const OrchestratorToolkit = Toolkit.make(
   UpdateScheduledTaskTool,
   DeleteScheduledTaskTool,
   RequestSecretTool,
+  RequestLoginTool,
   CreateThreadsTool,
   ThreadListTool,
   ThreadReadTool,

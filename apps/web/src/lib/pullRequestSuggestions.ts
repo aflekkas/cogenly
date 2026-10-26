@@ -9,7 +9,7 @@ import type { PullRequestDiffStat, PullRequestListCursors } from "@cogenly/contr
 
 /**
  * A listed change request with the environment that read it. Nothing on a row says which machine
- * it came from, and the page unions every connected one — so acting on a row, refreshing it, or
+ * it came from, and the page unions every connected one, so acting on a row, refreshing it, or
  * opening its detail all need the tag the listing itself does not carry.
  */
 export interface EnvironmentPullRequestEntry extends PullRequestListEntry {
@@ -27,7 +27,7 @@ export interface EnvironmentPullRequestError extends PullRequestListProjectError
 /**
  * The signed-in account per host. Keyed `"<environmentId> <host>"` once a listing spans more than
  * one environment: two machines can both reach github.com signed in as different people, and a
- * single host-keyed record would let whichever answered last decide who "I" am — which is how
+ * single host-keyed record would let whichever answered last decide who "I" am, which is how
  * every row of somebody's own work came to be filed under Others.
  */
 export type PullRequestViewers = PullRequestListResult["viewers"];
@@ -45,7 +45,7 @@ export function matchesPullRequestQuery(entry: PullRequestListEntry, query: stri
  * Every connected environment's listing, read as one list.
  *
  * `nextCursors` is keyed by environment rather than by repository: a cursor only means anything
- * to the host that issued it, and two machines can hold the same repository. `viewers` is not —
+ * to the host that issued it, and two machines can hold the same repository. `viewers` is not:
  * a host names one account, and the same host reached from two machines is the same account.
  */
 export interface MergedPullRequestList {
@@ -67,7 +67,7 @@ export interface MergedPullRequestList {
 /**
  * The environments' answers folded into one. A host reached from more than one environment is one
  * row in the switcher, readable if any environment could read it and searched on the host only if
- * every one of them did — a host answering unnarrowed anywhere still needs the local pass.
+ * every one of them did. A host answering unnarrowed anywhere still needs the local pass.
  */
 export function mergePullRequestLists(
   answers: ReadonlyArray<readonly [EnvironmentId, PullRequestListResult]>,
@@ -120,8 +120,8 @@ export function mergePullRequestLists(
 /**
  * How well a row answers the text that was searched for, as a number to order by.
  *
- * Every host searches more than a row shows — GitHub reads bodies and commit messages, GitLab
- * and Bitbucket read descriptions — so a result can be a real match with nothing on the row to
+ * Every host searches more than a row shows (GitHub reads bodies and commit messages, GitLab
+ * and Bitbucket read descriptions), so a result can be a real match with nothing on the row to
  * show for it. Ordering those by recency alone is what puts an apparently unrelated pull request
  * between two obvious ones. They are still results, so they are still shown; they are shown last,
  * under the rows whose own words matched.
@@ -146,7 +146,7 @@ function scorePullRequestMatch(entry: PullRequestListEntry, query: string): numb
   if ((entry.author?.login ?? "").toLowerCase().includes(needle)) return 50;
   if (entry.repository.toLowerCase().includes(needle)) return 40;
   if (terms.some((term) => title.includes(term))) return 30;
-  // The host matched something this row does not show — a description, a comment, a commit.
+  // The host matched something this row does not show: a description, a comment, a commit.
   return 10;
 }
 

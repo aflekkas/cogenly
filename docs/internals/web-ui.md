@@ -26,6 +26,11 @@ Style with Tailwind classes in the component that renders the element.
 - Interactive states (hover, focus-visible, pressed, selected) transition through the
   `interactive` utility in `index.css`; `state-hover` and `state-selected` include it, and the
   `require-interactive-transition` lint flags a raw `hover:bg-*` without it.
+- Every scroller fades the edges it can still scroll past. `ScrollArea` does this by default;
+  a native scroller (a virtualizer, a `<pre>`, a toolbar row) adds `scroll-fade-y`, `scroll-fade-x`
+  or `scroll-fade` from `index.css`. Opt out only where a fade hurts: editable text, canvases and
+  images, terminals, and scrollers inside a shadow root, which the utilities cannot reach. A mask
+  also fades the scroller's own background, so an opaque bar scrolls an inner row instead.
 
 ## Composition
 

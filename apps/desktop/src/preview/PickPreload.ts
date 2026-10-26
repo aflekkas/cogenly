@@ -203,7 +203,7 @@ const navigationDirectionForButton = (button: number): "back" | "forward" | null
 // so hovering this guest without focusing it sends the host app's router back
 // instead of the preview. Suppress Chromium's default here and drive this tab's
 // history explicitly so the buttons always navigate the browser the pointer is
-// over — never the host app.
+// over, never the host app.
 const suppressNavigationButton = (event: MouseEvent): void => {
   if (!event.isTrusted || navigationDirectionForButton(event.button) === null) return;
   event.preventDefault();

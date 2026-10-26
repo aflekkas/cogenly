@@ -57,6 +57,14 @@ const login = (name: string, password: string, domain = "github.com") => ({
   secretFields: { username: `${name}-user`, password },
 });
 
+/** An item whose name must stay unique in its scope, unlike a login's. */
+const key = (name: string, password: string) => ({
+  name,
+  type: "api_key" as const,
+  allowedDomains: [],
+  secretFields: { password },
+});
+
 const documentOf = (node: Node, itemId: string) =>
   node.state.get("vault", itemId).pipe(Effect.map((document) => document!));
 
@@ -153,9 +161,8 @@ describe("vault sync between paired machines", () => {
         const hub = yield* startNode(network, "Server");
         const spoke = yield* startNode(network, "Laptop");
         network.pair(hub, spoke);
-        yield* share(spoke, hub);
-        expect((yield* spoke.sync.sharingStatus).peers[0]?.state).toBe("waiting_for_peer");
-        yield* share(hub, spoke);
+        // No sharing mutation: new and previously untouched pairings default on.
+        yield* settle(hub, [spoke]);
         expect((yield* spoke.sync.sharingStatus).peers[0]?.state).toBe("shared");
 
         const { item } = yield* spoke.vault.create(login("GitHub", "spoke-password-1"));
@@ -163,7 +170,8 @@ describe("vault sync between paired machines", () => {
         expect(yield* reveal(hub, item.id)).toBe("spoke-password-1");
         const arrived = yield* hub.vault.getMetadata(item.id);
         expect(arrived).toMatchObject({ name: "GitHub", allowedDomains: ["github.com"] });
-        expect(arrived.policy.mode).toBe("ask");
+        // An arrival takes the default rule here: agents fill it on its sites.
+        expect(arrived.policy).toEqual({ mode: "allow", allowedAgentIds: [], allowedDomains: [] });
 
         // A grant on the hub is the hub's alone and writes nothing to sync.
         const before = yield* changeCount(hub);
@@ -178,6 +186,10 @@ describe("vault sync between paired machines", () => {
         });
         expect(yield* changeCount(hub)).toBe(before);
         // An approval request on the spoke stays on the spoke.
+        yield* spoke.vault.update({
+          id: item.id,
+          policy: { mode: "ask", allowedAgentIds: [], allowedDomains: [], ownerSet: true },
+        });
         const asked = yield* spoke.vault.use({
           itemId: item.id,
           field: "password",
@@ -231,7 +243,9 @@ describe("vault sync between paired machines", () => {
       const other = yield* startNode(network, "Desktop");
       network.pair(hub, spoke);
       network.pair(hub, other);
-      // Both spokes share with the hub; the hub has not agreed to hold anything.
+      // The hub explicitly opts out of both spokes.
+      yield* hub.sync.setPeerSharing({ environmentId: spoke.environmentId, enabled: false });
+      yield* hub.sync.setPeerSharing({ environmentId: other.environmentId, enabled: false });
       yield* share(spoke, hub);
       yield* share(other, hub);
       const { item } = yield* spoke.vault.create(login("Bank", "bank-password-1", "bank.test"));
@@ -316,6 +330,8 @@ describe("vault sync between paired machines", () => {
       const b = yield* startNode(network, "Desktop");
       network.pair(hub, a);
       network.pair(hub, b);
+      yield* hub.sync.setPeerSharing({ environmentId: a.environmentId, enabled: false });
+      yield* hub.sync.setPeerSharing({ environmentId: b.environmentId, enabled: false });
       yield* share(a, hub);
       yield* share(b, hub);
       const { item } = yield* a.vault.create(login("Mail", "mail-password-1", "mail.test"));
@@ -365,10 +381,10 @@ describe("vault sync between paired machines", () => {
         expect(yield* documentOf(hub, item.id)).toEqual(yield* documentOf(spoke, item.id));
 
         // A delete, then a later edit elsewhere: the edit brings the item
-        // back everywhere, as a new arrival that asks first.
+        // back everywhere, as a new arrival with the default rule.
         yield* spoke.vault.update({
           id: item.id,
-          policy: { mode: "allow", allowedAgentIds: [], allowedDomains: [] },
+          policy: { mode: "ask", allowedAgentIds: [], allowedDomains: [], ownerSet: true },
         });
         yield* spoke.vault.delete({ id: item.id });
         yield* TestClock.adjust(Duration.seconds(1));
@@ -376,7 +392,7 @@ describe("vault sync between paired machines", () => {
         yield* settle(hub, [spoke]);
         expect(yield* reveal(hub, item.id)).toBe("after-delete");
         expect(yield* reveal(spoke, item.id)).toBe("after-delete");
-        expect((yield* spoke.vault.getMetadata(item.id)).policy.mode).toBe("ask");
+        expect((yield* spoke.vault.getMetadata(item.id)).policy.mode).toBe("allow");
 
         // An edit, then a later delete elsewhere: the delete wins everywhere.
         yield* hub.vault.update({ id: item.id, secretFields: { password: "before-delete" } });
@@ -386,9 +402,15 @@ describe("vault sync between paired machines", () => {
         expect((yield* hub.vault.list({})).items).toEqual([]);
         expect((yield* spoke.vault.list({})).items).toEqual([]);
 
-        // Both machines already have a "Work" item; each keeps its own name.
-        const fromSpoke = (yield* spoke.vault.create(login("Work", "spoke-work"))).item;
-        const fromHub = (yield* hub.vault.create(login("Work", "hub-work"))).item;
+        // Logins for one site share its name, so they arrive as they are.
+        const spokeLogin = (yield* spoke.vault.create(login("Mail", "spoke-mail"))).item;
+        yield* hub.vault.create(login("Mail", "hub-mail"));
+        yield* settle(hub, [spoke]);
+        expect((yield* hub.vault.getMetadata(spokeLogin.id)).name).toBe("Mail");
+
+        // Both machines already have a "Work" key; each keeps its own name.
+        const fromSpoke = (yield* spoke.vault.create(key("Work", "spoke-work"))).item;
+        const fromHub = (yield* hub.vault.create(key("Work", "hub-work"))).item;
         yield* settle(hub, [spoke]);
         expect((yield* hub.vault.getMetadata(fromSpoke.id)).name).toBe("Work (from Laptop)");
         expect((yield* spoke.vault.getMetadata(fromHub.id)).name).toBe("Work (from Server)");
@@ -401,8 +423,8 @@ describe("vault sync between paired machines", () => {
 
         // A long machine name is cut so the renamed item stays within the name limit.
         network.names.set(hub.environmentId, "H".repeat(300));
-        const long = (yield* hub.vault.create(login("W".repeat(200), "long-1"))).item;
-        yield* spoke.vault.create(login("W".repeat(200), "long-2"));
+        const long = (yield* hub.vault.create(key("W".repeat(200), "long-1"))).item;
+        yield* spoke.vault.create(key("W".repeat(200), "long-2"));
         yield* settle(hub, [spoke]);
         const renamed = (yield* spoke.vault.getMetadata(long.id)).name;
         expect(renamed.length).toBeLessThanOrEqual(200);
@@ -447,11 +469,11 @@ describe("vault sync between paired machines", () => {
           sealedDigest: newest.digest,
         });
 
-      // Pairing again is a new pairing: B gets the documents but not the key.
+      // Pairing again verifies the peer's key and shares automatically.
       network.pair(hub, b);
       yield* settle(hub, [a, b]);
-      expect(yield* reveal(b, item.id)).toBe("cloud-1");
-      expect((yield* readable(b, item.id))?.digest).not.toBe(newest.digest);
+      expect(yield* reveal(b, item.id)).toBe("cloud-2");
+      expect((yield* readable(b, item.id))?.digest).toBe(newest.digest);
     }).pipe(Effect.scoped),
   );
 
@@ -602,6 +624,109 @@ describe("vault sync between paired machines", () => {
     ),
   );
 
+  it.effect("upgrade retains explicit opt-outs and leaves untouched pairings at the default", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 106 });
+      const key = VaultCrypto.generateKeyPair().publicKey;
+      yield* sql`INSERT INTO vault_peer_shares(environment_id, public_key, pairing_key, authorized_at, peer_sharing, sharing_enabled) VALUES ('env-off', ${key}, 'pairing-off', '2026-10-01', 0, 0), ('env-on', ${key}, 'pairing-on', '2026-10-01', 1, 1)`;
+      yield* runMigrations();
+      expect(yield* sql`SELECT * FROM vault_peer_sharing_preferences`).toEqual([
+        { environment_id: "env-off", pairing_key: "pairing-off", enabled: 0 },
+      ]);
+      expect(
+        yield* sql`SELECT sharing_enabled FROM vault_peer_shares ORDER BY environment_id`,
+      ).toEqual([{ sharing_enabled: 0 }, { sharing_enabled: 1 }]);
+    }).pipe(
+      Effect.provide(
+        NodeSqlite.layer({ filename: ":memory:" }).pipe(Layer.provideMerge(NodeServices.layer)),
+      ),
+    ),
+  );
+
+  it.effect(
+    "an existing untouched pairing shares old items on upgrade without a setting change",
+    () =>
+      Effect.gen(function* () {
+        const network = new Network();
+        const hub = yield* startNode(network, "Server");
+        const spoke = yield* startNode(network, "Laptop");
+        const { item } = yield* spoke.vault.create(login("Before upgrade", "old-password"));
+        network.pair(hub, spoke);
+        // No legacy authorization rows: the old opt-in was never touched.
+        expect(yield* hub.capture.recordedShares).toEqual([]);
+        expect(yield* spoke.capture.recordedShares).toEqual([]);
+        yield* spoke.sync.reconcile("full");
+        yield* settle(hub, [spoke]);
+        expect(yield* reveal(hub, item.id)).toBe("old-password");
+        expect((yield* hub.sync.sharingStatus).peers[0]).toMatchObject({
+          state: "shared",
+          sharingEnabled: true,
+        });
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect("opting out before key exchange survives later default reconciliation", () =>
+    Effect.gen(function* () {
+      const network = new Network();
+      const hub = yield* startNode(network, "Server");
+      const spoke = yield* startNode(network, "Laptop");
+      network.pair(hub, spoke);
+      expect(yield* hub.capture.recordedShares).toEqual([]);
+      yield* hub.sync.setPeerSharing({ environmentId: spoke.environmentId, enabled: false });
+      yield* hub.sync.reconcile("full");
+      yield* settle(hub, [spoke]);
+      expect(yield* hub.capture.recordedShares).toEqual([]);
+      expect((yield* hub.sync.sharingStatus).peers[0]).toMatchObject({
+        state: "not_shared",
+        sharingEnabled: false,
+      });
+      expect((yield* spoke.sync.sharingStatus).peers[0]?.state).toBe("not_shared");
+      yield* share(hub, spoke);
+      yield* settle(hub, [spoke]);
+      expect((yield* spoke.sync.sharingStatus).peers[0]?.state).toBe("shared");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("a legacy peer retains opt-in until enabled or upgraded", () =>
+    Effect.gen(function* () {
+      const network = new Network();
+      const hub = yield* startNode(network, "Server");
+      const spoke = yield* startNode(network, "Laptop");
+      network.pair(hub, spoke);
+      const modernChannels = network.channels.get(hub.environmentId)!;
+      const legacyChannels = Context.get(
+        yield* Layer.build(PeerChannels.layer),
+        PeerChannels.PeerChannels,
+      );
+      // The 0.3.2 wire shape and default: an absent authorization means false.
+      yield* legacyChannels.register(VaultPeerKey, () =>
+        Effect.gen(function* () {
+          const pair = yield* hub.capture.keyPair;
+          return {
+            publicKey: pair.publicKey,
+            sharing: (yield* hub.capture.shares).some(
+              (share) => share.environmentId === spoke.environmentId,
+            ),
+          };
+        }).pipe(Effect.orDie),
+      );
+      network.channels.set(hub.environmentId, legacyChannels);
+      yield* spoke.sync.reconcile("full");
+      const { item } = yield* spoke.vault.create(login("Mixed version", "mixed-password"));
+      expect(wrapKeysFor(yield* documentOf(spoke, item.id), hub.environmentId)).toEqual([]);
+      expect((yield* spoke.sync.sharingStatus).peers[0]).toMatchObject({
+        state: "not_shared",
+        sharingEnabled: true,
+        peerSharing: false,
+      });
+      // Upgrading changes the default response without any protocol change.
+      network.channels.set(hub.environmentId, modernChannels);
+      yield* settle(hub, [spoke]);
+      expect(yield* reveal(hub, item.id)).toBe("mixed-password");
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("enabling needs a direct online peer and refuses a changed or low-order key", () =>
     Effect.gen(function* () {
       const network = new Network();
@@ -691,6 +816,7 @@ describe("vault sync between paired machines", () => {
       network.pair(hub, b);
       yield* share(a, hub);
       yield* share(hub, a);
+      yield* hub.sync.setPeerSharing({ environmentId: b.environmentId, enabled: false });
       yield* share(b, hub);
       const { item } = yield* a.vault.create({
         ...login("Scan item", "scan-password-1", "scan-domain.test"),
@@ -734,6 +860,7 @@ describe("machines that do not hold the vault cannot delete, freeze or read item
       const c = yield* startNode(network, "Intruder");
       network.pair(hub, a);
       network.pair(hub, c);
+      yield* hub.sync.setPeerSharing({ environmentId: c.environmentId, enabled: false });
       yield* share(a, hub);
       yield* share(hub, a);
       // Nobody shares with C, and C shares with nobody.
@@ -782,9 +909,10 @@ describe("machines that do not hold the vault cannot delete, freeze or read item
       const c = yield* startNode(network, "Intruder");
       network.pair(hub, a);
       network.pair(hub, c);
+      yield* hub.sync.setPeerSharing({ environmentId: c.environmentId, enabled: false });
       yield* share(a, hub);
       yield* share(hub, a);
-      // C shares one way; nobody shares back with it.
+      // The hub opted out of C, so C is not a holder.
       yield* share(c, hub);
       const { item } = yield* a.vault.create(login("Bank", "bank-password-1", "bank.test"));
       yield* settle(hub, [a, c]);
@@ -899,12 +1027,13 @@ describe("machines that do not hold the vault cannot delete, freeze or read item
     }).pipe(Effect.scoped),
   );
 
-  it.effect("sharing one way releases nothing until the other machine shares back", () =>
+  it.effect("one-sided opt-out stops sharing until restored", () =>
     Effect.gen(function* () {
       const network = new Network();
       const hub = yield* startNode(network, "Server");
       const spoke = yield* startNode(network, "Laptop");
       network.pair(hub, spoke);
+      yield* hub.sync.setPeerSharing({ environmentId: spoke.environmentId, enabled: false });
       yield* share(spoke, hub);
       const { item } = yield* spoke.vault.create(login("Bank", "bank-password-1", "bank.test"));
       yield* settle(hub, [spoke]);
@@ -912,7 +1041,7 @@ describe("machines that do not hold the vault cannot delete, freeze or read item
       expect(wrapKeysFor(yield* documentOf(hub, item.id), hub.environmentId)).toEqual([]);
       expect(yield* readable(hub, item.id)).toBeUndefined();
       expect((yield* spoke.sync.sharingStatus).peers[0]).toMatchObject({
-        state: "waiting_for_peer",
+        state: "not_shared",
         peerSharing: false,
         itemsShared: 0,
       });
@@ -936,7 +1065,7 @@ describe("machines that do not hold the vault cannot delete, freeze or read item
         yield* spoke.capture.hasRevision(document, yield* recipientOf(hub), newest.digest),
       ).toBe(false);
       expect(yield* reveal(hub, item.id)).toBe("bank-password-1");
-      expect((yield* spoke.sync.sharingStatus).peers[0]?.state).toBe("waiting_for_peer");
+      expect((yield* spoke.sync.sharingStatus).peers[0]?.state).toBe("not_shared");
     }).pipe(Effect.scoped),
   );
 
@@ -1008,11 +1137,12 @@ describe("machines that do not hold the vault cannot delete, freeze or read item
         false,
       );
 
-      // Nor does A take a revision the hub wraps for it under the old share.
+      // Receiving a change rechecks the new pairing and fetches the key again;
+      // the newly authorized default share can then accept the hub's revision.
       yield* sealAs(hub, item.id, forgedPayload, [yield* recipientOf(a)]);
       yield* push(hub, a, true);
       const arrived = yield* documentOf(a, item.id);
-      expect((yield* readable(a, item.id))?.digest).not.toBe(revisionsOf(arrived)[0]?.digest);
+      expect((yield* readable(a, item.id))?.digest).toBe(revisionsOf(arrived)[0]?.digest);
     }).pipe(Effect.scoped),
   );
 

@@ -2,6 +2,9 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import { TextGenerationError, type ChatGreetingInput } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
+import * as Logger from "effect/Logger";
 import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
 
@@ -73,11 +76,11 @@ describe("decideGreeting", () => {
     });
   });
 
-  it("skips when off, late at night, on an implausible day, or past the daily budget", () => {
+  it("skips when off, on an implausible day, or past the daily budget", () => {
     expect(Greetings.decideGreeting({ ...base, enabled: false })).toEqual({ type: "skip" });
     expect(
       Greetings.decideGreeting({ ...base, request: { ...morning, bucket: "lateNight" } }),
-    ).toEqual({ type: "skip" });
+    ).toEqual({ type: "generate" });
     expect(
       Greetings.decideGreeting({ ...base, request: { ...morning, day: "2026-10-28" } }),
     ).toEqual({ type: "skip" });
@@ -90,6 +93,30 @@ describe("decideGreeting", () => {
     // Attempts older than a day no longer count.
     const old = spent.map((entry) => ({ ...entry, at: entry.at - 24 * HOUR }));
     expect(Greetings.decideGreeting({ ...base, entries: old })).toEqual({ type: "generate" });
+  });
+  it("retries failed buckets after 15 minutes while counting retries against the rolling cap", () => {
+    const failed = { key: Greetings.greetingKey(morning), text: null, at: NOW, attempts: 2 };
+    expect(
+      Greetings.decideGreeting({ ...base, entries: [failed], nowMs: NOW + 14 * 60_000 }),
+    ).toEqual({ type: "cached", text: null });
+    expect(
+      Greetings.decideGreeting({ ...base, entries: [failed], nowMs: NOW + 15 * 60_000 }),
+    ).toEqual({ type: "generate" });
+    expect(
+      Greetings.decideGreeting({
+        ...base,
+        entries: [{ ...failed, attempts: 4 }],
+        nowMs: NOW + HOUR,
+      }),
+    ).toEqual({ type: "skip" });
+    expect(
+      Greetings.decideGreeting({
+        ...base,
+        entries: [failed],
+        nowMs: NOW + 24 * HOUR,
+        request: { ...morning, day: "2026-10-26" },
+      }),
+    ).toEqual({ type: "generate" });
   });
 });
 
@@ -149,6 +176,12 @@ describe("ChatGreetingService.get", () => {
       yield* TestClock.setTime(NOW + 5 * HOUR);
       yield* service.get({ ...morning, bucket: "afternoon" });
       expect(model.calls).toHaveLength(2);
+      yield* TestClock.setTime(NOW + 14 * HOUR);
+      expect(yield* service.get({ ...morning, bucket: "lateNight" })).toEqual({
+        text: "Sunday morning. More work on spot?",
+        pending: false,
+      });
+      expect(model.calls.at(-1)?.timeOfDay).toBe("late at night");
     }).pipe(Effect.provide(makeLayer({ generate: model.generate })));
   });
 
@@ -197,31 +230,90 @@ describe("ChatGreetingService.get", () => {
     );
   });
 
-  it.effect("makes no call without recent work", () => {
-    const model = counting("Should not appear");
+  it.effect("greets even without a selected project or recent work", () => {
+    const model = counting("A quiet Sunday. What is on your mind?");
     return Effect.gen(function* () {
       yield* TestClock.setTime(NOW);
       const service = yield* Greetings.ChatGreetingService;
-      expect(yield* service.get(morning)).toEqual({ text: null, pending: false });
-      expect(model.calls).toHaveLength(0);
+      expect(yield* service.get(morning)).toEqual({
+        text: "A quiet Sunday. What is on your mind?",
+        pending: false,
+      });
+      expect(model.calls).toHaveLength(1);
     }).pipe(Effect.provide(makeLayer({ generate: model.generate, threads: [] })));
   });
 
-  it.effect("falls back to the built-in line when generation fails, without retrying", () => {
-    let calls = 0;
-    const generate: TextGeneration.TextGeneration["Service"]["generateGreeting"] = () =>
-      Effect.suspend(() => {
-        calls += 1;
-        return Effect.fail(
-          new TextGenerationError({ operation: "generateThreadTitle", detail: "No provider." }),
-        );
-      });
+  it.effect(
+    "reports repeated failures, retries after cooldown, and clears health on recovery",
+    () => {
+      let calls = 0;
+      const logs: unknown[] = [];
+      const logger = Logger.make(({ message }) => logs.push(message));
+      const generate: TextGeneration.TextGeneration["Service"]["generateGreeting"] = () =>
+        Effect.suspend(() => {
+          calls += 1;
+          if (calls === 3) return Effect.succeed({ greeting: "Back again. What is next?" });
+          return Effect.fail(
+            new TextGenerationError({ operation: "generateThreadTitle", detail: "No provider." }),
+          );
+        });
+      return Effect.gen(function* () {
+        yield* TestClock.setTime(NOW);
+        const service = yield* Greetings.ChatGreetingService;
+        expect(yield* service.get(morning)).toEqual({ text: null, pending: false });
+        expect(yield* service.get(morning)).toEqual({ text: null, pending: false });
+        expect(calls).toBe(1);
+        expect(JSON.stringify(logs)).toContain("AI greeting unavailable: provider-error");
+        expect(yield* service.healthItems).toEqual([]);
+        yield* TestClock.setTime(NOW + 15 * 60_000);
+        expect(yield* service.get(morning)).toEqual({ text: null, pending: false });
+        expect(yield* service.healthItems).toEqual([
+          expect.objectContaining({
+            key: "ai-greetings",
+            status: "warn",
+            detail: expect.stringContaining("provider-error"),
+          }),
+        ]);
+        yield* TestClock.setTime(NOW + 30 * 60_000);
+        expect(yield* service.get(morning)).toEqual({
+          text: "Back again. What is next?",
+          pending: false,
+        });
+        expect(yield* service.healthItems).toEqual([]);
+      }).pipe(Effect.provide(Layer.merge(makeLayer({ generate }), Logger.layer([logger]))));
+    },
+  );
+  it.effect("reports unusable model output instead of silently caching it", () => {
+    const logs: unknown[] = [];
+    const logger = Logger.make(({ message }) => logs.push(message));
     return Effect.gen(function* () {
       yield* TestClock.setTime(NOW);
       const service = yield* Greetings.ChatGreetingService;
       expect(yield* service.get(morning)).toEqual({ text: null, pending: false });
-      expect(yield* service.get(morning)).toEqual({ text: null, pending: false });
-      expect(calls).toBe(1);
-    }).pipe(Effect.provide(makeLayer({ generate })));
+      expect(JSON.stringify(logs)).toContain("AI greeting unavailable: invalid-output");
+    }).pipe(
+      Effect.provide(
+        Layer.merge(
+          makeLayer({ generate: counting("x".repeat(81)).generate }),
+          Logger.layer([logger]),
+        ),
+      ),
+    );
   });
+
+  it.effect("bounds a stalled generation and releases waiting clients", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(NOW);
+      const started = yield* Deferred.make<void>();
+      const generate: TextGeneration.TextGeneration["Service"]["generateGreeting"] = () =>
+        Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never));
+      yield* Effect.gen(function* () {
+        const service = yield* Greetings.ChatGreetingService;
+        const waiter = yield* service.get(morning).pipe(Effect.forkChild);
+        yield* Deferred.await(started);
+        yield* TestClock.adjust("30 seconds");
+        expect(yield* Fiber.join(waiter)).toEqual({ text: null, pending: false });
+      }).pipe(Effect.provide(makeLayer({ generate })));
+    }),
+  );
 });

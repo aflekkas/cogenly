@@ -1,10 +1,11 @@
-import { IntegrationError } from "@cogenly/contracts";
+import { IntegrationError, type ThreadId } from "@cogenly/contracts";
 import { isLoopbackHost } from "@cogenly/shared/preview";
 import * as Effect from "effect/Effect";
 
 export interface SignInOrigin {
   readonly origin: string | undefined;
   readonly fromAgent?: boolean;
+  readonly threadId?: ThreadId | undefined;
   /** A reachable browser origin, supplied explicitly by an agent. */
   readonly callbackOrigin?: string | undefined;
 }
@@ -29,7 +30,7 @@ export const selectCallbackOrigin = (from: SignInOrigin, known?: string) => {
           operation: "start sign-in",
           reason: "invalid_request",
           cause:
-            "Open Settings → Integrations on the VPS's reachable address and sign in there first, or pass callbackOrigin with that HTTPS origin. A loopback agent request cannot discover the browser's public address.",
+            "Use the inline integration card to sign in from the browser's reachable address, or pass callbackOrigin with that HTTPS origin. A loopback agent request cannot discover the browser's public address.",
         }),
       );
 };

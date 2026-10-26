@@ -1,5 +1,6 @@
 import { assistantCitationsToPlainText } from "@cogenly/shared/assistantCitations";
 import { truncate } from "@cogenly/shared/String";
+import { threadLinksToPlainText } from "@cogenly/shared/threadLinks";
 
 export interface ThreadTitleSeedInput {
   readonly text: string;
@@ -8,7 +9,7 @@ export interface ThreadTitleSeedInput {
 }
 
 function normalizeTitleSeed(value: string): string {
-  return assistantCitationsToPlainText(value).trim().replace(/\s+/gu, " ");
+  return threadLinksToPlainText(assistantCitationsToPlainText(value)).trim().replace(/\s+/gu, " ");
 }
 
 export function deriveThreadTitleSeed(input: ThreadTitleSeedInput): string {

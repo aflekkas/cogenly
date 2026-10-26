@@ -55,7 +55,7 @@ export interface DesktopBackendOutputLogShape {
 }
 
 // Factory for per-instance backend output logs. `forInstance(id)` returns
-// a writer that targets a distinct rotating log file — the primary
+// a writer that targets a distinct rotating log file. The primary
 // instance keeps `server-child.log` so the historical path stays stable
 // for ops; other instances get `server-child-<sanitized-id>.log`.
 //

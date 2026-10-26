@@ -175,7 +175,7 @@ export interface ProviderChangeRequestPage {
   /**
    * This page can be carried on from, so the service may hand the caller a cursor for it. False
    * where the host answered in an order a cursor means nothing in, which leaves a larger `limit`
-   * as the only way to the rest — what every listing did before there were cursors.
+   * as the only way to the rest, which is what every listing did before there were cursors.
    */
   readonly continues: boolean;
 }
@@ -189,8 +189,8 @@ export interface ProviderListCursor {
   /**
    * The instant of the oldest row already handed over, checked against a timestamp's shape before
    * it gets here because it goes into a host's own filter. Asked for inclusively: several rows
-   * share one instant often enough — a bot that touches eight change requests writes one timestamp
-   * on all eight — and asking for strictly older would lose whichever of them the slice ended
+   * share one instant often enough (a bot that touches eight change requests writes one timestamp
+   * on all eight), and asking for strictly older would lose whichever of them the slice ended
    * before. The service drops the ones it has already sent.
    */
   readonly updatedBefore: string;
@@ -316,7 +316,7 @@ export interface ProviderRepositoryRef {
   /** Provider-native repository identity, e.g. `owner/repo` or `group/subgroup/project`. */
   readonly repository: string;
   /**
-   * The host it lives on, which `repository` deliberately leaves out — the same `owner/repo`
+   * The host it lives on, which `repository` deliberately leaves out: the same `owner/repo`
    * exists on github.com and on a GitHub Enterprise install, and only the caller knows which
    * one a project's remote points at.
    */
@@ -382,7 +382,7 @@ export interface PullRequestProviderApi {
       /**
        * Free text to narrow the listing by, as the host understands it. A host with no text
        * filter of its own ignores it and answers with the page it would have answered with
-       * anyway — the caller narrows what it gets, so an unfiltered page is a wider answer
+       * anyway. The caller narrows what it gets, so an unfiltered page is a wider answer
        * rather than a wrong one.
        */
       readonly query?: string | undefined;
@@ -392,7 +392,7 @@ export interface PullRequestProviderApi {
        */
       readonly cursor?: ProviderListCursor | undefined;
       /**
-       * Further narrowings, which a host applies as far as it can and ignores the rest of —
+       * Further narrowings, which a host applies as far as it can and ignores the rest of;
        * an unnarrowed page is a wider answer rather than a wrong one, and the caller narrows
        * what it gets for the fields a row carries.
        */
@@ -430,7 +430,7 @@ export interface PullRequestProviderApi {
 
   /**
    * The line counts for rows a listing has already handed over. Only implemented by a provider
-   * whose listing leaves them out — for everyone else the numbers arrived with the row, and the
+   * whose listing leaves them out. For everyone else the numbers arrived with the row, and the
    * caller has nothing to ask for.
    */
   readonly listChangeRequestStats?: (input: {
@@ -500,7 +500,7 @@ export interface PullRequestProviderApi {
   /**
    * The same answer `getChangeRequest` carries, on its own. Asked before anything is written, so
    * a request that reached the server without going past the page is refused by what the host
-   * says rather than by what the client claimed — and asked freshly, because access granted or
+   * says rather than by what the client claimed, and asked freshly, because access granted or
    * taken away since the page loaded is exactly the case this guards.
    *
    * Implementations read the cheapest thing that answers it, which for a host with nothing to say
@@ -593,7 +593,7 @@ export interface PullRequestProviderApi {
 
   /**
    * Rewrites the change request's own words. Only called when `capabilities.edit.changeRequest`
-   * is true, and never with both fields absent — the caller refuses that before it gets here,
+   * is true, and never with both fields absent; the caller refuses that before it gets here,
    * because a host asked to change nothing answers differently on each of them.
    */
   readonly updateChangeRequest?: (
@@ -656,7 +656,7 @@ export interface PullRequestProviderApi {
    *
    * One call for both directions, because that is what every host does with them: GitHub posts and
    * deletes the same collection, and GitLab and Bitbucket write the whole reviewer set either way.
-   * Asking again somebody who has already reviewed is a request like any other — which is how a
+   * Asking again somebody who has already reviewed is a request like any other, which is how a
    * re-request is made.
    */
   readonly setReviewerRequest: (

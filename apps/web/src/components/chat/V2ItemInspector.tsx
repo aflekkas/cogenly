@@ -102,7 +102,7 @@ function StructuredValue({
   }, [highlightJson, text]);
   if (!text) return null;
   return (
-    <pre className={cn("max-h-80 overflow-auto text-muted-foreground", monoClassName)}>
+    <pre className={cn("scroll-fade max-h-80 overflow-auto text-muted-foreground", monoClassName)}>
       {language || isJson ? (
         <RenderErrorBoundary fallback={text}>
           <Suspense fallback={text}>
@@ -179,7 +179,7 @@ function ToolOutput(props: ToolOutputState) {
     />
   ));
   const text = props.output ? (
-    <div className="max-h-80 overflow-auto text-muted-foreground">{props.output}</div>
+    <div className="scroll-fade max-h-80 overflow-auto text-muted-foreground">{props.output}</div>
   ) : props.pending ? (
     <div className="text-muted-foreground italic">Loading output…</div>
   ) : props.error ? (

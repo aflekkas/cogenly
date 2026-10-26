@@ -382,7 +382,7 @@ export const NODE_ID_CACHE_CAPACITY = 128;
 
 /**
  * Pages of review threads to follow before the conversation is reported as truncated. GitHub
- * serves a hundred threads a page, so this is a thousand threads — past anything a pull request
+ * serves a hundred threads a page, so this is a thousand threads: past anything a pull request
  * a person is reading has, and short of walking a repository-sized conversation forever.
  */
 const REVIEW_THREAD_PAGES = 10;
@@ -554,7 +554,7 @@ export class GitHubPullRequestApi extends Context.Service<
     }) => Effect.Effect<ReadonlyArray<GitHubWorkflowRunApproval>, GitHubPullRequestApiError>;
 
     /**
-     * The host-native stack this pull request is in, or null when it is in none — which is also
+     * The host-native stack this pull request is in, or null when it is in none, which is also
      * the answer for a host that refuses the stacks preview altogether.
      */
     readonly getPullRequestStack: (input: {
@@ -742,7 +742,7 @@ export class GitHubPullRequestApi extends Context.Service<
 
     /**
      * Adds a reaction to a remark, or takes it back. `subjectId` is any node GitHub calls
-     * reactable — a comment, a review, or the pull request itself, which is looked up here
+     * reactable: a comment, a review, or the pull request itself, which is looked up here
      * because nothing in the conversation names it. A given `subjectId` is confirmed to belong
      * to this pull request before the mutation runs, since nothing else ties the two together.
      */
@@ -817,7 +817,7 @@ function isCommitSha(value: string): boolean {
 /**
  * The reader's own words as one literal phrase of a GitHub search query. Quoting is the whole
  * defence: outside quotes GitHub reads `is:merged` as a qualifier and `label:x` as another, so
- * text typed into a search box could widen the very listing it is meant to narrow — inside them
+ * text typed into a search box could widen the very listing it is meant to narrow. Inside them
  * it is only text. The two characters that could end the phrase early are therefore escaped
  * first, which GitHub reads back as themselves; an unbalanced quote is dropped instead, which
  * would let everything after it out of the phrase.
@@ -851,7 +851,7 @@ function filterQualifiers(
 ): ReadonlyArray<string> {
   if (filters === undefined) return [];
   return [
-    // One qualifier per group, its names joined by commas — GitHub's own OR.
+    // One qualifier per group, its names joined by commas (GitHub's own OR).
     ...(filters.labels ?? []).flatMap((group) =>
       group.length === 0 ? [] : [`label:${group.map(qualifierValue).join(",")}`],
     ),
@@ -871,7 +871,7 @@ function filterQualifiers(
  * The same narrowings over a row that has already arrived, for the search-free fallback. Every
  * listed row now carries its own `checksState`, so `checks` is judged the way `review` is: by
  * equality against the row's field. Unlike `review`, `checks` has no `"none"` value to catch an
- * absent state on purpose — a row with no checks configured, or whose checks are still `pending`,
+ * absent state on purpose: a row with no checks configured, or whose checks are still `pending`,
  * equals neither `"passing"` nor `"failing"` and so fails both, the same as a row search would
  * not have surfaced for `status:success` or `status:failure`.
  */
@@ -931,7 +931,7 @@ const SEARCH_REPOSITORY = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
  *
  * Null where a repository is not `owner/name`. A name is written into the query as itself, and a
  * name holding a space could otherwise end the `repo:` qualifier and start a qualifier of its
- * own — so an unaddressable one refuses the whole read rather than being escaped into something
+ * own, so an unaddressable one refuses the whole read rather than being escaped into something
  * GitHub might still read.
  */
 function searchQuery(input: {
@@ -1231,7 +1231,7 @@ export const make = Effect.gen(function* () {
   /**
    * Whether a client-given subject actually belongs to the pull request the request names. A
    * subject id is trusted to be whatever node it names, and that node can hang off any pull
-   * request on the host — so the mutation itself would write wherever the id actually belongs,
+   * request on the host, so the mutation itself would write wherever the id actually belongs,
    * not wherever the request says it does, unless this confirms the two agree first.
    */
   const subjectBelongsToPullRequest = (input: {
@@ -1929,7 +1929,7 @@ export const make = Effect.gen(function* () {
           }),
         );
       // GitHub does not index every repository for search, and one it will not search answers
-      // with no rows rather than with an error — so an empty listing is read again from the
+      // with no rows rather than with an error, so an empty listing is read again from the
       // repository's own list. Those rows come back newest-created first, an order no `updated:`
       // qualifier can carry on from, so that page says it cannot be continued and the reader
       // reaches the rest of it by asking for a larger page, as every listing used to.
@@ -1943,7 +1943,7 @@ export const make = Effect.gen(function* () {
       // Every filter is a qualifier `matchesFilters` can judge over the fallback's own rows just
       // as well as search judges them over its own, so carrying them into the fallback answers
       // the same read rather than a wider one. Free text is the one thing the fallback cannot
-      // judge locally — it lists rows, it does not search their text — so a query still rules
+      // judge locally (it lists rows, it does not search their text), so a query still rules
       // the fallback out: an empty answer under one is already the answer.
       const hasQuery = (input.query?.trim().length ?? 0) > 0;
       return read(true).pipe(
@@ -2001,7 +2001,7 @@ export const make = Effect.gen(function* () {
         );
       }
       // One extra row reveals that the host has more than the slice shows, the way the
-      // per-repository read does — up to GitHub's own ceiling on a search page, past which
+      // per-repository read does, up to GitHub's own ceiling on a search page, past which
       // `hasNextPage` is what says there is more.
       const rows = Math.min(input.limit + 1, PULL_REQUEST_SEARCH_MAX_ROWS);
       return client

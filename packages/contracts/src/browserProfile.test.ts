@@ -29,7 +29,7 @@ describe("resolveBrowserProfiles", () => {
   it("drops stored entries that collide with a built-in id", () => {
     // Built-ins are synthesized rather than stored, so a hand-edited settings
     // file must not be able to shadow Default with a persistent partition of
-    // its own — every tab already opened under Default would follow it.
+    // its own: every tab already opened under Default would follow it.
     const resolved = resolveBrowserProfiles([
       { id: DEFAULT_BROWSER_PROFILE_ID, name: "Hijacked", kind: "persistent" },
       { id: INCOGNITO_BROWSER_PROFILE_ID, name: "Not incognito", kind: "persistent" },

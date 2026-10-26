@@ -1,17 +1,17 @@
 /**
- * CodexDriver — first concrete `ProviderDriver` in the new per-instance model.
+ * CodexDriver: first concrete `ProviderDriver` in the new per-instance model.
  *
  * A driver is a plain value (not a Context.Service) whose `create()` returns
  * one `ProviderInstance` bundling:
- *   - `snapshot`   — the live `ManagedServerProvider` for this instance;
- *   - `adapter`    — the Codex session/turn/approval runtime;
- *   - `textGeneration` — commit/PR/branch/title generation via `codex exec`.
+ *   - `snapshot`: the live `ManagedServerProvider` for this instance;
+ *   - `adapter`: the Codex session/turn/approval runtime;
+ *   - `textGeneration`: commit/PR/branch/title generation via `codex exec`.
  *
  * Each call to `create()` captures the `codexConfig` argument in closures
  * owned by the returned instance. Two instances created with different
  * `homePath`s (e.g. `codex_personal` + `codex_work`) therefore run with
  * fully independent Codex app-server processes and `CODEX_HOME`
- * environments — no shared mutable state.
+ * environments, with no shared mutable state.
  *
  * Resource lifecycle: `create()` runs in a scope handed in by the registry.
  * Closing that scope releases the adapter's child processes, the managed
@@ -21,6 +21,7 @@
  *
  * @module provider/Drivers/CodexDriver
  */
+import * as CliProviderAuth from "../CliProviderAuth.ts";
 import { CodexSettings, ProviderDriverKind, UsageProviderKind } from "@cogenly/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -163,13 +164,15 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv, Path.Pat
       const processEnv = yield* mergeProviderInstanceEnvironment(environment);
       const homeLayout = yield* resolveCodexHomeLayout(config);
       const continuationIdentity = codexContinuationIdentity(homeLayout);
-      const stampIdentity = withInstanceIdentity({
+      const stamp = withInstanceIdentity({
         instanceId,
         driverKind: DRIVER_KIND,
         displayName,
         accentColor,
         continuationGroupKey: continuationIdentity.continuationKey,
       });
+      const stampIdentity = (draft: Parameters<typeof stamp>[0]) =>
+        stamp({ ...draft, setup: { canInstall: false, ...draft.setup, canAuthenticate: true } });
       yield* materializeCodexShadowHome(homeLayout).pipe(
         Effect.mapError(
           (cause) =>
@@ -223,7 +226,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv, Path.Pat
         ),
       );
 
-      // Build a managed snapshot whose settings never change — mutations come
+      // Build a managed snapshot whose settings never change; mutations come
       // in as instance rebuilds from the registry rather than in-place
       // updates. Pre-provide `ChildProcessSpawner` so the check fits
       // `makeManagedServerProvider.checkProvider`'s `R = never`.
@@ -377,7 +380,16 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv, Path.Pat
             ),
           );
 
+      const auth = yield* CliProviderAuth.make({
+        instanceId,
+        driver: "codex",
+        binaryPath: effectiveConfig.binaryPath,
+        homePath: homeLayout.effectiveHomePath ?? homeLayout.sharedHomePath,
+        environment: processEnv,
+        onChanged: snapshot.refresh,
+      });
       return {
+        auth,
         instanceId,
         driverKind: DRIVER_KIND,
         continuationIdentity,

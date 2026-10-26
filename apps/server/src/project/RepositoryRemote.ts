@@ -8,7 +8,7 @@ const isSharedRemote = Schema.is(SharedRepositoryRemote);
  * The portable identity of a repository: its remote normalized to
  * `host/owner/repo` (lowercase host, ssh and https spellings unified, no
  * `.git` suffix, no port or credentials). Null for a repository with no
- * remote — a local-only repository — and for values that are not remotes at
+ * remote (a local-only repository) and for values that are not remotes at
  * all (filesystem paths, bare names).
  */
 export function normalizeRepositoryRemote(remoteUrl: string | null | undefined): string | null {

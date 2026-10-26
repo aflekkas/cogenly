@@ -14,7 +14,7 @@ import { BadgeDot } from "../../ui/badge-dot";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../ui/tooltip";
 import { decisionsWaitingLabel } from "../../../agents/agentWorkspace.logic";
 import { SIDEBAR_MODE_LABELS, SIDEBAR_MODES, type SidebarMode } from "./sidebarModes.logic";
-import { useModesNeedingAttention } from "./useModesNeedingAttention";
+import { useModeIndicators } from "./useModeIndicators";
 
 export const SIDEBAR_MODE_ICONS: Record<SidebarMode, LucideIcon> = {
   chats: MessageCircleIcon,
@@ -31,7 +31,7 @@ export function SidebarModeSwitcher(props: {
   className?: string;
 }) {
   const { mode, onModeChange, decisionsWaiting, keybindings } = props;
-  const modesNeedingAttention = useModesNeedingAttention();
+  const modeIndicators = useModeIndicators();
   const index = SIDEBAR_MODES.indexOf(mode);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
@@ -76,7 +76,8 @@ export function SidebarModeSwitcher(props: {
         const shortcut = shortcutLabelForCommand(keybindings, `sidebar.mode.${segment}`);
         const badge = segment === "agents" && decisionsWaiting > 0 ? decisionsWaiting : null;
         // As on the rail: a dot where Agents has no count, on the open mode too.
-        const needsYou = modesNeedingAttention.has(segment) && badge === null;
+        const dot = badge === null ? (modeIndicators.get(segment) ?? null) : null;
+        const dotLabel = dot === "warning" ? "needs you" : dot === "info" ? "unread" : null;
         return (
           <Tooltip key={segment}>
             <TooltipTrigger
@@ -124,13 +125,13 @@ export function SidebarModeSwitcher(props: {
                   <span className="sr-only">, {decisionsWaitingLabel(badge)}</span>
                 </>
               ) : null}
-              <BadgeDot tone={needsYou && "info"} size="md" className="absolute top-1 right-1.5" />
-              {needsYou ? <span className="sr-only">, needs you</span> : null}
+              <BadgeDot tone={dot} size="md" className="absolute top-1 right-1.5" />
+              {dotLabel ? <span className="sr-only">, {dotLabel}</span> : null}
             </TooltipTrigger>
             <TooltipPopup side="bottom">
               {shortcut ? `${label} (${shortcut})` : label}
               {badge !== null ? ` · ${decisionsWaitingLabel(badge)}` : null}
-              {needsYou ? " · Needs you" : null}
+              {dot === "warning" ? " · Needs you" : dot === "info" ? " · Unread" : null}
             </TooltipPopup>
           </Tooltip>
         );

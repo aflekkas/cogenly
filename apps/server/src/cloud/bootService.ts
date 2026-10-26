@@ -1,6 +1,7 @@
 import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -218,8 +219,8 @@ export function renderBootServicePlist(
   // (and, with it, the process group) mid-handoff.
   // ProcessType Interactive opts out of background-job resource throttling.
   // AbandonProcessGroup stays at its default (false): launchd reaps leftover
-  // process-group members only when the launcher itself exits — the analog of
-  // KillMode=mixed's final cgroup kill — and not when the launcher restarts its
+  // process-group members only when the launcher itself exits (the analog of
+  // KillMode=mixed's final cgroup kill), and not when the launcher restarts its
   // child, so agent children survive server updates.
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
@@ -617,6 +618,8 @@ export class BootService extends Context.Service<
        * restart, so a later `cogenly service restart` lands on the new version.
        */
       readonly start?: boolean;
+      /** Stage a trial instead of replacing the active version of an installed service. */
+      readonly trialDatabasePath?: string;
       /**
        * Zone to bake into the unit as `COGENLY_TZ`, overriding the install
        * environment. Schedules then run in a defined zone even when the
@@ -665,6 +668,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   readonly cliVersion: string;
   readonly host?: BootServiceHost;
 }) {
+  const crypto = yield* Crypto.Crypto;
   const hostExecPath = yield* HostProcess.ExecutablePath;
   const platform = yield* HostProcess.Platform;
   const arch = yield* HostProcess.Architecture;
@@ -881,6 +885,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   const install = Effect.fn("cloud.boot_service.install")(function* (options?: {
     readonly allowDowngrade?: boolean;
     readonly start?: boolean;
+    readonly trialDatabasePath?: string;
     readonly timeZone?: string;
   }) {
     const manager = yield* requireManager;
@@ -965,6 +970,10 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     }
 
     yield* Effect.gen(function* () {
+      let nextState: ServiceState = {
+        protocol: SERVICE_LAUNCHER_PROTOCOL,
+        activeVersion: input.cliVersion,
+      };
       if (installed) {
         const previousStateText = yield* fs.readFileString(statePath).pipe(Effect.option);
         if (Option.isSome(previousStateText)) {
@@ -984,6 +993,25 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
               targetVersion: input.cliVersion,
             });
           }
+          if (options?.trialDatabasePath !== undefined) {
+            const previous = parseServiceState(previousStateText.value);
+            if (previous === undefined)
+              return yield* new BootServiceInstallError({ cause: "Invalid service state" });
+            if (previous.activeVersion !== input.cliVersion) {
+              nextState = {
+                ...previous,
+                update: {
+                  id: yield* crypto.randomUUIDv4().pipe(Effect.orDie),
+                  fromVersion: previous.activeVersion,
+                  targetVersion: input.cliVersion,
+                  dbPath: options.trialDatabasePath,
+                  status: "pending",
+                },
+              };
+            }
+          }
+        } else if (options?.trialDatabasePath !== undefined) {
+          return yield* new BootServiceInstallError({ cause: "Missing service state for trial" });
         }
       }
       yield* fs
@@ -999,14 +1027,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       yield* writeDurably(
         statePath,
         // @effect-diagnostics-next-line preferSchemaOverJson:off - fixed launcher-owned document.
-        `${JSON.stringify(
-          {
-            protocol: SERVICE_LAUNCHER_PROTOCOL,
-            activeVersion: input.cliVersion,
-          } satisfies ServiceState,
-          null,
-          2,
-        )}\n`,
+        `${JSON.stringify(nextState, null, 2)}\n`,
       );
       if (!start && installed) {
         // The launcher only writes this file while a remote update is in
@@ -1016,7 +1037,10 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
         // it, which this read catches: the file no longer says what was just
         // written, so stop here before repointing the unit.
         const written = yield* fs.readFileString(statePath);
-        if (serviceStateActiveVersion(written) !== input.cliVersion) {
+        if (
+          serviceStateActiveVersion(written) !== nextState.activeVersion ||
+          parseServiceState(written)?.update?.targetVersion !== nextState.update?.targetVersion
+        ) {
           return yield* new BootServiceUpdatePendingError();
         }
       }

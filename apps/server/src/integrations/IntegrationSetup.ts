@@ -9,7 +9,7 @@ import {
   type IntegrationCatalogEntry,
   type IntegrationConnectionStatus,
   type IntegrationConnectResult,
-  type IntegrationError,
+  IntegrationError,
   type IntegrationSetupAction,
   type IntegrationSetupStep,
   type IntegrationSummary,
@@ -128,7 +128,7 @@ const signIn = (input: SetupInput): IntegrationSetupAction => {
 
 const googleSteps = (redirectUri: string | undefined): Array<IntegrationSetupStep> => [
   {
-    text: "Create a Google Cloud project, or pick one you already use for this.",
+    text: "Create a Google Cloud project named Cogenly, or reuse your Cogenly project if you already have one.",
     url: "https://console.cloud.google.com/projectcreate",
   },
   {
@@ -136,7 +136,7 @@ const googleSteps = (redirectUri: string | undefined): Array<IntegrationSetupSte
     url: `https://console.cloud.google.com/flows/enableapi?apiid=${GOOGLE_APIS.join(",")}`,
   },
   {
-    text: "Set up the consent screen: give the app a name and your email. Choose External for personal Gmail, or Internal if every account belongs to your Workspace organization.",
+    text: "Set up the consent screen: name the app Cogenly and add your email. Choose External for personal Gmail, or Internal if every account belongs to your Workspace organization.",
     url: "https://console.cloud.google.com/auth/branding",
   },
   {
@@ -149,7 +149,7 @@ const googleSteps = (redirectUri: string | undefined): Array<IntegrationSetupSte
     copy: { label: "Scopes", value: GOOGLE_SCOPES.join(" ") },
   },
   {
-    text: "Create an OAuth client of type Web application, and add this exact Authorized redirect URI.",
+    text: "Create an OAuth client named Cogenly of type Web application, and add this exact Authorized redirect URI.",
     url: "https://console.cloud.google.com/auth/clients/create",
     ...(redirectUri === undefined
       ? {}
@@ -177,7 +177,7 @@ const slackSteps = (redirectUri: string | undefined): Array<IntegrationSetupStep
 
 const githubSteps = (redirectUri: string | undefined): Array<IntegrationSetupStep> => [
   {
-    text: "Register a new OAuth app on GitHub. Any name and homepage URL will do.",
+    text: "Register a new OAuth app on GitHub named Cogenly. Any homepage URL will do.",
     url: "https://github.com/settings/applications/new",
   },
   {
@@ -387,21 +387,21 @@ export const setupActionFor = (input: SetupInput): IntegrationSetupAction | unde
       return retry(
         input,
         `Couldn't reach ${service}`,
-        `${service} didn't answer. Check your connection, then try again.`,
+        input.message ?? `${service} didn't answer. Check your connection, then try again.`,
         input.status === "needs_sign_in" ? "sign_in" : "test",
       );
     case "upstream_error":
       return retry(
         input,
         `${service} returned an error`,
-        `${service} answered with an error. Try again in a moment.`,
+        input.message ?? `${service} answered with an error. Try again in a moment.`,
         input.status === "needs_sign_in" ? "sign_in" : "test",
       );
     case "approval_required":
       return fix(
         input,
         "Needs your approval",
-        "This change widens access or moves a saved secret to a new server, so the owner makes it in Settings.",
+        "This change widens access or moves a saved secret to a new server, so the owner approves it inline in this thread.",
       );
     case "disabled":
       return fix(input, `${service} is turned off`, "Turn it on to let agents use it.", "enable");
@@ -447,16 +447,6 @@ export const catalogSetupFor = (input: {
       ? appClient({ entry: input.entry, redirectUri: input.redirectUri })
       : undefined;
 
-/**
- * `Settings → Integrations`, opened on one account (integration id) or
- * catalog entry (catalog id) when `target` is set. Relative when the
- * request's origin is unknown.
- */
-export const settingsSetupUrl = (origin: string | undefined, target?: string): string => {
-  const base = `${(origin === undefined ? null : URL.parse(origin))?.origin ?? ""}/settings/integrations`;
-  return target === undefined ? base : `${base}?setup=${encodeURIComponent(target)}`;
-};
-
 const slug = (value: string) =>
   value
     .toLowerCase()
@@ -478,16 +468,17 @@ export const secretItemName = (
 export const agentNextStep = (
   action: IntegrationSetupAction,
   context: {
-    readonly settingsUrl: string;
     readonly entry?: IntegrationCatalogEntry | undefined;
     readonly name?: string | undefined;
     readonly accountLabel?: string | undefined;
   },
 ): string => {
   const retry =
-    context.name === undefined
-      ? `Retry integration_add${context.entry === undefined ? "" : ` with catalogId ${context.entry.id}`}.`
-      : `Retry integration_update with name ${context.name}.`;
+    action.type === "sign_in" || action.type === "fix"
+      ? "The inline card is waiting in this thread; Cogenly tells this thread when it connects. Then run integration_test and list the tools. Do not poll or create another integration."
+      : context.name === undefined
+        ? `Retry integration_add${context.entry === undefined ? "" : ` with catalogId ${context.entry.id}`}.`
+        : `Retry integration_update with name ${context.name}.`;
   const copies =
     action.type === "oauth_client"
       ? action.steps
@@ -496,25 +487,43 @@ export const agentNextStep = (
           )
           .join("\n")
       : "";
-  return `${integrationSetupGuide(context.entry?.id ?? "custom").instructions}\n\nCurrent requirement: ${action.title}. ${action.type === "install_runtime" ? action.command : ["sign_in", "retry", "fix"].includes(action.type) ? action.message : ""} ${copies}\n${retry}`;
+  return `${integrationSetupGuide(context.entry?.id ?? "custom").instructions}\n\nCurrent requirement: ${action.title}. ${agentDoes(action)} ${copies}\n${retry}`;
 };
 
-/** A connect or update result for an agent: its setup action, in words and as a Settings link. */
+/**
+ * What the agent does about each requirement. Console work (apps, clients,
+ * keys) is the agent's, in the collaborative browser; only sign-in consent is
+ * the user's.
+ */
+const agentDoes = (action: IntegrationSetupAction): string => {
+  switch (action.type) {
+    case "oauth_client":
+      return "Create or reuse the Cogenly app and client yourself in the collaborative browser as the guide above says, save the secret to the vault, then retry. Do not hand these steps to the user.";
+    case "api_key":
+      return `Create a key named Cogenly yourself in the collaborative browser${action.url === undefined ? "" : ` at ${action.url}`}, save it with vault_save, then retry. Do not hand these steps to the user.`;
+    case "install_runtime":
+      return action.canInstall
+        ? "Install it with integration_install_runtime, then retry."
+        : `Run ${action.command} on the server, then retry.`;
+    case "sign_in":
+      return `${action.message} The inline Sign in card in this thread opens the sign-in page in the user's browser; consenting is theirs. Do not paste the link or send a Settings URL.`;
+    case "retry":
+      return action.message;
+    case "fix":
+      return `${action.message} The inline card shows the field to correct; fix what you can yourself with integration_update.`;
+  }
+};
+
+/** A connect or update result for an agent, with guidance for its inline card. */
 export const withAgentNextStep = (
   result: IntegrationConnectResult,
-  context: { readonly origin: string | undefined; readonly accountLabel?: string | undefined },
+  context: { readonly accountLabel?: string | undefined } = {},
 ): IntegrationAgentResult => {
   const setup = result.setup;
   if (setup === undefined) return result;
-  const settingsUrl = settingsSetupUrl(
-    context.origin,
-    result.integration?.id ?? setup.integrationId ?? setup.catalogId,
-  );
   return {
     ...result,
-    settingsUrl,
     nextStep: agentNextStep(setup, {
-      settingsUrl,
       entry: setup.catalogId === undefined ? undefined : integrationCatalogEntry(setup.catalogId),
       name: result.integration?.name,
       accountLabel: result.integration?.accountLabel ?? context.accountLabel,
@@ -523,14 +532,11 @@ export const withAgentNextStep = (
 };
 
 /** One `integrations_list` row for an agent, with the next step when it isn't usable. */
-export const agentSummary = (summary: IntegrationSummary, origin: string | undefined) => {
+export const agentSummary = (summary: IntegrationSummary) => {
   if (summary.setup === undefined) return summary;
-  const settingsUrl = settingsSetupUrl(origin, summary.integration.id);
   return {
     ...summary,
-    settingsUrl,
     nextStep: agentNextStep(summary.setup, {
-      settingsUrl,
       entry: integrationCatalogEntryFor(summary.integration),
       name: summary.integration.name,
       accountLabel: summary.integration.accountLabel,
@@ -550,14 +556,15 @@ const PLAIN_FAILURES: Partial<Record<IntegrationError["reason"], string>> = {
  * fault rather than the request's.
  */
 export const agentFailureMessage = (
-  error: { readonly reason: IntegrationError["reason"]; readonly cause?: unknown },
-  origin: string | undefined,
+  error: Pick<IntegrationError, "operation" | "reason" | "cause" | "oauthFailure">,
 ): { readonly message: string; readonly transient: boolean } => {
   const transient =
     error.reason === "storage" ||
     error.reason === "upstream_error" ||
     error.reason === "upstream_timeout" ||
     error.reason === "upstream_unreachable";
+  if (error.oauthFailure)
+    return { message: new IntegrationError({ ...error, operation: "sign in" }).message, transient };
   const plain = PLAIN_FAILURES[error.reason];
   if (plain !== undefined) return { message: plain, transient };
   const entry =
@@ -568,16 +575,17 @@ export const agentFailureMessage = (
     entry,
     status: "error",
     reason: error.reason,
-    ...(error.reason === "upstream_error" && typeof error.cause === "string"
+    // Say which step refused, so a field to fix is named rather than guessed.
+    ...(typeof error.cause === "string" &&
+    (error.reason === "upstream_error" || error.reason === "invalid_request")
       ? { message: error.cause }
-      : {}),
+      : error.reason === "invalid_request"
+        ? { message: `Cogenly refused the request at the "${error.operation}" step.` }
+        : {}),
   });
   if (action === undefined) return { message: PLAIN_FAILURES.storage!, transient };
   return {
-    message: agentNextStep(action, {
-      settingsUrl: settingsSetupUrl(origin, entry?.id),
-      entry,
-    }),
+    message: agentNextStep(action, { entry }),
     transient,
   };
 };

@@ -1087,6 +1087,10 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:process-diagnostics",
       tag: WS_METHODS.serverGetProcessDiagnostics,
     }),
+    agentProcesses: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:agent-processes",
+      tag: WS_METHODS.serverGetAgentProcesses,
+    }),
     hostResources: createEnvironmentQueryAtomFamily(runtime, {
       label: "environment-data:server:host-resources",
       idleTtlMs: 0,
@@ -1235,9 +1239,9 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.projectLabelsAdoptOrphanFolder,
     }),
     /** Delete an orphan folder that holds only an empty skeleton. */
-    removeProjectOrphanFolder: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:projectLabels:removeProjectOrphanFolder",
-      tag: WS_METHODS.projectLabelsRemoveOrphanFolder,
+    trashProjectOrphanFolder: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:trashProjectOrphanFolder",
+      tag: WS_METHODS.projectLabelsTrashOrphanFolder,
     }),
     moveThreadProjectFolder: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projectLabels:moveThreadProjectFolder",
@@ -1407,6 +1411,10 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:signal-process",
       tag: WS_METHODS.serverSignalProcess,
     }),
+    killAgentProcess: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:kill-agent-process",
+      tag: WS_METHODS.serverKillAgentProcess,
+    }),
     startWork: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:work:start",
       tag: WS_METHODS.workStart,
@@ -1447,6 +1455,15 @@ export function createServerEnvironmentAtoms<R, E>(
     answerSecretRequest: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:secrets:answer-request",
       tag: WS_METHODS.secretsAnswerRequest,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.threadId, input.turnItemId]),
+      },
+    }),
+    answerLoginRequest: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:secrets:answer-login-request",
+      tag: WS_METHODS.secretsAnswerLoginRequest,
       concurrency: {
         mode: "singleFlight",
         key: ({ environmentId, input }) =>

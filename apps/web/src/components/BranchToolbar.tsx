@@ -649,7 +649,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   const envModeLocked = envLocked || (serverThread !== null && activeWorktreePath !== null);
 
   // "Previous worktree" hops a draft into the most recently active worktree
-  // of this project — the "keep going where I just was" follow-up flow. Only
+  // of this project, the "keep going where I just was" follow-up flow. Only
   // drafts can hop; started server threads have their workspace pinned.
   const canUsePreviousWorktree =
     draftThread !== null && serverThread === null && !envModeLocked && !forceNewWorktree;

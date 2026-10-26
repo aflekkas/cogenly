@@ -2,11 +2,10 @@
  * Which server browser tab an agent's request means, and whether that tab is
  * the browser the user sees.
  *
- * With the desktop app attached, every server tab should render in the app's
- * browser panel: its `<webview>` lives in the user's Electron profile, so it
- * shares their logins. A tab that could not attach runs in the server's own
- * headless Chromium instead, whose cookies are separate. Agents must hear
- * about that, or they report a login page the user never sees.
+ * Native desktop tabs share the user's Electron profile. A tab that starts
+ * headless keeps its separate browsing session and streams into the panel
+ * when shown. Until then, agents must hear that its login can differ from
+ * the user's desktop tabs.
  */
 
 export interface TargetableTab {
@@ -81,7 +80,7 @@ export interface TabRenderingStatus {
 }
 
 export const BACKGROUND_TAB_NOTICE =
-  "This tab runs in Cogenly's background browser, not in the browser panel the user sees, so it does not share their logins. A sign-in page here does not mean the user is signed out. Cogenly asked the panel to show this tab and moves it there once the user has this thread open; until then, say the browser sessions differ instead of asking the user to sign in again.";
+  "This tab runs in Cogenly's background browser and can have different logins from the desktop's native tabs. A sign-in page here does not mean the user is signed out. Showing this tab streams the same page into the panel, preserving its login and page state. Keep working: retry or use preview_wait_for rather than asking the user to show the panel or reply. If a sign-in page remains, sign in with vault_fill, or ask for a missing login privately; do not ask the user to sign in again in chat.";
 
 export const notShownNotice = (shownTab: { readonly tabId: string; readonly url: string | null }) =>
   `The user is looking at another tab (${shownTab.tabId}${shownTab.url ? `, ${shownTab.url}` : ""}), not this one. Pass that tabId to work on the page they see.`;
@@ -95,7 +94,7 @@ export const tabRenderingStatus = (
   tab: TargetableTab,
   desktopAvailable: boolean,
 ): TabRenderingStatus =>
-  tab.rendersOnDesktop
+  tab.rendersOnDesktop || tab.viewerCount > 0
     ? { rendering: "panel" }
     : desktopAvailable
       ? { rendering: "background", sessionMismatch: true, notice: BACKGROUND_TAB_NOTICE }
@@ -162,11 +161,15 @@ export const revealBeforeAttach = (input: {
   !input.adopted &&
   input.agentOwned &&
   !input.background;
-
-/**
- * Whether a tab the desktop just attached should replace the server's headless
- * page for it. Always, while the tab runs headless: the panel's page is the one
- * the user sees and is signed in on.
- */
-export const shouldMoveToDesktop = (tab: { readonly rendersOnDesktop: boolean } | undefined) =>
-  tab !== undefined && !tab.rendersOnDesktop;
+/** A headless fallback is a pending handoff, never proof of the user's sign-in state. */
+export const openHandoffStatus = <A extends { sessionMismatch?: boolean | undefined }>(
+  status: A,
+): A & { status?: "pending_panel"; notice?: string } =>
+  status.sessionMismatch
+    ? {
+        ...status,
+        status: "pending_panel" as const,
+        notice:
+          "The tab is waiting for the signed-in browser panel. Retry preview_open with this tabId or preview_status; do not treat a background sign-in page as the user being signed out.",
+      }
+    : status;

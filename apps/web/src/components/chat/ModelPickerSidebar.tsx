@@ -21,12 +21,12 @@ import {
 /**
  * Build the hover tooltip for an instance button. Mirrors the old
  * kind-based copy but uses the entry's configured `displayName` so custom
- * instances get their user-authored name (e.g. "Codex Personal — Unavailable.").
+ * instances get their user-authored name (e.g. "Codex Personal: Unavailable.").
  */
 function describeUnavailableInstance(entry: ProviderInstanceEntry): string {
   const label = entry.displayName;
   if (!entry.enabled || entry.status === "disabled") {
-    return `${label} — Disabled in settings.`;
+    return `${label}: Disabled in settings.`;
   }
   if (entry.status === "ready" && entry.isAvailable) {
     return label;
@@ -34,7 +34,7 @@ function describeUnavailableInstance(entry: ProviderInstanceEntry): string {
   const kind =
     entry.status === "error" ? "Unavailable" : entry.status === "warning" ? "Limited" : "Not ready";
   const msg = entry.snapshot.message?.trim();
-  return msg ? `${label} — ${kind}. ${msg}` : `${label} — ${kind}.`;
+  return msg ? `${label}: ${kind}. ${msg}` : `${label}: ${kind}.`;
 }
 
 const SELECTED_INDICATOR_CLASS =
@@ -117,7 +117,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
   /**
    * Instance id values that should render the "new" sparkle badge. Callers
    * pass the subset of default built-in ids they want flagged (custom
-   * instances are never flagged — the user just made them).
+   * instances are never flagged, since the user just made them).
    */
   newBadgeInstanceIds?: ReadonlySet<ProviderInstanceId>;
 }) {
@@ -196,7 +196,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
             {props.showFavorites ? (
               <div className="border-b border-border/70" aria-hidden="true" />
             ) : null}
-            {/* Instance buttons (one per configured instance — built-in + custom) */}
+            {/* Instance buttons (one per configured instance, built-in + custom) */}
             {props.instanceEntries.map((entry) => {
               const isUnavailable = !isProviderInstancePickerReady(entry);
               const isContextDisabled = props.disabledInstanceIds?.has(entry.instanceId) ?? false;
@@ -214,7 +214,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                 : isContextDisabled
                   ? (props.getDisabledInstanceTooltip?.(entry) ?? entry.displayName)
                   : showNewBadge
-                    ? `${entry.displayName} — New`
+                    ? `${entry.displayName} (New)`
                     : entry.displayName;
 
               const button = (
@@ -255,7 +255,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                     accentColor={entry.accentColor}
                     showBadge={showInstanceBadge}
                     className="size-6 z-30"
-                    iconClassName="size-5"
+                    size="lg"
                     indicatorBackground={
                       isHovered && !isDisabled
                         ? "var(--muted)"

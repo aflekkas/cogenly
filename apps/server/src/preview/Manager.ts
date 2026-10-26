@@ -2,7 +2,7 @@
  * In-memory PreviewManager implementation.
  *
  * Sessions are keyed by `(threadId, tabId)`; a single thread can host
- * multiple tabs (browser-style). `open` always creates a new tab — tab
+ * multiple tabs (browser-style). `open` always creates a new tab; tab
  * lifecycle is owned by the renderer.
  *
  * Events are published via Effect's `PubSub`, so subscriber failures are
@@ -48,6 +48,7 @@ export class PreviewManager extends Context.Service<
     readonly open: (
       input: PreviewOpenInput & {
         readonly automationOwner?: string;
+        readonly serverRendering?: "stream" | "native";
         /** Runs before the `opened` event publishes, so subscribers find state keyed by the tab. */
         readonly beforePublish?: (snapshot: PreviewSessionSnapshot) => void;
       },
@@ -66,6 +67,12 @@ export class PreviewManager extends Context.Service<
       readonly threadId: string;
       readonly tabId: string;
       readonly agentDriving: boolean;
+    }) => Effect.Effect<void, PreviewError>;
+    /** Records how clients display the existing server page. */
+    readonly reportServerRendering: (input: {
+      readonly threadId: string;
+      readonly tabId: string;
+      readonly serverRendering: "stream" | "native";
     }) => Effect.Effect<void, PreviewError>;
     readonly resize: (
       input: PreviewResizeInput,
@@ -148,7 +155,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
   const crypto = yield* Crypto.Crypto;
   const serverEpoch = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
   const stateRef = yield* SynchronizedRef.make<ManagerState>(initialState);
-  // Unbounded PubSub is fine here — events are tiny and we don't want to
+  // Unbounded PubSub is fine here: events are tiny and we don't want to
   // block publishers if a subscriber is slow. WS clients backpressure on
   // their own queues downstream.
   const eventsPubSub = yield* PubSub.unbounded<PreviewEvent>();
@@ -227,6 +234,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
         viewport: input.viewport ?? FILL_PREVIEW_VIEWPORT,
         ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
         ...(runtime === undefined ? {} : { runtime }),
+        ...(input.serverRendering === undefined ? {} : { serverRendering: input.serverRendering }),
         ...(runtime === "server" && input.automationOwner !== undefined
           ? { automationOwner: input.automationOwner }
           : {}),
@@ -535,10 +543,35 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     );
   });
 
+  const reportServerRendering: PreviewManager["Service"]["reportServerRendering"] = (input) =>
+    mutateExistingSession(input.threadId, input.tabId, (session) =>
+      Effect.gen(function* () {
+        if (session.snapshot.serverRendering === input.serverRendering)
+          return { next: session, emit: null, result: undefined };
+        const snapshot = {
+          ...session.snapshot,
+          serverRendering: input.serverRendering,
+          updatedAt: yield* currentIsoTimestamp,
+        };
+        return {
+          next: { ...session, snapshot },
+          emit: {
+            type: "navigated" as const,
+            threadId: session.threadId,
+            tabId: session.tabId,
+            createdAt: snapshot.updatedAt,
+            snapshot,
+          },
+          result: undefined,
+        };
+      }),
+    );
+
   return PreviewManager.of({
     open,
     requestReveal,
     reportAgentDriving,
+    reportServerRendering,
     navigate,
     reportStatus,
     resize,

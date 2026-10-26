@@ -57,6 +57,22 @@ function problem(overrides: Partial<MachineHealthProblem> = {}): MachineHealthPr
 }
 
 describe("healthFixAction", () => {
+  it("routes a named quarantine discard through the connected peer", () => {
+    const quarantine = problem({
+      itemKey: "sync:quarantined-thread:thread-1",
+      checkId: "sync",
+      title: "Discard quarantined changes for Brakes",
+      detail: "7 incoming items (2048 bytes)",
+      fix: "discard-quarantined",
+    });
+    expect(
+      healthFixAction([quarantine], context([LAPTOP], { viaEnvironmentId: LAPTOP })),
+    ).toMatchObject({
+      kind: "fix",
+      originEnvironmentId: HUB,
+      direct: { environmentId: LAPTOP, itemKeys: [quarantine.itemKey] },
+    });
+  });
   it("runs a direct fix on the origin when this client reaches it", () => {
     expect(healthFixAction([problem()], context([HUB, LAPTOP]))).toMatchObject({
       kind: "fix",
@@ -133,6 +149,41 @@ describe("healthFixAction", () => {
         context([HUB], OLD_SERVERS),
       ),
     ).toMatchObject({ direct: { kind: "legacy", commands: [{ kind: "setupSandbox" }] } });
+  });
+
+  it("maps a quarantine Fix to the legacy retry command when the origin is connected", () => {
+    const sync = problem({
+      itemKey: "sync:quarantined:laptop",
+      checkId: "sync",
+      fix: "retry-sync",
+      target: { _tag: "machine", environmentId: LAPTOP },
+    });
+    expect(healthFixAction([sync], context([HUB], OLD_SERVERS))).toMatchObject({
+      direct: {
+        kind: "legacy",
+        commands: [
+          {
+            kind: "retrySync",
+            itemKey: sync.itemKey,
+            environmentId: HUB,
+            peerEnvironmentId: LAPTOP,
+          },
+        ],
+      },
+    });
+  });
+
+  it("hands quarantine to an agent when only an older intermediary is connected", () => {
+    const sync = problem({
+      itemKey: "sync:quarantined:laptop",
+      checkId: "sync",
+      fix: "retry-sync",
+      target: { _tag: "machine", environmentId: LAPTOP },
+    });
+    expect(
+      healthFixAction([sync], context([LAPTOP], { ...OLD_SERVERS, viaEnvironmentId: LAPTOP }))
+        ?.kind,
+    ).toBe("agent");
   });
 
   it("gives an older server's items with no older command to the agent", () => {
@@ -369,4 +420,12 @@ describe("machineHealthLink", () => {
       machineEnvironmentId: HUB,
     });
   });
+});
+
+it("routes a version-skew Fix through the origin machine", () => {
+  const action = healthFixAction(
+    [problem({ fix: "update-machine", target: { _tag: "machine", environmentId: OTHER } })],
+    context([HUB]),
+  );
+  expect(action).toMatchObject({ kind: "fix", direct: { kind: "healthFix" } });
 });

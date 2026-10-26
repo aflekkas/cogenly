@@ -3,7 +3,7 @@ import { PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { VcsDriverKind } from "./vcs.ts";
 
 /**
- * `SourceControlProviderKind` — open branded slug naming a source control host, such as `github`.
+ * `SourceControlProviderKind`: open branded slug naming a source control host, such as `github`.
  *
  * Open on purpose, like `ProviderDriverKind`: a server can report a host this client does not
  * ship a definition for, and clients fall back to a generic presentation instead of failing to

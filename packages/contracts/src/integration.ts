@@ -87,6 +87,24 @@ export type IntegrationAuth = typeof IntegrationAuth.Type;
 const IntegrationAccountLabel = Schema.String.check(Schema.isMaxLength(200));
 
 const integrationFields = {
+  /** Catalog mark, or a public image URL for a custom integration. */
+  icon: Schema.optional(IntegrationCatalogId),
+  iconUrl: Schema.optional(
+    Schema.String.check(
+      Schema.isMaxLength(2000),
+      Schema.makeFilter((value) => {
+        const url = URL.parse(value);
+        return (
+          url !== null &&
+          url.protocol === "https:" &&
+          !url.username &&
+          !url.password &&
+          !url.search &&
+          !url.hash
+        );
+      }),
+    ),
+  ),
   name: IntegrationName,
   displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   transport: IntegrationTransport,
@@ -110,10 +128,22 @@ export const IntegrationProvenance = Schema.Struct({
   signedInViaAgent: Schema.optional(Schema.Boolean),
 });
 
+/**
+ * What an agent set up for an integration, and where: the cloud project, the
+ * OAuth app and client ids, redirect URIs, the account that owns them. Plain
+ * text so any service fits; a later agent reads it to find and fix the setup.
+ * Never secrets. In an input, an empty string clears the notes.
+ */
+export const IntegrationSetupNotesText = Schema.String.check(Schema.isMaxLength(4000));
+
 export const Integration = Schema.Struct({
   id: IntegrationId,
   ...integrationFields,
   provenance: Schema.optional(IntegrationProvenance),
+  /** Stored trimmed and never blank; clearing removes it. */
+  setupNotes: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(4000))),
+  /** When the server last wrote `setupNotes`. */
+  setupNotesUpdatedAt: Schema.optional(IsoDateTime),
   /** Credential destination authorized by the owner; absent on legacy definitions. */
   credentialOrigin: Schema.optional(Schema.String),
   /**
@@ -131,6 +161,7 @@ export type Integration = typeof Integration.Type;
 export const IntegrationCreateInput = Schema.Struct({
   ...integrationFields,
   enabled: Schema.optional(Schema.Boolean),
+  setupNotes: Schema.optional(IntegrationSetupNotesText),
 });
 export type IntegrationCreateInput = typeof IntegrationCreateInput.Type;
 
@@ -141,6 +172,7 @@ export const GoogleWorkspaceAddInput = Schema.Struct({
   name: Schema.optional(IntegrationName),
   callbackOrigin: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(2000))),
   scope: Schema.optional(IntegrationScope),
+  setupNotes: Schema.optional(IntegrationSetupNotesText),
 });
 export type GoogleWorkspaceAddInput = typeof GoogleWorkspaceAddInput.Type;
 export const IntegrationAddInput = Schema.Union([IntegrationCreateInput, GoogleWorkspaceAddInput]);
@@ -171,6 +203,7 @@ export const IntegrationCatalogConnectInput = Schema.Struct({
   accountLabel: Schema.optional(GoogleWorkspaceAddInput.fields.accountLabel),
   inputs: Schema.optional(IntegrationCatalogInputs),
   scope: Schema.optional(IntegrationScope),
+  setupNotes: Schema.optional(IntegrationSetupNotesText),
 });
 export type IntegrationCatalogConnectInput = typeof IntegrationCatalogConnectInput.Type;
 
@@ -180,6 +213,8 @@ export type IntegrationCatalogConnectInput = typeof IntegrationCatalogConnectInp
  * `catalogId` is set, otherwise as `IntegrationAddInput`.
  */
 export const IntegrationAddToolInput = Schema.Struct({
+  icon: integrationFields.icon,
+  iconUrl: integrationFields.iconUrl,
   catalogId: Schema.optional(IntegrationCatalogId),
   apiKey: IntegrationCatalogInputs.fields.apiKey,
   clientId: IntegrationCatalogInputs.fields.clientId,
@@ -199,10 +234,13 @@ export const IntegrationAddToolInput = Schema.Struct({
   accountLabel: integrationFields.accountLabel,
   auth: integrationFields.auth,
   callbackOrigin: GoogleWorkspaceAddInput.fields.callbackOrigin,
+  setupNotes: Schema.optional(IntegrationSetupNotesText),
 });
 export type IntegrationAddToolInput = typeof IntegrationAddToolInput.Type;
 
 export const IntegrationUpdateInput = Schema.Struct({
+  icon: integrationFields.icon,
+  iconUrl: integrationFields.iconUrl,
   id: IntegrationId,
   command: Schema.optional(IntegrationCommand),
   displayName: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
@@ -218,6 +256,8 @@ export const IntegrationUpdateInput = Schema.Struct({
   accountLabel: Schema.optional(IntegrationAccountLabel),
   /** Null turns OAuth sign-in off and forgets the stored tokens. */
   auth: Schema.optional(Schema.NullOr(IntegrationAuth)),
+  /** Replaces the setup notes; an empty string clears them. */
+  setupNotes: Schema.optional(IntegrationSetupNotesText),
 });
 export type IntegrationUpdateInput = typeof IntegrationUpdateInput.Type;
 
@@ -437,6 +477,9 @@ export const IntegrationSource = Schema.Struct({
   name: IntegrationName,
   displayName: Schema.String,
   icon: Schema.NullOr(IntegrationCatalogId),
+  iconUrl: integrationFields.iconUrl,
+  /** A custom HTTPS server's host, whose cached site icon stands in for a logo. */
+  faviconHost: Schema.optional(Schema.String),
   /** The catalog service's name, or the display name of a custom server. */
   serviceName: Schema.String,
   accountLabel: Schema.NullOr(Schema.String),
@@ -454,13 +497,12 @@ export type IntegrationSourcesResult = typeof IntegrationSourcesResult.Type;
 
 /**
  * `integration_add` and `integration_update` for agents: what the Settings
- * call returns, plus the next action in plain words and a Settings link the
- * user can open.
+ * call returns, plus the next action in plain words. The user acts on the
+ * inline card in the thread, never a Settings link.
  */
 export const IntegrationAgentResult = Schema.Struct({
   ...IntegrationConnectResult.fields,
   nextStep: Schema.optional(Schema.String),
-  settingsUrl: Schema.optional(Schema.String),
 });
 export type IntegrationAgentResult = typeof IntegrationAgentResult.Type;
 
@@ -469,7 +511,6 @@ export const IntegrationAgentListResult = Schema.Struct({
     Schema.Struct({
       ...IntegrationSummary.fields,
       nextStep: Schema.optional(Schema.String),
-      settingsUrl: Schema.optional(Schema.String),
     }),
   ),
 });
@@ -488,8 +529,22 @@ export const IntegrationTestResult = Schema.Struct({
 });
 export type IntegrationTestResult = typeof IntegrationTestResult.Type;
 
+/** Bounded OAuth diagnostics, without request URLs, codes or credentials. */
+export const IntegrationOAuthFailure = Schema.Struct({
+  stage: Schema.String,
+  host: Schema.String,
+  status: Schema.optional(Schema.Number),
+  error: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.String),
+});
+export type IntegrationOAuthFailure = typeof IntegrationOAuthFailure.Type;
+
+export const integrationOAuthFailureMessage = (failure: IntegrationOAuthFailure) =>
+  `OAuth ${failure.stage} failed at ${failure.host}${failure.status === undefined ? "" : ` (HTTP ${failure.status})`}${failure.error ? `: ${failure.error}` : ""}${failure.description ? ` (${failure.description})` : ""}.`;
+
 export class IntegrationError extends Schema.TaggedError<IntegrationError>()("IntegrationError", {
   operation: Schema.String,
+  oauthFailure: Schema.optional(IntegrationOAuthFailure),
   reason: Schema.Literals([
     "storage",
     "not_found",
@@ -514,6 +569,7 @@ export class IntegrationError extends Schema.TaggedError<IntegrationError>()("In
   cause: Schema.optional(Schema.Defect()),
 }) {
   override get message(): string {
+    if (this.oauthFailure) return integrationOAuthFailureMessage(this.oauthFailure);
     return `Could not ${this.operation} integration (${this.reason}).`;
   }
 }
@@ -552,6 +608,8 @@ export const IntegrationCallResult = Schema.Struct({
 export type IntegrationCallResult = typeof IntegrationCallResult.Type;
 
 export const IntegrationUpdateByNameInput = Schema.Struct({
+  icon: integrationFields.icon,
+  iconUrl: integrationFields.iconUrl,
   command: Schema.optional(IntegrationCommand),
   name: IntegrationName,
   callbackOrigin: GoogleWorkspaceAddInput.fields.callbackOrigin,
@@ -566,6 +624,7 @@ export const IntegrationUpdateByNameInput = Schema.Struct({
   hint: Schema.optional(Schema.String.check(Schema.isMaxLength(500))),
   accountLabel: Schema.optional(IntegrationAccountLabel),
   auth: Schema.optional(Schema.NullOr(IntegrationAuth)),
+  setupNotes: Schema.optional(IntegrationSetupNotesText),
 });
 export type IntegrationUpdateByNameInput = typeof IntegrationUpdateByNameInput.Type;
 
@@ -576,51 +635,17 @@ export const IntegrationSetupGuideInput = Schema.Struct({ service: TrimmedNonEmp
 export const IntegrationSetupGuideResult = Schema.Struct({
   service: Schema.String,
   instructions: Schema.String,
+  /** Notes earlier agents recorded on this service's existing integrations; also opening `instructions`. */
+  existingSetupNotes: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        name: Schema.String,
+        displayName: Schema.String,
+        accountLabel: Schema.optional(Schema.String),
+        setupNotes: Schema.String,
+        setupNotesUpdatedAt: Schema.optional(Schema.String),
+      }),
+    ),
+  ),
 });
-
-/**
- * What importing one native server leaves to do. `ready` needs nothing collected, `needs-sign-in`
- * is a claude.ai connector whose authorization stays with the account, `needs-secret` waits on
- * withheld header, environment or endpoint values, `needs-setup` on withheld command arguments,
- * and `unsupported` is not imported at all.
- */
-export const IntegrationNativeImportServerStatus = Schema.Literals([
-  "ready",
-  "needs-sign-in",
-  "needs-secret",
-  "needs-setup",
-  "unsupported",
-]);
-export type IntegrationNativeImportServerStatus = typeof IntegrationNativeImportServerStatus.Type;
-
-/** One native server as Settings reviews it: names and places only, no values. */
-export const IntegrationNativeImportServer = Schema.Struct({
-  /** The server's name in its native config. */
-  label: Schema.String,
-  provider: Schema.Literals(["claude", "codex"]),
-  /** `user` is the provider's own config, `project` a repository's, `account` a claude.ai connector. */
-  scope: Schema.Literals(["user", "project", "account"]),
-  /** The config file, home-relative where possible. Absent for claude.ai connectors. */
-  file: Schema.optional(Schema.String),
-  status: IntegrationNativeImportServerStatus,
-});
-export type IntegrationNativeImportServer = typeof IntegrationNativeImportServer.Type;
-
-export const IntegrationNativeImportPreview = Schema.Struct({
-  definitions: Schema.Array(IntegrationCreateInput),
-  /** Every native server found, for the owner's review. Absent from older servers. */
-  servers: Schema.optional(Schema.Array(IntegrationNativeImportServer)),
-  reconnect: Schema.Array(Schema.String),
-  warnings: Schema.Array(Schema.String),
-  /** At least one source needs manual review; importing must not complete the gate. */
-  incomplete: Schema.optional(Schema.Boolean),
-});
-export type IntegrationNativeImportPreview = typeof IntegrationNativeImportPreview.Type;
-export const IntegrationNativeImportResult = Schema.Struct({
-  imported: Schema.Array(Schema.String),
-  reconnect: Schema.Array(Schema.String),
-  warnings: Schema.Array(Schema.String),
-  /** At least one source needs manual review; importing must not complete the gate. */
-  incomplete: Schema.optional(Schema.Boolean),
-});
-export type IntegrationNativeImportResult = typeof IntegrationNativeImportResult.Type;
+export type IntegrationSetupGuideResult = typeof IntegrationSetupGuideResult.Type;

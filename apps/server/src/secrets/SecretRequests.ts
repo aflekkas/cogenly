@@ -12,6 +12,7 @@ import {
   CommandId,
   SecretRef,
   SecretRequestError,
+  VaultItemId,
   type ProjectId,
   type SecretRequestAnswerInput,
   type ThreadId,
@@ -29,6 +30,8 @@ import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
+import * as Vault from "../vault/Vault.ts";
+import * as InlineCardNotifications from "../orchestration-v2/InlineCardNotifications.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as Metrics from "../observability/Metrics.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -92,6 +95,8 @@ export class SecretRequests extends Context.Service<
 >()("cogenly-server/secrets/SecretRequests") {}
 
 const make = Effect.gen(function* () {
+  const vault = yield* Vault.Vault;
+  const notifications = yield* InlineCardNotifications.optional;
   const store = yield* ServerSecretStore.ServerSecretStore;
   const fileSystem = yield* FileSystem.FileSystem;
   const threadManagement = yield* ThreadManagementService.ThreadManagementService;
@@ -100,6 +105,17 @@ const make = Effect.gen(function* () {
     yield* store.getOrCreateRandom("secret-request-salt", 32).pipe(Effect.orDie),
   ).toString("hex");
 
+  /** Removes a vault item this answer created; logged, since the value stays in the vault otherwise. */
+  const removeVaultItem = (itemId: string) =>
+    vault.delete({ id: VaultItemId.make(itemId) }).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("Could not remove an unused secret request item", {
+          reason: error.reason,
+        }),
+      ),
+    );
+
+  const answerLock = yield* Semaphore.make(1);
   const answer: SecretRequests["Service"]["answer"] = (input) =>
     Effect.gen(function* () {
       yield* Effect.annotateCurrentSpan({
@@ -119,17 +135,34 @@ const make = Effect.gen(function* () {
       if (item.secretStatus !== "pending") {
         return yield* new SecretRequestError({ reason: "already_answered" });
       }
-      // The agent is waiting inside the run that asked; once it has ended,
-      // nobody will ever receive the ref, so a value saved now would be lost.
-      const run = records.runs.find((candidate) => candidate.id === item.runId);
-      if (run === undefined || ThreadManagementService.isTerminalRunStatus(run.status)) {
-        return yield* new SecretRequestError({ reason: "agent_stopped" });
+      // A sign-in card is saved through LoginRequests, straight into the vault;
+      // a single value stored here would never be read.
+      if (item.login !== undefined && input.answer.type === "save") {
+        return yield* new SecretRequestError({ reason: "not_found" });
       }
+      // An integration setup card is answered by its sign-in or approval, not a value.
+      if (item.integrationSetup !== undefined)
+        return yield* new SecretRequestError({ reason: "not_found" });
       // Store first: the card only says saved once the value is kept. Create,
       // not set: a second answer racing this one must not replace the value.
       // A value already there on a card still pending is an earlier save whose
       // record failed and could not be cleaned up; recording it finishes that save.
-      if (input.answer.type === "save") {
+      let secretVault = item.secretVault;
+      let savedVaultItemId: string | undefined;
+      if (input.answer.type === "save" && secretVault) {
+        const saved = yield* vault
+          .saveSecretValue({ ...secretVault, value: input.answer.secret })
+          .pipe(
+            Effect.mapError((cause) => new SecretRequestError({ reason: "vault_failed", cause })),
+          );
+        savedVaultItemId = saved.item.id;
+        secretVault = {
+          ...secretVault,
+          savedItemId: saved.item.id,
+          savedItemName: saved.item.name,
+        };
+      }
+      if (input.answer.type === "save" && !secretVault) {
         const encoded = yield* encodeStored({
           projectId: records.thread.projectId,
           value: input.answer.secret,
@@ -160,6 +193,7 @@ const make = Effect.gen(function* () {
           reason: item.reason,
           ...(item.placeholder === undefined ? {} : { placeholder: item.placeholder }),
           secretStatus,
+          ...(secretVault ? { secretVault } : {}),
         })
         .pipe(
           Effect.mapError((cause) => new SecretRequestError({ reason: "record_failed", cause })),
@@ -167,14 +201,22 @@ const make = Effect.gen(function* () {
           // stored above would make that retry look already answered.
           Effect.tapError(() =>
             input.answer.type === "save"
-              ? removeLogged(storeName(refFor(salt, input.threadId, item.id)))
+              ? savedVaultItemId !== undefined
+                ? removeVaultItem(savedVaultItemId)
+                : removeLogged(storeName(refFor(salt, input.threadId, item.id)))
               : Effect.void,
           ),
         );
-      if (input.answer.type !== "save") return;
-      // A request is answered once: if the agent's wait closed the card between
-      // the checks above and this record, the record changed nothing. Nobody
-      // will receive the ref, so the value is deleted rather than left to expire.
+      yield* notifications.answered({
+        threadId: input.threadId,
+        key: `secret:${input.threadId}:${item.id}`,
+        summary:
+          input.answer.type === "save"
+            ? `Secret saved: ${secretVault?.savedItemName ?? item.label}. ${secretVault ? "Use vault_list to access it" : `Use secretRef ${refFor(salt, input.threadId, item.id)}`}`
+            : `Secret request declined: ${item.label}`,
+      });
+      if (input.answer.type !== "save" || secretVault) return;
+      // A concurrent explicit cancellation must not leave an unused ref behind.
       const recorded = yield* threadManagement
         .getThreadRecords(input.threadId, ["turnItems"], {
           turnItemTypes: ["secret_request"],
@@ -188,7 +230,7 @@ const make = Effect.gen(function* () {
         yield* removeLogged(storeName(refFor(salt, input.threadId, item.id)));
         return yield* new SecretRequestError({ reason: "agent_stopped" });
       }
-    }).pipe(Effect.withSpan("SecretRequests.answer"));
+    }).pipe(answerLock.withPermits(1), Effect.withSpan("SecretRequests.answer"));
 
   const savedRef: SecretRequests["Service"]["savedRef"] = (input) =>
     Effect.gen(function* () {

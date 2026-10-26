@@ -6,8 +6,8 @@ export type PullRequestBodySegment =
       readonly kind: "attachment";
       readonly url: string;
       /**
-       * What the reader can be told the upload is. The uuid says nothing on its own — the type
-       * only appears in the signed redirect GitHub answers with — but the shape does: GitHub
+       * What the reader can be told the upload is. The uuid says nothing on its own (the type
+       * only appears in the signed redirect GitHub answers with), but the shape does: GitHub
        * writes a dropped image into the body as an `<img>` tag, so a bare attachment link on its
        * own line is what it does with a video. Anything else keeps the neutral name.
        */
@@ -33,7 +33,7 @@ const VIDEO_TAG_SRC_PATTERN = /<(?:video|source)\b[^>]*\bsrc\s*=\s*["']([^"']+)[
 const STANDALONE_VIDEO_TAG_PATTERN = /^\s*<video\b/iu;
 const VIDEO_TAG_END_PATTERN = /<\/video>\s*$/iu;
 
-/** Anything else — `javascript:`, `data:`, a relative path — is not an upload to link out to. */
+/** Anything else (`javascript:`, `data:`, a relative path) is not an upload to link out to. */
 function isWebUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
@@ -114,7 +114,7 @@ export function splitPullRequestBody(body: string): ReadonlyArray<PullRequestBod
       markdown.push(line);
       continue;
     }
-    // A tag can span lines, so look ahead for its close — bounded, and without building the
+    // A tag can span lines, so look ahead for its close: bounded, and without building the
     // joined text until one is actually found.
     const lastCandidate = Math.min(index + VIDEO_TAG_MAX_LINES, lines.length) - 1;
     let cursor = index;

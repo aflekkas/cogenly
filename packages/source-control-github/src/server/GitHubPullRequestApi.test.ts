@@ -2015,7 +2015,7 @@ layer("GitHubPullRequestApi.layer", (it) => {
         filters: { checks: "passing" },
       });
 
-      // Pending equals neither "passing" nor "failing", so it satisfies neither filter value —
+      // Pending equals neither "passing" nor "failing", so it satisfies neither filter value;
       // the same row would also be dropped by `checks: "failing"`.
       assert.deepStrictEqual(batch.items, []);
     }),
@@ -2044,7 +2044,7 @@ layer("GitHubPullRequestApi.layer", (it) => {
 
         // `draft` is a filter the fallback can judge over its own rows just as search judges it,
         // so an empty search answer under it alone is still ambiguous between "nothing matches"
-        // and "this repository is not indexed" — and the fallback applies the filter itself,
+        // and "this repository is not indexed", and the fallback applies the filter itself,
         // keeping only the non-draft row.
         expect(searchOfCall(1)).toBeUndefined();
         expect(batch.items.map((item) => item.number)).toEqual([2]);
@@ -2178,7 +2178,7 @@ layer("GitHubPullRequestApi.layer", (it) => {
         cursor: { updatedBefore: "2026-07-02T00:00:00Z", delivered: 10 },
       });
 
-      // Inclusive, so the rows already sent at that instant come back for the caller to drop —
+      // Inclusive, so the rows already sent at that instant come back for the caller to drop,
       // which is what keeps the ones beside them from being skipped.
       expect(searchOfCall(0)).toBe(
         "is:pr is:open updated:<=2026-07-02T00:00:00Z sort:updated-desc repo:acme/web",

@@ -28,9 +28,9 @@ function humanizeSlug(slug: string): string {
 /**
  * Resolve an instance's label with a tiered priority:
  *
- *   1. A snapshot `displayName` that differs from the driver's brand label —
+ *   1. A snapshot `displayName` that differs from the driver's brand label:
  *      the server has explicitly named this instance, trust it.
- *   2. For non-default instances, a humanized `instanceId` — the server fell
+ *   2. For non-default instances, a humanized `instanceId`; the server fell
  *      back to the driver-level label (the same for every instance of that
  *      kind), so the slug is what keeps "Codex" and "Codex Personal" apart.
  *   3. The snapshot's `displayName`, or the brand label from contracts.

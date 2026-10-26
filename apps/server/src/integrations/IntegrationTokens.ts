@@ -50,6 +50,7 @@ export const SignInAttachment = Schema.Struct({
       url: Schema.String,
       scope: IntegrationScope,
       oauthScope: Schema.optional(Schema.String),
+      clientId: Schema.optional(Schema.String),
     }),
   ),
 });

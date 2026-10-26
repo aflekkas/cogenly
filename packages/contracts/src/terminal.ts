@@ -144,6 +144,8 @@ export const TerminalSummary = Schema.Struct({
    * short, which cuts long commands mid-word; clients title, show and copy this.
    */
   command: Schema.optional(Schema.String.check(Schema.isMaxLength(TERMINAL_COMMAND_MAX_LENGTH))),
+  /** An agent command started to keep running past stop, settle and idle reaping. */
+  keepRunning: Schema.optional(Schema.Boolean),
 });
 export type TerminalSummary = typeof TerminalSummary.Type;
 

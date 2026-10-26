@@ -160,7 +160,7 @@ export function BranchToolbarBranchSelector({
     });
 
   // ---------------------------------------------------------------------------
-  // Thread branch mutation (colocated — only this component calls it)
+  // Thread branch mutation (colocated; only this component calls it)
   // ---------------------------------------------------------------------------
   const setThreadBranch = useCallback(
     (branch: string | null, worktreePath: string | null, automatic = false) => {

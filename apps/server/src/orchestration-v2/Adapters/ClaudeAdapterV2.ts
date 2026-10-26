@@ -49,6 +49,7 @@ import * as NodeChildProcess from "node:child_process";
 import { parseCliArgs } from "@cogenly/shared/cliArgs";
 import { AgentScope } from "@cogenly/shared/AgentScope";
 import * as HostProcess from "@cogenly/shared/HostProcess";
+import * as AgentProcesses from "../../process/AgentProcesses.ts";
 import { applyClaudePromptEffortPrefix } from "@cogenly/shared/model";
 import {
   CLAUDE_RESUME_COMPACTION_NEVER_ANSWER,
@@ -265,7 +266,7 @@ const CLAUDE_MCP_REGISTRATION_TIMEOUT = "90 seconds";
  * before adding the tail to exit errors. Here stderr is dropped instead, so
  * exit errors carry only the code or signal.
  */
-function spawnClaudeProcessGroup(options: ClaudeSpawnOptions): ClaudeSpawnedProcess {
+function spawnClaudeProcessGroup(options: ClaudeSpawnOptions) {
   const child = NodeChildProcess.spawn(options.command, options.args, {
     cwd: options.cwd,
     env: options.env,
@@ -762,6 +763,30 @@ export const layerQueryRunner: Layer.Layer<
     const { native: nativeEventLogger } = yield* ProviderEventLoggers.ProviderEventLoggers;
     const agentScope = yield* AgentScope;
     const platform = yield* HostProcess.Platform;
+    const agentProcesses = yield* AgentProcesses.AgentProcesses;
+    const runFork = Effect.runForkWith(yield* Effect.context<never>());
+    // The CLI's group goes in the agent process ledger, so a server that dies
+    // mid-turn leaves nothing the next one cannot find and kill.
+    const spawnTrackedClaudeProcess =
+      (threadId: string) =>
+      (options: ClaudeSpawnOptions): ClaudeSpawnedProcess => {
+        const child = spawnClaudeProcessGroup(options);
+        const pid = child.pid;
+        if (pid !== undefined) {
+          const identity = { threadId, terminalId: `provider-claude-${pid}` };
+          runFork(
+            agentProcesses.register({
+              ...identity,
+              kind: "provider",
+              command: "claude",
+              pid,
+              keepRunning: false,
+            }),
+          );
+          child.once("exit", () => runFork(agentProcesses.terminate(identity)));
+        }
+        return child;
+      };
 
     return ClaudeAgentSdkQueryRunner.of({
       allocateSessionId: crypto
@@ -816,7 +841,7 @@ export const layerQueryRunner: Layer.Layer<
         // groups, so there the SDK spawns the CLI itself.
         const spawnClaudeCodeProcess =
           options.spawnClaudeCodeProcess ??
-          (platform === "win32" ? undefined : spawnClaudeProcessGroup);
+          (platform === "win32" ? undefined : spawnTrackedClaudeProcess(input.threadId));
         // The CLI is running once query() returns, so it is closed if anything
         // before the session is handed out fails or is interrupted.
         const queryRuntime = yield* Effect.uninterruptibleMask((restore) =>
@@ -1158,8 +1183,6 @@ export function makeClaudeQueryOptions(input: {
   readonly onUserDialog?: ClaudeQueryOptions["onUserDialog"];
   readonly supportedDialogKinds?: ClaudeQueryOptions["supportedDialogKinds"];
   readonly allowDangerouslySkipPermissions?: boolean;
-  /** True restores Claude's native MCP configuration. */
-  readonly useProviderConnectors?: boolean;
   readonly managedMcpConfig?: boolean;
   /** Servers an administrator's `managed-mcp.json` defines, named in the prompt. */
   readonly managedMcpServerNames?: ReadonlyArray<string>;
@@ -1177,10 +1200,9 @@ export function makeClaudeQueryOptions(input: {
     "dangerously-skip-permissions": _launchArgSkipPermissions,
     ...extraArgs
   } = input.settings === undefined ? {} : parseCliArgs(input.settings.launchArgs).flags;
-  if (input.useProviderConnectors !== true) {
-    delete extraArgs["mcp-config"];
-    delete extraArgs["strict-mcp-config"];
-  }
+  // Native MCP configuration stays off: only Cogenly's and the repo's servers load.
+  delete extraArgs["mcp-config"];
+  delete extraArgs["strict-mcp-config"];
   const requestThinkingSummaries =
     compiledSelection.settings.alwaysThinkingEnabled !== false &&
     extraArgs["thinking-display"] !== "omitted";
@@ -1277,14 +1299,8 @@ export function makeClaudeQueryOptions(input: {
     ...(input.settings?.binaryPath
       ? { pathToClaudeCodeExecutable: input.settings.binaryPath }
       : {}),
-    ...(input.useProviderConnectors === true
-      ? input.environment === undefined
-        ? {}
-        : { env: input.environment }
-      : {
-          ...(input.managedMcpConfig ? {} : { strictMcpConfig: true }),
-          env: { ...input.environment, ENABLE_CLAUDEAI_MCP_SERVERS: "false" },
-        }),
+    ...(input.managedMcpConfig ? {} : { strictMcpConfig: true }),
+    env: { ...input.environment, ENABLE_CLAUDEAI_MCP_SERVERS: "false" },
     ...(sessionMcpServers === undefined ? {} : { mcpServers: sessionMcpServers }),
     systemPrompt: {
       type: "preset" as const,
@@ -1332,7 +1348,6 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__cogenly__pending_request_read",
   "mcp__cogenly__thread_configuration",
   "mcp__cogenly__thread_transfers",
-  "mcp__cogenly__thread_limit_handoff_options",
   "mcp__cogenly__worktree_status",
   "mcp__cogenly__worktree_list",
   "mcp__cogenly__project_list",
@@ -4835,8 +4850,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
         /**
          * Projects a workflow's members as ordinary subagents.
          *
-         * A member is not a provider task — it exists only inside the
-         * coordinator's progress snapshot — but everything the user expects
+         * A member is not a provider task (it exists only inside the
+         * coordinator's progress snapshot), but everything the user expects
          * from a subagent (a thread to open, a prompt, an answer) is expressed
          * by the same events, so this emits exactly the sequence
          * updateClaudeSubagentNode emits rather than inventing a parallel
@@ -6455,7 +6470,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
          * Deliberately narrow: only a registered coordinator that this frame
          * carries a snapshot for is touched, and only `subagent.updated` is
          * emitted, because node and turn-item ids need a turn context this path
-         * does not have. Status is left alone — `task_notification` owns the
+         * does not have. Status is left alone: `task_notification` owns the
          * lifecycle, and it has its own turn-aware path.
          * These updates only reach the projection while the launching run is still
          * ingesting, which holds because a running coordinator keeps that run open.
@@ -8789,9 +8804,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             canUseTool,
             onUserDialog,
             supportedDialogKinds: ["resume_return"],
-            ...(turnInput.runtimePolicy.useProviderConnectors === true
-              ? { useProviderConnectors: true }
-              : {}),
           });
           const querySession = yield* queryRunner
             .open({

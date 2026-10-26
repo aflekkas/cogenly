@@ -9,6 +9,9 @@ import {
   SettingsListEmpty,
 } from "./SettingsList";
 import { useEnvironmentMachineList } from "~/machines/useMachines";
+import { useOpenMachineHealthAlerts } from "~/machines/machineHealthAlertsStore";
+import { scheduledTaskAttentionTone } from "./settingsAttention.logic";
+import { SettingsAttentionTitle } from "./SettingsAttentionTitle";
 import { mergeRunOnOptions } from "~/machines/launchMachine.logic";
 import { EnvironmentOptionContent } from "../BranchToolbarEnvironmentSelector";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
@@ -233,7 +236,7 @@ export function scheduleLabel(
 
 /**
  * Human label for a run timestamp. `formatRelativeTime` only handles the
- * past, and `nextRunAt` is a future instant — render "in 5m" style labels
+ * past, and `nextRunAt` is a future instant, so render "in 5m" style labels
  * for upcoming runs instead of a misleading "just now".
  */
 export function relativeLabel(value: string | null): string {
@@ -679,6 +682,11 @@ function ScheduledTaskRow({
         ?.title,
   };
   const repositoryName = filterNames.repositoryName(task.projectId);
+  const attention = scheduledTaskAttentionTone(
+    useOpenMachineHealthAlerts(),
+    environmentId,
+    task.id,
+  );
   const toggle = useAtomCommand(serverEnvironment.setScheduledTaskEnabled, {
     label: "scheduled task enabled",
   });
@@ -724,7 +732,7 @@ function ScheduledTaskRow({
   );
   return (
     <SettingsListItem
-      title={task.title}
+      title={<SettingsAttentionTitle tone={attention}>{task.title}</SettingsAttentionTitle>}
       description={<span className="line-clamp-2">{task.prompt}</span>}
       status={
         <>
@@ -965,7 +973,7 @@ function DeliveryBlock({ title, children }: { title: string; children: ReactNode
   return (
     <div className="space-y-1">
       <Label>{title}</Label>
-      <pre className="max-h-64 overflow-auto rounded-md bg-muted p-2 text-xs whitespace-pre-wrap break-all">
+      <pre className="scroll-fade-y max-h-64 overflow-auto rounded-md bg-muted p-2 text-xs whitespace-pre-wrap break-all">
         {children}
       </pre>
     </div>

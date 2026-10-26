@@ -466,7 +466,7 @@ export function AgentComposer({
                   />
                 </div>
                 <div className="flex min-w-0 flex-nowrap items-center justify-between gap-2 px-3 pb-3 sm:gap-0 sm:px-4 sm:pb-4">
-                  <div className="relative -m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  <div className="scroll-fade-x relative -m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {ModelControls && (
                       <ModelControls
                         agent={agent}
@@ -479,54 +479,60 @@ export function AgentComposer({
                       />
                     )}
                   </div>
-                  <div className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
-                    {dictationEnabled && (
-                      <ComposerDictationControl
-                        ownerKey={composerTargetKey(target)}
-                        disabled={!canWrite}
-                        keybindings={keybindings}
-                        handleRef={dictationRef}
-                        // A textarea has no inline preview; each settled segment lands at the caret.
-                        onPartial={noop}
-                        onFinal={onDictationText}
-                        onActiveChange={(active) => {
-                          dictationActive.current = active;
-                          dictationCaret.current = null;
-                        }}
-                      />
-                    )}
-                    {canAttach && (
-                      <>
-                        <input
-                          ref={attachmentInput}
-                          type="file"
-                          multiple
-                          className="hidden"
-                          onChange={(event) => {
-                            const picked = Array.from(event.currentTarget.files ?? []);
-                            event.currentTarget.value = "";
-                            void addFiles(picked).then(() => textarea.current?.focus());
-                          }}
-                        />
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                disabled={!canWrite}
-                                onPointerDown={(event) => event.preventDefault()}
-                                onClick={() => attachmentInput.current?.click()}
-                                aria-label="Attach files"
-                              />
-                            }
-                          >
-                            <PaperclipIcon />
-                          </TooltipTrigger>
-                          <TooltipPopup>Attach files</TooltipPopup>
-                        </Tooltip>
-                      </>
+                  {/* Same spacing as the chat composer: dictation and attach as a tight pair, a
+                      little more room before send. */}
+                  <div className="flex shrink-0 flex-nowrap items-center justify-end gap-1.5">
+                    {(dictationEnabled || canAttach) && (
+                      <div className="flex shrink-0 items-center gap-0.5">
+                        {dictationEnabled && (
+                          <ComposerDictationControl
+                            ownerKey={composerTargetKey(target)}
+                            disabled={!canWrite}
+                            keybindings={keybindings}
+                            handleRef={dictationRef}
+                            // A textarea has no inline preview; each settled segment lands at the caret.
+                            onPartial={noop}
+                            onFinal={onDictationText}
+                            onActiveChange={(active) => {
+                              dictationActive.current = active;
+                              dictationCaret.current = null;
+                            }}
+                          />
+                        )}
+                        {canAttach && (
+                          <>
+                            <input
+                              ref={attachmentInput}
+                              type="file"
+                              multiple
+                              className="hidden"
+                              onChange={(event) => {
+                                const picked = Array.from(event.currentTarget.files ?? []);
+                                event.currentTarget.value = "";
+                                void addFiles(picked).then(() => textarea.current?.focus());
+                              }}
+                            />
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    disabled={!canWrite}
+                                    onPointerDown={(event) => event.preventDefault()}
+                                    onClick={() => attachmentInput.current?.click()}
+                                    aria-label="Attach files"
+                                  />
+                                }
+                              >
+                                <PaperclipIcon />
+                              </TooltipTrigger>
+                              <TooltipPopup>Attach files</TooltipPopup>
+                            </Tooltip>
+                          </>
+                        )}
+                      </div>
                     )}
                     <ComposerPrimaryActions
                       compact={false}

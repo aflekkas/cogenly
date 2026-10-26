@@ -55,7 +55,7 @@ const CAPABILITIES: PullRequestCapabilities = {
  *
  * Commenting and reviewing are not gated at all: read access is enough to say something and
  * enough to approve or ask for changes, which is what open-source review consists of. Resolving a
- * conversation is the exception — GitHub allows it to whoever can write, and to the author of the
+ * conversation is the exception: GitHub allows it to whoever can write, and to the author of the
  * pull request the conversation is on.
  *
  * Asking somebody else for a review needs write access, which is the one thing here an author
@@ -126,8 +126,8 @@ export function gitHubProviderFailure(
  * applied here by login. An actor already carrying one keeps it.
  *
  * A login GitHub did not answer for falls back to the picture every GitHub install serves at
- * `/<login>.png`. The lookup is one more request per repository and can be refused — a rate
- * limit, a slow host — and a face that comes and goes between two loads of the same page reads
+ * `/<login>.png`. The lookup is one more request per repository and can be refused (a rate
+ * limit, a slow host), and a face that comes and goes between two loads of the same page reads
  * as a bug in the page rather than as a request that failed quietly.
  */
 function withAvatar(
@@ -311,7 +311,7 @@ export const make = Effect.gen(function* () {
     /**
      * The same listing for a whole host in one search. The avatar lookup the per-repository read
      * needs is not here: a search reports an author's picture itself, so a face costs no request
-     * of its own — `withAvatar` still stands behind it for the login GitHub answered nothing for.
+     * of its own; `withAvatar` still stands behind it for the login GitHub answered nothing for.
      */
     listChangeRequestsAcross: (input) =>
       cli

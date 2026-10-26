@@ -125,7 +125,7 @@ export const ServerProviderSkill = Schema.Struct({
   shortDescription: Schema.optional(TrimmedNonEmptyString),
   /**
    * The skill is hidden from the agent's own skill tool, so only the user can
-   * start it — Claude Code's `disable-model-invocation`. Composers must offer
+   * start it (Claude Code's `disable-model-invocation`). Composers must offer
    * it as a slash command; naming it in prose does nothing.
    */
   userInvocationOnly: Schema.optional(Schema.Boolean),
@@ -165,10 +165,10 @@ export function isProviderWorkspaceSnapshotCurrent(
 /**
  * Availability of a configured provider instance from the runtime's POV.
  *
- *  - `available` — the build ships this driver and an instance is wired
+ *  - `available`: the build ships this driver and an instance is wired
  *    up. Default for legacy snapshots produced from the closed
  *    `ServerSettings.providers` map.
- *  - `unavailable` — the user's `ServerSettings.providerInstances` (or a
+ *  - `unavailable`: the user's `ServerSettings.providerInstances` (or a
  *    persisted thread / session binding) references a driver this build
  *    doesn't ship. Common after rolling back from a fork or PR branch
  *    that introduced a new driver. The snapshot is preserved so the UI
@@ -570,6 +570,50 @@ export const ServerSignalProcessResult = Schema.Struct({
 });
 export type ServerSignalProcessResult = typeof ServerSignalProcessResult.Type;
 
+/** A process tree an agent started from one of its thread's terminals. */
+export const ServerAgentProcess = Schema.Struct({
+  threadId: Schema.String,
+  /** Null when the thread is gone. */
+  threadTitle: Schema.NullOr(Schema.String),
+  terminalId: Schema.String,
+  /** `provider` is the provider CLI itself rather than a command it ran. */
+  kind: Schema.Literals(["terminal", "provider"]),
+  command: Schema.String,
+  startedAt: Schema.String,
+  /** Started with keep-running: survives stop, settle and idle reaping. */
+  keepRunning: Schema.Boolean,
+  /** Left running by an earlier server; nothing reads its output anymore. */
+  orphaned: Schema.Boolean,
+  pids: Schema.Array(PositiveInt),
+});
+export type ServerAgentProcess = typeof ServerAgentProcess.Type;
+
+export const ServerAgentProcessKill = Schema.Struct({
+  threadId: Schema.String,
+  terminalId: Schema.String,
+  command: Schema.String,
+  pids: Schema.Array(PositiveInt),
+  reason: Schema.Literals(["stopped", "idle", "restart", "orphan"]),
+  at: Schema.String,
+});
+export type ServerAgentProcessKill = typeof ServerAgentProcessKill.Type;
+
+export const ServerAgentProcessesResult = Schema.Struct({
+  processes: Schema.Array(ServerAgentProcess),
+  /** Newest first: what was killed for the agent, and why. */
+  killed: Schema.Array(ServerAgentProcessKill),
+});
+export type ServerAgentProcessesResult = typeof ServerAgentProcessesResult.Type;
+
+export const ServerKillAgentProcessInput = Schema.Struct({
+  threadId: Schema.String.check(Schema.isNonEmpty()),
+  terminalId: Schema.String.check(Schema.isNonEmpty()),
+});
+export type ServerKillAgentProcessInput = typeof ServerKillAgentProcessInput.Type;
+
+export const ServerKillAgentProcessResult = Schema.Struct({ pids: Schema.Array(PositiveInt) });
+export type ServerKillAgentProcessResult = typeof ServerKillAgentProcessResult.Type;
+
 /**
  * "tailnet" when the address is on this machine's Tailscale interface, "lan"
  * for any other private address, including other VPNs in 100.64.0.0/10.
@@ -849,7 +893,7 @@ export const ServerSelfUpdateInput = Schema.Struct({
 export type ServerSelfUpdateInput = typeof ServerSelfUpdateInput.Type;
 
 /** Acknowledgement that the update artifact is installed and the server is
-    about to restart into it — the connection will drop moments later. */
+    about to restart into it; the connection will drop moments later. */
 export const ServerSelfUpdateResult = Schema.Struct({
   targetVersion: TrimmedNonEmptyString,
   method: ServerSelfUpdateMethod,

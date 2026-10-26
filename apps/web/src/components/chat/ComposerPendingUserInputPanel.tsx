@@ -96,7 +96,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   // the thread the user is trying to read. Scoped to a single question: the card
   // is keyed by request id so the next prompt starts expanded, and storing the
   // collapsed question's id (rather than a bare flag) reopens the card when the
-  // prompt advances to its next question, which can happen without a click —
+  // prompt advances to its next question, which can happen without a click:
   // sending from the composer advances the active question.
   const [collapsedQuestionId, setCollapsedQuestionId] = useState<string | null>(null);
   const isCollapsed = collapsedQuestionId !== null && collapsedQuestionId === activeQuestion?.id;

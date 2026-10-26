@@ -1,5 +1,5 @@
 // Orchestrator that keeps the WSL pool instance in sync with the user's
-// settings. `reconcile` is the single entry point — bootstrap calls it
+// settings. `reconcile` is the single entry point: bootstrap calls it
 // once after the primary backend starts, and the wsl.ts IPC calls it
 // after persisting a `wslBackendEnabled` or `wslDistro` change. The
 // effect is idempotent and never fails: errors (WSL not available, port
@@ -7,7 +7,7 @@
 // having left the pool in a consistent state (either the previous WSL
 // instance is still running, or none is).
 //
-// The instance id encodes the desired distro selection — `wsl:default`
+// The instance id encodes the desired distro selection: `wsl:default`
 // when the user picked "track the WSL default" (settings.wslDistro is
 // null) and `wsl:<distro>` otherwise. Changing the distro setting
 // changes the id, so reconcile unregisters the old instance before
@@ -17,7 +17,7 @@
 // Port allocation: each WSL instance gets a freshly scanned port to
 // avoid colliding with the primary or with a previously-registered WSL
 // instance that's still tearing down. The scan only checks loopback
-// (127.0.0.1) since the WSL backend is loopback-only — the primary
+// (127.0.0.1) since the WSL backend is loopback-only; the primary
 // owns LAN exposure when the user opts in.
 
 import * as Cause from "effect/Cause";
@@ -126,7 +126,7 @@ export const layer = Layer.effect(
       pool.unregister(id).pipe(
         Effect.catchTags({
           DesktopBackendPoolCannotUnregisterPrimaryError: (cause) =>
-            // Should never happen — wsl: ids are not the primary id — but
+            // Should never happen (wsl: ids are not the primary id), but
             // log loudly if the logic ever drifts.
             logWslBackendWarning("refusing to unregister primary as wsl instance", {
               id,
@@ -168,7 +168,7 @@ export const layer = Layer.effect(
           configResolve: configuration.resolveWsl({ port: allocatedPort, distro: input.distro }),
           // Dual-mode secondary: record a fatal preflight failure so Connections
           // settings can show why the WSL backend never appeared. No dialog or
-          // fallback — Windows is the primary and keeps working.
+          // fallback: Windows is the primary and keeps working.
           onPreflightFailed: (failure) =>
             Ref.set(preflightErrorRef, Option.some(failure.reason)).pipe(Effect.as(false)),
           onStateDirOwned: () =>
@@ -269,7 +269,7 @@ export const layer = Layer.effect(
     // inferred error type is `never` and this catch is a no-op in
     // steady state. It's here to enforce the file-header contract
     // ("reconcile never fails; errors are logged") if a future change
-    // introduces an unhandled failure path — otherwise IPC callers
+    // introduces an unhandled failure path. Otherwise IPC callers
     // like setWslBackendEnabled would surface it to the renderer as
     // an opaque error.
     const reconcile = reconcileMutex

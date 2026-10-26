@@ -1,7 +1,9 @@
+import * as StaleRunRecoveryWorker from "../health/StaleRunRecoveryWorker.ts";
+import * as AgentHandoff from "../agents/AgentHandoff.ts";
+import * as IntegrationSetupRequests from "../integrations/IntegrationSetupRequests.ts";
 import * as WorktreeLifecycle from "../workspace/WorktreeLifecycle.ts";
 import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
 import * as GoogleTokenStore from "../integrations/local/GoogleTokenStore.ts";
-import * as NativeIntegrationImport from "../integrations/NativeIntegrationImport.ts";
 import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
 import * as AccountConnections from "../accounts/AccountConnections.ts";
 import * as AccountAccess from "../accounts/AccountAccess.ts";
@@ -32,8 +34,8 @@ import * as ApprovalChanges from "../agents/ApprovalChanges.ts";
 import * as AgentMcpPolicy from "../agents/AgentMcpPolicy.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as Agents from "../agents/AgentService.ts";
+import * as QueueDrainWorker from "./QueueDrainWorker.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
-import * as UsageLimitHandoff from "./UsageLimitHandoff.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as Layer from "effect/Layer";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -93,9 +95,13 @@ import * as ThreadLifecycleService from "./ThreadLifecycleService.ts";
 import * as ThreadForkService from "./ThreadForkService.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
+import * as InlineCardEvents from "./InlineCardEvents.ts";
+import * as InlineCardNotifications from "./InlineCardNotifications.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
+import * as LoginRequests from "../secrets/LoginRequests.ts";
 import * as Vault from "../vault/Vault.ts";
 import * as VaultSyncCapture from "../vault/VaultSyncCapture.ts";
+import * as SiteIconCache from "../assets/SiteIconCache.ts";
 import * as SharedState from "../sync/SharedState.ts";
 import * as Accounts from "../accounts/Accounts.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -111,11 +117,15 @@ const layerProjectFilesProvided = ProjectFiles.layer.pipe(Layer.provide(ProjectL
 
 // One signal shared by every writer of agent_approvals and both approval streams.
 const layerApprovalChanges = ApprovalChanges.layer;
+const layerInlineCardEvents = InlineCardEvents.layer;
 export const layerVaultSyncCapture = VaultSyncCapture.layer.pipe(
   Layer.provide(SharedState.layer),
   Layer.provide(ServerEnvironment.layerIdentity),
 );
+// One icon cache: the vault prefetches into it, the asset route serves from it.
+const layerSiteIconCache = SiteIconCache.layer;
 export const layerVaultProvided = Vault.layer.pipe(
+  Layer.provide(layerSiteIconCache),
   Layer.provide(layerVaultSyncCapture),
   Layer.provide(ServerEnvironment.layerIdentity),
   Layer.provide(layerProjectFilesProvided),
@@ -125,6 +135,7 @@ const layerIntegrationCredentials = IntegrationCredentials.layer.pipe(
   Layer.provide(layerVaultProvided),
 );
 const layerLocalIntegrationsProvided = LocalIntegrations.layer.pipe(
+  Layer.provide(layerInlineCardEvents),
   Layer.provide(GoogleTokenStore.layer.pipe(Layer.provide(layerVaultProvided))),
   Layer.provide(LocalMcpRunner.layer),
   Layer.provide(layerIntegrationCredentials),
@@ -135,8 +146,8 @@ export const layerIntegrationSyncPeers = IntegrationSyncPeers.layer.pipe(
   Layer.provide(ServerEnvironment.layerIdentity),
 );
 export const layerIntegrationsProvided = Integrations.layer.pipe(
+  Layer.provide(layerInlineCardEvents),
   Layer.provide(layerIntegrationSyncPeers),
-  Layer.provide(NativeIntegrationImport.layer),
   Layer.provide(layerIntegrationCredentials),
   Layer.provide(IntegrationTokens.layer.pipe(Layer.provide(layerVaultProvided))),
   Layer.provide(layerLocalIntegrationsProvided),
@@ -262,6 +273,9 @@ export const layerProjectSetupScriptRunner = ProjectSetupScriptRunner.layer.pipe
   Layer.provide(layerProjectService),
 );
 const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pipe(
+  Layer.provide(
+    AgentHandoff.layer.pipe(Layer.provide(Layer.mergeAll(AgentStore.layer, TextGeneration.layer))),
+  ),
   Layer.provide(WorktreeLifecycle.layer.pipe(Layer.provide(layerProjectSetupScriptRunner))),
   Layer.provide(AgentStore.layer),
   Layer.provide(
@@ -427,8 +441,24 @@ const layerWorkHandoffProvided = WorkHandoff.layer.pipe(
 const layerThreadLifecycleProvided = ThreadLifecycleService.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
 );
-const layerSecretRequestsProvided = SecretRequests.layer.pipe(
+const layerInlineCardNotifications = InlineCardNotifications.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
+  Layer.provide(layerInlineCardEvents),
+);
+const layerSecretRequestsProvided = SecretRequests.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(layerThreadManagementProvided, layerVaultProvided, layerInlineCardNotifications),
+  ),
+);
+const layerLoginRequestsProvided = LoginRequests.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      layerThreadManagementProvided,
+      layerVaultProvided,
+      AgentStore.layer,
+      layerInlineCardNotifications,
+    ),
+  ),
 );
 const layerAgentsProvided = Agents.layer.pipe(
   Layer.provide(Membership.layer),
@@ -503,6 +533,7 @@ const layerAccountConnectionsProvided = AccountConnections.layer.pipe(
   ),
 );
 const layerAgentWorkspaceProvided = AgentWorkspace.layer.pipe(
+  Layer.provide(layerInlineCardNotifications),
   Layer.provide(
     Layer.mergeAll(
       AgentStore.layer,
@@ -511,6 +542,17 @@ const layerAgentWorkspaceProvided = AgentWorkspace.layer.pipe(
       layerAccountAccessProvided,
       layerScheduledTaskProvided,
       layerIntegrationsProvided,
+      layerApprovalChanges,
+      layerThreadManagementProvided,
+    ),
+  ),
+);
+const layerIntegrationSetupRequestsProvided = IntegrationSetupRequests.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      layerThreadManagementProvided,
+      layerIntegrationsProvided,
+      layerAgentWorkspaceProvided,
       layerApprovalChanges,
     ),
   ),
@@ -521,6 +563,7 @@ const layerAgentMcpPolicyProvided = AgentMcpPolicy.layer.pipe(
       AgentStore.layer,
       layerProjectFilesProvided,
       layerAgentWorkspaceProvided,
+      layerIntegrationSetupRequestsProvided,
       layerThreadManagementProvided,
       layerIntegrationsProvided,
     ),
@@ -605,6 +648,7 @@ const layerProductionBase = Layer.mergeAll(
   layerThreadLaunchProvided,
   layerRepositoryCheckoutProvided,
   RepositoryIconResolver.layer,
+  layerSiteIconCache,
   RepositoryCheckout.layerRelocation.pipe(
     Layer.provide(Layer.mergeAll(layerRepositoryCheckoutProvided, layerProjectLabelsProvided)),
   ),
@@ -629,27 +673,23 @@ const layerProductionBase = Layer.mergeAll(
     ),
   ),
   layerAgentWorkspaceProvided,
+  layerIntegrationSetupRequestsProvided,
   layerAgentEventReactorProvided,
   layerAgentMcpPolicyProvided,
   AgentStore.layer,
   layerScheduledTaskProvided,
   layerSecretRequestsProvided,
+  layerLoginRequestsProvided,
   layerVaultProvided,
   layerAccountsProvided,
   layerAccountAccessProvided,
   layerCliCredentialsProvided,
   layerAccountConnectionsProvided,
+  StaleRunRecoveryWorker.layer.pipe(Layer.provide(layerThreadManagementProvided)),
+  QueueDrainWorker.layer.pipe(Layer.provide(layerOrchestratorProvided)),
   UsageLimitRecoveryWorker.layer.pipe(
-    Layer.provide(AgentStore.layer),
-    Layer.provide(
-      Layer.mergeAll(
-        ProjectionStore.layer,
-        layerThreadManagementProvided,
-        UsageLimitHandoff.layer.pipe(Layer.provide(layerThreadManagementProvided)),
-      ),
-    ),
+    Layer.provide(Layer.mergeAll(ProjectionStore.layer, layerThreadManagementProvided)),
   ),
-  UsageLimitHandoff.layer.pipe(Layer.provide(layerThreadManagementProvided)),
   layerProviderContinuationWorkerProvided,
   layerAgentSessionImporterProvided,
   layerT3ImportProvided,

@@ -1883,3 +1883,23 @@ it("renders automatic completion as a work entry instead of a user bubble", () =
     })[0]?.kind,
   ).toBe("message");
 });
+
+it("hides internal agent setup after an agent conversation becomes a normal thread", () => {
+  const message: ChatMessage = {
+    id: MessageId.make("agent-kickoff:deleted"),
+    runId: null,
+    role: "user",
+    text: "Hidden setup",
+    attachments: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    streaming: false,
+  };
+  expect(
+    deriveTimelineEntriesFromVisibleTurnItems({
+      visibleTurnItems: [],
+      optimisticMessages: [],
+      anchoredMessages: [message],
+    }),
+  ).toEqual([]);
+});

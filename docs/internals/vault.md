@@ -31,14 +31,36 @@ User guide:
 
 `vault_items` keeps plaintext: name, type, scope (environment-wide or a
 project label id), an optional display `label`, field _names_, allowed
-domains, policy, timestamps, and a deleted tombstone. The secret body —
-username, password, TOTP secret, value, and a card's number, expiry
-month/year, CVC and cardholder name — exists only inside the ciphertext.
-Usernames are secret too; only `label` is safe to display. A card also keeps
-its last 4 digits in plaintext metadata: that fragment is display text for
-telling cards apart (it cannot be filled or used on its own), and it is the
-only secret-derived value outside the ciphertext. Legacy card-shaped items
-written onto the old slots are left as they are; nothing migrates them.
+domains, policy, timestamps, and a deleted tombstone. The secret body
+(username, password, TOTP secret, value, and a card's number, expiry
+month/year, CVC and cardholder name) exists inside the ciphertext.
+
+Two secret-derived values are copied out as display text, because lists
+need them to tell items apart: a card's last 4 digits, and a **login's**
+username (up to 320 characters). A login's username is an account identity,
+like an integration's account label, so `vault_list` shows it and the
+scrubber leaves it alone; scrubbing it would blank the list it belongs in.
+Only `type: "login"` gets this. Other types keep `username` secret, since
+integration token items hold a client secret there. Both copies are derived
+from the decrypted body on every write and on sync arrival, so they never
+travel in a sync payload. The startup `upgradeLogins` pass copies usernames
+for logins written before this, and a tombstone drops its copy. Legacy
+card-shaped items written onto the old slots are left as they are; nothing
+migrates them.
+
+Several logins for one site share its name (the unique name index excludes
+logins) and differ by label, "<Site> · <username>" unless the owner set one.
+The service keeps labels unique per site. With no item named, a fill matches
+the logins allowed on the page. When several remain, the caller gets them back
+as candidates (`choose_login` from `vault_fill`) rather than a guess. Login
+to integration links live in `vault_login_integrations`; like policy, they
+are local to the machine.
+
+Site icons are not vault data.
+[SiteIconCache](../../apps/server/src/assets/SiteIconCache.ts) fetches a login
+site's favicon when the login is saved, and again at startup for existing
+logins, and serves it to every client as a signed `site-icon` asset. An icon
+an agent passed (`iconUrl`) wins over the fetched one.
 
 ## Use, policy, approvals
 
@@ -48,11 +70,26 @@ adds the credential revision, machine, project, provider instance, terminal id
 and delivery method. This records delivery, not every downstream API action.
 
 MCP browser fills identify a thread or its persistent agent, never a human.
-Both default to `ask`: the first use inserts a pending row in the existing
-`agent_approvals` table with action kind `vault_use` and the tool returns a
-clear "waiting on you" result — no hang. Approving (existing agents RPCs)
-grants that item's policy to that thread or agent, and to the approved domain when one
-was involved, so a retry succeeds. Rejecting leaves the policy untouched.
+The default rule is `allow` with empty lists: any thread or agent may fill
+the item on its allowed sites without asking, because the owner saved it
+for those sites. The owner prefers that autonomy to a confirmation per use.
+Three things still stop a fill:
+
+- **A page outside the item's allowed sites always asks.** For a thread or
+  agent this is an approval, not a refusal. Approving it adds the site to
+  the policy's `approvedDomains` and leaves "any agent" as it was. Server
+  destinations outside the allowed sites are refused outright.
+- **An explicit `ask` (Ask first)** asks on every use. Approving grants the
+  item to that thread or agent.
+- **`deny` (Block)** refuses agents everywhere.
+
+An approval is a pending row in `agent_approvals` with action kind
+`vault_use`, and the tool returns a clear "waiting on you" result rather
+than hanging. Rejecting leaves the policy untouched. `ownerSet` marks a rule
+the owner picked by hand. Migration 110 moved every rule still on the old
+`ask` default to the new one, because an owner-picked "Ask first" could not
+be told apart from the default. Integration token items, which carry a sync
+attachment, keep their explicit `ask`.
 
 `resolveSecretByName` is the server-internal API for other server features
 (e.g. the integrations gateway): it returns a decrypted field by name and is
@@ -80,6 +117,17 @@ legacy backfill reads metadata only and preserves item ids and encrypted
 bodies. Account lookups filter by project, including direct id lookups; an
 unfiled caller sees only all-project accounts.
 
+Sign-in cards (`request_login`) are `secret_request` turn items with a `login`
+block, so they share that item's pending, notification, fork and restart
+handling; a new turn item type would have to be taught to each of those. The
+answer travels only in the `secrets.answerLoginRequest` RPC payload to
+[LoginRequests](../../apps/server/src/secrets/LoginRequests.ts), which writes the
+vault item before recording the card as saved; the item records only the saved
+item's id. New logins get the default rule with the card's host as their
+allowed site. An update merges into the existing login, which is how a
+password-only item gains its username, and keeps its policy. A login the owner chose not to keep is created
+machine-only and deleted by a sweep once the asking run has ended.
+
 CLI process exposure uses separate revision-bound grants, including for owner
 threads. It reuses `vault_use` approvals with a `processExposure` payload; this
 branch must never update the browser policy. Approval grants this thread by
@@ -95,7 +143,7 @@ receipt is removed, so storage failures remain retryable. CLI verification
 uses a replacement environment and private empty configuration directories;
 provider-native credential files are neither imported nor cloned.
 
-## Scrubbing and the preview_evaluate trap
+## Scrubbing and browser extraction
 
 Stored and delivered secret values are scrubbed from tool results; values shorter
 than six characters use whole-token matching.
@@ -106,12 +154,12 @@ against them before serialization. That covers terminal output
 (`terminal_run`/`terminal_read`) and other tool output as a second layer.
 Exact-value scrubbing cannot catch transformed secrets (base64, character
 codes, etc.). Before dispatching a `vault_fill`, `PreviewAutomationBroker`
-therefore disables agent evaluation on that tab for its remaining lifetime,
+therefore disables agent evaluation and selector extraction on that tab for its remaining lifetime,
 across provider sessions and browser-host reconnections. It also seals fills
 whose browser response fails: typing may already have happened. Navigation
 does not lift the restriction, since history can restore filled inputs and
 pages can retain values in script state or storage. Snapshots and focused
-browser actions remain available; evaluation needs a fresh tab. Values are
+browser actions remain available; evaluation and extraction need a fresh tab. Values are
 never logged; lengths and names are the most telemetry may carry. Card values
 are also scrubbed in the shapes a page echoes them: the number digits-only or
 grouped in fours, and the expiry as `MM/YYYY`; the CVC and `MM/YY` expiry are

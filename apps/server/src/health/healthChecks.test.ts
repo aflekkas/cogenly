@@ -30,11 +30,16 @@ import {
   SYNC_STUCK_AFTER_MS,
   type SyncPeerSample,
   buildReport,
+  directlyFixableItemKeys,
+  quarantinedThreadItem,
+  agentProcessesCheck,
   chatSandboxCheck,
   diskCheck,
+  databaseCheck,
   integrationsCheck,
   machineLinksCheck,
   providersCheck,
+  rateLimitItems,
   sameReportContent,
   scheduledTasksCheck,
   serverCheck,
@@ -249,6 +254,24 @@ describe("providersCheck", () => {
       "warn",
     );
   });
+
+  it("warns once an account is rate-limited repeatedly, naming the likely cause", () => {
+    const codex = ProviderInstanceId.make("codex");
+    const items = rateLimitItems({
+      providers: [provider({ instanceId: codex, displayName: "Codex" })],
+      streaks: [
+        { providerInstanceId: codex, count: 5, latestAt: ago(minutes(4)) },
+        // Below the repeat threshold: an occasional 429 is not an item.
+        { providerInstanceId: ProviderInstanceId.make("claude"), count: 2, latestAt: now },
+      ],
+    });
+    assert.strictEqual(items.length, 1);
+    assert.strictEqual(items[0]?.key, "providers:codex:rate-limited");
+    assert.strictEqual(items[0]?.status, "warn");
+    assert.include(items[0]?.title ?? "", "rate-limited repeatedly");
+    assert.include(items[0]?.detail ?? "", "5 rate limits in the last hour");
+    assert.include(items[0]?.detail ?? "", "too many concurrent threads on one account");
+  });
 });
 
 describe("peerReachabilityItem", () => {
@@ -414,6 +437,25 @@ describe("sync tracking", () => {
     ...overrides,
   });
 
+  it("reports quarantined history without suggesting a deterministic retry", () => {
+    const peer = sample({ heldChanges: 3, heldThreads: 1, quarantined: 3, backlog: 0 });
+    const result = syncCheck({
+      peers: [{ sample: peer, progress: trackSyncProgress(undefined, peer, NOW_MS) }],
+      nowMs: NOW_MS,
+    });
+    expect(result).toMatchObject({
+      status: "fail",
+      items: [
+        {
+          key: `sync:quarantined:${vps}`,
+          status: "fail",
+          fix: null,
+          target: { _tag: "machine", environmentId: vps },
+        },
+      ],
+    });
+  });
+
   it("flags a backlog whose acknowledgements don't move for five minutes", () => {
     const first = trackSyncProgress(undefined, sample(), NOW_MS);
     const later = NOW_MS + SYNC_STUCK_AFTER_MS;
@@ -421,8 +463,26 @@ describe("sync tracking", () => {
     assert.strictEqual(still.pendingSinceMs, NOW_MS);
     const result = syncCheck({ peers: [{ sample: sample(), progress: still }], nowMs: later });
     assert.strictEqual(result.status, "fail");
-    assert.strictEqual(result.items[0]?.key, `sync:stuck:${vps}`);
-    assert.strictEqual(result.items[0]?.fix, "retry-sync");
+    assert.strictEqual(
+      result.items.find((entry) => entry.key === `sync:stuck:${vps}`)?.key,
+      `sync:stuck:${vps}`,
+    );
+    assert.strictEqual(
+      result.items.find((entry) => entry.key === `sync:stuck:${vps}`)?.fix,
+      "retry-sync",
+    );
+  });
+
+  it("shows catch-up progress, measured rate and estimated time remaining", () => {
+    const current = sample({ backlog: 300, ratePerSecond: 50 });
+    const result = syncCheck({
+      peers: [{ sample: current, progress: trackSyncProgress(undefined, current, NOW_MS) }],
+      nowMs: NOW_MS,
+    });
+    assert.strictEqual(result.items[0]?.title, "Catching up Contabo VPS");
+    assert.include(result.items[0]?.detail, "300 changes pending");
+    assert.include(result.items[0]?.detail, "50.0 changes/s");
+    assert.include(result.items[0]?.detail, "remaining");
   });
 
   it("restarts the clock when acknowledgements move, and clears it once in sync", () => {
@@ -680,7 +740,7 @@ describe("stuckRunsCheck", () => {
   });
 
   it("collapses many stuck subagents in one thread into one counted item", () => {
-    const title = "Athens Racing — Master: Fixes, Kifissia & Riviera";
+    const title = "Athens Racing Master: Fixes, Kifissia & Riviera";
     const result = stuckRunsCheck({
       active: [
         ...Array.from({ length: 18 }, (_, index) =>
@@ -694,7 +754,7 @@ describe("stuckRunsCheck", () => {
     assert.deepStrictEqual(
       result.items.map((entry) => entry.title),
       [
-        `18 subagents stuck in "Athens Racing — Master: Fixes, Kifissia & Riviera" for 2 days`,
+        `18 subagents stuck in "Athens Racing Master: Fixes, Kifissia & Riviera" for 2 days`,
         `A subagent in "Other" has been running for 6 hours`,
       ],
     );
@@ -739,12 +799,21 @@ describe("tailscaleServeCheck", () => {
   });
 
   it("doesn't call a restart broken while Cogenly points Serve back at this run", () => {
-    // `--tailscale-serve` removes the mapping at shutdown; the new run adds it back.
+    // Reconciliation also allows tailscaled to come up after the server.
     const restarting = tailscaleServeCheck({
       serveEnabled: true,
       setup: setup({ progress: { ...emptyProgress, working: new Set(["expose"]) } }),
     });
     expect(restarting).toMatchObject({ status: "ok", items: [] });
+    expect(
+      tailscaleServeCheck({
+        serveEnabled: true,
+        setup: setup({
+          status: null,
+          progress: { ...emptyProgress, working: new Set(["expose"]) },
+        }),
+      }),
+    ).toMatchObject({ status: "ok", items: [] });
     const broken = tailscaleServeCheck({ serveEnabled: true, setup: setup({}) });
     expect(broken).toMatchObject({
       status: "fail",
@@ -775,4 +844,123 @@ it("chat sandbox health offers provisioning only for repairable failures", () =>
     status: "ok",
     items: [],
   });
+});
+
+describe("machine version skew", () => {
+  const self = machine({
+    environmentId: EnvironmentId.make("self"),
+    name: "MacBook",
+    relation: "this",
+    pairing: "self",
+    serverVersion: "0.3.3",
+  });
+  const inspect = (peers: ReadonlyArray<MachineInfo>) =>
+    machineLinksCheck({
+      machines: [self, ...peers],
+      link: { _tag: "hub", spokes: peers.length },
+      now,
+    });
+  it("warns on older peers, with a direct fix for peers that support it", () => {
+    const result = inspect([machine({ serverVersion: "0.3.3-staging.1", relation: "spoke" })]);
+    expect(result.status).toBe("warn");
+    expect(result.items[0]).toMatchObject({ title: "Update Contabo VPS to match", fix: null });
+    const newer = inspect([machine({ serverVersion: "0.3.4" })]);
+    expect(newer.items[0]).toMatchObject({
+      title: "Update MacBook to match",
+      fix: "update-machine",
+      target: { _tag: "machine", environmentId: self.environmentId },
+    });
+  });
+  it("offers a peer update, and leaves offline machines manual", () => {
+    const source = machine({ serverVersion: "0.3.4", environmentId: EnvironmentId.make("newer") });
+    const old = machine({ serverVersion: "0.3.3", relation: "spoke" });
+    expect(
+      inspect([source, old]).items.find(
+        (item) =>
+          item.target?._tag === "machine" && item.target.environmentId === old.environmentId,
+      )?.fix,
+    ).toBe("update-machine");
+    expect(
+      inspect([source, { ...old, online: false }]).items.find(
+        (item) => item.key === `machine-version:${old.environmentId}`,
+      )?.fix,
+    ).toBeNull();
+  });
+  it("clears after versions match and tolerates 0.3.2 lists without versions", () => {
+    expect(inspect([machine({ serverVersion: "0.3.3" })]).items).toEqual([]);
+    expect(inspect([machine({})]).items).toEqual([]);
+  });
+});
+
+it("agent process health warns about live orphans only, with a Fix", () => {
+  const live = { orphaned: false, command: "npm run dev", pids: [10] };
+  expect(agentProcessesCheck({ processes: [live] })).toMatchObject({ status: "ok", items: [] });
+  // An orphan whose processes all exited is nothing to fix.
+  expect(
+    agentProcessesCheck({ processes: [{ orphaned: true, command: "gone", pids: [] }] }).status,
+  ).toBe("ok");
+  const check = agentProcessesCheck({
+    processes: [live, { orphaned: true, command: "vite --port 5173\necho done", pids: [20, 21] }],
+  });
+  expect(check.status).toBe("warn");
+  expect(check.items[0]).toMatchObject({
+    key: "agent-processes:orphaned",
+    title: "1 orphaned agent command still running",
+    fix: "kill-orphans",
+  });
+  expect(check.items[0]?.detail).toContain('"vite --port 5173" (2 processes)');
+});
+
+it("names the quarantine and volume, and requires an explicit item for discard", () => {
+  const held = quarantinedThreadItem({
+    threadId: ThreadId.make("thread:bad"),
+    title: "Brakes",
+    count: 7,
+    bytes: 2048,
+  });
+  expect(held).toMatchObject({
+    title: "Discard quarantined changes for Brakes",
+    fix: "discard-quarantined",
+    detail: expect.stringContaining("7 incoming items (2048 bytes)"),
+    target: { _tag: "thread", threadId: "thread:bad" },
+  });
+  const report = buildReport({
+    environmentId: EnvironmentId.make("self"),
+    machineName: "MacBook",
+    observedAt: DateTime.makeUnsafe(0),
+    serverVersion: "0.3.3",
+    uptimeSeconds: 1,
+    checks: [{ id: "sync", status: "fail", summary: "Quarantined", items: [held] }],
+  });
+  expect(directlyFixableItemKeys(report)).toEqual([]);
+});
+
+it("reports a warning while database writes use the main-thread fallback", () => {
+  expect(
+    databaseCheck({ answered: true, sizeBytes: 4096, writerWorkerUnavailable: true }),
+  ).toMatchObject({
+    status: "warn",
+    items: [{ key: "database:writer-worker", status: "warn" }],
+  });
+  expect(
+    databaseCheck({ answered: true, sizeBytes: 4096, writerWorkerUnavailable: false }).status,
+  ).toBe("ok");
+});
+
+it("chat sandbox health distinguishes AppArmor userns blocking from missing bubblewrap", () => {
+  const blocked = chatSandboxCheck({
+    available: false,
+    failure: "apparmor-userns",
+    reason: "bubblewrap is blocked by AppArmor user-namespace restriction",
+  });
+  expect(blocked.items[0]).toMatchObject({
+    title: "Chat commands are off: bubblewrap is blocked by AppArmor user-namespace restriction",
+    fix: "setup-sandbox",
+  });
+  expect(blocked.items[0]?.detail).toContain("kernel.apparmor_restrict_unprivileged_userns=1");
+  expect(blocked.items[0]?.detail).toContain("/etc/apparmor.d/cogenly-bwrap");
+  expect(blocked.items[0]?.detail).toContain("flags=(unconfined)");
+  expect(blocked.items[0]?.detail).toContain("apparmor_parser -r");
+  expect(blocked.items[0]?.detail).toContain("global restriction stays on");
+  expect(blocked.items[0]?.detail).not.toContain("installs the distro bubblewrap package");
 });

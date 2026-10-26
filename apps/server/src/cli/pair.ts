@@ -215,7 +215,7 @@ const probeEnvironmentDescriptor = (
       Effect.mapError(() => ({ _tag: "unreachable" }) as const),
     );
     // Bad-gateway family means a proxy (Tailscale Serve) answered for a
-    // backend that is gone — a stale mapping, not a live occupant. Treating
+    // backend that is gone: a stale mapping, not a live occupant. Treating
     // it as unreachable lets `cogenly pair --tailscale` repair its own mapping
     // after the server's port changed.
     if (response.status === 502 || response.status === 503 || response.status === 504) {
@@ -377,8 +377,8 @@ const resolveTailscalePairingBase = Effect.fn("pair.resolveTailscalePairingBase"
     });
 
     // Only an unreachable port, or a mapping already fronting this exact
-    // environment, is safe to (re)configure. Any other responder — T3 or not
-    // — must not have its mapping silently replaced.
+    // environment, is safe to (re)configure. Any other responder, T3 or not,
+    // must not have its mapping silently replaced.
     const existing = yield* probeEnvironmentDescriptor(baseUrl);
     if (existing._tag === "descriptor") {
       if (existing.descriptor.environmentId !== input.target.descriptor.environmentId) {

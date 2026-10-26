@@ -641,7 +641,7 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
     expect(decoded.providerInstances[workId]?.config).toEqual({ homePath: "~/.codex_work" });
     // Critical: a config naming a driver this build does not know about
     // (`ollama` is not in `ProviderDriverKind`) must round-trip without loss.
-    // The runtime handles "driver not installed" — the schema must not.
+    // The runtime handles "driver not installed"; the schema must not.
     expect(decoded.providerInstances[ollamaId]?.driver).toBe("ollama");
     expect(decoded.providerInstances[ollamaId]?.config).toEqual({
       endpoint: "http://localhost:11434",

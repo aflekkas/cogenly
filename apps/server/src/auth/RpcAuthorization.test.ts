@@ -147,8 +147,6 @@ describe("RPC authorization scopes", () => {
 
   it("guards integration secret forms, the runtime installer and the sources feed, on the client too", () => {
     for (const method of [
-      WS_METHODS.integrationsPreviewNative,
-      WS_METHODS.integrationsImportNative,
       WS_METHODS.integrationsSaveOAuthClient,
       WS_METHODS.integrationsSaveApiKey,
     ]) {
@@ -195,15 +193,6 @@ describe("RPC authorization scopes", () => {
 
   it("requires operate access to stop a workflow", () => {
     expect(requiredScopeForRpcMethod(ORCHESTRATION_V2_WS_METHODS.stopWorkflow)).toBe(
-      AuthOrchestrationOperateScope,
-    );
-  });
-
-  it("reads usage-limit handoff options with read access and accepts one with operate access", () => {
-    expect(requiredScopeForRpcMethod(ORCHESTRATION_V2_WS_METHODS.recommendUsageLimitHandoff)).toBe(
-      AuthOrchestrationReadScope,
-    );
-    expect(requiredScopeForRpcMethod(ORCHESTRATION_V2_WS_METHODS.acceptUsageLimitHandoff)).toBe(
       AuthOrchestrationOperateScope,
     );
   });
@@ -293,7 +282,12 @@ describe("RPC authorization scopes", () => {
     }
   });
 
-  it.each([WS_METHODS.projectLabelsAdoptOrphanFolder, WS_METHODS.projectLabelsRemoveOrphanFolder])(
+  it.each([
+    WS_METHODS.projectLabelsAdoptOrphanFolder,
+    WS_METHODS.projectLabelsTrashOrphanFolder,
+    // Deprecated 0.3.2 alias of trashOrphanFolder.
+    WS_METHODS.projectLabelsRemoveOrphanFolder,
+  ])(
     "requires operate access for %s, on the client too, while listing orphans is a read",
     (method) => {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);

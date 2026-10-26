@@ -19,6 +19,7 @@ import * as Access from "../mcp/McpToolAccess.ts";
 import { liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
 import * as Labels from "../projectLabels/ProjectLabelService.ts";
 import * as Service from "./AgentService.ts";
+import * as AgentStore from "./AgentStore.ts";
 import * as AgentsMcp from "./AgentsMcp.ts";
 import { agentFixture } from "./agent.testkit.ts";
 
@@ -39,6 +40,7 @@ const clientScope = (access: "read-only" | "full-access") =>
 const organizer = (access: "read-only" | "full-access", moves: Array<unknown>) =>
   Layer.mergeAll(
     clientScope(access),
+    Layer.mock(AgentStore.AgentStore)({ forThread: () => Effect.succeed(null) }),
     Layer.mock(Threads.ThreadManagementService)({
       getThreadShell: (id) => Effect.succeed(liveThreadShell(id)),
     }),
@@ -61,6 +63,16 @@ const organizer = (access: "read-only" | "full-access", moves: Array<unknown>) =
         }),
     }),
     Layer.mock(Service.AgentService)({
+      update: (input) =>
+        Effect.sync(() => {
+          moves.push(input);
+          return { agent: { ...filed, instructions: input.instructions ?? filed.instructions } };
+        }),
+      delete: (id) =>
+        Effect.sync(() => {
+          moves.push(id);
+          return { deleted: true };
+        }),
       list: () => Effect.succeed({ agents: [listItem(filed), listItem(agentFixture("loose"))] }),
       setProject: (input) =>
         Effect.sync(() => {
@@ -71,7 +83,7 @@ const organizer = (access: "read-only" | "full-access", moves: Array<unknown>) =
   );
 const run = (
   dependencies: ReturnType<typeof organizer>,
-  name: "list_agents" | "update_agent_project",
+  name: "list_agents" | "update_agent_project" | "update_agent" | "delete_agent",
   args: object,
 ) =>
   Effect.gen(function* () {
@@ -147,6 +159,7 @@ it.effect.each([
         Layer.mock(Threads.ThreadManagementService)({
           getThreadShell: (id) => Effect.succeed(id === threadId ? shell : null),
         }),
+        Layer.mock(AgentStore.AgentStore)({ forThread: () => Effect.succeed(null) }),
         Layer.mock(Service.AgentService)({
           builderStart: (input) =>
             Effect.sync(() => {
@@ -174,4 +187,27 @@ it.effect.each([
         expect(started).toEqual(["Watch my pull requests"]);
       }
     }),
+);
+
+it.effect("owner management tools edit and delete through the agent service", () =>
+  Effect.gen(function* () {
+    const writes: unknown[] = [];
+    const layer = organizer("full-access", writes);
+    expect(
+      yield* run(layer, "update_agent", { id: filed.id, instructions: "Watch CI" }),
+    ).toMatchObject({ agent: { instructions: "Watch CI" } });
+    expect(yield* run(layer, "delete_agent", { id: filed.id })).toEqual({ deleted: true });
+    expect(writes).toEqual([{ id: filed.id, instructions: "Watch CI" }, filed.id]);
+  }),
+);
+it.effect("read-only management clients cannot mutate agents", () =>
+  Effect.gen(function* () {
+    const writes: unknown[] = [];
+    const layer = organizer("read-only", writes);
+    for (const name of ["update_agent", "delete_agent"] as const) {
+      const result = yield* run(layer, name, { id: filed.id });
+      expect(result).toMatchObject({ code: "capability_denied" });
+    }
+    expect(writes).toEqual([]);
+  }),
 );

@@ -10,6 +10,7 @@ import {
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 
 export const ProviderSetupInput = Schema.Struct({
+  targetEnvironmentId: Schema.optionalKey(EnvironmentId),
   instanceId: ProviderInstanceId,
 });
 export type ProviderSetupInput = typeof ProviderSetupInput.Type;
@@ -65,6 +66,7 @@ export const ProviderAuthInteraction = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("credentials"),
+    url: Schema.optionalKey(TrimmedNonEmptyString.check(Schema.isMaxLength(16_384))),
     id: SetupOperationId,
     fields: Schema.Array(
       Schema.Struct({
@@ -102,6 +104,7 @@ export const ProviderAuthResponse = Schema.Union([
 export type ProviderAuthResponse = typeof ProviderAuthResponse.Type;
 
 export const ProviderAuthStartInput = Schema.Struct({
+  targetEnvironmentId: Schema.optionalKey(EnvironmentId),
   instanceId: ProviderInstanceId,
   methodId: Schema.optionalKey(SetupOperationId),
   returnUrl: Schema.optionalKey(Schema.String),
@@ -110,6 +113,7 @@ export const ProviderAuthStartInput = Schema.Struct({
 export type ProviderAuthStartInput = typeof ProviderAuthStartInput.Type;
 
 export const ProviderAuthRespondInput = Schema.Struct({
+  targetEnvironmentId: Schema.optionalKey(EnvironmentId),
   instanceId: ProviderInstanceId,
   flowId: SetupOperationId,
   interactionId: SetupOperationId,
@@ -143,6 +147,7 @@ export const ProviderAuthState = Schema.Struct({
 export type ProviderAuthState = typeof ProviderAuthState.Type;
 
 export const ProviderAuthCompleteInput = Schema.Struct({
+  targetEnvironmentId: Schema.optionalKey(EnvironmentId),
   instanceId: ProviderInstanceId,
   flowId: SetupOperationId,
   callbackUrl: TrimmedNonEmptyString.check(Schema.isMaxLength(16_384)),
@@ -150,6 +155,7 @@ export const ProviderAuthCompleteInput = Schema.Struct({
 export type ProviderAuthCompleteInput = typeof ProviderAuthCompleteInput.Type;
 
 export const ProviderAuthCancelInput = Schema.Struct({
+  targetEnvironmentId: Schema.optionalKey(EnvironmentId),
   instanceId: ProviderInstanceId,
   flowId: SetupOperationId,
 });

@@ -7,18 +7,28 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import {
+  apparmorBwrapProfile,
+  apparmorBwrapProfilePath,
+  apparmorProfileInstallCommand,
+  apparmorProfileInstallCommands,
+  apparmorUsernsSysctlPath,
   classifyLinuxSandboxFailure,
   detectSandboxPackageManager,
+  isAppArmorUsernsRestricted,
   sandboxFailureReason,
   sandboxInstallCommand,
   sandboxInstallCommands,
   type SandboxFailure,
 } from "./sandboxProvisioning.ts";
 import * as ProcessRunner from "../processRunner.ts";
+import * as ServerConfig from "../config.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import { resolveLookupMasks } from "./lookupMasks.ts";
 import {
   linuxReadOnlyArguments,
   linuxReadOnlySeccomp,
@@ -67,6 +77,7 @@ export const make = Effect.gen(function* () {
   const platform = yield* HostProcess.Platform;
   const architecture = yield* HostProcess.Architecture;
   const environment = yield* HostProcess.Environment;
+  const home = yield* HostProcess.HomeDirectory;
   const resolve = (command: string) =>
     resolveCommandPath(command, { env: environment }).pipe(
       Effect.provideService(FileSystem.FileSystem, fs),
@@ -74,6 +85,22 @@ export const make = Effect.gen(function* () {
     );
   const scope = yield* Effect.scope;
   const filter = platform === "linux" ? linuxReadOnlySeccomp(architecture) : null;
+  // Optional so CLI probes and tests build without a server. Read per launch:
+  // provider instances can change while the server runs.
+  const serverConfig = yield* Effect.serviceOption(ServerConfig.ServerConfig);
+  const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
+  const masks = Effect.gen(function* () {
+    const settings = Option.isSome(serverSettings)
+      ? yield* serverSettings.value.getSettings.pipe(Effect.orElseSucceed(() => null))
+      : null;
+    return yield* resolveLookupMasks({ config: serverConfig, settings });
+  }).pipe(
+    Effect.provideService(FileSystem.FileSystem, fs),
+    Effect.provideService(Path.Path, path),
+    Effect.provideService(HostProcess.Platform, platform),
+    Effect.provideService(HostProcess.Environment, environment),
+    Effect.provideService(HostProcess.HomeDirectory, home),
+  );
   let binary: string | null = null;
   let status: SandboxStatus = {
     available: false,
@@ -85,6 +112,9 @@ export const make = Effect.gen(function* () {
     failure,
     reason: sandboxFailureReason(failure),
   });
+  /** Fresh read after a reprobe, without the caller's narrowed view of `status`. */
+  const currentFailure = (): SandboxFailure | undefined =>
+    status.available ? undefined : status.failure;
   const prepare = Effect.fn("ReadOnlySandbox.prepare")(function* (input: {
     readonly shell: string;
     readonly args: ReadonlyArray<string>;
@@ -105,10 +135,11 @@ export const make = Effect.gen(function* () {
           new SandboxUnavailable({ reason: "a private sandbox directory could not be created." }),
       ),
     );
+    const hidden = yield* masks;
     if (platform === "darwin") {
       return {
         shell: sandboxBinary,
-        args: ["-p", macReadOnlyProfile(directory), input.shell, ...input.args],
+        args: ["-p", macReadOnlyProfile(directory, hidden), input.shell, ...input.args],
         env: { TMPDIR: directory, TMP: directory, TEMP: directory },
       };
     }
@@ -128,7 +159,7 @@ export const make = Effect.gen(function* () {
         "cogenly-sandbox",
         filterPath,
         sandboxBinary,
-        ...linuxReadOnlyArguments(input),
+        ...linuxReadOnlyArguments({ ...input, masks: hidden }),
       ],
       env: { TMPDIR: "/tmp", TMP: "/tmp", TEMP: "/tmp" },
     };
@@ -185,9 +216,9 @@ export const make = Effect.gen(function* () {
         } as const;
       const appArmorRestricted =
         platform === "linux" &&
-        (yield* fs
-          .readFileString("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
-          .pipe(Effect.orElseSucceed(() => "0"))).trim() === "1";
+        isAppArmorUsernsRestricted(
+          yield* fs.readFileString(apparmorUsernsSysctlPath).pipe(Effect.orElseSucceed(() => "0")),
+        );
       return unavailable(
         platform === "linux"
           ? classifyLinuxSandboxFailure(result.stderr, appArmorRestricted)
@@ -222,24 +253,15 @@ export const make = Effect.gen(function* () {
       status.failure === "seccomp-unsupported"
     )
       return result(`Chat commands are off: ${status.reason}.`);
-    const available: string[] = [];
-    for (const manager of ["apt-get", "dnf", "pacman", "zypper", "apk"])
-      if (yield* resolve(manager)) available.push(manager);
-    const manager = detectSandboxPackageManager(available);
-    if (manager === null)
-      return result(
-        "Chat commands are off: no supported package manager was found. Install the distro bubblewrap package, then run cogenly security setup.",
-      );
     const root = (yield* HostProcess.UserId) === 0;
-    const command = sandboxInstallCommand(manager, root);
-    const run = (command: string, args: string[], timeout: "5 seconds" | "5 minutes") =>
+    const run = (command: string, args: string[], timeout: "5 seconds" | "5 minutes", stdin = "") =>
       runner
         .run({
           command,
           args,
           timeout,
           maxOutputBytes: 4096,
-          stdin: "",
+          stdin,
           outputMode: "truncate",
           env: { ...environment, DEBIAN_FRONTEND: "noninteractive", SUDO_ASKPASS: "/bin/false" },
         })
@@ -247,24 +269,73 @@ export const make = Effect.gen(function* () {
           Effect.map((r) => r.code === 0 && !r.timedOut),
           Effect.orElseSucceed(() => false),
         );
+    const runPrivileged = (executable: string, args: string[], stdin = "") =>
+      run(
+        root ? executable : "sudo",
+        root ? args : ["-n", "--", executable, ...args],
+        "5 minutes",
+        stdin,
+      );
+    // bubblewrap present but blocked by AppArmor needs no package install.
+    if (status.failure !== "apparmor-userns") {
+      const available: string[] = [];
+      for (const manager of ["apt-get", "dnf", "pacman", "zypper", "apk"])
+        if (yield* resolve(manager)) available.push(manager);
+      const manager = detectSandboxPackageManager(available);
+      if (manager === null)
+        return result(
+          "Chat commands are off: no supported package manager was found. Install the distro bubblewrap package, then run cogenly security setup.",
+        );
+      const command = sandboxInstallCommand(manager, root);
+      if (!root && !(yield* run("sudo", ["-n", "true"], "5 seconds")))
+        return result(`Chat commands are off: ${status.reason}. Run: ${command}`, command);
+      for (const [executable, ...args] of sandboxInstallCommands(manager)) {
+        if (!(yield* runPrivileged(executable!, args)))
+          return result(`Chat sandbox installation failed. Run: ${command}`, command);
+      }
+      yield* refresh;
+      if (status.available)
+        return result(
+          "Chat commands are on: bubblewrap is installed and the sandbox probe passed.",
+        );
+      if (currentFailure() !== "apparmor-userns")
+        return result(
+          `Chat commands are off: ${status.reason}. The distro package was installed; the host restriction still needs attention.`,
+          command,
+        );
+    }
+    // AppArmor userns restriction: install only the per-bwrap profile, and
+    // never touch the global sysctl. An existing profile is left alone.
+    const bwrapPath = binary ?? "/usr/bin/bwrap";
+    const profileCommand = apparmorProfileInstallCommand(bwrapPath, root);
+    const profileExists = yield* fs
+      .exists(apparmorBwrapProfilePath)
+      .pipe(Effect.orElseSucceed(() => false));
+    if (profileExists)
+      return result(
+        `Chat commands are off: ${status.reason}. The AppArmor profile at ${apparmorBwrapProfilePath} already exists, so it was left unchanged; the global AppArmor user-namespace restriction stays on.`,
+      );
     if (!root && !(yield* run("sudo", ["-n", "true"], "5 seconds")))
-      return result(`Chat commands are off: ${status.reason}. Run: ${command}`, command);
-    for (const [executable, ...args] of sandboxInstallCommands(manager)) {
-      if (
-        !(yield* run(
-          root ? executable! : "sudo",
-          root ? args : ["-n", "--", executable!, ...args],
-          "5 minutes",
-        ))
-      )
-        return result(`Chat sandbox installation failed. Run: ${command}`, command);
+      return result(
+        `Chat commands are off: ${status.reason}. Run:\n${profileCommand}`,
+        profileCommand,
+      );
+    const profile = apparmorBwrapProfile(bwrapPath);
+    for (const [executable, ...args] of apparmorProfileInstallCommands()) {
+      if (!(yield* runPrivileged(executable, args, executable === "tee" ? profile : "")))
+        return result(
+          `Chat sandbox AppArmor setup failed. Run:\n${profileCommand}`,
+          profileCommand,
+        );
     }
     yield* refresh;
     return status.available
-      ? result("Chat commands are on: bubblewrap is installed and the sandbox probe passed.")
+      ? result(
+          "Chat commands are on: the AppArmor profile for bubblewrap is installed and the sandbox probe passed. The global AppArmor user-namespace restriction stays on.",
+        )
       : result(
-          `Chat commands are off: ${status.reason}. The distro package was installed; the host restriction still needs attention.`,
-          command,
+          `Chat commands are off: ${status.reason}. The AppArmor profile was installed; the host restriction still needs attention.`,
+          profileCommand,
         );
   }).pipe(semaphore.withPermit);
   return ReadOnlySandbox.of({

@@ -161,6 +161,7 @@ if [ -z "$version" ]; then
   [ -n "$version" ] || fail "could not find a ${channel} release; set COGENLY_VERSION"
 fi
 
+
 versions_dir="${t3_home}/runtime/versions"
 target_dir="${versions_dir}/${version}"
 
@@ -211,7 +212,7 @@ else
   "$(runtime_entry "$staging")" --version >/dev/null || fail "the downloaded executable does not run"
   printf '%s\n' "$version" > "${staging}/.install-complete"
 
-  rm -rf "$target_dir"
+  [ ! -e "$target_dir" ] || fail "an incomplete runtime already exists at ${target_dir}; inspect it before reinstalling"
   mv "$staging" "$target_dir"
   trap - EXIT
 fi
@@ -220,6 +221,12 @@ fi
 # Older explicitly pinned releases may not have this command yet.
 if "$(runtime_entry "$target_dir")" security setup --help 2>/dev/null | grep -q -- "--local"; then
   "$(runtime_entry "$target_dir")" security setup --local </dev/null
+fi
+
+# Existing service installs use the downloaded CLI's preflight, trial and rollback.
+if [ -f "${t3_home}/runtime/service-state.json" ]; then
+  PATH="${bin_dir}:$PATH" COGENLY_HOME="$t3_home" "$(runtime_entry "$target_dir")" update "$version" --yes
+  exit $?
 fi
 
 step "Setting up the cogenly command..."

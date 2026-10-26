@@ -23,7 +23,7 @@ const toneClassName: Record<BadgeDotTone, string> = {
 };
 
 const badgeDotVariants = cva(
-  "pointer-events-none rounded-full transition-[opacity,scale,background-color] duration-(--motion-duration-fast) ease-out motion-reduce:transition-opacity",
+  "pointer-events-none rounded-full transition-[opacity,background-color] duration-(--motion-duration-fast) ease-out motion-reduce:transition-opacity",
   {
     defaultVariants: { size: "sm", ring: "none" },
     variants: {
@@ -43,12 +43,14 @@ const badgeDotVariants = cva(
 );
 
 /**
- * The status or notification dot on an icon (unread, running, update ready).
- * It stays mounted: a dot that appears fades and scales up from 0.6, one that
- * clears runs the same motion back in its last colour, and a colour change
- * crossfades. Only live changes move; a dot that is already showing when it
- * mounts paints still. Opacity only under reduced motion. The parent places
- * it (`absolute top-1 right-1`) and must be `relative`.
+ * The status or notification dot on a row or icon. One primitive for every
+ * dot so they read alike: `info` (blue) is unread news, `warning` (amber) is
+ * something waiting on you and outranks unread, `destructive` (red) is an
+ * alert. It stays mounted: a dot that appears fades in, one that clears fades
+ * out in its last colour, and a colour change crossfades. Opacity only, and
+ * only live changes move; a dot already showing when it mounts paints still.
+ * The parent places it (`absolute top-2 right-2` on a rail icon) and must be
+ * `relative`.
  */
 export function BadgeDot({
   tone,
@@ -70,7 +72,7 @@ export function BadgeDot({
       className={cn(
         badgeDotVariants({ size, ring }),
         painted ? toneClassName[painted] : undefined,
-        shown ? "scale-100 opacity-100" : "scale-60 opacity-0 motion-reduce:scale-100",
+        shown ? "opacity-100" : "opacity-0",
         className,
       )}
     />

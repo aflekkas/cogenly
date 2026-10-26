@@ -45,8 +45,8 @@ const TERMINATE_GRACE_MS = 5_000;
 /**
  * The boot unit is `Type=notify` with `WatchdogSec=60` and
  * `TimeoutStartSec=180` (see `renderBootServiceUnit`). Only the launcher is
- * alive in every phase — idle with no child, the update handoff, the
- * pre-trial database backup, and a trial child's synchronous migrations —
+ * alive in every phase (idle with no child, the update handoff, the
+ * pre-trial database backup, and a trial child's synchronous migrations),
  * so the launcher owns sd_notify and the server child's own watchdog is a
  * second, redundant pinger (`NotifyAccess=all` allows both).
  */

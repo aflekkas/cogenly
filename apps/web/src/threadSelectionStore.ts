@@ -66,7 +66,7 @@ export const useThreadSelectionStore = create<ThreadSelectionStore>((set, get) =
     set((state) => {
       const anchor = state.anchorThreadKey;
       if (anchor === null) {
-        // No anchor yet — treat as a single toggle
+        // No anchor yet, so treat as a single toggle
         const next = new Set(state.selectedThreadKeys);
         next.add(threadKey);
         return { selectedThreadKeys: next, anchorThreadKey: threadKey };
@@ -75,7 +75,7 @@ export const useThreadSelectionStore = create<ThreadSelectionStore>((set, get) =
       const anchorIndex = orderedThreadKeys.indexOf(anchor);
       const targetIndex = orderedThreadKeys.indexOf(threadKey);
       if (anchorIndex === -1 || targetIndex === -1) {
-        // Anchor or target not in this list (different project?) — fallback to toggle
+        // Anchor or target not in this list (different project?): fall back to toggle
         const next = new Set(state.selectedThreadKeys);
         next.add(threadKey);
         return { selectedThreadKeys: next, anchorThreadKey: threadKey };

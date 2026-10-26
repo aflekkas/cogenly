@@ -411,7 +411,7 @@ export interface ComposerThreadDraftState {
 /**
  * True when the user has invested real content in the draft: typed text or
  * any attachment/context. Model selection and mode choices alone do not
- * count — those are ambient defaults, not work in progress. Used by the
+ * count; those are ambient defaults, not work in progress. Used by the
  * sidebar draft rows (which draft sessions deserve a row) and by new-thread
  * resurrection (a draft with content keeps its settings instead of being
  * reset to defaults).
@@ -882,7 +882,7 @@ const EMPTY_THREAD_DRAFT = Object.freeze<ComposerThreadDraftState>({
 /**
  * Canonical factory for a blank `ComposerThreadDraftState`. Exported so tests
  * (and any other call sites) can build a draft without re-declaring every
- * slice — adding a new field to the interface (e.g. `reviewComments`) only
+ * slice. Adding a new field to the interface (e.g. `reviewComments`) only
  * has to be reflected here, not in every stub.
  */
 function createEmptyThreadDraft(): ComposerThreadDraftState {
@@ -1004,7 +1004,7 @@ function normalizeProviderDriverKind(value: unknown): ProviderDriverKind | null 
 
 /**
  * Match the `ProviderInstanceId` slug pattern (letter followed by
- * letters/digits/`-`/`_`, 1..64 chars). Permissive validator — the schema
+ * letters/digits/`-`/`_`, 1..64 chars). Permissive validator: the schema
  * layer owns authoritative validation; this is used inline to gate typed
  * writes to the draft's instance-keyed maps without pulling the full
  * Effect Schema runtime into the hot path.
@@ -1115,7 +1115,7 @@ function normalizeProviderModelOptions(
 // because default instance ids used the same slug as the driver kind.
 //
 // Selections whose instance id doesn't match the slug pattern collapse to
-// `null` — caller is responsible for deciding whether that's a dropped
+// `null`; the caller is responsible for deciding whether that's a dropped
 // write or a routed error.
 function normalizeModelSelection(
   value: unknown,
@@ -1618,8 +1618,8 @@ function createDraftThreadState(
 ): DraftThreadState {
   // A project change (including switching environments within a logical
   // project) invalidates machine-specific context: the branch may not exist
-  // there and the worktree path certainly doesn't. The user's *intent* —
-  // env mode and start-from-origin — is machine-independent and carries.
+  // there and the worktree path certainly doesn't. The user's *intent*
+  // (env mode and start-from-origin) is machine-independent and carries.
   const projectChanged =
     existingThread !== undefined &&
     (existingThread.environmentId !== projectRef.environmentId ||
@@ -2219,7 +2219,7 @@ export function partializeComposerDraftStoreState(
 ): PersistedComposerDraftStoreState {
   // Draft sessions worth persisting: mapped (a new-thread flow targets
   // them), promoting (mid-send), holding real user content (they back a
-  // sidebar row), or holding an open page. Everything else is a zombie — and
+  // sidebar row), or holding an open page. Everything else is a zombie, and
   // its composer blob must be dropped WITH it, or model/mode-only entries
   // would persist forever keyed to a session that no longer exists.
   const mappedDraftKeys = new Set(
@@ -2827,7 +2827,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                 : nextDraftThreadsByThreadKey[previousThreadKeyForLogicalProject];
             // A remap only garbage-collects the previous draft when the user
             // never invested content in it. A draft with typed text or
-            // attachments stays alive unmapped — the sidebar draft rows list
+            // attachments stays alive unmapped: the sidebar draft rows list
             // every such session, so "new thread" can mint a fresh draft
             // without destroying the one the user walked away from.
             if (
@@ -2974,7 +2974,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
         clearProjectDraftThreadId: (projectRef) => {
           set((state) => {
             // A project can own several sessions (invested drafts survive
-            // remaps unmapped), so project removal must sweep them all — a
+            // remaps unmapped), so project removal must sweep them all; a
             // leftover would render a sidebar row for a project that no
             // longer exists.
             const matchingThreadKeys = Object.entries(state.draftThreadsByThreadKey)
@@ -4580,7 +4580,7 @@ export function useEffectiveComposerModelState(input: {
   selectedProvider: ProviderDriverKind;
   /**
    * When supplied, the draft's saved selection for this instance takes
-   * precedence over the driver-kind bucket — so a custom `codex_personal`
+   * precedence over the driver-kind bucket, so a custom `codex_personal`
    * instance reads its own model, not the default Codex's.
    */
   selectedInstanceId?: ProviderInstanceId | null | undefined;

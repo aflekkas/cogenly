@@ -1,4 +1,10 @@
-import { EnvironmentId, PreviewTabId, ProviderInstanceId, ThreadId } from "@cogenly/contracts";
+import {
+  PREVIEW_AUTOMATION_SERVER_OPERATIONS,
+  EnvironmentId,
+  PreviewTabId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@cogenly/contracts";
 import { expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeCrypto } from "@effect/platform-node";
@@ -15,6 +21,7 @@ import * as ServerSecretStore from "../../../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as Sqlite from "../../../persistence/Sqlite.ts";
 import * as Vault from "../../../vault/Vault.ts";
+import { Network, startNode } from "../../../vault/vaultSync.testkit.ts";
 import * as Invocation from "../../McpInvocationContext.ts";
 import * as Access from "../../McpToolAccess.ts";
 import { liveThreadsLayer } from "../../McpToolAccess.testkit.ts";
@@ -88,6 +95,7 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
         const connected = yield* Deferred.make<void>();
         const events = yield* broker.connect({
           clientId: "test-browser",
+          supportedOperations: PREVIEW_AUTOMATION_SERVER_OPERATIONS,
           environmentId: scope.environmentId,
         });
         const fiber = yield* events.pipe(
@@ -108,20 +116,29 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
                       message: "Typing failed after input",
                     },
                   }
-                : {
-                    ok: true,
-                    result:
-                      request.operation === "evaluate"
-                        ? "321-drowssap-otco"
-                        : {
-                            available: true,
-                            visible: true,
-                            tabId: request.tabId ?? tabId,
-                            url: pageUrl,
-                            title: "Login",
-                            loading: false,
-                          },
-                  }),
+                : request.operation === "waitFor" &&
+                    (request.input as { locator?: string }).locator === "input[name=missing]"
+                  ? {
+                      ok: false,
+                      error: {
+                        _tag: "PreviewAutomationTimeoutError",
+                        message: "Waited 2000ms without every condition holding.",
+                      },
+                    }
+                  : {
+                      ok: true,
+                      result:
+                        request.operation === "evaluate"
+                          ? "321-drowssap-otco"
+                          : {
+                              available: true,
+                              visible: true,
+                              tabId: request.tabId ?? tabId,
+                              url: pageUrl,
+                              title: "Login",
+                              loading: false,
+                            },
+                    }),
             });
           }),
           Effect.forkChild,
@@ -147,7 +164,10 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
         secretFields: { username: "octo-user", password: "octo-password-123" },
       });
       expect(JSON.stringify(saved)).not.toContain("octo-password-123");
-      expect(JSON.stringify(saved)).not.toContain("octo-user");
+      // The username is the login's display text; the password never comes back.
+      expect(saved).toMatchObject({
+        item: { username: "octo-user", policy: { mode: "allow", allowedAgentIds: [] } },
+      });
 
       const listed = yield* call("vault_list", {});
       expect(JSON.stringify(listed)).not.toContain("octo-password-123");
@@ -161,15 +181,7 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
       });
       expect(evaluated).toBe(1);
 
-      const asked = yield* call("vault_fill", { name: "GitHub", field: "password" });
-      expect(asked).toMatchObject({ status: "approval_required" });
-      expect(typed).toHaveLength(0);
-      const savedItem = (yield* Context.get(context, Vault.Vault).list({})).items[0]!;
-      yield* Context.get(context, Vault.Vault).update({
-        id: savedItem.id,
-        policy: { mode: "allow", allowedAgentIds: [], allowedDomains: ["github.com"] },
-      });
-
+      // Saved with the default rule: on its own site it fills without asking.
       const filled = yield* call("vault_fill", {
         name: "GitHub",
         field: "password",
@@ -199,6 +211,19 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
           if (blocked._tag === "Failure")
             expect(blocked.failure.message).toContain("disabled on this tab after a vault fill");
         }
+      }
+      for (const target of [{ tabId }, {}]) {
+        const blocked = yield* broker
+          .invoke({
+            scope: threadScope,
+            operation: "extract",
+            input: { selector: "input", attributes: ["value"] },
+            ...target,
+          })
+          .pipe(Effect.result);
+        expect(blocked._tag).toBe("Failure");
+        if (blocked._tag === "Failure")
+          expect(blocked.failure.message).toContain("disabled on this tab after a vault fill");
       }
       // Navigation, a new provider session and host reconnection cannot clear the seal.
       yield* broker.invoke({
@@ -254,13 +279,29 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
       expect(evaluated).toBe(2);
       failTyping = false;
 
+      // A locator that matches nothing fails at once, naming it, and types nothing.
+      const missing = yield* call("vault_fill", {
+        name: "GitHub",
+        field: "password",
+        locator: "input[name=missing]",
+        tabId: freshTab,
+      });
+      expect(missing).toMatchObject({
+        code: "invalid_request",
+        message: expect.stringMatching(
+          /^No element matches the locator input\[name=missing\] on github\.com\..*preview_snapshot/,
+        ),
+      });
+      expect(typed).toHaveLength(2);
+
       pageUrl = "https://evil.test/login";
       const denied = yield* call("vault_fill", {
         name: "GitHub",
         field: "password",
         locator: "input[name=password]",
       });
-      expect(denied).toMatchObject({ status: "denied" });
+      // Another site asks the user instead of typing anything.
+      expect(denied).toMatchObject({ status: "approval_required" });
       expect(typed).toHaveLength(2);
 
       // The scrub hook in McpToolAccess redacts stored values from any result.
@@ -305,7 +346,7 @@ it.effect("vault_fill fills card fields by field and never returns them", () =>
                   loading: false,
                 } as never)
               : Effect.sync(() => {
-                  typed.push(request.input);
+                  if (request.operation === "type") typed.push(request.input);
                   return {} as never;
                 }),
         }),
@@ -400,8 +441,59 @@ it.effect("vault_fill fills card fields by field and never returns them", () =>
         field: "cardNumber",
         locator: "input[name=cardNumber]",
       });
-      expect(denied).toMatchObject({ status: "denied" });
+      expect(denied).toMatchObject({ status: "approval_required" });
       expect(typed).toHaveLength(4);
     }),
   ),
+);
+
+it.effect("agents inspect, disable and restore sharing through the Settings service", () =>
+  Effect.gen(function* () {
+    const network = new Network();
+    const hub = yield* startNode(network, "Server");
+    const spoke = yield* startNode(network, "Laptop");
+    network.pair(hub, spoke);
+    const callers = Layer.mergeAll(
+      liveThreadsLayer,
+      Layer.succeed(Invocation.McpInvocationContext, {
+        environmentId: hub.environmentId,
+        capabilities: new Set(["orchestration" as const]),
+        requestNamespace: "test",
+        issuedAt: 0,
+        thread: {
+          threadId,
+          providerSessionId: "session",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+        },
+        client: undefined,
+      }),
+    );
+    const context = Context.merge(hub.context, yield* Layer.build(callers));
+    const toolkit = yield* VaultToolkit.pipe(
+      Effect.provide(Access.HandlersLayer.layer(Handlers.layer)),
+      Effect.provideContext(context),
+    );
+    const call = (name: "vault_sharing_status" | "vault_sharing_update", input: object) =>
+      toolkit.handle(name, input as never).pipe(
+        Stream.unwrap,
+        Stream.runCollect,
+        Effect.provideContext(context),
+        Effect.map((results) => results.at(-1)?.result),
+      );
+    expect(yield* call("vault_sharing_status", {})).toMatchObject({
+      peers: [{ state: "shared", sharingEnabled: true }],
+    });
+    expect(
+      yield* call("vault_sharing_update", { environmentId: spoke.environmentId, enabled: false }),
+    ).toMatchObject({
+      peers: [{ state: "not_shared", sharingEnabled: false }],
+    });
+    expect((yield* spoke.sync.sharingStatus).peers[0]?.state).toBe("not_shared");
+    expect(
+      yield* call("vault_sharing_update", { environmentId: spoke.environmentId, enabled: true }),
+    ).toMatchObject({
+      peers: [{ state: "shared", sharingEnabled: true }],
+    });
+    expect((yield* hub.sync.sharingStatus).peers[0]?.state).toBe("shared");
+  }).pipe(Effect.scoped),
 );

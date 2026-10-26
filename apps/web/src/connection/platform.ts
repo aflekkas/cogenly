@@ -361,7 +361,7 @@ const loadPrimaryConnectionRegistration = Effect.fn(
 });
 
 // A desktop-local secondary backend (e.g. a parallel WSL backend) lives on its
-// own loopback origin, so — unlike the same-origin primary — it authenticates
+// own loopback origin, so (unlike the same-origin primary) it authenticates
 // with a bearer token minted from the bootstrap credential the desktop issues.
 const loadSecondaryConnectionRegistration = Effect.fn(
   "web.connectionPlatform.loadSecondaryConnectionRegistration",

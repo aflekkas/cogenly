@@ -8,11 +8,11 @@ import {
   AgentId,
   type AgentFallbackReason,
   ModelSelection as ModelSelectionSchema,
-  type ModelSelection,
   FactId,
   type RunId,
   type ContextPrincipal,
   AgentMemoryNote,
+  AgentCoreMemory,
   AgentListItem,
   type AgentMarkReadInput,
   AgentWorkRun,
@@ -29,7 +29,6 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as Facts from "../context/FactService.ts";
 import * as Retrieval from "../context/ContextRetrievalService.ts";
 import { builderSystemPrompt } from "./builderPrompt.ts";
-import { conversationCarryOver } from "./context.ts";
 
 interface Row {
   payload_json: string;
@@ -46,12 +45,14 @@ const decodeNote = Schema.decodeUnknownEffect(AgentMemoryNote);
 const decodeEventContext = Schema.decodeUnknownEffect(Schema.fromJsonString(AgentEventContext));
 const encodeEventContext = Schema.encodeSync(Schema.fromJsonString(AgentEventContext));
 const decodeRun = Schema.decodeUnknownEffect(AgentWorkRun);
+const decodeModelSelectionJson = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(ModelSelectionSchema),
+);
+const decodeCoreMemory = Schema.decodeEffect(AgentCoreMemory);
 const decodeSelectionJson = (json: string | null) =>
   json == null
     ? Effect.succeed(undefined)
-    : Schema.decodeUnknownEffect(Schema.fromJsonString(ModelSelectionSchema))(json).pipe(
-        Effect.catch(() => Effect.succeed(undefined)),
-      );
+    : decodeModelSelectionJson(json).pipe(Effect.catch(() => Effect.succeed(undefined)));
 const encodePermissions = Schema.encodeEffect(Schema.fromJsonString(AgentPermissions));
 const decodeLatestMessage = Schema.decodeUnknownEffect(
   Schema.fromJsonString(AgentListItem.fields.latestMessage),
@@ -81,11 +82,10 @@ export class AgentStore extends Context.Service<
       principal?: ContextPrincipal,
     ) => Effect.Effect<boolean, AgentError>;
     readonly context: (threadId: ThreadId, runId?: RunId) => Effect.Effect<string, AgentError>;
-    readonly carryOver: (
-      agentId: AgentId,
-      ordinal: number,
-      messages: ReadonlyArray<{ role: string; text: string }>,
-    ) => Effect.Effect<void, AgentError>;
+    readonly updateCoreMemory: (
+      id: AgentId,
+      text: string,
+    ) => Effect.Effect<{ text: string }, AgentError>;
     /** Reserve background work only; owner messages never consume this allowance. */
     readonly reserve: (id: AgentId) => Effect.Effect<boolean, AgentError>;
     readonly outcome: (id: AgentId, succeeded: boolean) => Effect.Effect<Agent, AgentError>;
@@ -132,14 +132,14 @@ const make = Effect.gen(function* () {
       Effect.mapError(storeError),
     );
   const get = (id: AgentId) =>
-    sql<Row>`SELECT a.*, (SELECT f.folder_id FROM effective_thread_project_folders f WHERE f.thread_id = a.conversation_thread_id) AS project_folder_id, (SELECT json_object('id', m.message_id, 'role', m.role, 'text', substr(json_extract(m.payload_json, '$.text'), 1, 240), 'createdAt', m.created_at, 'updatedAt', m.updated_at) FROM orchestration_v2_projection_messages m WHERE m.thread_id = a.conversation_thread_id AND m.role IN ('user', 'assistant') AND m.streaming = 0 AND trim(json_extract(m.payload_json, '$.text')) <> '' ORDER BY m.created_at DESC, m.message_id DESC LIMIT 1) AS latest_message_json, (SELECT COUNT(*) FROM orchestration_v2_projection_messages m WHERE m.thread_id = a.conversation_thread_id AND m.role = 'assistant' AND m.streaming = 0 AND trim(json_extract(m.payload_json, '$.text')) <> '' AND (m.updated_at, m.message_id) > (a.last_read_at, a.last_read_message_id)) AS unread_count FROM agents a WHERE a.agent_id = ${id}`.pipe(
+    sql<Row>`SELECT a.*, (SELECT f.folder_id FROM effective_thread_project_folders f WHERE f.thread_id = a.conversation_thread_id) AS project_folder_id, (SELECT json_object('id', m.message_id, 'role', m.role, 'text', substr(json_extract(m.payload_json, '$.text'), 1, 240), 'createdAt', m.created_at, 'updatedAt', m.updated_at) FROM orchestration_v2_projection_messages m WHERE m.thread_id = a.conversation_thread_id AND m.role IN ('user', 'assistant') AND m.message_id NOT LIKE 'agent-kickoff:%' AND m.message_id NOT LIKE 'agent-fallback:%' AND m.streaming = 0 AND trim(json_extract(m.payload_json, '$.text')) <> '' ORDER BY m.created_at DESC, m.message_id DESC LIMIT 1) AS latest_message_json, (SELECT COUNT(*) FROM orchestration_v2_projection_messages m WHERE m.thread_id = a.conversation_thread_id AND m.role = 'assistant' AND m.streaming = 0 AND trim(json_extract(m.payload_json, '$.text')) <> '' AND (m.updated_at, m.message_id) > (a.last_read_at, a.last_read_message_id)) AS unread_count FROM agents a WHERE a.agent_id = ${id}`.pipe(
       Effect.mapError(storeError),
       Effect.flatMap((rows) =>
         rows[0] ? fromRow(rows[0]) : Effect.fail(new AgentError({ message: "Agent not found." })),
       ),
     );
   const list = () =>
-    sql<Row>`SELECT a.*, (SELECT f.folder_id FROM effective_thread_project_folders f WHERE f.thread_id = a.conversation_thread_id) AS project_folder_id, (SELECT json_object('id', m.message_id, 'role', m.role, 'text', substr(json_extract(m.payload_json, '$.text'), 1, 240), 'createdAt', m.created_at, 'updatedAt', m.updated_at) FROM orchestration_v2_projection_messages m WHERE m.thread_id = a.conversation_thread_id AND m.role IN ('user', 'assistant') AND m.streaming = 0 AND trim(json_extract(m.payload_json, '$.text')) <> '' ORDER BY m.created_at DESC, m.message_id DESC LIMIT 1) AS latest_message_json, (SELECT COUNT(*) FROM orchestration_v2_projection_messages m WHERE m.thread_id = a.conversation_thread_id AND m.role = 'assistant' AND m.streaming = 0 AND trim(json_extract(m.payload_json, '$.text')) <> '' AND (m.updated_at, m.message_id) > (a.last_read_at, a.last_read_message_id)) AS unread_count FROM agents a ORDER BY a.agent_id`.pipe(
+    sql<Row>`SELECT a.*, (SELECT f.folder_id FROM effective_thread_project_folders f WHERE f.thread_id = a.conversation_thread_id) AS project_folder_id, (SELECT json_object('id', m.message_id, 'role', m.role, 'text', substr(json_extract(m.payload_json, '$.text'), 1, 240), 'createdAt', m.created_at, 'updatedAt', m.updated_at) FROM orchestration_v2_projection_messages m WHERE m.thread_id = a.conversation_thread_id AND m.role IN ('user', 'assistant') AND m.message_id NOT LIKE 'agent-kickoff:%' AND m.message_id NOT LIKE 'agent-fallback:%' AND m.streaming = 0 AND trim(json_extract(m.payload_json, '$.text')) <> '' ORDER BY m.created_at DESC, m.message_id DESC LIMIT 1) AS latest_message_json, (SELECT COUNT(*) FROM orchestration_v2_projection_messages m WHERE m.thread_id = a.conversation_thread_id AND m.role = 'assistant' AND m.streaming = 0 AND trim(json_extract(m.payload_json, '$.text')) <> '' AND (m.updated_at, m.message_id) > (a.last_read_at, a.last_read_message_id)) AS unread_count FROM agents a ORDER BY a.agent_id`.pipe(
       Effect.flatMap((rows) => Effect.forEach(rows, fromRow)),
       Effect.mapError(storeError),
     );
@@ -290,6 +290,8 @@ const make = Effect.gen(function* () {
             yield* sql`DELETE FROM agent_conversation_context WHERE agent_id = ${id}`;
             yield* sql`DELETE FROM agent_memory WHERE agent_id = ${id}`;
             yield* sql`DELETE FROM agent_work_runs WHERE agent_id = ${id}`;
+            yield* sql`DELETE FROM commitments WHERE agent_id = ${id} AND status = 'proposed'`;
+            yield* sql`UPDATE commitments SET agent_id = NULL, payload_json = json_set(payload_json, '$.agentId', NULL, '$.owner', json_object('kind', 'user')) WHERE agent_id = ${id} OR (json_extract(payload_json, '$.owner.kind') = 'agent' AND json_extract(payload_json, '$.owner.agentId') = ${id})`;
             const rows = yield* sql`DELETE FROM agents WHERE agent_id = ${id} RETURNING agent_id`;
             return rows.length > 0;
           }),
@@ -325,18 +327,22 @@ const make = Effect.gen(function* () {
           budgetChars: agent === null ? 4000 : 16000,
         });
         if (agent === null) return context.text;
-        return `You are ${agent.name}, the owner's persistent agent.\nResponsibility:\n${agent.responsibility}\nYou act on your own across all of the owner's projects and repositories, within your permissions: ${yield* encodePermissions(agent.permissions)}. Use project_list to see them and project_create or project_clone to add one.\nStanding instructions:\n${agent.instructions}\n\n${context.text}\nUse fact_search to retrieve accessible facts, fact_propose for uncertain facts, and fact_supersede to replace proposals. memory_read, memory_remember and memory_forget remain aliases for your own facts. Only the user can confirm a proposal. Use list_open_items for shared commitments, propose_commitment for extracted obligations, and update_commitment_status with evidence. Use request_agent_approval for new triggers or permission changes; you can never approve your own requests. Use start_agent_work to start or propose repository Work. Send concise messages to the owner.`;
+        return `You are ${agent.name}, the owner's persistent agent.\nResponsibility:\n${agent.responsibility}\nYou act on your own across all of the owner's projects and repositories, within your permissions: ${yield* encodePermissions(agent.permissions)}. Use project_list to see them and project_create or project_clone to add one.\nStanding instructions:\n${agent.instructions}\n\nCore memory (curated, always in context):\n${agent.coreMemory ?? ""}\nUse agent_core_memory_update to maintain this block (8000 character budget). Keep hard constraints, preferences and current priorities; instructions and retrieved facts are separate.\n\n${context.text}\nUse fact_search to retrieve accessible facts, fact_propose for uncertain facts, and fact_supersede to replace proposals. memory_read, memory_remember and memory_forget remain aliases for your own facts. Only the user can confirm a proposal. Use list_open_items for shared commitments, propose_commitment for extracted obligations, and update_commitment_status with evidence. Use request_agent_approval for new triggers or permission changes; you can never approve your own requests. Use start_agent_work to start or propose repository Work. Send concise messages to the owner.`;
       }).pipe(Effect.mapError(storeError)),
-    carryOver: (agentId, ordinal, messages) =>
-      Effect.gen(function* () {
-        const rows = yield* sql<{
-          summary: string;
-          covered_run_ordinal: number;
-        }>`SELECT * FROM agent_conversation_context WHERE agent_id = ${agentId}`;
-        if ((rows[0]?.covered_run_ordinal ?? 0) >= ordinal) return;
-        const { summary } = conversationCarryOver(rows[0]?.summary ?? "", messages);
-        yield* sql`INSERT INTO agent_conversation_context(agent_id, summary, covered_run_ordinal) VALUES (${agentId}, ${summary}, ${ordinal}) ON CONFLICT(agent_id) DO UPDATE SET summary = excluded.summary, covered_run_ordinal = excluded.covered_run_ordinal`;
-      }).pipe(Effect.mapError(storeError)),
+    updateCoreMemory: (id, text) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const validated = yield* decodeCoreMemory(text);
+            const at = yield* now;
+            const rows =
+              yield* sql`UPDATE agents SET payload_json = json_set(payload_json, '$.coreMemory', ${validated}, '$.updatedAt', ${at}) WHERE agent_id = ${id} RETURNING agent_id`;
+            if (!rows.length) return yield* new AgentError({ message: "Agent not found." });
+            yield* shared.capture("agent", id);
+            return { text: validated };
+          }),
+        )
+        .pipe(Effect.mapError(storeError)),
     reserve: (id) =>
       Effect.gen(function* () {
         const at = yield* now;

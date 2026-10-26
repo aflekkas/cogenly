@@ -218,7 +218,7 @@ export function superellipseProfile(n: number, sx = 1, sy = 1): number[] {
 
 /**
  * Profil radial de l'UNION de disques : r(theta) = la plus lointaine des
- * intersections rayon/cercle. Exact tant que l'origine est dans l'union — c'est
+ * intersections rayon/cercle. Exact tant que l'origine est dans l'union, et c'est
  * ce qui donne les bosses du nuage sans booleen de path.
  */
 export function unionOfCirclesProfile(

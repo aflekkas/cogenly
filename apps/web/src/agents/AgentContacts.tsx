@@ -463,10 +463,14 @@ function AgentRow({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [pending, setPending] = useState(false);
   const since = formatRelativeTime(agent.updatedAt);
+  const identities = useEnvironmentIdentities();
   const environmentLabel =
-    useEnvironmentIdentities().find((entry) => entry.environmentId === agent.environmentId)
-      ?.label ?? null;
-  const environmentMachine = useEnvironmentMachines().get(agent.environmentId) ?? "server";
+    agent.ownerName ??
+    identities.find((entry) => entry.environmentId === (agent.ownerMachine ?? agent.environmentId))
+      ?.label ??
+    null;
+  const environmentMachine =
+    useEnvironmentMachines().get(agent.ownerMachine ?? agent.environmentId) ?? "server";
   const configs = useServerConfigs();
   const providerEntry = useMemo(
     () =>
@@ -546,7 +550,7 @@ function AgentRow({
       { id: "open", label: "Open", icon: "mail-open" },
       { id: "details", label: "Open details", icon: "settings" },
       { id: "rename", label: "Rename", icon: "pencil", disabled: !canWrite },
-      { id: "face", label: "Change face…", disabled: !canWrite },
+      { id: "face", label: "Change face…", icon: "smile", disabled: !canWrite },
       ...(folders.length > 0 || currentFolderId !== null
         ? [
             {
@@ -702,6 +706,7 @@ function AgentRow({
               }
             >
               <PopoverTrigger
+                nativeButton={false}
                 render={
                   <span className="flex size-8 shrink-0 items-center justify-center" aria-hidden />
                 }
@@ -777,17 +782,17 @@ function AgentRow({
                   >
                     <Tooltip>
                       <TooltipTrigger
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          void openMenu({ x: rect.right, y: rect.bottom });
+                        }}
+                        onPointerDown={(event) => event.stopPropagation()}
                         render={
                           <button
                             type="button"
                             aria-label={`More for ${agent.name}`}
                             aria-haspopup="menu"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              const rect = event.currentTarget.getBoundingClientRect();
-                              void openMenu({ x: rect.right, y: rect.bottom });
-                            }}
-                            onPointerDown={(event) => event.stopPropagation()}
                             className="inline-flex cursor-pointer items-center rounded-md bg-transparent px-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
                           />
                         }
@@ -817,7 +822,10 @@ function AgentRow({
                       kind={environmentMachine}
                       className="size-3 shrink-0"
                     />
-                    <span className="truncate">{environmentLabel}</span>
+                    <span className="truncate">
+                      {environmentLabel}
+                      {agent.ownerOnline === false ? " · Offline" : ""}
+                    </span>
                   </span>
                 ) : null}
                 {providerEntry ? (
@@ -836,7 +844,7 @@ function AgentRow({
                         displayName={providerEntry.displayName}
                         accentColor={providerEntry.accentColor}
                         showBadge={providerEntry.accentColor !== undefined}
-                        iconClassName="size-3.5"
+                        size="sm"
                       />
                     </TooltipTrigger>
                     <TooltipPopup side="top">{modelLabel}</TooltipPopup>

@@ -141,26 +141,15 @@ it.effect("production runtime policy names connected integrations in turn contex
     const check = yield* integrations.testConnection(integration.id);
     expect(check.status).toBe("connected");
 
-    const settings = yield* ServerSettings.ServerSettingsService;
     const policy = yield* RuntimePolicy.RuntimePolicyV2;
     const thread = unfiledThread(yield* DateTime.now);
-    // Native servers are off by default, before the import offer is reviewed too.
+    // Provider-native servers are always off; the turn says so.
     const resolved = yield* policy.resolve({ thread, modelSelection: thread.modelSelection });
     expect(resolved.projectManifest).toContain("Connected integrations: acme (Acme Docs).");
     expect(resolved.projectManifest).toContain("Use integration_tools / integration_call.");
-    expect(resolved.useProviderConnectors).toBeUndefined();
     expect(resolved.projectManifest).toContain(
       "own MCP servers, connectors, plugins and apps are off",
     );
     expect(resolved.projectManifest).toContain("checked into the repository");
-    yield* settings.updateSettings({ nativeMcpImportReviewed: true });
-    const reviewed = yield* policy.resolve({ thread, modelSelection: thread.modelSelection });
-    expect(reviewed.useProviderConnectors).toBeUndefined();
-
-    yield* settings.updateSettings({ useProviderConnectors: true });
-    const optedIn = yield* policy.resolve({ thread, modelSelection: thread.modelSelection });
-    expect(optedIn.projectManifest).toContain("Connected integrations: acme (Acme Docs).");
-    expect(optedIn.useProviderConnectors).toBe(true);
-    expect(optedIn.projectManifest).not.toContain("own MCP servers, connectors, plugins");
   }).pipe(Effect.provide(layerProductionPolicy)),
 );

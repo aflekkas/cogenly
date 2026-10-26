@@ -48,8 +48,8 @@ function isThreadNotFound(error: unknown): boolean {
 
 /**
  * Serves orchestration V2 snapshots over HTTP so clients can load the
- * (potentially large) shell and thread projections off the socket; gzip
- * compressible and cacheable — and then resume the WebSocket subscription via
+ * (potentially large) shell and thread projections off the socket (gzip
+ * compressible and cacheable), and then resume the WebSocket subscription via
  * `afterSequence`.
  */
 export const layer = HttpApiBuilder.group(
