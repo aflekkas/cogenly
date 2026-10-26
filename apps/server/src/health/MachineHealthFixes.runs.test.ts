@@ -31,6 +31,7 @@ import { layerWithRegistry } from "../orchestration-v2/testkit/ProviderReplayHar
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as Tasks from "../scheduledTasks/ScheduledTaskService.ts";
 import * as Health from "./MachineHealth.ts";
+import * as ServerSelfUpdate from "../cloud/selfUpdate.ts";
 import * as Fixes from "./MachineHealthFixes.ts";
 import { STUCK_RUN_AFTER_MS } from "./healthChecks.ts";
 
@@ -203,6 +204,7 @@ it.effect.each([
           }),
           Layer.mock(Tasks.ScheduledTaskService)({}),
           Layer.succeed(SqlClient.SqlClient, sql),
+          Layer.mock(ServerSelfUpdate.ServerSelfUpdate)({ capability: null }),
           NodeServices.layer,
         ),
       ),

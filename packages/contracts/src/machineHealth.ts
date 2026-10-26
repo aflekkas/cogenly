@@ -62,6 +62,7 @@ export const MachineHealthFix = Schema.Literals([
   "stop-runs",
   "retry-sync",
   "setup-sandbox",
+  "update-machine",
 ]);
 export type MachineHealthFix = typeof MachineHealthFix.Type;
 
@@ -231,6 +232,15 @@ export const MachineHealthFixRun = makePeerChannel({
   scope: AuthPeerDelegateScope,
   payload: Schema.Struct({ itemKeys: MachineHealthFixItemKeys }),
   success: MachineHealthFixResult,
+  error: MachineHealthError,
+});
+
+/** Update this peer to a version already running on a paired machine. */
+export const MachineVersionUpdate = makePeerChannel({
+  name: "health.update-version.v1",
+  scope: AuthPeerDelegateScope,
+  payload: Schema.Struct({ targetVersion: TrimmedNonEmptyString }),
+  success: Schema.Struct({}),
   error: MachineHealthError,
 });
 

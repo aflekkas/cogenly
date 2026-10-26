@@ -227,7 +227,9 @@ has a **Fix**. Where Cogenly can fix it directly, Fix does it on the machine
 with the problem, even when you are connected to the other one: it stops a
 thread's stuck runs (they lost their provider session, so they can't be
 resumed; send the thread a message to carry on), runs a failed task again,
-retries sync, or sets up the chat sandbox. A provider or integration that needs
+retries sync, or sets up the chat sandbox. Machine links also warn when paired
+machines run different Cogenly versions. Update the older machine to match;
+Fix can start a supported background service update. A provider or integration that needs
 sign-in opens its sign-in. Anything else opens a new chat with the problem
 filled in, so an agent can investigate and fix it once you send it. A paired
 machine that can't be reached is shown from what this machine last saw of it.

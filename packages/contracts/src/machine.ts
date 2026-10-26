@@ -59,6 +59,7 @@ export const MachineInfo = Schema.Struct({
   kind: MachineKind,
   hardware: MachineHardware,
   platform: ExecutionEnvironmentPlatformOs,
+  serverVersion: Schema.optionalKey(TrimmedNonEmptyString),
   relation: MachineRelation,
   online: Schema.Boolean,
   /** Null for this machine and for a peer never seen since pairing. */
