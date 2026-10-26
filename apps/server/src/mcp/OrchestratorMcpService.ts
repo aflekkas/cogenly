@@ -36,6 +36,7 @@ import {
   type OrchestratorMcpUpdateScheduledTaskInput,
   type OrchestratorMcpListScheduledTasksInput,
   type ProjectId,
+  type SecretRef,
   type OrchestratorMcpThreadDetail,
   type OrchestratorMcpThreadInterruptInput,
   type OrchestratorMcpThreadInterruptResult,
@@ -205,6 +206,36 @@ export class OrchestratorMcpService extends Context.Service<
 >()("cogenly-server/mcp/OrchestratorMcpService") {}
 
 const isThreadManagementError = Schema.is(ThreadManagementService.ThreadManagementError);
+
+/**
+ * Stores a private answer as a vault item instead of a one-use ref. The answer
+ * is removed only after the vault write commits, so a failed write leaves it
+ * for a retry with the same clientRequestId.
+ */
+export const saveAnswerToVault = (
+  secretRequests: SecretRequests.SecretRequests["Service"],
+  vault: Vault.Vault["Service"],
+  input: {
+    readonly ref: SecretRef;
+    readonly projectId: ProjectId;
+    readonly target: NonNullable<OrchestratorMcpRequestSecretInput["saveToVault"]>;
+  },
+) =>
+  secretRequests
+    .adopt({ ref: input.ref, projectId: input.projectId }, (value) =>
+      vault.saveSecretValue({
+        name: input.target.name,
+        type: input.target.type,
+        domains: input.target.domains ?? [],
+        value,
+      }),
+    )
+    .pipe(
+      Effect.map(({ item }) => item),
+      Effect.mapError((error) =>
+        failure("orchestration_error", `Could not store the secret in the vault: ${error.message}`),
+      ),
+    );
 
 function failure(code: OrchestratorMcpFailure["code"], message: string): OrchestratorMcpFailure {
   return new OrchestratorMcpFailure({ code, message });
@@ -1981,33 +2012,11 @@ const make = Effect.gen(function* () {
           };
         }
         if (input.saveToVault) {
-          // The private answer lands as a vault item instead of a one-use
-          // ref: consume the ref server-side and store the value encrypted.
-          const value = yield* secretRequests
-            .consume({ ref: secretRef.value, projectId: parent.thread.projectId })
-            .pipe(
-              Effect.mapError((error) =>
-                failure(
-                  "orchestration_error",
-                  `Could not store the secret in the vault: ${error.message}`,
-                ),
-              ),
-            );
-          const { item } = yield* vault
-            .saveSecretValue({
-              name: input.saveToVault.name,
-              type: input.saveToVault.type,
-              domains: input.saveToVault.domains ?? [],
-              value,
-            })
-            .pipe(
-              Effect.mapError((error) =>
-                failure(
-                  "orchestration_error",
-                  `Could not store the secret in the vault: ${error.message}`,
-                ),
-              ),
-            );
+          const item = yield* saveAnswerToVault(secretRequests, vault, {
+            ref: secretRef.value,
+            projectId: parent.thread.projectId,
+            target: input.saveToVault,
+          });
           return { status, vaultItemId: item.id, vaultItemName: item.name };
         }
         return { status, secretRef: secretRef.value };
