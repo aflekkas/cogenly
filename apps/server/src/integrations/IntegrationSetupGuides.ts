@@ -1,4 +1,10 @@
-import { integrationCatalogEntry, type IntegrationCatalogId } from "@cogenly/contracts";
+import {
+  integrationCatalogEntry,
+  integrationCatalogEntryFor,
+  type Integration,
+  type IntegrationCatalogId,
+  type IntegrationSetupGuideResult,
+} from "@cogenly/contracts";
 
 // Setup knowledge belongs to agents. Keep uncertain provider requirements explicit.
 const GUIDES: Record<IntegrationCatalogId | "custom", string> = {
@@ -33,7 +39,10 @@ Name everything you create on the user's behalf Cogenly: cloud project display n
 Record what you set up in setupNotes on integration_add or integration_update: what was created where (project ID, app or client ID, redirect URIs), which account owns it, and the date. Never put secrets in notes. Before repairing an integration, read its setupNotes in integrations_list, and update them after you change the setup.
 Inspect existing integrations first to avoid duplicates. Settings only manages connected accounts. Tokens stay in the vault; collect secrets only the user knows through request_secret with saveToVault, and save ones you obtained with vault_save. Pass callbackOrigin explicitly for first-time OAuth from a remote/VPS or Tailscale connection; localhost on the server is not reachable from another device. Use integration_update by name for a fresh sign-in link. Persistent agents use the normal owner-approval path. Never perform a write just to verify connectivity.`;
 
-export function integrationSetupGuide(service: string): { service: string; instructions: string } {
+export function integrationSetupGuide(
+  service: string,
+  existing: ReadonlyArray<Integration> = [],
+): IntegrationSetupGuideResult {
   const normalized = service.trim().toLowerCase();
   const id = ["gmail", "google", "google workspace"].includes(normalized)
     ? "google-workspace"
@@ -44,5 +53,44 @@ export function integrationSetupGuide(service: string): { service: string; instr
     id === "custom" || integrationCatalogEntry(id) !== undefined
       ? (id as keyof typeof GUIDES)
       : "custom";
-  return { service: key, instructions: `${COMMON}\n\n${GUIDES[key]}` };
+  const instructions = `${COMMON}\n\n${GUIDES[key]}`;
+  const notes = existing.flatMap((integration) =>
+    integration.setupNotes !== undefined && matchesService(integration, key, service)
+      ? [
+          {
+            name: integration.name,
+            displayName: integration.displayName,
+            ...(integration.accountLabel ? { accountLabel: integration.accountLabel } : {}),
+            setupNotes: integration.setupNotes,
+            ...(integration.setupNotesUpdatedAt
+              ? { setupNotesUpdatedAt: integration.setupNotesUpdatedAt }
+              : {}),
+          },
+        ]
+      : [],
+  );
+  if (notes.length === 0) return { service: key, instructions };
+  // Notes first, so a re-auth or a move to another machine reuses what was already made.
+  const recorded = notes
+    .map(
+      (note) =>
+        `- ${note.displayName}${note.accountLabel ? ` (${note.accountLabel})` : ""}, integration ${note.name}: ${note.setupNotes}`,
+    )
+    .join("\n");
+  return {
+    service: key,
+    existingSetupNotes: notes,
+    instructions: `Existing setup notes. An earlier agent already set this up; reuse what it created (project, app, client, redirect URIs) instead of starting over, and update the notes with integration_update after you change anything:\n${recorded}\n\n${instructions}`,
+  };
+}
+
+/** Whether an existing integration is an account of the service the guide is for. */
+function matchesService(integration: Integration, key: string, service: string) {
+  if (key !== "custom") return integrationCatalogEntryFor(integration)?.id === key;
+  const wanted = service.trim().toLowerCase();
+  return (
+    integration.name.toLowerCase() === wanted ||
+    integration.displayName.toLowerCase() === wanted ||
+    integration.url.toLowerCase() === wanted
+  );
 }

@@ -595,4 +595,17 @@ export const IntegrationSetupGuideInput = Schema.Struct({ service: TrimmedNonEmp
 export const IntegrationSetupGuideResult = Schema.Struct({
   service: Schema.String,
   instructions: Schema.String,
+  /** Notes earlier agents recorded on this service's existing integrations; also opening `instructions`. */
+  existingSetupNotes: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        name: Schema.String,
+        displayName: Schema.String,
+        accountLabel: Schema.optional(Schema.String),
+        setupNotes: Schema.String,
+        setupNotesUpdatedAt: Schema.optional(Schema.String),
+      }),
+    ),
+  ),
 });
+export type IntegrationSetupGuideResult = typeof IntegrationSetupGuideResult.Type;

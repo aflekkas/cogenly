@@ -935,6 +935,31 @@ describe("Integrations gateway", () => {
     }).pipe(Effect.provide(layerWith())),
   );
 
+  it.effect("opens the setup guide with notes from the service's existing integrations", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      const notes = "Slack app Cogenly (A0123) in Acme; redirect https://cogenly.example.com/oauth";
+      yield* service.create(
+        { ...createInput("https://mcp.slack.com/mcp", "slack"), headers: {}, setupNotes: notes },
+        { fromAgent: true },
+      );
+      yield* service.create(
+        { ...createInput("https://example.com/mcp"), headers: {}, setupNotes: "Unrelated." },
+        { fromAgent: true },
+      );
+      const guide = yield* service.setupGuide("slack");
+      expect(guide.existingSetupNotes).toEqual([
+        expect.objectContaining({ name: "slack", setupNotes: notes }),
+      ]);
+      expect(guide.instructions.startsWith("Existing setup notes.")).toBe(true);
+      expect(guide.instructions).toContain(notes);
+      expect(guide.instructions).not.toContain("Unrelated.");
+      // A service nobody has set up yet gets the plain guide.
+      expect((yield* service.setupGuide("linear")).existingSetupNotes).toBeUndefined();
+    }).pipe(Effect.provide(layerWith())),
+  );
+
   it.effect("gives additional unlabeled accounts a distinguishing default label", () =>
     Effect.gen(function* () {
       yield* runMigrations();

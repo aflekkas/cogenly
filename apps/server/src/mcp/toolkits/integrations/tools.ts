@@ -47,7 +47,7 @@ export const IntegrationsToolkit = Toolkit.make(
     parameters: IntegrationSetupGuideInput,
     success: IntegrationSetupGuideResult,
     description:
-      "Read agent setup instructions for Gmail/Google Workspace, Wispr Flow, Slack, GitHub, Linear, Notion, Fathom or any MCP server by URL or command. Call this before connecting a service. Do the setup yourself end to end in the collaborative browser, console work included, without asking first; the user only handles a password or 2FA you can't fill from the vault, and the final OAuth consent.",
+      "Read agent setup instructions for Gmail/Google Workspace, Wispr Flow, Slack, GitHub, Linear, Notion, Fathom or any MCP server by URL or command. Call this before connecting or repairing a service; it opens with the setup notes earlier agents left on that service's existing integrations, so reuse what they created. Do the setup yourself end to end in the collaborative browser, console work included, without asking first; the user only handles a password or 2FA you can't fill from the vault, and the final OAuth consent.",
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false),

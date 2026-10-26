@@ -393,6 +393,7 @@ export function tokenRefreshAt(expiresAt: number | null, issuedAtMs: number | nu
 export class Integrations extends Context.Service<
   Integrations,
   {
+    /** The service's setup guide, opening with notes left on its existing integrations. */
     readonly setupGuide: (
       service: string,
     ) => Effect.Effect<ReturnType<typeof integrationSetupGuide>>;
@@ -2208,7 +2209,12 @@ const make = (options: IntegrationsOptions = {}) =>
           );
 
     const service: Integrations["Service"] = Integrations.of({
-      setupGuide: (service) => Effect.succeed(integrationSetupGuide(service)),
+      setupGuide: (service) =>
+        rows().pipe(
+          // A guide without notes still beats no guide when the store can't be read.
+          Effect.orElseSucceed(() => []),
+          Effect.map((existing) => integrationSetupGuide(service, existing)),
+        ),
       list: (options) =>
         rows().pipe(
           Effect.flatMap((all) => summaries(all, options?.includeProcessOutput === true)),
