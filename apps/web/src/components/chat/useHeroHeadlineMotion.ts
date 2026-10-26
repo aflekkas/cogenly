@@ -3,6 +3,7 @@ import { useLayoutEffect, type RefObject } from "react";
 import { observeResize } from "~/lib/observeResize";
 import { LAYOUT_MOTION_DURATION } from "~/panelAnimations";
 
+import { HERO_HEADING_GROUP } from "./HeroHeadline";
 import { settleFadeSwap } from "./StateTransition";
 
 interface HeadlineSnapshot {
@@ -59,9 +60,11 @@ function snapshot(heading: HTMLElement): HeadlineSnapshot {
 
 /**
  * One opacity crossfade owns greeting, project and repository changes, including
- * draft replacement. Names reserve their width in CSS, so selecting a longer
- * name never changes the line breaks. Resize only refreshes the leaving copy;
- * it does not replay content animation or feed measurements back into layout.
+ * draft replacement. Names take their natural width, so a new one may reflow
+ * the sentence: the old sentence fades out where it stood while the new one
+ * fades in already laid out, so nothing glides or snaps. Resize only refreshes
+ * the leaving copy; it does not replay content animation or feed measurements
+ * back into layout.
  */
 export function useHeroHeadlineMotion(headingRef: RefObject<HTMLElement | null>, group: string) {
   useLayoutEffect(() => {
@@ -107,7 +110,7 @@ export function useHeroHeadlineMotion(headingRef: RefObject<HTMLElement | null>,
       }
       // FadeSwap handles changing surfaces; this hook handles one sentence's
       // content, so a replacing draft must not also fade the entire slot.
-      if (before) settleFadeSwap("draft-heading");
+      if (before) settleFadeSwap(HERO_HEADING_GROUP);
       before = snapshot(heading);
     };
     update();

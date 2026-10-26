@@ -68,9 +68,8 @@ import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
 import { useRepositoryNames } from "~/projectLabels/useRepositoryNames";
 import { answerNoProjectPick, useWorkNoProjectPicked } from "~/projectLabels/workNoProjectPicks";
 import { useChatGreeting } from "./useChatGreeting";
-import { FadeSwap } from "./StateTransition";
+import { HeroHeadline, HeroName, HeroPickerButton } from "./HeroHeadline";
 import { useHeroHeadlineMotion } from "./useHeroHeadlineMotion";
-import { cn } from "~/lib/utils";
 import { WorkHeroCrumbText, WorkHeroSentence } from "./WorkHeroSentence";
 import { sortLogicalProjectsForSidebar } from "../Sidebar.logic";
 import {
@@ -88,10 +87,7 @@ import {
 } from "../ui/combobox";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { InlineButton } from "../ui/button";
 
-/** The draft heading's FadeSwap slot, which a replacing draft's heading picks up from. */
-const DRAFT_HEADING_GROUP = "draft-heading";
 const MANAGE_REPOSITORIES_VALUE = "manage-repositories";
 // Work without a repository (in the project's folder): the row that leads the picker.
 const NO_REPOSITORY_VALUE = "no-repository";
@@ -652,42 +648,30 @@ export function DraftHeroHeadline({
             // aria-label here would replace the title with an action phrase
             // mid-sentence and baffle screen-reader users.
             // It shrinks (truncating) before the breadcrumb outgrows its line.
-            <ComboboxTrigger
-              render={
-                <InlineButton
-                  tone="picker"
-                  weight="normal"
-                  className="pointer-events-auto min-w-0 max-w-64 shrink align-baseline"
-                />
-              }
-              data-draft-project-trigger=""
-            />
+            <ComboboxTrigger render={<HeroPickerButton />} />
           }
         >
-          {/* Plain inline flow, so the name shares the heading's baseline. The badge is an
-              atomic inline box and stays clear of the button's underline. */}
-          <span
-            className={cn(
-              "block truncate",
-              breadcrumb.repository.placeholder && "text-muted-foreground",
-            )}
-          >
-            {!breadcrumb.repository.placeholder && activeProjectDisplayName ? (
-              // The same icon the picker's row shows for it.
-              <span className="inline-flex size-[0.78em] align-[-0.06em] me-[0.28em] items-center justify-center">
-                <RepositoryRowIcon
-                  local={activeProject}
-                  {...(activeProject
-                    ? linkedRepositoryIcon(repositoryFolder, activeProject.id)
-                    : { remote: null, iconPath: null })}
-                  environmentId={activeProject?.environmentId ?? null}
-                  // Sized in em to the heading, like the hero's other inline icons.
-                  className="size-full"
-                />
-              </span>
-            ) : null}
-            {breadcrumb.repository.text}
-          </span>
+          <HeroName
+            text={breadcrumb.repository.text}
+            placeholder={breadcrumb.repository.placeholder}
+            chevron
+            icon={
+              activeProjectDisplayName ? (
+                // The same icon the picker's row shows for it.
+                <span className="inline-flex size-[0.78em] align-[-0.06em] me-[0.28em] items-center justify-center">
+                  <RepositoryRowIcon
+                    local={activeProject}
+                    {...(activeProject
+                      ? linkedRepositoryIcon(repositoryFolder, activeProject.id)
+                      : { remote: null, iconPath: null })}
+                    environmentId={activeProject?.environmentId ?? null}
+                    // Sized in em to the heading, like the hero's other inline icons.
+                    className="size-full"
+                  />
+                </span>
+              ) : null
+            }
+          />
         </TooltipTrigger>
         {!breadcrumb.repository.placeholder ? (
           <TooltipPopup side="top">{breadcrumb.repository.text}</TooltipPopup>
@@ -878,40 +862,30 @@ export function DraftHeroHeadline({
   const headingLabel = isChatDraft ? `${greeting}${greetingSuffix ?? ""}` : breadcrumb.label;
 
   return (
-    <div className="@container flex w-full flex-col items-center">
-      <h1
-        ref={headingRef}
-        style={{ fontSize: "clamp(var(--text-xl), 3cqw, var(--text-3xl))" }}
-        aria-label={headingLabel}
-        className="group/hero-headline relative w-full origin-bottom text-balance text-center font-normal text-xl text-foreground tracking-tight"
-      >
-        <FadeSwap
-          group={DRAFT_HEADING_GROUP}
-          // A chat's project and Work's breadcrumb change in place, not by a swap.
-          swapKey={isChatDraft ? "chat" : "work"}
-        >
-          {isChatDraft ? (
-            <>
-              <span data-hero-greeting="" className="inline">
-                {greeting}
-              </span>
-              {draftThread && draftId ? (
-                <ComposerProjectPicker
-                  appearance="hero"
-                  environmentId={draftThread.environmentId}
-                  threadId={draftThread.threadId}
-                  draftId={draftId}
-                  size="sm"
-                />
-              ) : null}
-            </>
-          ) : (
-            // Project, then the repository within it: each half is its own
-            // picker, so either can be swapped on its own.
-            <WorkHeroSentence project={projectHeadline} repository={projectSelector} />
-          )}
-        </FadeSwap>
-      </h1>
-    </div>
+    <HeroHeadline
+      ref={headingRef}
+      label={headingLabel}
+      // A chat's project and Work's breadcrumb change in place, not by a swap.
+      swapKey={isChatDraft ? "chat" : "work"}
+    >
+      {isChatDraft ? (
+        <>
+          {greeting}
+          {draftThread && draftId ? (
+            <ComposerProjectPicker
+              appearance="hero"
+              environmentId={draftThread.environmentId}
+              threadId={draftThread.threadId}
+              draftId={draftId}
+              size="sm"
+            />
+          ) : null}
+        </>
+      ) : (
+        // Project, then the repository within it: each half is its own
+        // picker, so either can be swapped on its own.
+        <WorkHeroSentence project={projectHeadline} repository={projectSelector} />
+      )}
+    </HeroHeadline>
   );
 }
