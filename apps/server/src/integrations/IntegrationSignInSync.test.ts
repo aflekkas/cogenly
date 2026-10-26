@@ -82,8 +82,7 @@ const sharedPair = Effect.gen(function* () {
   const hub = yield* startMachine(network, "Server");
   const spoke = yield* startMachine(network, "Laptop");
   network.pair(hub, spoke);
-  yield* share(spoke, hub);
-  yield* share(hub, spoke);
+  yield* settle(hub, [spoke]);
   return { network, hub, spoke };
 });
 
@@ -172,8 +171,9 @@ describe("web integration sign-ins across paired machines", () => {
       const hub = yield* startMachine(network, "Server");
       const spoke = yield* startMachine(network, "Laptop");
       network.pair(hub, spoke);
-      yield* share(spoke, hub);
-      // The hub cannot read this vault yet, so the spoke refreshes its own sign-ins.
+      // Pairing alone shares the vault and makes the hub the refresh owner.
+      expect(yield* spoke.peers.defaultRefreshOwner).toBe(hub.environmentId);
+      yield* hub.sync.setPeerSharing({ environmentId: spoke.environmentId, enabled: false });
       expect(yield* spoke.peers.defaultRefreshOwner).toBe(spoke.environmentId);
       yield* share(hub, spoke);
       expect(yield* spoke.peers.defaultRefreshOwner).toBe(hub.environmentId);

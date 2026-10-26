@@ -28,9 +28,9 @@ describe("peerSyncIndicator", () => {
     );
   });
 
-  it("waits on a machine that has not shared back, then follows progress", () => {
+  it("handles an older server without a handshake badge, then follows progress", () => {
     expect(label({ machine: "Hub", online: true, pending: 3, sharing: "waiting_for_peer" })).toBe(
-      "Waiting for Hub to share back",
+      "Not shared",
     );
     expect(label({ machine: "Hub", online: false, pending: 0, sharing: "waiting_for_peer" })).toBe(
       "Offline",
@@ -64,10 +64,10 @@ describe("vaultItemsWaitingText", () => {
   it("says nothing until an item waits", () => {
     expect(vaultItemsWaitingText(0)).toBeNull();
     expect(vaultItemsWaitingText(1)).toBe(
-      "1 item from another machine is waiting until you share with it.",
+      "1 encrypted item from another machine is not available here yet.",
     );
     expect(vaultItemsWaitingText(3)).toBe(
-      "3 items from other machines are waiting until you share with them.",
+      "3 encrypted items from other machines are not available here yet.",
     );
   });
 });

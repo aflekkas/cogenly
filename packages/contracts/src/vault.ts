@@ -191,8 +191,8 @@ export type VaultUsageListResult = typeof VaultUsageListResult.Type;
 
 /**
  * Vault sharing with one directly paired machine (docs/internals/vault-sync.md).
- * `waiting_for_peer`: this machine shares, the other has not turned it on, so
- * nothing is released to it or accepted from it yet.
+ * `waiting_for_peer` is retained for older servers; new servers report not_shared
+ * when either machine opts out. Both sides otherwise default on.
  * `key_changed`: the other machine now presents a different vault key than the
  * one pinned here. Re-pairing clears the pin; the UI tells the owner to do that.
  */
@@ -209,6 +209,8 @@ export const VaultPeerSharing = Schema.Struct({
   label: Schema.String,
   online: Schema.Boolean,
   state: VaultPeerSharingState,
+  /** Local opt-out switch; absent on older servers. */
+  sharingEnabled: Schema.optionalKey(Schema.Boolean),
   /** Whether the other machine shares with this one; null when it could not be asked. */
   peerSharing: Schema.NullOr(Schema.Boolean),
   /** Synced items whose current revision this machine has passed to that peer. */

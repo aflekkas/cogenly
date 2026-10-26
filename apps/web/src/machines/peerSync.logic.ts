@@ -9,7 +9,6 @@ import type {
 export type PeerSyncIndicator =
   | { readonly kind: "synced" }
   | { readonly kind: "syncing"; readonly pending: number }
-  | { readonly kind: "waiting"; readonly machine: string }
   | { readonly kind: "not_shared" }
   | { readonly kind: "offline" }
   | { readonly kind: "key_changed" };
@@ -37,7 +36,7 @@ export function peerSyncIndicator(input: {
   if (input.sharing === "key_changed") return { kind: "key_changed" };
   if (input.sharing === "not_shared") return { kind: "not_shared" };
   if (!input.online) return { kind: "offline" };
-  if (input.sharing === "waiting_for_peer") return { kind: "waiting", machine: input.machine };
+  if (input.sharing === "waiting_for_peer") return { kind: "not_shared" };
   if (input.pending > 0) return { kind: "syncing", pending: input.pending };
   return { kind: "synced" };
 }
@@ -48,8 +47,6 @@ export function peerSyncLabel(indicator: PeerSyncIndicator): string {
       return "Synced";
     case "syncing":
       return indicator.pending === 1 ? "Syncing 1 change" : `Syncing ${indicator.pending} changes`;
-    case "waiting":
-      return `Waiting for ${indicator.machine} to share back`;
     case "not_shared":
       return "Not shared";
     case "offline":
@@ -67,8 +64,6 @@ export function peerSyncTone(
       return "success";
     case "syncing":
       return "info";
-    case "waiting":
-      return "warning";
     case "key_changed":
       return "error";
     case "not_shared":
@@ -81,8 +76,8 @@ export function peerSyncTone(
 export function vaultItemsWaitingText(count: number): string | null {
   if (count <= 0) return null;
   return count === 1
-    ? "1 item from another machine is waiting until you share with it."
-    : `${count} items from other machines are waiting until you share with them.`;
+    ? "1 encrypted item from another machine is not available here yet."
+    : `${count} encrypted items from other machines are not available here yet.`;
 }
 
 const PORTABILITY_REASONS: Readonly<Record<VaultPortabilityReason, string>> = {

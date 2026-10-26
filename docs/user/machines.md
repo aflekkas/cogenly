@@ -26,8 +26,15 @@ a clone. Pick it, and it clones into the project's folder on this machine;
 [moving a project](#move-threads-and-projects) clones all of them there. A
 repository's folder is named after the repository, so it lands in the same
 place everywhere. Removing a repository from one machine frees the disk space
-and keeps it in the project, so you can clone it back later. Memory, settings and web integration definitions sync between paired machines. Share the vault to sync web sign-ins too; see [Vault on several machines](vault.md#vault-on-several-machines). Local integrations, including Google Workspace, sign in on each machine. Resource files stay local. Matching
-project names are kept separately until you choose how to combine them.
+and keeps it in the project, so you can clone it back later.
+
+Memory, settings and web integration definitions sync between paired machines.
+Portable vault items and web sign-ins share by default, with a per-machine
+opt-out in Settings → Vault; see
+[Vault on several machines](vault.md#vault-on-several-machines).
+Local integrations, including Google Workspace, sign in on each machine.
+Resource files stay local. Matching project names are kept separately until you
+choose how to combine them.
 
 ## Your conversations on every machine
 

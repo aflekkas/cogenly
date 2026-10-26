@@ -53,6 +53,7 @@ import * as ProviderRegistry from "../../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../../secrets/SecretRequests.ts";
 import * as Vault from "../../vault/Vault.ts";
+import * as VaultSync from "../../vault/VaultSync.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import * as VcsStatusBroadcaster from "../../vcs/VcsStatusBroadcaster.ts";
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
@@ -269,6 +270,9 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({ list: () => Effect.succeed([]) }),
   Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
   Layer.mock(SecretRequests.SecretRequests)({}),
+  Layer.mock(VaultSync.VaultSync)({
+    sharingStatus: Effect.succeed({ peers: [], itemsShared: 0, itemsWaiting: 0 }),
+  }),
   Layer.mock(Vault.Vault)({
     list: () => Effect.succeed({ items: [] }),
     scrubText: (text) => Effect.succeed(text),
@@ -851,7 +855,14 @@ const smokeCases = [
   },
   {
     toolkit: "vault",
-    names: ["vault_list", "vault_save", "vault_fill", "vault_delete"],
+    names: [
+      "vault_list",
+      "vault_save",
+      "vault_fill",
+      "vault_delete",
+      "vault_sharing_status",
+      "vault_sharing_update",
+    ],
     tool: "vault_list",
     args: {},
     expected: { items: [] },

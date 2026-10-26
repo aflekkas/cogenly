@@ -59,19 +59,18 @@ uses across the vault, including items you have since deleted.
 
 ## Vault on several machines
 
-With [paired machines](machines.md), you can share the vault between a
-machine and its hub. Turn on **Share vault** for the other machine under
-**Paired machines** in **Settings → Vault**, on both machines: items move only
-when each side has chosen to share with the other. Until the other side does,
-the machine shows **Waiting for (machine) to share back**, and releases no
-keys to that machine. Sharing is
-end-to-end encrypted. The secrets, names, and sites of items are readable only
-on machines you share with. The other machine must be online to turn sharing
-on.
+With [paired machines](machines.md), portable vault items and web integration
+sign-ins share automatically between a machine and its hub. Sharing is
+end-to-end encrypted. Turn off **Share vault** for a machine in **Settings →
+Vault** to stop future sharing in both directions. Either machine can opt out.
+The other machine must be online to turn sharing back on and verify its key.
+Agents can inspect and change the same switches with `vault_sharing_status`
+and `vault_sharing_update`, without an owner approval prompt.
 
-- A hub you have not shared with still passes items between your other
-  machines, but cannot read them. For one laptop's items to reach another
-  laptop, share both laptops with the hub, and the hub with both.
+Existing pairings share automatically after upgrading unless sharing was
+explicitly disabled. Older peers keep their opt-in behavior until they upgrade.
+A hub that shares can pass readable items to its other sharing machines.
+
 - Approvals stay on each machine. An item arriving on a machine asks before any
   agent there uses it, even if you allowed that agent elsewhere.
 - To keep an item on one machine, edit it and choose **Keep on this machine
@@ -79,8 +78,7 @@ on.
   OAuth client, always stay on their machine. Either way the item shows
   **This machine only**.
 - If a machine shows **Key changed**, it now presents a different vault key
-  than the one this machine trusted. Unpair it and pair again, then turn
-  sharing back on on both machines.
+  than the one this machine trusted. Unpair it and pair again.
 - If an arriving item has the same name as one already there, it shows up as
   "Name (from Machine)" on that machine.
 - Deleting an item sends the delete to every machine you share with. The

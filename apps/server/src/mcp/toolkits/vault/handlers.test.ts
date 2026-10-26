@@ -15,6 +15,7 @@ import * as ServerSecretStore from "../../../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as Sqlite from "../../../persistence/Sqlite.ts";
 import * as Vault from "../../../vault/Vault.ts";
+import { Network, startNode } from "../../../vault/vaultSync.testkit.ts";
 import * as Invocation from "../../McpInvocationContext.ts";
 import * as Access from "../../McpToolAccess.ts";
 import { liveThreadsLayer } from "../../McpToolAccess.testkit.ts";
@@ -404,4 +405,55 @@ it.effect("vault_fill fills card fields by field and never returns them", () =>
       expect(typed).toHaveLength(4);
     }),
   ),
+);
+
+it.effect("agents inspect, disable and restore sharing through the Settings service", () =>
+  Effect.gen(function* () {
+    const network = new Network();
+    const hub = yield* startNode(network, "Server");
+    const spoke = yield* startNode(network, "Laptop");
+    network.pair(hub, spoke);
+    const callers = Layer.mergeAll(
+      liveThreadsLayer,
+      Layer.succeed(Invocation.McpInvocationContext, {
+        environmentId: hub.environmentId,
+        capabilities: new Set(["orchestration" as const]),
+        requestNamespace: "test",
+        issuedAt: 0,
+        thread: {
+          threadId,
+          providerSessionId: "session",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+        },
+        client: undefined,
+      }),
+    );
+    const context = Context.merge(hub.context, yield* Layer.build(callers));
+    const toolkit = yield* VaultToolkit.pipe(
+      Effect.provide(Access.HandlersLayer.layer(Handlers.layer)),
+      Effect.provideContext(context),
+    );
+    const call = (name: "vault_sharing_status" | "vault_sharing_update", input: object) =>
+      toolkit.handle(name, input as never).pipe(
+        Stream.unwrap,
+        Stream.runCollect,
+        Effect.provideContext(context),
+        Effect.map((results) => results.at(-1)?.result),
+      );
+    expect(yield* call("vault_sharing_status", {})).toMatchObject({
+      peers: [{ state: "shared", sharingEnabled: true }],
+    });
+    expect(
+      yield* call("vault_sharing_update", { environmentId: spoke.environmentId, enabled: false }),
+    ).toMatchObject({
+      peers: [{ state: "not_shared", sharingEnabled: false }],
+    });
+    expect((yield* spoke.sync.sharingStatus).peers[0]?.state).toBe("not_shared");
+    expect(
+      yield* call("vault_sharing_update", { environmentId: spoke.environmentId, enabled: true }),
+    ).toMatchObject({
+      peers: [{ state: "shared", sharingEnabled: true }],
+    });
+    expect((yield* hub.sync.sharingStatus).peers[0]?.state).toBe("shared");
+  }).pipe(Effect.scoped),
 );
