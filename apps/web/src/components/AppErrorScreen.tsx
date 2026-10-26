@@ -49,7 +49,7 @@ export function AppErrorScreen({
           <CopyErrorButton report={report} />
         </div>
         <CollapsiblePanel className="w-full">
-          <pre className="mt-2 max-h-64 overflow-auto rounded-lg border border-border/70 bg-card px-3 py-2 text-left font-mono text-xs whitespace-pre-wrap text-foreground/80">
+          <pre className="scroll-fade-y mt-2 max-h-64 overflow-auto rounded-lg border border-border/70 bg-card px-3 py-2 text-left font-mono text-xs whitespace-pre-wrap text-foreground/80">
             {report}
           </pre>
         </CollapsiblePanel>

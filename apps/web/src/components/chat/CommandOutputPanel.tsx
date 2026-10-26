@@ -75,7 +75,7 @@ export function TerminalOutputBlock(props: { readonly text: string; readonly tru
           followRef.current =
             element.scrollHeight - element.scrollTop - element.clientHeight <= FOLLOW_SLACK_PX;
         }}
-        className="max-h-80 overflow-auto text-muted-foreground"
+        className="scroll-fade max-h-80 overflow-auto text-muted-foreground"
       >
         {spans.map((span, index) =>
           span.style === null ? (
