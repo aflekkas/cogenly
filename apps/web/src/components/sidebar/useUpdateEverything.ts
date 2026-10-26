@@ -3,6 +3,8 @@ import { PROVIDER_DISPLAY_NAMES } from "@cogenly/contracts";
 import { Atom } from "effect/reactivity";
 import { useMemo } from "react";
 
+import { useMachineDirectory } from "~/machines/useMachines";
+import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { APP_VERSION } from "~/branding";
 import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
 import { isElectron } from "~/env";
@@ -20,6 +22,7 @@ import {
   collectUpdateEverythingResult,
   describeUpdateEverything,
   runUpdateEverything,
+  updateServersInOrder,
   type SkippedMachine,
   type UpdateRunMachine,
 } from "./updateEverything.logic";
@@ -29,7 +32,6 @@ import {
   setUpdateEverythingRun,
   settleUpdateRunMachine,
   showUpdateEverythingResult,
-  waitForServerUpdateHandoff,
   waitForUpdateRestart,
 } from "./updateEverythingRun";
 
@@ -46,7 +48,7 @@ export type ReportLocalUpdateError = (title: string, description: string) => voi
  * archive appear only once GitHub has published that version. `run` performs the whole pass, including
  * this app's own download and install when given. It updates quietly, tracks
  * each machine in the run state, and reports one summary toast at the end.
- * This app relaunches once every server restarts into its update, after a
+ * This app relaunches once every server returns on its target version, after a
  * short countdown the user can postpone. The summary then waits for the
  * relaunch, and servers still restarting are followed after it.
  */
@@ -74,6 +76,16 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
     [environments],
   );
   const machines = useAtomValue(machinesAtom);
+  const directory = useMachineDirectory(machines.map((machine) => machine.environmentId));
+  const hubEnvironmentIds = new Set(
+    Array.from(directory, ([environmentId, list]) =>
+      list.link._tag === "hub"
+        ? environmentId
+        : list.link._tag === "spoke"
+          ? list.link.hubEnvironmentId
+          : null,
+    ).filter((id) => id !== null),
+  );
   const { targets: behindServers, skipped: unreachable } = collectServerUpdateTargets(
     machines,
     targetVersion,
@@ -212,30 +224,29 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
             return outcomes;
           },
           updateServers: async () => {
-            const runs = servers.map(async (server) => {
-              const serverOutcome = await updateServer(server, { quiet: true });
+            const verified = await updateServersInOrder({
+              servers,
+              hubEnvironmentIds,
+              update: (server) => updateServer(server, { quiet: true }),
+              readVersion: (environmentId) =>
+                appAtomRegistry.get(serverEnvironment.configValueAtom(environmentId))?.environment
+                  .serverVersion ?? null,
+            });
+            return verified.map(({ server, outcome: serverOutcome }) => {
               settleUpdateRunMachine(
                 server.environmentId,
                 serverOutcome.status === "failed"
                   ? serverOutcome.message
                   : (providerFailures.get(server.environmentId) ?? null),
                 {
-                  serverUpdated: serverOutcome.status !== "failed",
+                  serverUpdated: serverOutcome.status === "updated",
                   providerFailure: providerFailures.get(server.environmentId) ?? null,
                 },
               );
               const finished = { label: server.serverLabel, outcome: serverOutcome };
               finishedServers.push(finished);
-              return finished;
+              return Promise.resolve(finished);
             });
-            // Once a server restarts into its update it finishes on its own,
-            // so this app does not wait for it to come back.
-            await Promise.all(
-              servers.map((server, index) =>
-                waitForServerUpdateHandoff(server.environmentId, runs[index]!),
-              ),
-            );
-            return runs;
           },
         });
         const result = (finished: ReadonlyArray<{ label: string; outcome: ServerUpdateOutcome }>) =>

@@ -140,6 +140,35 @@ export function collectServerUpdateTargets(
   return { targets, skipped };
 }
 
+/** Wait for each spoke to return before restarting its hub, then verify the whole pass. */
+export async function updateServersInOrder(input: {
+  readonly servers: ReadonlyArray<ServerUpdateTarget>;
+  readonly hubEnvironmentIds: ReadonlySet<EnvironmentId>;
+  readonly update: (server: ServerUpdateTarget) => Promise<ServerUpdateOutcome>;
+  readonly readVersion: (environmentId: EnvironmentId) => string | null;
+}) {
+  const finished: Array<{ server: ServerUpdateTarget; outcome: ServerUpdateOutcome }> = [];
+  const ordered = input.servers.toSorted(
+    (left, right) =>
+      Number(input.hubEnvironmentIds.has(left.environmentId)) -
+      Number(input.hubEnvironmentIds.has(right.environmentId)),
+  );
+  for (const server of ordered) finished.push({ server, outcome: await input.update(server) });
+  return finished.map(({ server, outcome }) => {
+    const version = input.readVersion(server.environmentId);
+    return {
+      server,
+      outcome:
+        version === server.targetVersion || outcome.status === "failed"
+          ? outcome
+          : ({
+              status: "failed",
+              message: `${server.serverLabel} is on ${version ?? "an unknown version"}; expected ${server.targetVersion}.`,
+            } satisfies ServerUpdateOutcome),
+    };
+  });
+}
+
 export interface UpdateEverythingSteps<Providers, Servers> {
   /** Downloads this app's update. Resolves true when it is ready to install.
       Without it, `localReady` is true: there is nothing to download. */
