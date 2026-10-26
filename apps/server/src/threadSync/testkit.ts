@@ -87,6 +87,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
     readonly git: Pick<GitWorkflow.GitWorkflowService["Service"], "forkSource" | "forkCheckout">;
     readonly providers: ReadonlyArray<ServerProvider>;
     readonly clone?: (remote: string) => Effect.Effect<string>;
+    readonly setup?: SetupScripts.ProjectSetupScriptRunner["Service"]["runForThread"];
   },
   realFiling = false,
   lifecycle?: {
@@ -424,7 +425,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
               }),
               Layer.mock(TerminalManager.TerminalManager)({}),
               Layer.mock(SetupScripts.ProjectSetupScriptRunner)({
-                runForThread: () => Effect.succeed({ status: "no-script" }),
+                runForThread: forkOptions.setup ?? (() => Effect.succeed({ status: "no-script" })),
               }),
               providerCatalog,
               Layer.mock(ServerSettings.ServerSettingsService)({}),
@@ -451,7 +452,6 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
         ThreadLaunchRouting.layer,
         forkOptions === undefined ? Layer.empty : ThreadFork.layer,
       ).pipe(
-        Layer.provideMerge(forkLaunches),
         Layer.provide(providerCatalog),
         Layer.provideMerge(ThreadTransfer.layer),
         Layer.provide(
@@ -473,6 +473,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
             : RepositoryHandoff.layer,
         ),
         Layer.provideMerge(ThreadRouting.layer),
+        Layer.provideMerge(forkLaunches),
         Layer.provideMerge(ThreadSync.layer),
         Layer.provideMerge(
           Layer.succeed(ThreadReplication.ThreadReplication, {
@@ -579,6 +580,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
     remoteCommands,
     remoteLaunch,
     launched,
+    launch: yield* ThreadLaunch.ThreadLaunchService.pipe(Effect.provideContext(context)),
     restartReplication,
     scheduled,
     sink,

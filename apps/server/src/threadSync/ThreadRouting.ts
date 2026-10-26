@@ -52,6 +52,7 @@ import * as EventStore from "../orchestration-v2/EventStore.ts";
 import { commandThreadId } from "../orchestration-v2/Orchestrator.ts";
 import * as RemoteThreadCommands from "../orchestration-v2/RemoteThreadCommands.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
+import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ProjectLabels from "../projectLabels/ProjectLabelService.ts";
 import { writeAttachmentFiles } from "./attachmentFiles.ts";
 import * as ThreadReplication from "./ThreadReplication.ts";
@@ -184,6 +185,7 @@ const make = Effect.gen(function* () {
   const channels = yield* PeerChannels.PeerChannels;
   const remoteCommands = yield* RemoteThreadCommands.RemoteThreadCommands;
   const threads = yield* ThreadManagement.ThreadManagementService;
+  const launch = yield* ThreadLaunch.ThreadLaunchService;
   const projectLabels = yield* ProjectLabels.ProjectLabelService;
   const eventStore = yield* EventStore.EventStoreV2;
   const sql = yield* SqlClient.SqlClient;
@@ -471,13 +473,15 @@ const make = Effect.gen(function* () {
           }),
         );
         yield* writeFiles(files.filter((file) => named.has(file.name)));
-        const result = yield* threads
-          .dispatch(command)
-          .pipe(
-            Effect.mapError(
-              (error) => new ThreadRemoteError({ reason: "rejected", detail: error.message }),
-            ),
-          );
+        const result = yield* (
+          command.type === "prepared-run.retry"
+            ? launch.retryPreparation(command)
+            : threads.dispatch(command)
+        ).pipe(
+          Effect.mapError(
+            (error) => new ThreadRemoteError({ reason: "rejected", detail: error.message }),
+          ),
+        );
         // The caller's projection shows the result by the time it hears back.
         if (priority !== true) yield* threadSync.sync(caller.environmentId).pipe(Effect.ignore);
         return { eventIds: result.storedEvents.map((stored) => stored.event.id) };
