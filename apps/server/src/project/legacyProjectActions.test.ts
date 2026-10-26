@@ -76,6 +76,62 @@ const layer = Layer.mergeAll(SqlitePersistence.layerMemory, ServerSecretStore.la
 );
 
 describe("loading settings with pre-0.3.2 project overrides", () => {
+  it.effect(
+    "keeps actions through another migration and later updates when the sidecar write fails",
+    () =>
+      Effect.gen(function* () {
+        const { settingsPath } = yield* ServerConfig.ServerConfig;
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        yield* fs.makeDirectory(path.dirname(settingsPath), { recursive: true });
+        const sidecarPath = path.join(path.dirname(settingsPath), LEGACY_PROJECT_ACTIONS_FILE_NAME);
+        yield* fs.writeFileString(
+          settingsPath,
+          JSON.stringify({
+            deviceOnboardingCompleted: true,
+            projectSettingsFolded: true,
+            projectScriptOverrides: { [repo]: [action("lint")] },
+          }),
+        );
+        // A directory at the destination makes the atomic rename fail.
+        yield* fs.makeDirectory(sidecarPath);
+        // exists must be false so this exercises a failed write, not an existing sidecar.
+        const failingFs = {
+          ...fs,
+          exists: (file: string) =>
+            file === sidecarPath ? Effect.succeed(false) : fs.exists(file),
+        };
+        yield* Effect.gen(function* () {
+          const service = yield* ServerSettings.ServerSettingsService;
+          const settings = yield* service.getSettings;
+          expect(settings.deviceOnboardingCompleted).toBe(false);
+          expect(
+            readLegacyProjectActions(JSON.parse(yield* fs.readFileString(settingsPath))),
+          ).toEqual({ folded: true, scripts: { [repo]: [action("lint")] } });
+          yield* service.updateSettings({ defaultAutoPull: true });
+          expect(
+            readLegacyProjectActions(JSON.parse(yield* fs.readFileString(settingsPath))),
+          ).toEqual({ folded: true, scripts: { [repo]: [action("lint")] } });
+        }).pipe(
+          Effect.provide(ServerSettings.layer),
+          Effect.provideService(FileSystem.FileSystem, failingFs),
+        );
+        yield* fs.remove(sidecarPath, { recursive: true });
+        yield* ServerSettings.ServerSettingsService.pipe(
+          Effect.flatMap((service) => service.getSettings),
+          Effect.provide(ServerSettings.layer),
+        );
+        expect(
+          readLegacyProjectActions(JSON.parse(yield* fs.readFileString(settingsPath))),
+        ).toBeNull();
+        expect(
+          yield* fs
+            .readFileString(sidecarPath)
+            .pipe(Effect.flatMap(Schema.decodeUnknownEffect(LegacyProjectActionsJson))),
+        ).toEqual({ folded: true, scripts: { [repo]: [action("lint")] } });
+      }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("decodes, saves the actions beside the file, and rewrites it without them", () =>
     Effect.gen(function* () {
       const { settingsPath } = yield* ServerConfig.ServerConfig;
