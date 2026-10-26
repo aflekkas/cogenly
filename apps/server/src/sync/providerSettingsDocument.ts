@@ -11,7 +11,7 @@ import * as Schema from "effect/Schema";
 const secretEnvironmentName = (name: string) =>
   /(?:^|_)(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIALS?)(?:$|_)/i.test(
     name,
-  );
+  ) || /KEY|AUTH|BEARER|SESSION|COOKIE|PRIVATE|CREDENTIAL|PASS/i.test(name);
 
 // Never replicate the opaque driver config: it can hold passwords, machine
 // paths and arbitrary command arguments. Only these portable settings travel.

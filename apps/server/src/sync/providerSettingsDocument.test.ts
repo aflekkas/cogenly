@@ -54,6 +54,25 @@ describe("portable provider configuration", () => {
     ).toBe(true);
   });
 
+  it("excludes secret-looking names that only contain a keyword, not a delimited token", () => {
+    const value = encodeProviderSettings({
+      driver,
+      environment: [
+        { name: "LANG", value: "en_US.UTF-8", sensitive: false },
+        { name: "ANTHROPIC_APIKEY", value: "DO_NOT_REPLICATE", sensitive: false },
+        { name: "UPSTREAM_AUTH", value: "DO_NOT_REPLICATE", sensitive: false },
+        { name: "SESSION", value: "DO_NOT_REPLICATE", sensitive: false },
+      ],
+      config: {},
+    });
+    expect(value).toEqual({
+      driver,
+      environment: [{ name: "LANG", value: "en_US.UTF-8", sensitive: false }],
+      customModels: [],
+    });
+    expect(JSON.stringify(value)).not.toContain("DO_NOT_REPLICATE");
+  });
+
   it("keeps machine-local paths and sensitive environment when applying remote edits", () => {
     const local = {
       driver,
