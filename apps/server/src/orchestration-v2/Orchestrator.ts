@@ -628,10 +628,12 @@ function nativeSubagentWorkActive(
  * agent output. A run parked at "waiting" is post-terminal drain, so its agent
  * turn is over and a wake is still needed.
  */
+function isForegroundRun(run: OrchestrationV2Run): boolean {
+  return run.status === "preparing" || run.status === "starting" || run.status === "running";
+}
+
 function hasLiveRun(projection: Pick<OrchestrationV2ThreadProjection, "runs">): boolean {
-  return projection.runs.some(
-    (run) => run.status === "preparing" || run.status === "starting" || run.status === "running",
-  );
+  return projection.runs.some(isForegroundRun);
 }
 
 /** The link with its watch replaced, or removed when `watch` is undefined. */
@@ -1409,7 +1411,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       if (
         projection.thread.archivedAt !== null ||
         projection.thread.deletedAt !== null ||
-        projection.runs.some(isBlockingRun) ||
+        hasLiveRun(projection) ||
         nativeSubagentWorkActive(projection) ||
         projection.runs.some((run) => run.status === "queued" && run.queueHeld === true)
       ) {
@@ -5247,7 +5249,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const activeProviderThread = projection.providerThreads.find(
         (candidate) => candidate.id === projection.thread.activeProviderThreadId,
       );
-      const activeRun = projection.runs.find(isBlockingRun);
+      const activeRun = projection.runs.find(isForegroundRun);
       // A message queued during worktree setup can arrive after that setup failed
       // without a worktree. It waits, held, like the messages queued before the
       // failure, instead of starting in the project checkout.
@@ -8695,7 +8697,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     command: Extract<OrchestrationV2Command, { readonly type: "queue.send-all" }>,
   ) =>
     Effect.gen(function* () {
-      const activeRun = projection.runs.findLast(isBlockingRun);
+      const activeRun = projection.runs.findLast(isForegroundRun);
       if (
         activeRun === undefined ||
         activeRun.status !== "running" ||
@@ -8833,7 +8835,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
       // No turn to steer: the first queued run carries the combined message and
       // starts next. Starting it on purpose releases a held queue, as Resume does.
-      if (projection.runs.every((run) => !isBlockingRun(run))) {
+      if (!hasLiveRun(projection)) {
         const sessionError =
           projection.providerSessions
             .filter(
@@ -12829,7 +12831,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       // while holding the parent lock, so nesting the parent lock inside the
       // child lock here would invert that order, and the keyed executor's
       // semaphores are neither reentrant nor deadlock-aware.
-      if (stored.event.type === "run.updated") {
+      const providerFinished =
+        stored.event.type === "run.updated" && stored.event.payload.status === "waiting";
+      if (stored.event.type === "run.updated" && !providerFinished) {
         yield* threadDispatch.withLock(
           threadId,
           finalizeDelegatedCompletionDelivery(threadId, stored.event.payload.id),
@@ -12855,6 +12859,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             Effect.logWarning("Failed to start the next queued V2 run", { threadId, cause }),
           ),
         );
+      // Waiting ends foreground work, but task results still await their checkpoint.
+      if (providerFinished) return;
       // After the queue decision: a provider failure holds the child's queued
       // wakes, and only then is the failed run the task's result.
       const parentThreadId = yield* appOwnedSubagentParentThreadId(threadId);
@@ -12972,7 +12978,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           !String(stored.commandId).startsWith("command:runtime-reconcile:") &&
           // Peer results may settle a local parent; imported history never wakes it.
           (!isReplayedCommandId(stored.commandId) || isReplicaCommandId(stored.commandId)) &&
-          (stored.event.payload.status === "completed" ||
+          (stored.event.payload.status === "waiting" ||
+            stored.event.payload.status === "completed" ||
             stored.event.payload.status === "interrupted" ||
             stored.event.payload.status === "failed" ||
             stored.event.payload.status === "cancelled" ||
