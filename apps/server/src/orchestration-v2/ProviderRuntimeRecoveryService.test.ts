@@ -20,6 +20,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { idleThreadProjection, liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
@@ -589,4 +590,105 @@ it.effect("startup leaves a delegated child's queued server notices deliverable"
       true,
     );
   }).pipe(Effect.provide(runtime)),
+);
+
+it.effect.each(["startup", "shutdown"] as const)(
+  "%s recovery writes delegated child provider updates only in the child's stream",
+  (trigger) =>
+    Effect.gen(function* () {
+      const sink = yield* EventSink.EventSinkV2;
+      const recovery = yield* Recovery.ProviderRuntimeRecoveryService;
+      const sql = yield* SqlClient.SqlClient;
+      const at = yield* DateTime.now;
+      const parentId = ThreadId.make("thread:recovery-a-parent");
+      const childId = ThreadId.make("thread:recovery-z-child");
+      const providerThreadId = ProviderThreadId.make("provider-thread:recovery-child");
+      const base = idleThreadProjection(liveThreadShell(childId)).thread;
+      yield* sink.write({
+        events: [parentId, childId].map((id) => ({
+          id: EventId.make(`event:create:${id}`),
+          type: "thread.created" as const,
+          threadId: id,
+          occurredAt: at,
+          payload: { ...base, id },
+        })),
+      });
+      yield* sink.write({
+        events: [
+          {
+            id: EventId.make("event:recovery-child-provider"),
+            type: "provider-thread.updated",
+            threadId: childId,
+            occurredAt: at,
+            payload: {
+              id: providerThreadId,
+              driver: ProviderDriverKind.make("codex"),
+              providerInstanceId: base.providerInstanceId,
+              providerSessionId: null,
+              appThreadId: childId,
+              ownerNodeId: null,
+              nativeThreadRef: null,
+              nativeConversationHeadRef: null,
+              status: "active",
+              firstRunOrdinal: null,
+              lastRunOrdinal: null,
+              handoffIds: [],
+              forkedFrom: null,
+              createdAt: at,
+              updatedAt: at,
+              pendingBackgroundTasks: [],
+            },
+          },
+        ],
+      });
+      // The recovery query includes this provider thread in the parent's roster.
+      yield* sink.write({
+        events: [
+          {
+            id: EventId.make("event:recovery-delegation"),
+            type: "subagent.updated",
+            threadId: parentId,
+            occurredAt: at,
+            payload: {
+              id: NodeId.make("subagent:recovery-child"),
+              threadId: parentId,
+              runId: null,
+              parentNodeId: NodeId.make("node:recovery-parent"),
+              origin: "app_owned",
+              createdBy: "agent",
+              driver: ProviderDriverKind.make("codex"),
+              providerInstanceId: base.providerInstanceId,
+              providerThreadId,
+              childThreadId: childId,
+              nativeTaskRef: null,
+              prompt: "work",
+              title: "child",
+              model: null,
+              status: "running",
+              result: null,
+              startedAt: at,
+              completedAt: null,
+              updatedAt: at,
+            },
+          },
+        ],
+      });
+      const projections = yield* Projections.ProjectionStoreV2;
+      yield* sql`UPDATE orchestration_v2_projection_threads SET updated_at = '1900-01-01T00:00:00Z' WHERE thread_id = ${parentId}`;
+      expect(
+        (yield* projections.getRuntimeRecoveryProjection(parentId)).providerThreads[0]?.appThreadId,
+      ).toBe(childId);
+      expect((yield* projections.getRecoveryThreadIds("runtime"))[0]).toBe(parentId);
+      if (trigger === "startup") yield* recovery.recover;
+      else yield* recovery.reconcile("shutdown");
+      const updates = yield* sql<{
+        stream_id: string;
+        payload_json: string;
+      }>`SELECT stream_id, payload_json FROM orchestration_events WHERE event_type = 'provider-thread.updated'`;
+      expect(updates).toHaveLength(2);
+      expect(updates.every((row) => row.stream_id === childId)).toBe(true);
+      const projection = yield* (yield* Projections.ProjectionStoreV2).getThreadProjection(childId);
+      expect(projection.providerThreads[0]?.status).toBe("idle");
+      expect(projection.providerThreads[0]?.pendingBackgroundTasks).toEqual([]);
+    }).pipe(Effect.provide(runtime)),
 );

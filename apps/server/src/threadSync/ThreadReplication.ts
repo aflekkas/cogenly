@@ -1,6 +1,6 @@
 import { isMisroutedLegacyRecoveryEvent } from "@cogenly/shared/legacyRecoveryEvent";
 import { projectReplicaFilings } from "./replicaFiling.ts";
-import { normalizeLegacyProviderThread } from "./legacyProviderThreadIdentity.ts";
+import { normalizeLegacyProviderThread } from "@cogenly/shared/legacyProviderThreadIdentity";
 import { normalizeLegacySession } from "./legacySessionIdentity.ts";
 /**
  * ThreadReplication: copies thread event logs between paired machines. Each
@@ -462,8 +462,9 @@ const make = Effect.gen(function* () {
         let encoded =
           kept === undefined ? ((yield* encodeEventJson(item.event)) as Schema.Json) : kept;
         if (
-          (normalizeLegacySession(item.event, environmentId) !== item.event ||
-            normalizeLegacyProviderThread(item.event, environmentId) !== item.event) &&
+          (item.event.type.startsWith("provider-session.") ||
+            normalizeLegacySession(item.event, environmentId) !== item.event ||
+            normalizeLegacyProviderThread(item.event) !== item.event) &&
           rawField(encoded, "cogenlyReplicaSessionOrigin") === undefined
         ) {
           encoded = {
@@ -741,32 +742,36 @@ const make = Effect.gen(function* () {
     };
     // Keep the original wire history plus its origin. A relay or a later owner
     // must derive the same session id, rather than using its own environment.
-    const normalized = items.map(({ event, raw }) => {
-      const origin = rawField(raw, "cogenlyReplicaSessionOrigin");
-      const decodedOrigin = decodeEnvironmentId(origin);
-      const receiptCommand = rawField(rawField(raw, "cogenlyReplicaReceipt"), "commandId");
-      const sessionOrigin = Option.getOrElse(decodedOrigin, () =>
-        EnvironmentId.make(
-          replicaSessionOrigin(receiptCommand) ??
-            accepted.get(event.threadId)?.meta.owner ??
-            source,
-        ),
-      );
-      const scoped = normalizeLegacyProviderThread(
-        normalizeLegacySession(event, sessionOrigin),
-        sessionOrigin,
-      );
-      return {
-        event: scoped,
-        raw:
-          scoped === event
-            ? raw
-            : {
-                ...(raw as object),
-                cogenlyReplicaSessionOrigin: sessionOrigin,
-              },
-      };
-    });
+    const sessionOrigins = new Map<EventId, EnvironmentId>();
+    const normalized = yield* Effect.forEach(items, ({ event, raw }) =>
+      Effect.gen(function* () {
+        const origin = rawField(raw, "cogenlyReplicaSessionOrigin");
+        const decodedOrigin = decodeEnvironmentId(origin);
+        const receiptCommand = rawField(rawField(raw, "cogenlyReplicaReceipt"), "commandId");
+        const receiptOrigin = replicaSessionOrigin(receiptCommand);
+        const decodedReceiptOrigin = decodeEnvironmentId(receiptOrigin);
+        if (receiptOrigin !== undefined && Option.isNone(decodedReceiptOrigin))
+          return yield* new ThreadReplicationError({ reason: "invalid-batch" });
+        const sessionOrigin = Option.getOrElse(decodedOrigin, () =>
+          Option.getOrElse(
+            decodedReceiptOrigin,
+            () => accepted.get(event.threadId)?.meta.owner ?? source,
+          ),
+        );
+        sessionOrigins.set(event.id, sessionOrigin);
+        const scoped = normalizeLegacyProviderThread(normalizeLegacySession(event, sessionOrigin));
+        return {
+          event: scoped,
+          raw:
+            scoped === event
+              ? raw
+              : {
+                  ...(raw as object),
+                  cogenlyReplicaSessionOrigin: sessionOrigin,
+                },
+        };
+      }),
+    );
     const rawById = new Map(normalized.map((item) => [item.event.id, item.raw]));
     const candidates: Array<OrchestrationV2DomainEvent> = [];
     for (const { event } of normalized) {
@@ -825,6 +830,7 @@ const make = Effect.gen(function* () {
         commandId,
         events: fresh,
         retainedEvents,
+        sessionOrigins,
         receipts,
         owners: [...accepted.values()].map(({ meta }) => ({
           threadId: meta.threadId,

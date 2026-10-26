@@ -1,3 +1,4 @@
+import { normalizeLegacyProviderThread } from "@cogenly/shared/legacyProviderThreadIdentity";
 import {
   CommandId,
   type EventId,
@@ -100,6 +101,7 @@ export interface EventSinkV2Shape {
       readonly epoch: number;
     }>;
     readonly receipts?: ReadonlyArray<Omit<CommandReceiptStore.CommandReceiptV2, "resultSequence">>;
+    readonly sessionOrigins?: ReadonlyMap<EventId, EnvironmentId>;
     readonly retainedEvents?: ReadonlyArray<{ readonly id: EventId; readonly json: string }>;
     readonly commandId: CommandId;
     readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
@@ -355,7 +357,8 @@ const layerBase: Layer.Layer<
         });
       });
 
-    const normalizeEvents = (events: ReadonlyArray<OrchestrationV2DomainEvent>) => {
+    const normalizeEvents = (input: ReadonlyArray<OrchestrationV2DomainEvent>) => {
+      const events = input.map(normalizeLegacyProviderThread);
       const runOrdinals = new Map(
         events.flatMap((event) =>
           event.type === "run.created" || event.type === "run.updated"
@@ -398,7 +401,10 @@ const layerBase: Layer.Layer<
       "context-handoff": ["context_handoffs", "context_handoff_id", "thread_id"],
       "context-transfer": ["context_transfers", "context_transfer_id", "target_thread_id"],
     };
-    const validateReplicaIdentities = (events: ReadonlyArray<OrchestrationV2DomainEvent>) =>
+    const validateReplicaIdentities = (
+      events: ReadonlyArray<OrchestrationV2DomainEvent>,
+      sessionOrigins?: ReadonlyMap<EventId, EnvironmentId>,
+    ) =>
       Effect.gen(function* () {
         const claimed = new Map<string, ThreadId>();
         const sameWriter = (left: ThreadId | string, right: ThreadId | string) =>
@@ -408,19 +414,15 @@ const layerBase: Layer.Layer<
             FROM thread_owners WHERE thread_id IN (${left}, ${right})`.pipe(
             Effect.map((rows) => rows.length === 2 && rows[0]!.writer === rows[1]!.writer),
           );
-        // Older builds shared one session id across a machine. Its namespace
-        // still proves ownership when a sibling thread has since moved away.
-        const machineSessionOwner = (id: string, threadId: ThreadId) =>
-          sql<{ readonly owner_env: string }>`SELECT owner_env FROM thread_owners
-            WHERE thread_id = ${threadId}`.pipe(
-            Effect.map((rows) =>
-              rows.some(
-                (row) =>
-                  /^provider-session:provider-instance:[^:]+:shared:machine:[^:]+$/.test(id) &&
-                  id.endsWith(`:machine:${encodeURIComponent(row.owner_env)}`),
-              ),
-            ),
+        // A historical attach belongs to its writer even after its thread moves.
+        const machineSessionOwner = (id: string, eventId: EventId) => {
+          const origin = sessionOrigins?.get(eventId);
+          return (
+            origin !== undefined &&
+            /^provider-session:provider-instance:[^:]+:shared:machine:[^:]+$/.test(id) &&
+            id.endsWith(`:machine:${encodeURIComponent(origin)}`)
           );
+        };
         for (const event of events) {
           if (isMisroutedLegacyRecoveryEvent(event)) continue;
           const payload = event.payload;
@@ -448,7 +450,7 @@ const layerBase: Layer.Layer<
             !(
               table === "provider_sessions" &&
               ((yield* sameWriter(prior, event.threadId)) ||
-                (yield* machineSessionOwner(payload.id, event.threadId)))
+                machineSessionOwner(payload.id, event.id))
             )
           )
             return yield* new ThreadOwnedElsewhereError({ threadId: event.threadId });
@@ -468,7 +470,7 @@ const layerBase: Layer.Layer<
               if (
                 bound.length > 0 ||
                 (yield* sameWriter(row.thread_id, event.threadId)) ||
-                (yield* machineSessionOwner(payload.id, event.threadId))
+                machineSessionOwner(payload.id, event.id)
               )
                 continue;
             }
@@ -481,9 +483,11 @@ const layerBase: Layer.Layer<
       readonly commandId?: CommandId;
       readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
       readonly replica?: boolean;
+      readonly sessionOrigins?: ReadonlyMap<EventId, EnvironmentId>;
     }) =>
       Effect.gen(function* () {
-        if (input.replica === true) yield* validateReplicaIdentities(input.events);
+        if (input.replica === true)
+          yield* validateReplicaIdentities(input.events, input.sessionOrigins);
         if (input.events.length > 0 && input.replica !== true) {
           const threadIds = [...new Set(input.events.map((event) => event.threadId))];
           const owned = yield* sql<{
@@ -538,6 +542,7 @@ const layerBase: Layer.Layer<
         readonly owner: EnvironmentId;
         readonly epoch: number;
       }> = [],
+      sessionOrigins?: ReadonlyMap<EventId, EnvironmentId>,
     ) {
       yield* Effect.annotateCurrentSpan({
         "orchestration_v2.command_id": input.commandId ?? null,
@@ -564,6 +569,7 @@ const layerBase: Layer.Layer<
             ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
             events: normalized,
             replica,
+            ...(sessionOrigins === undefined ? {} : { sessionOrigins }),
           });
           for (const retained of retainedEvents)
             yield* sql`INSERT INTO thread_replication_raw_events(event_id, event_json)
@@ -1022,6 +1028,7 @@ const layerBase: Layer.Layer<
           input.retainedEvents,
           input.receipts,
           input.owners,
+          input.sessionOrigins,
         ).pipe(
           Effect.mapError(
             (cause) =>

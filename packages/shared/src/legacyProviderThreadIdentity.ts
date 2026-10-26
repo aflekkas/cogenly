@@ -1,23 +1,18 @@
-import {
-  ProviderThreadId,
-  type EnvironmentId,
-  type OrchestrationV2DomainEvent,
-} from "@cogenly/contracts";
+import { ProviderThreadId, type OrchestrationV2DomainEvent } from "@cogenly/contracts";
 
-// Native conversations imported independently on two machines can have the same
-// provider-thread id under different app threads. Keep the native ref untouched;
-// only the application identity and its typed references need a namespace.
-const nativeIdentity =
-  /^provider-thread:provider:[^:]+:(?:provider-instance:[^:]+:)?native-thread:[^:]+$/;
-
+// The old `import:<driver>:<native>` app-thread namespace is distinct from
+// `thread:provider:<driver>:native-thread:<native>`. Only the former needs
+// a different provider identity; ordinary adapter-created conversations keep
+// their native-derived id, including when their app thread changes machines.
 export const normalizeLegacyProviderThread = (
   event: OrchestrationV2DomainEvent,
-  origin: EnvironmentId,
 ): OrchestrationV2DomainEvent => {
+  const imported = /^import:([^:]+):(.+)$/.exec(event.threadId);
+  if (imported === null) return event;
+  const [, driver, nativeId] = imported;
+  const legacyId = `provider-thread:provider:${driver}:native-thread:${nativeId}`;
   const scope = (id: ProviderThreadId) =>
-    nativeIdentity.test(id)
-      ? ProviderThreadId.make(`${id}:machine:${encodeURIComponent(origin)}`)
-      : id;
+    id === legacyId ? ProviderThreadId.make(`provider-thread:import:${driver}:${nativeId}`) : id;
   let payload = event.payload;
   const set = (key: string, value: unknown) => {
     payload = { ...payload, [key]: value } as typeof payload;
@@ -52,6 +47,15 @@ export const normalizeLegacyProviderThread = (
     const id = scope(payload.forkedFrom.providerThreadId);
     if (id !== payload.forkedFrom.providerThreadId)
       set("forkedFrom", { ...payload.forkedFrom, providerThreadId: id });
+  }
+  if (
+    event.type === "turn-item.updated" &&
+    event.payload.type === "fork" &&
+    event.payload.source.type === "provider_thread"
+  ) {
+    const source = event.payload.source;
+    const id = scope(source.providerThreadId);
+    if (id !== source.providerThreadId) set("source", { ...source, providerThreadId: id });
   }
   if (event.type === "context-handoff.updated" && event.payload.history !== undefined) {
     const history = event.payload.history;

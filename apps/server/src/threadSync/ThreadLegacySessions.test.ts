@@ -3,20 +3,24 @@ import {
   CommandId,
   EventId,
   NodeId,
+  MessageId,
   ProviderDriverKind,
   ProviderInstanceId,
   ProviderSessionId,
   ProviderThreadId,
   RuntimeRequestId,
   ThreadId,
+  TurnItemId,
   type OrchestrationV2DomainEvent,
 } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import { pair } from "../machines/testkit.ts";
 import { CodexProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
+import migrateImportIdentities from "../persistence/Migrations/105_LegacyImportProviderIdentity.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import { startThreadMachine as start, threadCreated } from "./testkit.ts";
 
@@ -411,14 +415,12 @@ it.live(
       yield* mac.sync.sync(hub.environmentId);
       yield* hub.sync.sync(mac.environmentId);
       yield* hub.sync.sync(other.environmentId);
-      for (const [id, origin] of [
-        [hubId, hub.environmentId],
-        [macId, mac.environmentId],
+      for (const [id, expectedId] of [
+        [hubId, "provider-thread:import:codex:imported-conversation"],
+        [macId, nativeId],
       ] as const) {
         const projection = yield* other.projections.getThreadProjection(id);
-        expect(projection.thread.activeProviderThreadId).toBe(
-          `${nativeId}:machine:${encodeURIComponent(origin)}`,
-        );
+        expect(projection.thread.activeProviderThreadId).toBe(expectedId);
         expect(projection.providerThreads[0]).toMatchObject({
           id: projection.thread.activeProviderThreadId,
           appThreadId: id,
@@ -426,8 +428,35 @@ it.live(
         });
       }
       expect((yield* hub.projections.getThreadProjection(hubId)).providerThreads[0]?.id).toBe(
-        nativeId,
+        "provider-thread:import:codex:imported-conversation",
       );
+      // A handoff and fresh owner update preserve the same identity on every peer.
+      for (const machine of [hub, mac]) {
+        yield* machine.sql`INSERT INTO projection_projects(project_id, title, workspace_root, auto_pull, scripts_json, created_at, updated_at)
+          VALUES ('project:mcp-test', 'Project', '/repo', 0, '[]', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`;
+      }
+      expect(
+        (yield* hub.transfer.move({ threadIds: [hubId], target: mac.environmentId })).moved,
+      ).toEqual([hubId]);
+      const providerThread = (yield* mac.projections.getThreadProjection(hubId))
+        .providerThreads[0]!;
+      yield* mac.sink.write({
+        events: [
+          {
+            id: EventId.make("event:import-after-handoff"),
+            type: "provider-thread.updated",
+            threadId: hubId,
+            occurredAt: at,
+            payload: { ...providerThread, status: "idle" },
+          },
+        ],
+      });
+      yield* mac.sync.sync(hub.environmentId);
+      for (const machine of [hub, mac]) {
+        expect(
+          (yield* machine.projections.getThreadProjection(hubId)).providerThreads.map((p) => p.id),
+        ).toEqual(["provider-thread:import:codex:imported-conversation"]);
+      }
     }).pipe(Effect.scoped),
 );
 
@@ -483,5 +512,246 @@ it.live.each(["startup", "shutdown", "unrecognized"])(
       expect(
         (yield* hub.projections.getThreadProjection(wrong)).providerThreads[0]?.appThreadId,
       ).toBe(wrong);
+    }).pipe(Effect.scoped),
+);
+
+it.live.each(["moved-first", "moved-last"])(
+  "historical machine-session attaches replay after handoff (%s)",
+  (order) =>
+    Effect.gen(function* () {
+      const hub = yield* start(`historical-${order}-hub`, "cloud-server");
+      const mac = yield* start(`historical-${order}-mac`, "computer");
+      const other = yield* start(`historical-${order}-other`, "computer");
+      yield* pair(hub, mac);
+      yield* pair(hub, other);
+      const at = yield* DateTime.now;
+      const moved = ThreadId.make("thread:historical-moved");
+      const stays = ThreadId.make("thread:historical-stays");
+      const sessionId = ProviderSessionId.make(
+        `${shared}:machine:${encodeURIComponent(mac.environmentId)}`,
+      );
+      const ids = order === "moved-first" ? [moved, stays] : [stays, moved];
+      yield* mac.sink.write({ events: ids.flatMap((id) => history(id, at, sessionId)) });
+      for (const machine of [mac, hub]) {
+        yield* machine.sql`INSERT INTO projection_projects(project_id, title, workspace_root, auto_pull, scripts_json, created_at, updated_at)
+        VALUES ('project:mcp-test', 'Project', '/repo', 0, '[]', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`;
+      }
+      yield* mac.sync.sync(hub.environmentId);
+      expect(
+        (yield* mac.transfer.move({ threadIds: [moved], target: hub.environmentId })).moved,
+      ).toEqual([moved]);
+      yield* hub.sync.sync(other.environmentId);
+      for (const id of [moved, stays]) {
+        expect(
+          (yield* other.projections.getThreadProjection(id)).providerThreads[0]?.providerSessionId,
+        ).toBe(sessionId);
+      }
+      expect(
+        (yield* other.sql`SELECT count(*) AS count FROM thread_replication_deferred`)[0]?.count,
+      ).toBe(0);
+    }).pipe(Effect.scoped),
+);
+
+it.live("malformed replica receipt origins fail as invalid batches without defects", () =>
+  Effect.gen(function* () {
+    const hub = yield* start("bad-receipt-hub", "cloud-server");
+    const mac = yield* start("bad-receipt-mac", "computer");
+    yield* pair(hub, mac);
+    const at = yield* DateTime.now;
+    yield* mac.sink.write({ events: history(ThreadId.make("thread:bad-receipt"), at) });
+    const batch = yield* mac.replication.readBatch({ events: 0, meta: 0 }, hub.environmentId, true);
+    const events = batch.events.map((raw) => {
+      const { cogenlyReplicaSessionOrigin: _origin, ...event } = raw as Record<string, Schema.Json>;
+      return {
+        ...event,
+        cogenlyReplicaReceipt: {
+          commandId: "command:replica: :7",
+          commandType: "thread.create",
+          acceptedAt: DateTime.formatIso(at),
+          status: "accepted",
+          error: null,
+        },
+      };
+    });
+    expect(
+      yield* Effect.flip(hub.replication.receive({ ...batch, events }, mac.environmentId, false)),
+    ).toMatchObject({ reason: "invalid-batch" });
+    expect((yield* hub.replication.cursors(mac.environmentId)).received.events).toBe(0);
+  }).pipe(Effect.scoped),
+);
+
+it.live.each(["machine", "legacy"])(
+  "takeover allocates a local session before a second writer reattaches (%s)",
+  (kind) =>
+    Effect.gen(function* () {
+      const hub = yield* start(`takeover-${kind}-hub`, "cloud-server", undefined, undefined, true);
+      const mac = yield* start(`takeover-${kind}-mac`, "computer");
+      yield* pair(hub, mac);
+      const at = yield* DateTime.now;
+      const moved = ThreadId.make("thread:takeover-moved");
+      const stays = ThreadId.make("thread:takeover-stays");
+      const sessionId =
+        kind === "legacy"
+          ? shared
+          : ProviderSessionId.make(`${shared}:machine:${encodeURIComponent(mac.environmentId)}`);
+      yield* mac.sink.write({
+        events: [...history(stays, at, sessionId), ...history(moved, at, sessionId)],
+      });
+      for (const machine of [mac, hub]) {
+        yield* machine.sql`INSERT INTO projection_projects(project_id, title, workspace_root, auto_pull, scripts_json, created_at, updated_at)
+      VALUES ('project:mcp-test', 'Project', '/repo', 0, '[]', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`;
+      }
+      yield* mac.sync.sync(hub.environmentId);
+      expect(
+        (yield* mac.transfer.move({ threadIds: [moved], target: hub.environmentId })).moved,
+      ).toEqual([moved]);
+      yield* Option.getOrThrow(hub.engine).dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make("command:takeover-message"),
+        threadId: moved,
+        messageId: MessageId.make("message:takeover"),
+        text: "resume",
+        attachments: [],
+        dispatchMode: { type: "start_immediately" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* Option.getOrThrow(hub.worker).drain();
+      const hubSession = ProviderSessionId.make(
+        `${shared}:machine:${encodeURIComponent(hub.environmentId)}`,
+      );
+      expect(
+        (yield* hub.projections.getThreadProjection(moved)).providerSessions.map((s) => s.id),
+      ).toContain(hubSession);
+      // The old owner must accept the new owner's session before it starts another thread.
+      yield* hub.sync.sync(mac.environmentId);
+      const attached = history(stays, at, sessionId)[1]!;
+      yield* mac.sink.write({
+        events: [{ ...attached, id: EventId.make("event:takeover-reattach") }],
+      });
+      yield* mac.sync.sync(hub.environmentId);
+      const sessions = yield* hub.sql<{
+        thread_id: string;
+        cwd: string;
+        status: string;
+      }>`SELECT thread_id, json_extract(payload_json, '$.cwd') AS cwd, status FROM orchestration_v2_projection_provider_sessions WHERE provider_session_id = ${hubSession}`;
+      expect(sessions[0]?.thread_id).toBe(moved);
+      expect(sessions[0]?.cwd).not.toBe("/shared");
+      expect((yield* hub.replication.cursors(mac.environmentId)).received).toEqual(
+        (yield* mac.replication.cursors(hub.environmentId)).acknowledged,
+      );
+    }).pipe(Effect.scoped),
+);
+
+it.live(
+  "legacy import projections migrate before partial replay without duplicating provider threads",
+  () =>
+    Effect.gen(function* () {
+      const machine = yield* start("import-migration", "computer");
+      const at = yield* DateTime.now;
+      const id = ThreadId.make("import:codex:migration-native");
+      const legacy = ProviderThreadId.make(
+        "provider-thread:provider:codex:native-thread:migration-native",
+      );
+      const canonical = "provider-thread:import:codex:migration-native";
+      const events = history(id, at).map((event) =>
+        event.type === "provider-thread.updated"
+          ? { ...event, payload: { ...event.payload, id: legacy } }
+          : event.type === "thread.created"
+            ? { ...event, payload: { ...event.payload, activeProviderThreadId: legacy } }
+            : event,
+      );
+      yield* machine.sink.write({ events });
+      // Recreate the projection written before this build, with an already-synced log.
+      yield* machine.sql`UPDATE orchestration_v2_projection_threads SET active_provider_thread_id = ${legacy},
+    payload_json = json_set(payload_json, '$.activeProviderThreadId', ${legacy}) WHERE thread_id = ${id}`;
+      yield* machine.sql`UPDATE orchestration_v2_projection_provider_threads SET provider_thread_id = ${legacy},
+    payload_json = json_set(payload_json, '$.id', ${legacy}, '$.futureField', 'kept') WHERE thread_id = ${id}`;
+      yield* machine.run(migrateImportIdentities);
+      yield* machine.run(migrateImportIdentities);
+      expect(
+        (yield* machine.sql`SELECT json_extract(payload_json, '$.futureField') AS future FROM orchestration_v2_projection_provider_threads WHERE thread_id = ${id}`)[0]
+          ?.future,
+      ).toBe("kept");
+      yield* machine.sink.write({
+        events: events
+          .filter((e) => e.type === "provider-thread.updated")
+          .map((e) => ({ ...e, id: EventId.make("event:partial-import-replay") })),
+      });
+      const projection = yield* machine.projections.getThreadProjection(id);
+      expect(projection.thread.activeProviderThreadId).toBe(canonical);
+      expect(projection.providerThreads.map((p) => p.id)).toEqual([canonical]);
+    }).pipe(Effect.scoped),
+);
+
+it.live(
+  "import fork source references normalize while ordinary native conversations keep their identity",
+  () =>
+    Effect.gen(function* () {
+      const hub = yield* start("fork-import-hub", "cloud-server");
+      const mac = yield* start("fork-import-mac", "computer");
+      yield* pair(hub, mac);
+      const at = yield* DateTime.now;
+      for (const id of [
+        ThreadId.make("import:codex:fork-native"),
+        ThreadId.make("thread:ordinary-native"),
+      ]) {
+        const native = ProviderThreadId.make(
+          "provider-thread:provider:codex:native-thread:fork-native",
+        );
+        yield* mac.sink.write({
+          events: [
+            ...history(id, at).map((event) =>
+              event.type === "provider-thread.updated"
+                ? { ...event, payload: { ...event.payload, id: native } }
+                : event,
+            ),
+            {
+              id: EventId.make(`event:fork:${id}`),
+              type: "turn-item.updated",
+              threadId: id,
+              occurredAt: at,
+              payload: {
+                id: TurnItemId.make(`item:fork:${id}`),
+                type: "fork",
+                threadId: id,
+                runId: null,
+                nodeId: null,
+                providerThreadId: native,
+                providerTurnId: null,
+                nativeItemRef: null,
+                parentItemId: null,
+                ordinal: 0,
+                status: "completed",
+                title: native,
+                startedAt: at,
+                completedAt: at,
+                updatedAt: at,
+                source: { type: "provider_thread", providerThreadId: native },
+                targetThreadId: ThreadId.make("thread:fork-target"),
+              },
+            },
+          ],
+        });
+      }
+      yield* mac.sync.sync(hub.environmentId);
+      for (const machine of [hub, mac]) {
+        for (const id of [
+          ThreadId.make("import:codex:fork-native"),
+          ThreadId.make("thread:ordinary-native"),
+        ]) {
+          const projection = yield* machine.projections.getThreadProjection(id);
+          const item = projection.turnItems[0]!;
+          const expected = id.startsWith("import:")
+            ? "provider-thread:import:codex:fork-native"
+            : "provider-thread:provider:codex:native-thread:fork-native";
+          expect(projection.providerThreads[0]?.id).toBe(expected);
+          expect(item).toMatchObject({
+            providerThreadId: expected,
+            source: { providerThreadId: expected },
+            title: "provider-thread:provider:codex:native-thread:fork-native",
+          });
+        }
+      }
     }).pipe(Effect.scoped),
 );
