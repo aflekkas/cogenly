@@ -1,3 +1,5 @@
+import { normalizeLegacyProviderThread } from "@cogenly/shared/legacyProviderThreadIdentity";
+import { isMisroutedLegacyRecoveryEvent } from "@cogenly/shared/legacyRecoveryEvent";
 import { withWorkMetadata } from "@cogenly/shared/workMetadata";
 import { applyThreadPullRequestLinkUpdate } from "@cogenly/shared/threadPullRequests";
 import { projectTurnItemForWire } from "./WireProjection.ts";
@@ -1992,8 +1994,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       END
     `;
 
-    const apply: ProjectionStoreV2Shape["apply"] = (event) =>
+    const apply: ProjectionStoreV2Shape["apply"] = (input) =>
       Effect.gen(function* () {
+        const event = normalizeLegacyProviderThread(input);
+        if (isMisroutedLegacyRecoveryEvent(event)) return;
         switch (event.type) {
           case "thread.pull-request-link-updated": {
             const thread = yield* getThread(event.threadId);
@@ -2898,7 +2902,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         Effect.mapError(
           (cause) =>
             new ProjectionStoreApplyEventError({
-              eventType: event.type,
+              eventType: input.type,
               cause,
             }),
         ),

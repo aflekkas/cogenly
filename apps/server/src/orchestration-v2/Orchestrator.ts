@@ -983,6 +983,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ),
     );
 
+  // A takeover resumes the conversation, never the other machine's process.
+  const reusableProviderSessionId = (id: ProviderSessionId | null | undefined) =>
+    id !== null &&
+    id !== undefined &&
+    !id.endsWith(":shared") &&
+    (!id.includes(":machine:") ||
+      id.split(":machine:")[1]?.split(":")[0] === encodeURIComponent(sessionMachine ?? ""))
+      ? id
+      : undefined;
+
   const providerSessionIdFor = (input: {
     readonly adapter: ProviderAdapter.ProviderAdapterV2["Service"];
     readonly providerInstanceId: ProviderInstanceId;
@@ -4415,7 +4425,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           input.modelSelection.instanceId,
         ).find((candidate) => candidate.id !== providerThread.id);
         const targetProviderSessionId =
-          existingTargetProviderThread?.providerSessionId ??
+          reusableProviderSessionId(existingTargetProviderThread?.providerSessionId) ??
           (yield* mapDispatchError(input.command)(
             providerSessionIdFor({
               adapter: targetAdapter,
@@ -5649,7 +5659,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ),
         );
         const providerSessionId =
-          activeProviderThread?.providerSessionId ??
+          reusableProviderSessionId(activeProviderThread?.providerSessionId) ??
           (yield* mapDispatchError(command)(
             providerSessionIdFor({
               adapter,
@@ -6037,7 +6047,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ? rootProviderThreadsForProvider(projection, modelSelection.instanceId)[0]
           : activeProviderThread;
       const providerSessionId =
-        (canResumeAcrossInstances ? undefined : targetProviderThread?.providerSessionId) ??
+        (canResumeAcrossInstances
+          ? undefined
+          : reusableProviderSessionId(targetProviderThread?.providerSessionId)) ??
         (yield* mapDispatchError(command)(
           providerSessionIdFor({
             adapter,
