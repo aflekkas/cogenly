@@ -80,21 +80,38 @@
   gap: 2px;
   padding-top: 2px;
   pointer-events: none;
+  /* The name pill's scale: the hero draws the header's pill larger, so the
+     builder's move can carry one exactly onto the other. */
+  --agent-identity-scale: 1;
 }
 .agent-identity-person > * {
   pointer-events: auto;
 }
+.agent-identity-person[data-size="hero"] {
+  gap: 10px;
+  padding-top: 0;
+  --agent-identity-scale: 1.3333;
+}
+.agent-identity-person[data-hidden] {
+  visibility: hidden;
+}
+/* A face that changes colour in place (the builder's proposal, a picked colour)
+   eases to it rather than snapping. */
+.agent-identity-person > svg rect {
+  transition: fill var(--motion-duration-base) var(--motion-ease-standard);
+}
 @utility agent-identity-name {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  max-width: 16rem;
+  gap: calc(2px * var(--agent-identity-scale, 1));
+  max-width: calc(16rem * var(--agent-identity-scale, 1));
   border: 0;
   border-radius: 999px;
-  padding: 2px 7px 2px 9px;
+  padding: calc(2px * var(--agent-identity-scale, 1)) calc(7px * var(--agent-identity-scale, 1))
+    calc(2px * var(--agent-identity-scale, 1)) calc(9px * var(--agent-identity-scale, 1));
   background: color-mix(in srgb, var(--muted) 70%, transparent);
   color: var(--foreground);
-  font-size: 12px;
+  font-size: calc(12px * var(--agent-identity-scale, 1));
   font-weight: 500;
   line-height: 1.2;
   cursor: pointer;
@@ -458,6 +475,31 @@
   color: var(--destructive);
   padding: 10px;
   overflow-wrap: anywhere;
+}
+/* The builder's transcript and, over it, its empty state: the agent about to be
+   made, centred in the space between the band and the composer. The hero layer
+   is out of flow so it stays put while its copy fades and the person moves up
+   into the band (AgentBuilder's playHeroMove). */
+@utility agent-builder-stage {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+@utility agent-builder-hero {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow-y: auto;
+  padding: calc(var(--chat-header-overlap) + 8px)
+    calc(var(--content-gutter) + var(--chat-content-inset)) 20px;
+}
+.agent-builder-hero[data-leaving] {
+  pointer-events: none;
 }
 @utility agent-conversation-empty {
   display: flex;

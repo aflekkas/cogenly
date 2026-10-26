@@ -21,18 +21,26 @@ import {
   useState,
   type ComponentProps,
   type ReactNode,
+  type Ref,
   type RefObject,
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { AgentFaceProps } from "~/components/agents/face";
+import { agentAppearance, type AgentFaceProps } from "~/components/agents/face";
 import { avatarFaceProps } from "~/components/agents/face/agentAvatar.logic";
+import {
+  ComposerControl,
+  ComposerControlChevron,
+  ComposerControlIcon,
+  composerControlGapClassName,
+} from "~/components/chat/ComposerControl";
 import { ComposerPrimaryActions } from "~/components/chat/ComposerPrimaryActions";
 import { ComposerSurface } from "~/components/chat/ComposerSurface";
 import { Button } from "~/components/ui/button";
 import { SidebarInset } from "~/components/ui/sidebar";
 import { toastManager } from "~/components/ui/toast";
 import { useScratchProject } from "~/hooks/useScratchProject";
+import { prefersReducedMotion } from "~/lib/sendMotion";
 import { cn, newMessageId, randomUUID } from "~/lib/utils";
 import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
 import { agentsRpc } from "~/rpc/agents";
@@ -53,7 +61,7 @@ import {
   proposalTriggers,
   stripProposal,
 } from "./agentBuilder.logic";
-import { AgentIdentity } from "./AgentIdentity";
+import { AgentIdentity, AgentIdentityPerson } from "./AgentIdentity";
 import { AgentProjectPicker, useAgentProjectFolders } from "./AgentProjectPicker";
 import { AgentProposalCard } from "./AgentProposalCard";
 import { AgentTypingDots } from "./AgentTypingBubble";
@@ -77,14 +85,26 @@ import type { AgentContact, AgentMessage } from "./agents.types";
 import { useMessageMotion } from "./useMessageMotion";
 
 const LIVE_RUN = new Set(["preparing", "queued", "starting", "running"]);
-/** The builder's own face: the mono cloud, until the proposal's face takes over. */
-const BUILDER_FACE: AgentFaceProps = {
-  seed: "new-friend",
+const BUILDER_SHAPE = agentAppearance("new-friend").shape;
+/**
+ * The builder's own face: the mono cloud, until the proposal's face takes over. It
+ * carries the agent's seed, so the face morphs into the proposed one instead of
+ * being replaced by it.
+ */
+const builderFace = (seed: string): AgentFaceProps => ({
+  seed,
+  shape: BUILDER_SHAPE,
   expression: "curieux",
   color: "currentColor",
   paper: "none",
   className: "text-foreground/90",
-};
+});
+/**
+ * The empty state introduces the agent with its face and name; once the
+ * conversation starts they move up into the header (`playHeroMove`) while the
+ * copy fades. A failed first send brings the empty state back.
+ */
+type HeroState = { phase: "shown"; returned: boolean } | { phase: "leaving" | "gone" };
 
 interface BuilderThread {
   environmentId: EnvironmentId;
@@ -178,7 +198,31 @@ export function AgentBuilder({
   const accent = proposal?.face?.color ? accentForColor(proposal.face.color) : NEUTRAL_ACCENT;
   const face: AgentFaceProps = proposal?.face
     ? avatarFaceProps({ seed, ...proposal.face })
-    : BUILDER_FACE;
+    : builderFace(seed);
+  const name = proposal?.name ?? "New agent";
+  // Only a change while mounted moves the person: the builder always mounts empty, so
+  // the first render is the empty state at rest.
+  const [hero, setHero] = useState<HeroState>({ phase: "shown", returned: false });
+  const empty = messages.length === 0;
+  if (!empty && hero.phase === "shown") setHero({ phase: "leaving" });
+  if (empty && hero.phase !== "shown") setHero({ phase: "shown", returned: true });
+  const heroRef = useRef<HTMLDivElement>(null);
+  const headerPersonRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (hero.phase !== "leaving") return;
+    const layer = heroRef.current;
+    const person = headerPersonRef.current;
+    const animations = layer && person ? playHeroMove(layer, person) : [];
+    let current = true;
+    void Promise.all(animations.map((animation) => animation.finished)).then(
+      () => current && setHero({ phase: "gone" }),
+      () => undefined,
+    );
+    return () => {
+      current = false;
+      for (const animation of animations) animation.cancel();
+    };
+  }, [hero.phase]);
   const proposalFolderId = proposalProjectFolderId({
     chosen: cardFolderId,
     proposed: proposal?.projectFolderId,
@@ -350,9 +394,19 @@ export function AgentBuilder({
     <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none md:h-dvh">
       <section className="agent-conversation" aria-label="New agent" style={accentStyle(accent)}>
         <AgentIdentity
-          face={{ ...face, state: busy ? "thinking" : "idle" }}
-          name={proposal?.name ?? "New agent"}
-          status={busy ? "Thinking…" : null}
+          face={face}
+          name={name}
+          person={
+            <AgentIdentityPerson
+              ref={headerPersonRef}
+              face={{ ...face, state: busy ? "thinking" : "idle" }}
+              name={name}
+              // Held until the move lands, so the pill arrives the size it left.
+              status={busy && hero.phase === "gone" ? "Thinking…" : null}
+              hidden={hero.phase === "shown"}
+              morphName
+            />
+          }
           trailing={
             <Button size="icon-sm" variant="ghost-muted" aria-label="Cancel" onClick={cancel}>
               <XIcon className="size-4.5" />
@@ -380,7 +434,18 @@ export function AgentBuilder({
           creating={creating}
           cardRef={cardRef}
           onCreate={() => void create()}
-          onExample={(text) => void send(text)}
+          overlay={
+            hero.phase === "gone" ? null : (
+              <Hero
+                ref={heroRef}
+                face={face}
+                name={name}
+                leaving={hero.phase === "leaving"}
+                returned={hero.phase === "shown" && hero.returned}
+                onExample={(text) => void send(text)}
+              />
+            )
+          }
         >
           <footer className="agent-composer-area">
             {error && (
@@ -433,7 +498,7 @@ function Transcript({
   creating,
   cardRef,
   onCreate,
-  onExample,
+  overlay,
   children,
 }: {
   threadKey: string;
@@ -447,7 +512,8 @@ function Transcript({
   creating: boolean;
   cardRef: RefObject<HTMLDivElement | null>;
   onCreate: () => void;
-  onExample: (text: string) => void;
+  /** The empty state, drawn over the transcript. */
+  overlay: ReactNode;
   /** The composer, under the transcript. */
   children: ReactNode;
 }) {
@@ -479,23 +545,21 @@ function Transcript({
   const latestAssistant = messages.findLast((message) => message.role === "assistant");
   return (
     <>
-      <div
-        ref={scroll}
-        className="agent-message-scroll scroll-fade-y"
-        onScroll={onScroll}
-        onWheel={stopFollowing}
-        onTouchStart={stopFollowing}
-      >
+      <div className="agent-builder-stage">
         <div
-          className="agent-messages"
-          role="log"
-          aria-live="polite"
-          aria-relevant="additions text"
+          ref={scroll}
+          className="agent-message-scroll scroll-fade-y"
+          onScroll={onScroll}
+          onWheel={stopFollowing}
+          onTouchStart={stopFollowing}
         >
-          {messages.length === 0 && !typingKey ? (
-            <Hero onExample={onExample} />
-          ) : (
-            conversationRows(messages).map(({ message, separator, grouped }) => {
+          <div
+            className="agent-messages"
+            role="log"
+            aria-live="polite"
+            aria-relevant="additions text"
+          >
+            {conversationRows(messages).map(({ message, separator, grouped }) => {
               const text = message.role === "user" ? message.text : stripProposal(message.text);
               return (
                 <Fragment key={claimed.get(message.id) ?? message.id}>
@@ -541,52 +605,138 @@ function Transcript({
                   </div>
                 </Fragment>
               );
-            })
-          )}
-          {typingKey && (
-            <div
-              key={typingKey}
-              data-message-id={typingKey}
-              className="agent-message-row"
-              data-owner={false}
-              data-grouped={messages.at(-1)?.role === "assistant"}
-            >
-              <div className="agent-bubble" data-owner={false}>
-                <AgentTypingDots />
+            })}
+            {typingKey && (
+              <div
+                key={typingKey}
+                data-message-id={typingKey}
+                className="agent-message-row"
+                data-owner={false}
+                data-grouped={messages.at(-1)?.role === "assistant"}
+              >
+                <div className="agent-bubble" data-owner={false}>
+                  <AgentTypingDots />
+                </div>
+                {workingOn && (
+                  <span key={workingOn} className="agent-typing-hint agent-morph">
+                    {workingOn}
+                  </span>
+                )}
               </div>
-              {workingOn && (
-                <span key={workingOn} className="agent-typing-hint agent-morph">
-                  {workingOn}
-                </span>
-              )}
-            </div>
-          )}
+            )}
+          </div>
         </div>
+        {overlay}
       </div>
       {children}
     </>
   );
 }
 
-function Hero({ onExample }: { onExample: (text: string) => void }) {
+/**
+ * The empty state: the agent about to be made, then what to say. A first render
+ * is at rest; only an empty state that comes back (a first send that failed)
+ * fades in.
+ */
+function Hero({
+  ref,
+  face,
+  name,
+  leaving,
+  returned,
+  onExample,
+}: {
+  ref: Ref<HTMLDivElement>;
+  face: AgentFaceProps;
+  name: string;
+  leaving: boolean;
+  returned: boolean;
+  onExample: (text: string) => void;
+}) {
   return (
-    <div className="agent-conversation-empty agent-enter gap-3">
-      <span className="text-base text-foreground">Tell me what to take care of.</span>
-      <span>
-        Describe the job in a sentence. I'll pick a face, a name and a schedule; change anything by
-        just saying so.
-      </span>
-      <ul className="mt-2 flex flex-wrap justify-center gap-1.5" aria-label="Examples">
-        {BUILDER_EXAMPLES.map((example) => (
-          <li key={example}>
-            <Button variant="outline" size="xs" onClick={() => onExample(example)}>
-              {example}
-            </Button>
-          </li>
-        ))}
-      </ul>
+    <div
+      ref={ref}
+      className={cn("agent-builder-hero", returned && "agent-enter")}
+      data-leaving={leaving || undefined}
+      inert={leaving}
+    >
+      <div className="m-auto flex flex-col items-center gap-5">
+        <AgentIdentityPerson face={face} name={name} size="hero" morphName />
+        <div data-hero-copy className="agent-conversation-empty gap-3">
+          <span className="text-base text-foreground">Tell me what to take care of.</span>
+          <span>
+            Describe the job in a sentence. I'll pick a face, a name and a schedule; change anything
+            by just saying so.
+          </span>
+          <ul className="mt-2 flex flex-wrap justify-center gap-1.5" aria-label="Examples">
+            {BUILDER_EXAMPLES.map((example) => (
+              <li key={example}>
+                <Button variant="outline" size="xs" onClick={() => onExample(example)}>
+                  {example}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
     </div>
   );
+}
+
+/** A motion token from index.css, as a number of milliseconds or a timing function. */
+function motionToken(name: string, fallback: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
+
+/**
+ * The empty state's person moves into the header as one element: the header's
+ * person, already in its final place, is drawn from where the hero's is and
+ * glides up while the copy fades. Under reduced motion the hero fades out and
+ * the header's person fades in. Returns the running animations.
+ */
+function playHeroMove(hero: HTMLElement, header: HTMLElement): Animation[] {
+  if (typeof hero.animate !== "function") return [];
+  const easing = motionToken("--motion-ease-standard", "cubic-bezier(0.32, 0.72, 0, 1)");
+  const fade = {
+    duration: Number.parseFloat(motionToken("--motion-duration-fast", "150")),
+    easing,
+  };
+  const leave = (element: Element | null) =>
+    element?.animate([{ opacity: 1 }, { opacity: 0 }], { ...fade, fill: "forwards" });
+  const from = hero.querySelector<HTMLElement>(".agent-identity-person");
+  const animations = [leave(hero.querySelector("[data-hero-copy]"))];
+  if (!from || prefersReducedMotion()) {
+    animations.push(leave(from), header.animate([{ opacity: 0 }, { opacity: 1 }], fade));
+    return animations.filter((animation) => animation !== undefined);
+  }
+  const move = {
+    duration: Number.parseFloat(motionToken("--motion-duration-panel", "300")),
+    easing,
+  };
+  // The header's person is the one that moves; the hero's steps aside for it.
+  animations.push(
+    from.animate([{ opacity: 0 }, { opacity: 0 }], { duration: move.duration, fill: "forwards" }),
+  );
+  // The face and the pill each scale by their own ratio, so both land exactly.
+  for (const part of [":scope > svg", ".agent-identity-name"]) {
+    const start = from.querySelector(part)?.getBoundingClientRect();
+    const target = header.querySelector<HTMLElement>(part);
+    const end = target?.getBoundingClientRect();
+    if (!start || !target || !end || end.height === 0) continue;
+    const dx = start.left + start.width / 2 - (end.left + end.width / 2);
+    const dy = start.top + start.height / 2 - (end.top + end.height / 2);
+    const scale = start.height / end.height;
+    animations.push(
+      target.animate(
+        [
+          { transformOrigin: "50% 50%", transform: `translate(${dx}px, ${dy}px) scale(${scale})` },
+          { transformOrigin: "50% 50%", transform: "none" },
+        ],
+        move,
+      ),
+    );
+  }
+  return animations.filter((animation) => animation !== undefined);
 }
 
 const MIN_HEIGHT = 78;
@@ -737,12 +887,25 @@ function BuilderProjectPicker(props: {
       onChange={props.onChange}
       disabled={props.disabled}
       aria-label={current ? `File in ${current.label.name}` : "File in a project"}
-      trigger={<Button type="button" variant="ghost-muted" size="xs" />}
+      trigger={<ComposerControl className="min-w-0" />}
     >
-      <span key={current?.key ?? "none"} className="swap-motion flex min-w-0 items-center gap-1">
-        {current ? <ProjectFolderIcon project={current} className="size-3.5" /> : <FolderIcon />}
-        <span className="min-w-0 truncate">{current ? current.label.name : "No project"}</span>
+      <span
+        key={current?.key ?? "none"}
+        className={cn("swap-motion flex min-w-0 items-center", composerControlGapClassName("sm"))}
+      >
+        {current ? (
+          <ProjectFolderIcon project={current} className="size-4" />
+        ) : (
+          <ComposerControlIcon icon={FolderIcon} />
+        )}
+        <span
+          data-composer-control-label
+          className={cn("max-w-40 truncate", current === null && "text-muted-foreground")}
+        >
+          {current ? current.label.name : "No project"}
+        </span>
       </span>
+      <ComposerControlChevron />
     </AgentProjectPicker>
   );
 }
