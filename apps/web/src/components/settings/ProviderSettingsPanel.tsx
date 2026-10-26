@@ -84,8 +84,7 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
 import { ExpandableText } from "./ExpandableText";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
-import { ProviderMachineSignIns } from "./ProviderMachineSignIns";
-import { ProviderAuthenticationSection } from "./ProviderAuthenticationSection";
+import { ProviderAccountMachines } from "./ProviderAccountMachines";
 import { CodexSetupSection, CodexManagedRuntimeFields } from "./CodexSetupSection";
 import { readCodexSetupMode } from "./CodexSetupSection.logic";
 import { providerClients } from "./providerDriverMeta";
@@ -826,27 +825,19 @@ export function EnvironmentProviderSettings({
                   })
                 }
               />
-            ) : mode === "editor" &&
-              !readOnly &&
-              liveProvider &&
-              liveProvider.setup?.canAuthenticate ? (
-              <>
-                <ProviderAuthenticationSection
-                  key={`${environmentId}:${row.instanceId}`}
-                  environmentId={environmentId}
-                  environmentLabel={environmentLabel}
-                  instanceId={row.instanceId}
-                  provider={liveProvider}
-                  readOnly={readOnly}
-                />
-              </>
             ) : null}
             {mode === "editor" && liveProvider ? (
-              <ProviderMachineSignIns
+              <ProviderAccountMachines
+                key={`${environmentId}:${row.instanceId}`}
                 environmentId={environmentId}
+                environmentLabel={environmentLabel}
                 instanceId={row.instanceId}
                 provider={liveProvider}
                 readOnly={readOnly}
+                // Managed Codex signs this machine in with ChatGPT above.
+                skipCurrent={
+                  row.driver === "codex" && readCodexSetupMode(row.instance.config) === "managed"
+                }
               />
             ) : null}
           </>

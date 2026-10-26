@@ -1,5 +1,6 @@
 import { AnimatedHeight } from "../AnimatedHeight";
 import { IntegrationSetupCard } from "./IntegrationSetupCard";
+import { ProviderSignInRequestCard } from "./ProviderSignInRequestCard";
 import {
   loginRequestDisplay,
   loginRequestSite,
@@ -43,6 +44,16 @@ export function SecretRequestCard(props: {
     return (
       <AnimatedHeight>
         <IntegrationSetupCard {...props} />
+      </AnimatedHeight>
+    );
+  if (item.providerSignIn !== undefined)
+    return (
+      <AnimatedHeight>
+        <ProviderSignInRequestCard
+          environmentId={props.environmentId}
+          item={{ ...item, providerSignIn: item.providerSignIn }}
+          visibility={props.visibility}
+        />
       </AnimatedHeight>
     );
   const display = item.login

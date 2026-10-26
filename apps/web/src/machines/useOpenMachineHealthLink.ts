@@ -1,9 +1,10 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 
+import { openProviderSignIn } from "../components/providers/ProviderSignInDialog";
 import { machineHealthAnchorId, type MachineHealthLink } from "./machineHealthLinks.logic";
 
-/** Navigates to the screen a health item or alert points at. */
+/** Navigates to the screen a health item or alert points at, or opens a provider's sign-in. */
 export function useOpenMachineHealthLink(): (link: MachineHealthLink) => void {
   const navigate = useNavigate();
   return useCallback(
@@ -28,6 +29,13 @@ export function useOpenMachineHealthLink(): (link: MachineHealthLink) => void {
           void navigate({
             to: "/settings/providers",
             search: { environmentId: link.environmentId, instanceId: link.instanceId },
+          });
+          return;
+        case "providerSignIn":
+          void openProviderSignIn({
+            environmentId: link.environmentId,
+            targetEnvironmentId: link.targetEnvironmentId,
+            instanceId: link.instanceId,
           });
           return;
         case "integrations":

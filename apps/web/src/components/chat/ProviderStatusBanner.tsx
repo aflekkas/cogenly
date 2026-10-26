@@ -61,9 +61,9 @@ export function getProviderStatusMessage(status: ServerProvider): string {
   }
   if (status.auth.status === "unauthenticated") {
     if (hasProviderSetup(status)) {
-      return "Open provider setup to sign in.";
+      return "Sign in to use it here.";
     }
-    return "Sign in via the CLI to authenticate again.";
+    return "It signs in on this machine itself, outside Cogenly.";
   }
   return status.status === "ready"
     ? "No models are available for this provider."
@@ -89,7 +89,7 @@ export const ProviderStatusBanner = memo(function ProviderStatusBanner({
   const isUnauthenticated = status.status === "error" && status.auth.status === "unauthenticated";
   const incompatible = getIncompatibleVersion(status);
   const title = isUnauthenticated
-    ? `${providerName} is unauthenticated`
+    ? `${providerName} is not signed in`
     : incompatible
       ? `${providerName} ${status.version ?? ""} is ${incompatible.status === "broken" ? "known to be broken" : "unsupported"}`
       : `${providerName} provider status`;

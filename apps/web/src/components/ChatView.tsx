@@ -310,10 +310,19 @@ import {
   PaperclipIcon,
   DownloadIcon,
   GitBranchIcon,
+  KeyRoundIcon,
   ShieldQuestionIcon,
   TargetIcon,
   WifiOffIcon,
 } from "lucide-react";
+import {
+  providerNeedsSignIn,
+  providerSignedOutLabel,
+  providerSignInForMachine,
+  providersNeedingSignIn,
+} from "@cogenly/client-runtime/provider-sign-in";
+import { openProviderSignIn } from "./providers/ProviderSignInDialog";
+import type { ProviderSignInRequest } from "./providers/ProviderSignInFlow";
 import { cn, randomUUID } from "~/lib/utils";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS, timelineHeaderInset } from "~/workspaceTitlebar";
 import { preloadableComponent } from "~/lib/preloadableComponent";
@@ -3619,7 +3628,72 @@ export default function ChatView(props: ChatViewProps) {
     resumeCompactionPermanentlyDismissed,
     setResumeCompactionPermanentlyDismissed,
   ]);
-  const providerStatusBannerKey = getProviderStatusBannerKey(activeProviderStatus);
+  // The selected provider signed out on the machine that runs this thread, as
+  // that machine reports it. Before the machine list loads, this server's own
+  // provider status decides for a thread it runs itself.
+  const providerSignInEnvironmentId = activeThread?.environmentId ?? environmentId;
+  const activeEnvironmentLabel = activeEnvironmentOption?.label;
+  const composerProviderSignIn = useMemo(():
+    | (ProviderSignInRequest & { readonly machineName: string })
+    | null => {
+    if (activeProviderInstanceId === null) return null;
+    const entry = providerSignInForMachine({
+      viaEnvironmentId: providerSignInEnvironmentId,
+      list: runOnMachineList,
+      instanceId: activeProviderInstanceId,
+      machineEnvironmentId: pickedRunOnMachine,
+    });
+    if (entry !== null) return providerNeedsSignIn(entry) ? entry : null;
+    if (
+      pickedRunOnMachine === null &&
+      activeProviderStatus?.auth.status === "unauthenticated" &&
+      activeProviderStatus.setup?.canAuthenticate === true
+    )
+      return {
+        environmentId: providerSignInEnvironmentId,
+        instanceId: activeProviderInstanceId,
+        machineName: activeEnvironmentLabel ?? "this machine",
+      };
+    return null;
+  }, [
+    activeEnvironmentLabel,
+    activeProviderInstanceId,
+    activeProviderStatus,
+    pickedRunOnMachine,
+    providerSignInEnvironmentId,
+    runOnMachineList,
+  ]);
+  // Every provider signed out on the machine that runs this thread, for the model picker.
+  const modelPickerProviderSignIn = useMemo(() => {
+    const entries = providersNeedingSignIn({
+      viaEnvironmentId: providerSignInEnvironmentId,
+      list: runOnMachineList,
+      machineEnvironmentId: pickedRunOnMachine,
+    });
+    if (entries.length === 0) return undefined;
+    const byInstance = new Map(entries.map((entry) => [entry.instanceId, entry]));
+    return {
+      signedOut: new Map(entries.map((entry) => [entry.instanceId, entry.machineName])),
+      onSignIn: (instanceId: ProviderInstanceId) => {
+        const entry = byInstance.get(instanceId);
+        if (entry) void openProviderSignIn(entry);
+      },
+    };
+  }, [pickedRunOnMachine, providerSignInEnvironmentId, runOnMachineList]);
+  // Only the latest run's signed-out failure becomes a Sign in card, and only while still signed out.
+  const latestRunId = activeThreadShell?.latestRun?.runId ?? null;
+  const providerSignInForFailedRun = useMemo(
+    () =>
+      composerProviderSignIn !== null && latestRunId !== null
+        ? { runId: latestRunId, request: composerProviderSignIn }
+        : null,
+    [composerProviderSignIn, latestRunId],
+  );
+  const providerStatusBannerKey =
+    // The composer's sign-in notice says it, with the action; the top banner would repeat it.
+    composerProviderSignIn !== null && activeProviderStatus?.auth.status === "unauthenticated"
+      ? null
+      : getProviderStatusBannerKey(activeProviderStatus);
   const [dismissedProviderStatusBannerKey, setDismissedProviderStatusBannerKey] = useState<
     string | null
   >(null);
@@ -3628,12 +3702,11 @@ export default function ChatView(props: ChatViewProps) {
       setDismissedProviderStatusBannerKey(null);
     }
   }, [dismissedProviderStatusBannerKey, providerStatusBannerKey]);
-  const visibleProviderStatus = shouldShowProviderStatusBanner(
-    activeProviderStatus,
-    dismissedProviderStatusBannerKey,
-  )
-    ? activeProviderStatus
-    : null;
+  const visibleProviderStatus =
+    providerStatusBannerKey !== null &&
+    shouldShowProviderStatusBanner(activeProviderStatus, dismissedProviderStatusBannerKey)
+      ? activeProviderStatus
+      : null;
   const hasTimelineTopBanner = Boolean(timelineThreadError) || visibleProviderStatus !== null;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
@@ -4200,6 +4273,11 @@ export default function ChatView(props: ChatViewProps) {
   };
   const toggleInteractionModeStable = useStableCallback(toggleInteractionMode);
   const openProviderSetup = (instanceId: ProviderInstanceId) => {
+    // Signed out on this thread's machine: setup is just the sign-in.
+    if (modelPickerProviderSignIn?.signedOut.has(instanceId)) {
+      modelPickerProviderSignIn.onSignIn(instanceId);
+      return;
+    }
     void navigate({
       to: "/settings/providers",
       search: { environmentId, instanceId },
@@ -6112,10 +6190,34 @@ export default function ChatView(props: ChatViewProps) {
           },
         })
       : null;
+  const providerSignInBannerItem = useMemo((): ComposerBannerStackItem | null => {
+    if (composerProviderSignIn === null) return null;
+    const { machineName } = composerProviderSignIn;
+    return {
+      id: `provider-sign-in:${composerProviderSignIn.instanceId}:${composerProviderSignIn.targetEnvironmentId ?? "here"}`,
+      variant: "warning",
+      priority: "notice",
+      icon: <KeyRoundIcon />,
+      title: providerSignedOutLabel(machineName),
+      description: `${composerProviderSignIn.providerName ?? activeProviderStatus?.displayName ?? "This provider"} can't run this thread until it signs in there.`,
+      actions: (
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={() => void openProviderSignIn(composerProviderSignIn)}
+        >
+          Sign in on {machineName}
+        </Button>
+      ),
+    };
+  }, [activeProviderStatus?.displayName, composerProviderSignIn]);
   const composerBannerItems = useMemo<
     Array<ComposerBannerStackItem | ComposerBannerStackContent>
   >(() => {
-    const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];
+    const limitRecoveryItems = [
+      ...(providerSignInBannerItem === null ? [] : [providerSignInBannerItem]),
+      ...(limitRecoveryBanner === null ? [] : [limitRecoveryBanner]),
+    ];
     // Up from the queue: background work, then the rate-limit backoff, so
     // the two keep their places whether or not an activity row leads.
     const backgroundWorkItems = [
@@ -6194,6 +6296,7 @@ export default function ChatView(props: ChatViewProps) {
     canWriteSourceControl,
     feedbackBannerItems,
     limitRecoveryBanner,
+    providerSignInBannerItem,
     handleRestoreThreadBranchStable,
     isRestoringThreadBranch,
     backgroundWorkBannerItem,
@@ -6962,6 +7065,17 @@ export default function ChatView(props: ChatViewProps) {
   // failure path restores the draft. The toast's one action clears the pick
   // and sends the same draft from this machine.
   const resendRef = useRef<() => void>(() => undefined);
+  // The send a sign-in held back goes out once the machine reports the provider signed in.
+  const signInPromptedForSendRef = useRef<string | null>(null);
+  const [resendAfterSignIn, setResendAfterSignIn] = useState(false);
+  useEffect(() => {
+    if (composerProviderSignIn !== null) return;
+    // Signed in: a later sign-out prompts again.
+    signInPromptedForSendRef.current = null;
+    if (!resendAfterSignIn) return;
+    setResendAfterSignIn(false);
+    resendRef.current();
+  }, [composerProviderSignIn, resendAfterSignIn]);
   const offlineLaunchToast = (machine: EnvironmentId, sendRouteThreadKey: string) => {
     const copy = describeOfflineLaunch({
       machineName:
@@ -7080,6 +7194,20 @@ export default function ChatView(props: ChatViewProps) {
     if (!sendCtx?.providerAvailable) {
       notifyDirectAnnotationAttached();
       return;
+    }
+    // A signed-out provider would fail the turn. The draft stays, the sign-in
+    // opens, and the message sends once that machine reports it signed in. A
+    // second send after the user closed it goes through, so a wrong status
+    // can never block sending.
+    if (composerProviderSignIn !== null && !directAnnotation) {
+      const key = `${composerProviderSignIn.instanceId}:${composerProviderSignIn.targetEnvironmentId ?? "here"}`;
+      if (signInPromptedForSendRef.current !== key) {
+        signInPromptedForSendRef.current = key;
+        void openProviderSignIn(composerProviderSignIn).then((signedIn) => {
+          if (signedIn) setResendAfterSignIn(true);
+        });
+        return;
+      }
     }
     const multipleModelSelections = sendCtx.multipleModelSelections;
     if (
@@ -9681,6 +9809,7 @@ export default function ChatView(props: ChatViewProps) {
                     : {
                         retryableWorkspacePreparationRunIds,
                         onRetryWorkspacePreparation: onRetryWorkspacePreparationStable,
+                        providerSignInForFailedRun,
                       })}
                   {...(draftId
                     ? { onWorktreeSetupWorkLocally: onWorktreeSetupWorkLocallyStable }
@@ -10033,6 +10162,7 @@ export default function ChatView(props: ChatViewProps) {
                             }
                             onProviderModelSelect={onProviderModelSelectStable}
                             onOpenProviderSetup={openProviderSetupStable}
+                            providerSignIn={modelPickerProviderSignIn}
                             getModelDisabledReason={getModelDisabledReason}
                             toggleInteractionMode={toggleInteractionModeStable}
                             handleInteractionModeChange={handleInteractionModeChangeStable}
