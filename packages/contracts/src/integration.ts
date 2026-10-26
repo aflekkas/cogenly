@@ -110,10 +110,22 @@ export const IntegrationProvenance = Schema.Struct({
   signedInViaAgent: Schema.optional(Schema.Boolean),
 });
 
+/**
+ * What an agent set up for an integration, and where: the cloud project, the
+ * OAuth app and client ids, redirect URIs, the account that owns them. Plain
+ * text so any service fits; a later agent reads it to find and fix the setup.
+ * Never secrets. In an input, an empty string clears the notes.
+ */
+export const IntegrationSetupNotesText = Schema.String.check(Schema.isMaxLength(4000));
+
 export const Integration = Schema.Struct({
   id: IntegrationId,
   ...integrationFields,
   provenance: Schema.optional(IntegrationProvenance),
+  /** Stored trimmed and never blank; clearing removes it. */
+  setupNotes: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(4000))),
+  /** When the server last wrote `setupNotes`. */
+  setupNotesUpdatedAt: Schema.optional(IsoDateTime),
   /** Credential destination authorized by the owner; absent on legacy definitions. */
   credentialOrigin: Schema.optional(Schema.String),
   /**
@@ -131,6 +143,7 @@ export type Integration = typeof Integration.Type;
 export const IntegrationCreateInput = Schema.Struct({
   ...integrationFields,
   enabled: Schema.optional(Schema.Boolean),
+  setupNotes: Schema.optional(IntegrationSetupNotesText),
 });
 export type IntegrationCreateInput = typeof IntegrationCreateInput.Type;
 
@@ -141,6 +154,7 @@ export const GoogleWorkspaceAddInput = Schema.Struct({
   name: Schema.optional(IntegrationName),
   callbackOrigin: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(2000))),
   scope: Schema.optional(IntegrationScope),
+  setupNotes: Schema.optional(IntegrationSetupNotesText),
 });
 export type GoogleWorkspaceAddInput = typeof GoogleWorkspaceAddInput.Type;
 export const IntegrationAddInput = Schema.Union([IntegrationCreateInput, GoogleWorkspaceAddInput]);
@@ -171,6 +185,7 @@ export const IntegrationCatalogConnectInput = Schema.Struct({
   accountLabel: Schema.optional(GoogleWorkspaceAddInput.fields.accountLabel),
   inputs: Schema.optional(IntegrationCatalogInputs),
   scope: Schema.optional(IntegrationScope),
+  setupNotes: Schema.optional(IntegrationSetupNotesText),
 });
 export type IntegrationCatalogConnectInput = typeof IntegrationCatalogConnectInput.Type;
 
@@ -199,6 +214,7 @@ export const IntegrationAddToolInput = Schema.Struct({
   accountLabel: integrationFields.accountLabel,
   auth: integrationFields.auth,
   callbackOrigin: GoogleWorkspaceAddInput.fields.callbackOrigin,
+  setupNotes: Schema.optional(IntegrationSetupNotesText),
 });
 export type IntegrationAddToolInput = typeof IntegrationAddToolInput.Type;
 
@@ -218,6 +234,8 @@ export const IntegrationUpdateInput = Schema.Struct({
   accountLabel: Schema.optional(IntegrationAccountLabel),
   /** Null turns OAuth sign-in off and forgets the stored tokens. */
   auth: Schema.optional(Schema.NullOr(IntegrationAuth)),
+  /** Replaces the setup notes; an empty string clears them. */
+  setupNotes: Schema.optional(IntegrationSetupNotesText),
 });
 export type IntegrationUpdateInput = typeof IntegrationUpdateInput.Type;
 
@@ -566,6 +584,7 @@ export const IntegrationUpdateByNameInput = Schema.Struct({
   hint: Schema.optional(Schema.String.check(Schema.isMaxLength(500))),
   accountLabel: Schema.optional(IntegrationAccountLabel),
   auth: Schema.optional(Schema.NullOr(IntegrationAuth)),
+  setupNotes: Schema.optional(IntegrationSetupNotesText),
 });
 export type IntegrationUpdateByNameInput = typeof IntegrationUpdateByNameInput.Type;
 

@@ -120,8 +120,8 @@ export function IntegrationServicesSettings() {
           {...(empty ? { title: "Connect your first service" } : {})}
           description={
             empty
-              ? "Let agents read and act in services like Gmail, Slack and Linear. An agent sets each one up with you and asks before it uses a sign-in or secret."
-              : "Ask an agent to connect another service or any MCP server. It walks you through setup."
+              ? "Let agents read and act in services like Gmail, Slack and Linear. An agent does the setup for you; you sign in and approve access."
+              : "Ask an agent to connect another service or any MCP server. It does the setup; you sign in and approve access."
           }
           control={
             <Button
@@ -543,6 +543,40 @@ function AccountRow({
           </p>
         ) : null}
       </AnimatedHeight>
+      {integration.setupNotes ? (
+        <SetupNotes text={integration.setupNotes} updatedAt={integration.setupNotesUpdatedAt} />
+      ) : null}
     </SettingsRow>
+  );
+}
+
+/** What the agent that set this account up created, and where. */
+function SetupNotes({
+  text,
+  updatedAt,
+}: {
+  readonly text: string;
+  readonly updatedAt: string | undefined;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="pb-3">
+      <DisclosureTrigger
+        open={open}
+        variant="quiet"
+        className="w-fit"
+        onClick={() => setOpen(!open)}
+      >
+        Setup notes
+      </DisclosureTrigger>
+      <DisclosurePanel open={open}>
+        <p className="pt-1 text-sm whitespace-pre-wrap text-muted-foreground">{text}</p>
+        {updatedAt ? (
+          <p className="pt-1 text-xs text-muted-foreground">
+            Updated {new Date(updatedAt).toLocaleString()}
+          </p>
+        ) : null}
+      </DisclosurePanel>
+    </div>
   );
 }

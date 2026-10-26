@@ -903,6 +903,39 @@ describe("Integrations gateway", () => {
     }).pipe(Effect.provide(layerWith())),
   );
 
+  it.effect("keeps an agent's setup notes, stamped, until they are replaced or cleared", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      const notes = "Slack app Cogenly (A0123) in Acme; redirect https://cogenly.example.com/oauth";
+      const { integration } = yield* service.create(
+        { ...createInput("https://example.com/mcp"), headers: {}, setupNotes: `  ${notes}  ` },
+        { addedByAgent: { id: "agent:test", name: "Research" }, fromAgent: true },
+      );
+      expect(integration).toMatchObject({
+        setupNotes: notes,
+        setupNotesUpdatedAt: integration.createdAt,
+      });
+      // A thread agent writes notes without approval, as integration_update does.
+      const agent = { fromAgent: true, holdStoredSecrets: true, preserveScope: true } as const;
+      const replaced = yield* service.update(
+        { id: integration.id, setupNotes: "Moved the redirect to the VPS." },
+        agent,
+      );
+      expect(replaced.integration.setupNotes).toBe("Moved the redirect to the VPS.");
+      expect(replaced.integration.setupNotesUpdatedAt).toBeDefined();
+      // Other edits leave them alone, and listing shows them to the next agent.
+      yield* service.update({ id: integration.id, hint: "Acme Slack" }, agent);
+      expect((yield* service.list()).integrations[0]?.integration.setupNotes).toBe(
+        "Moved the redirect to the VPS.",
+      );
+      const cleared = yield* service.update({ id: integration.id, setupNotes: " " }, agent);
+      expect(cleared.integration).not.toHaveProperty("setupNotes");
+      expect(cleared.integration).not.toHaveProperty("setupNotesUpdatedAt");
+      expect((yield* service.list()).integrations[0]?.integration).not.toHaveProperty("setupNotes");
+    }).pipe(Effect.provide(layerWith())),
+  );
+
   it.effect("gives additional unlabeled accounts a distinguishing default label", () =>
     Effect.gen(function* () {
       yield* runMigrations();

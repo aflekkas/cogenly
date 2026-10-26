@@ -128,7 +128,7 @@ const signIn = (input: SetupInput): IntegrationSetupAction => {
 
 const googleSteps = (redirectUri: string | undefined): Array<IntegrationSetupStep> => [
   {
-    text: "Create a Google Cloud project, or pick one you already use for this.",
+    text: "Create a Google Cloud project named Cogenly, or reuse your Cogenly project if you already have one.",
     url: "https://console.cloud.google.com/projectcreate",
   },
   {
@@ -136,7 +136,7 @@ const googleSteps = (redirectUri: string | undefined): Array<IntegrationSetupSte
     url: `https://console.cloud.google.com/flows/enableapi?apiid=${GOOGLE_APIS.join(",")}`,
   },
   {
-    text: "Set up the consent screen: give the app a name and your email. Choose External for personal Gmail, or Internal if every account belongs to your Workspace organization.",
+    text: "Set up the consent screen: name the app Cogenly and add your email. Choose External for personal Gmail, or Internal if every account belongs to your Workspace organization.",
     url: "https://console.cloud.google.com/auth/branding",
   },
   {
@@ -149,7 +149,7 @@ const googleSteps = (redirectUri: string | undefined): Array<IntegrationSetupSte
     copy: { label: "Scopes", value: GOOGLE_SCOPES.join(" ") },
   },
   {
-    text: "Create an OAuth client of type Web application, and add this exact Authorized redirect URI.",
+    text: "Create an OAuth client named Cogenly of type Web application, and add this exact Authorized redirect URI.",
     url: "https://console.cloud.google.com/auth/clients/create",
     ...(redirectUri === undefined
       ? {}
@@ -177,7 +177,7 @@ const slackSteps = (redirectUri: string | undefined): Array<IntegrationSetupStep
 
 const githubSteps = (redirectUri: string | undefined): Array<IntegrationSetupStep> => [
   {
-    text: "Register a new OAuth app on GitHub. Any name and homepage URL will do.",
+    text: "Register a new OAuth app on GitHub named Cogenly. Any homepage URL will do.",
     url: "https://github.com/settings/applications/new",
   },
   {
@@ -496,7 +496,30 @@ export const agentNextStep = (
           )
           .join("\n")
       : "";
-  return `${integrationSetupGuide(context.entry?.id ?? "custom").instructions}\n\nCurrent requirement: ${action.title}. ${action.type === "install_runtime" ? action.command : ["sign_in", "retry", "fix"].includes(action.type) ? action.message : ""} ${copies}\n${retry}`;
+  return `${integrationSetupGuide(context.entry?.id ?? "custom").instructions}\n\nCurrent requirement: ${action.title}. ${agentDoes(action)} ${copies}\n${retry}`;
+};
+
+/**
+ * What the agent does about each requirement. Console work (apps, clients,
+ * keys) is the agent's, in the collaborative browser; only sign-in consent is
+ * the user's.
+ */
+const agentDoes = (action: IntegrationSetupAction): string => {
+  switch (action.type) {
+    case "oauth_client":
+      return "Create or reuse the Cogenly app and client yourself in the collaborative browser as the guide above says, save the secret to the vault, then retry. Do not hand these steps to the user.";
+    case "api_key":
+      return `Create a key named Cogenly yourself in the collaborative browser${action.url === undefined ? "" : ` at ${action.url}`}, save it with vault_save, then retry. Do not hand these steps to the user.`;
+    case "install_runtime":
+      return action.canInstall
+        ? "Install it with integration_install_runtime, then retry."
+        : `Run ${action.command} on the server, then retry.`;
+    case "sign_in":
+      return `${action.message} Give the user the sign-in link from the result (call integration_update with just the name for a fresh one); approving it is theirs.`;
+    case "retry":
+    case "fix":
+      return action.message;
+  }
 };
 
 /** A connect or update result for an agent: its setup action, in words and as a Settings link. */

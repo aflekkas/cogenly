@@ -86,9 +86,9 @@ const publicOrigin = (origin: string | undefined) => {
     : parsed.origin;
 };
 
-/** Collect a secret privately into the vault, then reference it. */
+/** Put a secret in the vault without it passing through chat, then reference it. */
 const storeHint = (item: string, host: string, as: string) =>
-  `Collect it with request_secret and saveToVault: {name: "${item}", type: "api_key", domains: ["${host}"]} (never in chat), then pass ${as}: "{{credential:${item}.value}}".`;
+  `Save it with vault_save {name: "${item}", type: "api_key", allowedDomains: ["${host}"], secretFields: {value: …}} (if only the user has it, request_secret with saveToVault under the same name; never in chat), then pass ${as}: "{{credential:${item}.value}}".`;
 
 /** What an agent must collect for one auth mode, as one instruction. */
 const inputsHelp = (
@@ -100,10 +100,10 @@ const inputsHelp = (
   if (mode === "api_key") {
     const label = entry.auth.find((auth) => auth.kind === mode)?.label ?? "API key";
     const host = new URL(entry.url).hostname;
-    return `${entry.name} needs the user's ${label}. ${storeHint(secretItemName(entry.id, "api-key", accountLabel), host, "apiKey")} ${docs}`;
+    return `${entry.name} needs a ${label}. Create one named Cogenly yourself in the collaborative browser. ${storeHint(secretItemName(entry.id, "api-key", accountLabel), host, "apiKey")} ${docs}`;
   }
   const host = entry.tokenHost ?? new URL(entry.url).hostname;
-  return `${entry.name} needs an OAuth app the user creates with ${entry.name}. Ask for its client ID and pass it as clientId; for its client secret: ${storeHint(secretItemName(entry.id, "client-secret", accountLabel), host, "clientSecret")} ${docs}`;
+  return `${entry.name} needs the user's own OAuth app. Create or reuse one named Cogenly yourself in the collaborative browser and pass its client ID as clientId; for its client secret: ${storeHint(secretItemName(entry.id, "client-secret", accountLabel), host, "clientSecret")} ${docs}`;
 };
 
 /**
@@ -135,6 +135,7 @@ export const catalogRequest = (
     ...(input.callbackOrigin === undefined ? {} : { callbackOrigin: input.callbackOrigin }),
   },
   ...(input.scope === undefined ? {} : { scope: input.scope }),
+  ...(input.setupNotes === undefined ? {} : { setupNotes: input.setupNotes }),
 });
 
 export const resolveCatalogConnect = (
@@ -152,6 +153,7 @@ export const resolveCatalogConnect = (
   const inputs = request.inputs ?? {};
   const accountLabel = request.accountLabel?.trim() || undefined;
   const scope = request.scope ?? { type: "all" as const };
+  const setupNotes = request.setupNotes === undefined ? {} : { setupNotes: request.setupNotes };
 
   if (entry.kind === "local-preset") {
     if (accountLabel === undefined)
@@ -170,6 +172,7 @@ export const resolveCatalogConnect = (
         name: catalogIntegrationName(entry, accountLabel, context.existingNames),
         ...(callbackOrigin === undefined ? {} : { callbackOrigin }),
         scope,
+        ...setupNotes,
       },
     };
   }
@@ -212,6 +215,7 @@ export const resolveCatalogConnect = (
       headers: mode === "api_key" ? { Authorization: `Bearer ${inputs.apiKey!.trim()}` } : {},
       scope,
       hint: "",
+      ...setupNotes,
       ...(accountLabel === undefined ? {} : { accountLabel }),
       ...(mode === "oauth"
         ? { auth: { type: "oauth" as const, ...oauthScope } }

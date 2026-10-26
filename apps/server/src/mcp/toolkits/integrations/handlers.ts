@@ -249,6 +249,7 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
             ...(input.hint === undefined ? {} : { hint: input.hint }),
             ...(input.accountLabel === undefined ? {} : { accountLabel: input.accountLabel }),
             ...(input.auth === undefined ? {} : { auth: input.auth }),
+            ...(input.setupNotes === undefined ? {} : { setupNotes: input.setupNotes }),
           },
           {
             preserveCredentialDestination: agent !== null,

@@ -154,6 +154,10 @@ const make = Effect.gen(function* () {
         : { credentialOrigin: local.credentialOrigin }),
       ...(local?.provenance === undefined ? {} : { provenance: local.provenance }),
       ...(current?.accountLabel === undefined ? {} : { accountLabel: current.accountLabel }),
+      // Setup notes record this machine's setup (its redirect URIs, its client); they stay local.
+      ...(current?.setupNotes === undefined
+        ? {}
+        : { setupNotes: current.setupNotes, setupNotesUpdatedAt: current.setupNotesUpdatedAt }),
       ...(local?.browserOrigin === undefined ? {} : { browserOrigin: local.browserOrigin }),
       ...(fields.auth === null ? {} : { auth: { ...local?.auth, ...fields.auth } }),
       ...(local?.oauthState === undefined ? {} : { oauthState: local.oauthState }),
