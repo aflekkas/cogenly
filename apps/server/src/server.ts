@@ -99,6 +99,7 @@ import * as ServerBrowser from "./preview/ServerBrowser.ts";
 import * as DesktopBrowserChannel from "./preview/DesktopBrowserChannel.ts";
 import * as ServerBrowserStream from "./preview/ServerBrowserStream.ts";
 import * as PreviewBrowser from "./preview/PreviewBrowser.ts";
+import * as BrowserExtensions from "./preview/BrowserExtensions.ts";
 import * as ProcessRunner from "./processRunner.ts";
 import * as GitManager from "./git/GitManager.ts";
 import * as Keybindings from "./keybindings.ts";
@@ -923,6 +924,8 @@ const layerMakeRoutes = Layer.mergeAll(
   ),
   // Server browser tabs and HTML render previews install and run the same headless browser.
   Layer.provide(PreviewBrowser.layer),
+  // The RPCs, the agent tools and both browsers share one extension store.
+  Layer.provide(BrowserExtensions.layer),
   Layer.provide(PreviewAutomationBroker.layer),
   Layer.provide(layerServerSelfUpdate),
   Layer.provide(layerCommandReadiness),

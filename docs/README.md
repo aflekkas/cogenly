@@ -15,6 +15,7 @@
 - [Visual replies](./user/html-renders.md)
 - [Importing from T3 Code](./user/importing-from-t3-code.md)
 - [Import browser sessions](./user/browser-import.md)
+- [Browser extensions](./user/browser-extensions.md)
 - [Camera, microphone and other site permissions](./user/site-permissions.md)
 - [Use Cogenly as your default browser](./user/default-browser.md)
 - [Devices](./user/devices.md)

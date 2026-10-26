@@ -279,6 +279,31 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     "browser",
     "browser",
   ),
+  browser_extensions_list: tool(
+    ["List", "Listing", "Listed", "browser extensions"],
+    "browser",
+    "browser",
+  ),
+  browser_extension_install: tool(
+    ["Install", "Installing", "Installed", "a browser extension"],
+    "browser",
+    "browser",
+  ),
+  browser_extension_toggle: tool(
+    ["Toggle", "Toggling", "Toggled", "a browser extension"],
+    "browser",
+    "browser",
+  ),
+  browser_extension_remove: tool(
+    ["Remove", "Removing", "Removed", "a browser extension"],
+    "browser",
+    "browser",
+  ),
+  browser_extension_open: tool(
+    ["Open", "Opening", "Opened", "a browser extension page"],
+    "browser",
+    "browser",
+  ),
   preview_recording_start: tool(
     ["Start", "Starting", "Started", "recording the preview browser"],
     "browser",

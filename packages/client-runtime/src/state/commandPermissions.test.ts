@@ -71,7 +71,11 @@ describe("command permissions", () => {
     WS_METHODS.browserCookieSources,
     WS_METHODS.browserImportCookies,
     WS_METHODS.previewClearProfile,
-  ])("%s checks the destination browser grant for cookie imports", (method) =>
+    WS_METHODS.browserExtensionsList,
+    WS_METHODS.browserExtensionInstall,
+    WS_METHODS.browserExtensionRemove,
+    WS_METHODS.browserExtensionToggle,
+  ])("%s checks the destination browser grant for profile data", (method) =>
     Effect.scoped(
       Effect.gen(function* () {
         const registry = yield* setup;

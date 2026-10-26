@@ -739,6 +739,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/integrations",
   },
   {
+    id: "browser-extensions",
+    title: "Browser extensions",
+    to: "/settings/integrations",
+    searchTerms: ["chrome web store chromium add-ons plugins ad blocker password manager"],
+  },
+  {
     id: "browser-default-profile",
     title: "Default browser profile",
     to: "/settings/integrations",
