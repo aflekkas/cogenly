@@ -162,7 +162,10 @@ const pairedMachine = (id: string, name: string) => ({
  * A thread running on this machine's `claude-personal`, paired with a cloud
  * server whose own instances are named differently.
  */
-const crossMachineFixture = (remote: (machine: EnvironmentId) => ReadonlyArray<ServerProvider>) => {
+const crossMachineFixture = (
+  remote: (machine: EnvironmentId) => ReadonlyArray<ServerProvider>,
+  background = false,
+) => {
   const threadId = ThreadId.make("cross-machine");
   const instanceId = ProviderInstanceId.make("claude-personal");
   const shell = liveThreadShell(threadId);
@@ -176,12 +179,16 @@ const crossMachineFixture = (remote: (machine: EnvironmentId) => ReadonlyArray<S
     runs: [
       {
         id: RunId.make("run:cross"),
-        status: "running",
+        status: background ? "completed" : "running",
         rootNodeId: NodeId.make("root"),
         providerInstanceId: instanceId,
       } as never,
     ],
   };
+  if (background)
+    records.providerThreads = [
+      { id: "provider-thread", pendingBackgroundTasks: [{ taskId: "native", kind: "subagent" }] },
+    ] as never;
   const dispatched: Array<unknown> = [];
   const dependencies = Layer.mergeAll(
     NodeCrypto.layer,
@@ -413,4 +420,25 @@ it.effect("remote delegation retries without clientRequestId reuse their command
     expect(keys).toHaveLength(2);
     expect(keys[0]).toBe(keys[1]);
   }).pipe(Effect.provide(Orchestrator.layer.pipe(Layer.provideMerge(dependencies))));
+});
+
+it.effect("a native background caller can delegate after its parent settles", () => {
+  const fixture = crossMachineFixture(
+    () => [serverProvider("claude", "claude", ["claude-opus-4-5"])],
+    true,
+  );
+  return fixture.provide(
+    Effect.gen(function* () {
+      const service = yield* Orchestrator.OrchestratorMcpService;
+      yield* service
+        .delegateTask(fixture.scope, {
+          machine: "Cloud server",
+          task: "Continue background work",
+          mode: "async",
+          target: { driverKind: ProviderDriverKind.make("claude") },
+        })
+        .pipe(Effect.exit);
+      expect(fixture.selections()).toHaveLength(1);
+    }),
+  );
 });

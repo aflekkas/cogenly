@@ -4,7 +4,15 @@ import * as AgentStore from "../agents/AgentStore.ts";
 import * as CliCredentials from "../accounts/CliCredentials.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { EnvironmentId, ProjectLabelId, ProviderInstanceId, ThreadId } from "@cogenly/contracts";
+import {
+  EnvironmentId,
+  ProjectLabelId,
+  ProviderInstanceId,
+  RunId,
+  ThreadId,
+  TurnItemId,
+  type OrchestrationV2ThreadShell,
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -18,7 +26,7 @@ import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { liveThreadShell } from "./McpToolAccess.testkit.ts";
+import { idleThreadProjection, liveThreadShell } from "./McpToolAccess.testkit.ts";
 
 const caller = (id: string): Invocation.McpInvocationScope => ({
   environmentId: EnvironmentId.make("test"),
@@ -108,6 +116,8 @@ it.effect(
         ...agentFixture(),
         permissions: { ...agentFixture().permissions, deploy: false },
       };
+      const backgroundShells = new Map<ThreadId, OrchestrationV2ThreadShell>();
+      const stoppedThreads = new Set<ThreadId>();
       const dependencies = Layer.mergeAll(
         Layer.succeed(ReadOnlySandbox.ReadOnlySandbox, sandbox),
         Layer.mock(AgentStore.AgentStore)({
@@ -118,13 +128,45 @@ it.effect(
         }),
         Layer.succeed(Manager.TerminalManager, manager),
         Layer.mock(ThreadManagement.ThreadManagementService)({
+          getThreadRecords: (id, _fields, options) => {
+            const shell = backgroundShells.get(id)!;
+            expect(options?.turnItemTypes).toEqual(["run_interrupt_request"]);
+            expect(options?.turnItemRunIds).toEqual([shell.latestRunId]);
+            const projection = idleThreadProjection(shell);
+            return Effect.succeed({
+              ...projection,
+              turnItems: stoppedThreads.has(id)
+                ? [
+                    {
+                      id: TurnItemId.make("interrupt"),
+                      threadId: id,
+                      runId: shell.latestRunId,
+                      nodeId: null,
+                      providerThreadId: null,
+                      providerTurnId: null,
+                      nativeItemRef: null,
+                      parentItemId: null,
+                      ordinal: 0,
+                      status: "completed" as const,
+                      title: "Interrupt requested",
+                      startedAt: shell.updatedAt,
+                      completedAt: shell.updatedAt,
+                      updatedAt: shell.updatedAt,
+                      type: "run_interrupt_request" as const,
+                      message: "Stop",
+                    },
+                  ]
+                : [],
+            });
+          },
           getThreadShell: (id) =>
             Effect.succeed(
-              id === "builder"
-                ? { ...liveThreadShell(id), surface: "builder" as const }
-                : id === "chat"
-                  ? { ...liveThreadShell(id), surface: "chat" as const }
-                  : liveThreadShell(id, id === "plan" ? { interactionMode: "plan" } : {}),
+              backgroundShells.get(id) ??
+                (id === "builder"
+                  ? { ...liveThreadShell(id), surface: "builder" as const }
+                  : id === "chat"
+                    ? { ...liveThreadShell(id), surface: "chat" as const }
+                    : liveThreadShell(id, id === "plan" ? { interactionMode: "plan" } : {})),
             ),
         }),
         Layer.mock(ProjectService.ProjectService)({
@@ -151,6 +193,50 @@ it.effect(
         const tools = yield* TerminalMcpService.TerminalMcpService;
         const as = <A, E, R>(id: string, effect: Effect.Effect<A, E, R>) =>
           effect.pipe(Effect.provideService(Invocation.McpInvocationContext, caller(id)));
+        for (const provider of ["claude", "codex"]) {
+          const id = ThreadId.make(`background:${provider}`);
+          const shell = {
+            ...liveThreadShell(id, { activeRunId: null }),
+            providerInstanceId: ProviderInstanceId.make(provider),
+            latestRunId: RunId.make(`settled:${provider}`),
+            pendingBackgroundTasks: [{ taskId: "native-child", kind: "subagent" as const }],
+          };
+          backgroundShells.set(id, shell);
+          const asBackground = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+            effect.pipe(
+              Effect.provideService(Invocation.McpInvocationContext, {
+                ...caller(id),
+                thread: { ...caller(id).thread!, providerInstanceId: shell.providerInstanceId },
+              }),
+            );
+          const terminal = yield* asBackground(tools.run({ command: "cat", background: true }));
+          expect(yield* asBackground(tools.list())).toHaveLength(1);
+          expect(yield* as("B", tools.list())).toEqual([]);
+          yield* asBackground(tools.write({ terminalId: terminal.terminalId, input: "working" }));
+          // Stop revokes immediately, even before the provider clears its roster.
+          stoppedThreads.add(id);
+          expect(
+            (yield* asBackground(tools.run({ command: "cat", background: true })).pipe(Effect.flip))
+              .code,
+          ).toBe("parent_not_active");
+          expect(
+            (yield* asBackground(
+              tools.write({ terminalId: terminal.terminalId, input: "late" }),
+            ).pipe(Effect.flip)).code,
+          ).toBe("parent_not_active");
+          stoppedThreads.delete(id);
+          backgroundShells.set(id, { ...shell, pendingBackgroundTasks: [] });
+          expect(
+            (yield* asBackground(tools.run({ command: "cat", background: true })).pipe(Effect.flip))
+              .code,
+          ).toBe("parent_not_active");
+          // Cleanup still addresses the original thread after its work ended.
+          yield* asBackground(tools.kill({ terminalId: terminal.terminalId }));
+        }
+        inputs.length = 0;
+        signals.length = 0;
+        spawnedIn.length = 0;
+        launches.length = 0;
         for (const operation of [
           tools.run({ command: "echo forbidden", background: true }),
           tools.write({ terminalId: "builder-terminal", input: "echo forbidden\n" }),

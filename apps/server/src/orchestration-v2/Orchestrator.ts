@@ -7005,6 +7005,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           "providerThreads",
           "providerTurns",
           "attempts",
+          "turnItems",
         ])
         .pipe(
           Effect.mapError(
@@ -7018,7 +7019,18 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const parentRun = parentProjection.runs.find(
         (candidate) => candidate.id === command.parentRunId,
       );
-      if (parentRun === undefined || !isBlockingRun(parentRun)) {
+      const latestRun = parentProjection.runs.findLast((run) => run.status !== "queued");
+      const ownsBackgroundWork =
+        parentRun?.id === latestRun?.id &&
+        derivePendingBackgroundWork({
+          latestRun,
+          providerThreads: parentProjection.providerThreads,
+          turnItems: parentProjection.turnItems,
+          activeProviderThreadId: parentProjection.thread.activeProviderThreadId,
+          runs: parentProjection.runs,
+          pullRequests: parentProjection.thread.pullRequests,
+        }).length > 0;
+      if (parentRun === undefined || (!isBlockingRun(parentRun) && !ownsBackgroundWork)) {
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
           commandType: command.type,
