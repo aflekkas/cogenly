@@ -58,8 +58,15 @@ describe("settingsPagesForAlert", () => {
       "tailscale-serve",
       "canary",
       "chat-terminal-sandbox",
+      "agent-processes",
     ] as const) {
       expect(settingsPagesForAlert(alert({ checkId }))).toEqual(["/settings/machines"]);
+    }
+    // Version skew and sync quarantine name the machine to update or retry.
+    for (const checkId of ["machine-links", "sync"] as const) {
+      expect(
+        settingsPagesForAlert(alert({ checkId, target: { _tag: "machine", environmentId: vps } })),
+      ).toEqual(["/settings/machines"]);
     }
   });
 });

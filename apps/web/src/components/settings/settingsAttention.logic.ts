@@ -93,7 +93,17 @@ function owningSettingsPage(alert: SettingsAttentionAlert): SettingsPath | null 
     case "disk":
     case "database":
       return "/settings/storage";
-    default:
+    // Machine-wide: version skew, sync quarantine, orphaned agent processes and the rest
+    // are fixed from the machine's own health list.
+    case "server":
+    case "machine-links":
+    case "sync":
+    case "stuck-runs":
+    case "boot-service":
+    case "tailscale-serve":
+    case "canary":
+    case "chat-terminal-sandbox":
+    case "agent-processes":
       return null;
   }
 }
