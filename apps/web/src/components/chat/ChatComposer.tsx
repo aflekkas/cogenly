@@ -4694,9 +4694,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       restingHiddenBlockCount >
         (planModeUiEnabled ? 1 : 0) + (showProjectPicker ? 1 : 0) + (showSourcesPicker ? 1 : 0),
   });
-  // Sources is the last block, so it is the first to fold. A picker whose trigger folds away
-  // (or unfolds, when it sits on the overflow trigger) closes rather than float off nothing.
-  const sourcesBlockFolded = restingHiddenBlockCount > 0;
+  // Sources folds right after the project, which sits after it. A picker whose trigger folds
+  // away (or unfolds, when it sits on the overflow trigger) closes rather than float off nothing.
+  const sourcesBlockFolded = restingHiddenBlockCount > (showProjectPicker ? 1 : 0);
   const sourcesPickerOpen =
     sourcesPicker.open &&
     !composerControlsHidden &&
@@ -4728,31 +4728,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           },
         ]
       : []),
-    // The project folds before the model or effort controls give way.
-    ...(showProjectPicker
-      ? [
-          {
-            id: "project",
-            // The divider separates where the agent runs from how it runs.
-            content: (
-              <>
-                <ComposerControlSeparator size={composerControlsCollapsed ? "xs" : "sm"} />
-                <ComposerProjectPicker
-                  environmentId={routeThreadRef.environmentId}
-                  threadId={activeThreadId}
-                  draftId={routeKind === "draft" ? draftId : null}
-                  size={composerControlsCollapsed ? "xs" : "sm"}
-                  disabled={isSendBusy}
-                />
-              </>
-            ),
-          },
-        ]
-      : []),
     ...(showSourcesPicker
       ? [
           {
-            // Last, so it folds first; the overflow menu then offers it.
+            // Folds once the project has; the overflow menu then offers it.
             id: "sources",
             content: (
               <ComposerSourcesPicker
@@ -4764,6 +4743,23 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 anchor={sourcesPicker.anchor}
                 onOpenChange={onSourcesPickerOpenChangeStable}
                 onPick={insertIntegrationSourceStable}
+              />
+            ),
+          },
+        ]
+      : []),
+    // Last, so the project folds first, before sources or the model and effort controls.
+    ...(showProjectPicker
+      ? [
+          {
+            id: "project",
+            content: (
+              <ComposerProjectPicker
+                environmentId={routeThreadRef.environmentId}
+                threadId={activeThreadId}
+                draftId={routeKind === "draft" ? draftId : null}
+                size={composerControlsCollapsed ? "xs" : "sm"}
+                disabled={isSendBusy}
               />
             ),
           },
