@@ -891,3 +891,16 @@ export const chatSandboxCheck = (status: SandboxStatus): MachineHealthCheck => {
     ],
   };
 };
+
+/** Queue stalls share the run-health section and link directly to their thread. */
+export function stuckQueuesItems(queues: ReadonlyArray<ActiveRun>): MachineHealthItem[] {
+  return queues.map((queue) => ({
+    key: `stuck-queue:thread:${queue.threadId}`,
+    status: "warn",
+    title: `Queued messages not sending in ${queue.threadTitle}`,
+    detail: "The provider turn is idle. Fix sends the next queued message now.",
+    since: queue.startedAt,
+    target: { _tag: "thread", threadId: queue.threadId },
+    fix: "send-queue",
+  }));
+}

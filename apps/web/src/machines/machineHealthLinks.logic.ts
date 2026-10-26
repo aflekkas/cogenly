@@ -138,6 +138,7 @@ const DIRECT_FIXES: ReadonlySet<MachineHealthFix> = new Set([
   "run-now",
   "resume",
   "stop-runs",
+  "send-queue",
   "retry-sync",
   "setup-sandbox",
   "update-machine",

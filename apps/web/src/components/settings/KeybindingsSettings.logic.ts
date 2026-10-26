@@ -346,7 +346,7 @@ export function commandLabel(command: KeybindingCommand): string {
   if (command === "composer.sendAlternate") return "Composer: Opposite Queue or Steer Action";
   if (command === "composer.sendBackground") return "Composer: Start in Background";
   if (command === "composer.sendAndNewThread") return "Composer: Send and Start New Thread";
-  if (command === "thread.steerQueuedMessage") return "Queue: Send First Queued Message as Steer";
+  if (command === "thread.steerQueuedMessage") return "Queue: Send First Queued Message Now";
   if (command === "thread.editQueuedMessage") return "Queue: Edit Last Queued Message";
   if (command === "thread.sendAllQueuedMessages") return "Queue: Send All Queued Messages Now";
   if (command === "thread.copyReference") return "Pull request: copy link or thread ID";

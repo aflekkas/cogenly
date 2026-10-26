@@ -182,8 +182,8 @@ const QueueReorderTool = Tool.make("queue_reorder", {
 const QueuePromoteTool = Tool.make("queue_promote_to_steer", {
   ...commandTool,
   description:
-    "Deliver a queued message as steering to the specified active run. Existing provider and run-state rules apply.",
-  parameters: Schema.Struct({ ...queueTarget, targetRunId: RunId }),
+    "Send a queued message now: steer the active turn, or start a turn when idle. targetRunId is optional.",
+  parameters: Schema.Struct({ ...queueTarget, targetRunId: Schema.optional(RunId) }),
 }).annotate(Tool.Destructive, true);
 const QueueClearTool = Tool.make("queue_clear", {
   ...commandTool,

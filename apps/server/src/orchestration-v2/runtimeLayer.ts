@@ -33,6 +33,7 @@ import * as ApprovalChanges from "../agents/ApprovalChanges.ts";
 import * as AgentMcpPolicy from "../agents/AgentMcpPolicy.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as Agents from "../agents/AgentService.ts";
+import * as QueueDrainWorker from "./QueueDrainWorker.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
 import * as UsageLimitHandoff from "./UsageLimitHandoff.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
@@ -641,6 +642,7 @@ const layerProductionBase = Layer.mergeAll(
   layerCliCredentialsProvided,
   layerAccountConnectionsProvided,
   StaleRunRecoveryWorker.layer.pipe(Layer.provide(layerThreadManagementProvided)),
+  QueueDrainWorker.layer.pipe(Layer.provide(layerOrchestratorProvided)),
   UsageLimitRecoveryWorker.layer.pipe(
     Layer.provide(AgentStore.layer),
     Layer.provide(

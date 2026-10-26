@@ -58,7 +58,7 @@ import * as ThreadSync from "../threadSync/ThreadSync.ts";
 import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
 import * as HealthCanary from "./HealthCanary.ts";
 import * as ComputerUseService from "../computerUse/ComputerUseService.ts";
-import { readStaleRuns } from "./staleRuns.ts";
+import { readStaleRuns, readStuckQueues } from "./staleRuns.ts";
 import {
   type SyncPeerProgress,
   type SyncPeerSample,
@@ -76,6 +76,7 @@ import {
   scheduledTasksCheck,
   serverCheck,
   stuckRunsCheck,
+  stuckQueuesItems,
   syncCheck,
   tailscaleServeCheck,
   trackSyncProgress,
@@ -362,10 +363,18 @@ const make = Effect.gen(function* () {
     });
 
   const activeRuns = (now: DateTime.Utc) =>
-    readStaleRuns(now).pipe(
-      Effect.provideService(SqlClient.SqlClient, sql),
-      Effect.map((active) => stuckRunsCheck({ active, now })),
-    );
+    Effect.gen(function* () {
+      const active = yield* readStaleRuns(now);
+      const queues = yield* readStuckQueues(now);
+      const check = stuckRunsCheck({ active, now });
+      if (queues.length === 0) return check;
+      return {
+        ...check,
+        status: check.status === "fail" ? ("fail" as const) : ("warn" as const),
+        summary: "Work needs attention",
+        items: [...check.items, ...stuckQueuesItems(queues)],
+      };
+    }).pipe(Effect.provideService(SqlClient.SqlClient, sql));
 
   const evaluate: Effect.Effect<MachineHealthReport> = Effect.gen(function* () {
     const now = yield* DateTime.now;

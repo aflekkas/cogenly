@@ -111,9 +111,37 @@ it.effect("recovery leaves a replica's running turn to the machine that runs it"
       ],
     });
     expect(yield* projections.getRecoveryThreadIds("runtime")).toEqual([threadId]);
+    yield* sink.write({
+      events: [
+        {
+          id: EventId.make("event:waiting"),
+          type: "run.updated",
+          threadId,
+          runId,
+          occurredAt: at,
+          payload: { ...run, status: "waiting" },
+        },
+        {
+          id: EventId.make("event:queued"),
+          type: "run.created",
+          threadId,
+          occurredAt: at,
+          payload: {
+            ...run,
+            id: RunId.make("run:queued"),
+            ordinal: 2,
+            status: "queued",
+            startedAt: null,
+          },
+        },
+      ],
+    });
+    expect(yield* projections.getRecoveryThreadIds("queued-runs")).toEqual([threadId]);
+    expect(yield* projections.canStartQueuedRun(threadId)).toBe(true);
 
     yield* sql`INSERT INTO thread_owners(thread_id, owner_env, local, epoch, updated_at) VALUES (${threadId}, 'env:vps', 0, 0, ${DateTime.formatIso(at)})`;
     expect(yield* projections.getRecoveryThreadIds("runtime")).toEqual([]);
+    expect(yield* projections.getRecoveryThreadIds("queued-runs")).toEqual([]);
   }).pipe(Effect.provide(runtime)),
 );
 
