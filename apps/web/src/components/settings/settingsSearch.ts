@@ -180,6 +180,7 @@ const MOVED_GENERAL_ANCHORS: Readonly<Record<string, SettingsPath>> = {
   "projects-folder": "/settings/new-threads",
   "project-actions": "/settings/new-threads",
   diagnostics: "/settings/diagnostics",
+  "time-format": "/settings/appearance",
 };
 
 /** The new page for an old General anchor, or null when it still lives on General. */
@@ -402,15 +403,17 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "snooze-limited-threads",
-    title: "Snooze limited threads",
+    title: "Snooze at usage limits",
     to: "/settings/general",
-    searchTerms: ["usage quota rate limit reset wake recover continue"],
+    searchTerms: ["snooze limited threads usage quota rate limit reset wake recover continue"],
   },
   {
     id: "auto-resume-limited-threads",
-    title: "Auto-resume limited threads",
+    title: "Resume after usage limits",
     to: "/settings/general",
-    searchTerms: ["usage quota rate limit reset recover continue"],
+    searchTerms: [
+      "auto-resume limited threads automatically usage quota rate limit reset recover continue",
+    ],
   },
   {
     id: "working-shelf",
@@ -433,7 +436,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "time-format",
     title: "Time format",
-    to: "/settings/general",
+    to: "/settings/appearance",
     searchTerms: ["timestamp clock locale system browser os 12 hour 24 hour"],
   },
   {
@@ -444,9 +447,9 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "skills-in-slash-menu",
-    title: "Show skills in slash menu",
+    title: "Skills in the slash menu",
     to: "/settings/general",
-    searchTerms: ["command menu dollar $ slash /"],
+    searchTerms: ["show skills command menu dollar $ slash /"],
   },
   {
     id: "composer-rich-text",
@@ -472,7 +475,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "follow-up-behavior",
     title: "Follow-up behavior",
     to: "/settings/general",
-    searchTerms: ["queue steer running turn send default behavior composer"],
+    searchTerms: ["queue steer running turn send default behavior composer while agent works"],
   },
   {
     id: "provider-update-checks",
@@ -542,7 +545,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "quit-confirmation",
     title: "Quit shortcut",
     to: "/settings/general",
-    searchTerms: ["confirmation desktop app exit direct hold double click press twice"],
+    searchTerms: ["confirmation desktop app exit quit right away hold double click press twice"],
     desktopOnly: true,
   },
   {
@@ -592,8 +595,9 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "open-source-licenses",
-    title: "Open source licenses",
+    title: "Open-source licenses",
     to: "/settings/general",
+    searchTerms: ["about third-party notices open source oss dependencies"],
   },
   {
     id: "legacy-plan-mode",

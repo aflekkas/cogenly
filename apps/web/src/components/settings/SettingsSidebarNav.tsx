@@ -103,7 +103,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const currentHash = useLocation({ select: (location) => location.hash });
   const currentSearch = useLocation({ select: (location) => location.search });
   const scopeSearch = useMemo(() => validateSettingsScopeSearch(currentSearch), [currentSearch]);
-  // Detail pages (Repository, Open source licenses) highlight their parent.
+  // Detail pages (Repository, Open-source licenses) highlight their parent.
   const activeNavPath = settingsNavPathFor(pathname);
   const { isMobile, setOpenMobile, open, setOpen } = useSidebar();
   const legacySidebarEnabled = useLegacySidebarEnabled();
