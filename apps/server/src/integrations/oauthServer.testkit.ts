@@ -41,6 +41,13 @@ export interface MockAuthServer {
   tokenEndpoint?: string;
   readonly tokenRequests: Array<string>;
   registrations: number;
+  authorizationError?: {
+    status: number;
+    error: string;
+    error_description: string;
+    redirect?: boolean;
+  };
+  authorizationRequests: number;
   registrationError?: { status: number; error: string; error_description: string };
   readonly registrationRequests: Array<unknown>;
   refreshes: number;
@@ -74,6 +81,7 @@ export const startMockAuthServer = Effect.gen(function* () {
     base: "",
     tokenRequests: [],
     registrations: 0,
+    authorizationRequests: 0,
     registrationRequests: [],
     refreshes: 0,
     revoked: false,
@@ -158,15 +166,31 @@ export const startMockAuthServer = Effect.gen(function* () {
     // Consent: the test plays the browser and picks the account with `account`.
     HttpRouter.add("GET", "/auth/authorize", (request) =>
       Effect.sync(() => {
+        mock.authorizationRequests += 1;
         const params = new URL(request.url, mock.base).searchParams;
+        if (mock.authorizationError) {
+          const { status, error, error_description, redirect } = mock.authorizationError;
+          return redirect
+            ? HttpServerResponse.redirect(
+                `${mock.base}/auth/error?${new URLSearchParams({ error, error_description })}`,
+                { status: 302 },
+              )
+            : reply({ error, error_description }, status);
+        }
         const clientId = params.get("client_id") ?? "";
         const redirectUri = params.get("redirect_uri") ?? "";
+        if (!mock.clients.has(clientId))
+          return HttpServerResponse.redirect(
+            `${mock.base}/auth/error?error=application_not_found`,
+            { status: 302 },
+          );
         if (
           !mock.clients.get(clientId)?.includes(redirectUri) ||
           params.get("code_challenge_method") !== "S256" ||
           params.get("response_type") !== "code"
         )
           return reply({ error: "invalid_request" }, 400);
+        if (!params.has("account")) return HttpServerResponse.html("<h1>Consent</h1>");
         const code = `code-${mock.codes.size + 1}`;
         mock.codes.set(code, {
           clientId,

@@ -1,11 +1,17 @@
+import * as Schema from "effect/Schema";
 import {
   isIntegrationError,
+  integrationCatalogEntryFor,
+  IntegrationOAuthFailure,
+  integrationOAuthFailureMessage,
   type Integration,
   type IntegrationError,
   type IntegrationScope,
   type IntegrationSummary,
   type IntegrationTestResult,
 } from "@cogenly/contracts";
+
+const isOAuthFailure = Schema.is(IntegrationOAuthFailure);
 
 const REASON_TEXT: Readonly<Record<IntegrationError["reason"], string>> = {
   google_client_missing: "Ask an agent to configure your Google OAuth client.",
@@ -32,8 +38,11 @@ const REASON_TEXT: Readonly<Record<IntegrationError["reason"], string>> = {
 
 /** Plain text for a failed integrations RPC. */
 export function integrationErrorText(error: unknown): string {
-  if (isIntegrationError(error))
-    return error.oauthFailure ? error.message : REASON_TEXT[error.reason];
+  if (isIntegrationError(error)) {
+    const detail = error.oauthFailure ?? (isOAuthFailure(error.cause) ? error.cause : undefined);
+    if (detail) return integrationOAuthFailureMessage(detail);
+    return REASON_TEXT[error.reason];
+  }
   return error instanceof Error && error.message.trim() !== ""
     ? error.message
     : "The server rejected the change.";
@@ -169,4 +178,57 @@ export function scopeLabel(
   });
   if (names.length === 0) return "No projects";
   return names.join(", ");
+}
+
+/** An action ends in exactly one state, including when opening the browser fails. */
+export type IntegrationActionState =
+  | { readonly type: "idle" }
+  | { readonly type: "pending"; readonly purpose?: "sign_in" | "change" }
+  | { readonly type: "error"; readonly message: string }
+  | { readonly type: "success" };
+
+export function settleIntegrationAction(state: IntegrationActionState): IntegrationActionState {
+  return state.type === "pending" ? { type: "idle" } : state;
+}
+
+/** Shared card and Settings policy; catalog connections never expose protocol configuration. */
+export function integrationSignInView(
+  state: IntegrationActionState,
+  integration: Integration | undefined,
+  options: {
+    readonly catalogId?: string | undefined;
+    readonly connected?: boolean;
+    readonly message?: string | null | undefined;
+  } = {},
+) {
+  const catalog =
+    options.catalogId !== undefined ||
+    (integration !== undefined && integrationCatalogEntryFor(integration) !== undefined);
+  const current =
+    state.type === "pending"
+      ? state
+      : options.connected
+        ? { type: "success" as const }
+        : state.type === "idle" && options.message
+          ? { type: "error" as const, message: options.message }
+          : state;
+  return {
+    label:
+      current.type === "pending"
+        ? current.purpose === "change"
+          ? options.connected
+            ? "Connected"
+            : "Sign in"
+          : "Opening sign-in…"
+        : current.type === "error"
+          ? "Retry"
+          : current.type === "success"
+            ? "Connected"
+            : "Sign in",
+    disabled: current.type === "pending" || current.type === "success",
+    error: current.type === "error" ? current.message : null,
+    showServerUrl: !catalog,
+    showClientId: !catalog && integration?.auth?.type === "oauth",
+    showOAuthScopes: !catalog && integration?.auth?.type === "oauth",
+  };
 }

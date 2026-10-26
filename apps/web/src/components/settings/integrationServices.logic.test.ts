@@ -1,13 +1,22 @@
 import {
   IntegrationError,
+  INTEGRATION_CATALOG,
   type Integration,
   type IntegrationSummary,
   type ProjectLabelId,
 } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
+import * as Schema from "effect/Schema";
+
+const errorCodec = Schema.fromJsonString(IntegrationError);
+const encodeError = Schema.encodeSync(errorCodec);
+const decodeError = Schema.decodeUnknownSync(errorCodec);
 
 import {
   integrationErrorText,
+  integrationSignInView,
+  settleIntegrationAction,
+  type IntegrationActionState,
   integrationStatus,
   integrationTitle,
   scopeLabel,
@@ -209,5 +218,83 @@ describe("display helpers", () => {
     );
     expect(integrationTitle({ ...integration, accountLabel: " gmail " })).toBe("Gmail");
     expect(integrationTitle(integration)).toBe("Gmail");
+  });
+});
+
+describe("integration sign-in state", () => {
+  it("a failure atomically replaces pending, and settling cannot erase it", () => {
+    let state: IntegrationActionState = { type: "pending" };
+    expect(integrationSignInView(state, integration)).toMatchObject({
+      label: "Opening sign-in…",
+      disabled: true,
+      error: null,
+    });
+    state = { type: "error", message: "OAuth authorize failed" };
+    expect(integrationSignInView(state, integration)).toMatchObject({
+      label: "Retry",
+      disabled: false,
+      error: "OAuth authorize failed",
+    });
+    expect(settleIntegrationAction(state)).toBe(state);
+    expect(
+      integrationSignInView({ type: "pending", purpose: "change" }, integration),
+    ).toMatchObject({ label: "Sign in", disabled: true, error: null });
+    expect(
+      integrationSignInView({ type: "pending" }, integration, { message: "An earlier failure" })
+        .error,
+    ).toBeNull();
+    expect(integrationSignInView({ type: "idle" }, integration, { connected: true })).toMatchObject(
+      { label: "Connected", disabled: true },
+    );
+  });
+
+  it("catalog cards and Settings never offer server, client ID or scope inputs", () => {
+    for (const entry of INTEGRATION_CATALOG) {
+      const account = {
+        ...integration,
+        url: entry.kind === "remote" ? entry.url : integration.url,
+        auth: { type: "oauth" as const },
+      };
+      for (const state of [
+        { type: "idle" },
+        { type: "pending" },
+        { type: "error", message: "Try again" },
+      ] satisfies IntegrationActionState[]) {
+        // The card knows its catalog ID even before its account arrives.
+        expect(integrationSignInView(state, undefined, { catalogId: entry.id })).toMatchObject({
+          showServerUrl: false,
+          showClientId: false,
+          showOAuthScopes: false,
+        });
+        if (entry.kind === "remote")
+          expect(integrationSignInView(state, account)).toMatchObject({
+            showServerUrl: false,
+            showClientId: false,
+            showOAuthScopes: false,
+          });
+      }
+    }
+    expect(
+      integrationSignInView({ type: "idle" }, { ...integration, auth: { type: "oauth" } }),
+    ).toMatchObject({ showServerUrl: true, showClientId: true, showOAuthScopes: true });
+  });
+
+  it("shows bounded OAuth detail carried through the error cause", () => {
+    const error = new IntegrationError({
+      operation: "sign in",
+      reason: "upstream_error",
+      cause: {
+        stage: "authorize",
+        host: "auth.example",
+        status: 400,
+        error: "invalid_client",
+        description: "Client expired",
+      },
+    });
+    const received = decodeError(encodeError(error));
+    expect(received.cause).toMatchObject({ stage: "authorize", host: "auth.example", status: 400 });
+    expect(integrationErrorText(received)).toBe(
+      "OAuth authorize failed at auth.example (HTTP 400): invalid_client (Client expired).",
+    );
   });
 });

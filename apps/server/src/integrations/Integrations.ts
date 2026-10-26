@@ -2764,7 +2764,7 @@ const make = (options: IntegrationsOptions = {}) =>
         }).pipe(Stream.mapEffect(() => rows().pipe(Effect.flatMap(summaries)))),
       beginSignIn: (id, from) =>
         Effect.gen(function* () {
-          const integration = yield* getById(id);
+          let integration = yield* getById(id);
           if (!integration.enabled)
             return yield* new IntegrationError({ operation: "sign in", reason: "disabled" });
           // A managed account signs in through its own process, on its fixed callback origin.
@@ -2796,6 +2796,7 @@ const make = (options: IntegrationsOptions = {}) =>
               signedIn: state?.signedIn ?? false,
               server,
             }));
+            integration = yield* getById(id);
           }
           const auth = integration.auth!;
           const previous = integration.oauthState;
@@ -2807,16 +2808,79 @@ const make = (options: IntegrationsOptions = {}) =>
             previous.registration.redirectUris.includes(redirectUri)
               ? previous.registration
               : undefined;
-          const registered =
+          let registered =
             auth.clientId !== undefined || reusable !== undefined
               ? undefined
               : yield* protocol.register(server, redirectUri);
-          const registration = reusable ?? registered?.registration;
-          const clientId = auth.clientId ?? registration!.clientId;
+          let registration = reusable ?? registered?.registration;
+          let clientId = auth.clientId ?? registration!.clientId;
           const { verifier, challenge } = yield* OAuth.pkcePair.pipe(
             Effect.provideService(Crypto.Crypto, crypto),
           );
           const state = yield* OAuth.randomState.pipe(Effect.provideService(Crypto.Crypto, crypto));
+          const catalog = integrationCatalogEntryFor(integration);
+          const scope =
+            (catalog?.kind === "remote" ? undefined : auth.scope?.trim()) ||
+            server.scopesSupported?.join(" ") ||
+            undefined;
+          const link = () =>
+            OAuth.authorizationUrl({ server, clientId, redirectUri, state, challenge, scope });
+          yield* protocol.checkAuthorization(link()).pipe(
+            Effect.catchTags({
+              IntegrationError: (error) =>
+                Effect.gen(function* () {
+                  // Only an explicit client rejection justifies replacing a saved client.
+                  const rejectedClient = [
+                    "invalid_client",
+                    "unauthorized_client",
+                    "application_not_found",
+                    "invalid_redirect_uri",
+                  ].includes(error.oauthFailure?.error ?? "");
+                  if (
+                    !rejectedClient ||
+                    (!reusable && auth.clientId === undefined) ||
+                    !server.registrationEndpoint
+                  )
+                    return yield* error;
+                  const rejected = integration;
+                  integration = yield* integrationLock(id).withPermits(1)(
+                    Effect.gen(function* () {
+                      const current = yield* getById(id);
+                      if (grantKey(current) !== grantKey(rejected))
+                        return yield* new IntegrationError({
+                          operation: "reset OAuth client",
+                          reason: "invalid_request",
+                        });
+                      const {
+                        clientId: _clientId,
+                        clientSecret: _clientSecret,
+                        ...publicAuth
+                      } = current.auth!;
+                      const next = {
+                        ...current,
+                        auth: publicAuth,
+                        oauthState: { signedIn: false, server },
+                        updatedAt: auth.clientId === undefined ? current.updatedAt : yield* now,
+                      };
+                      if (auth.clientId === undefined) yield* persist(next);
+                      else yield* persistDefinition(next, current);
+                      return next;
+                    }).pipe(
+                      sql.withTransaction,
+                      Effect.mapError(failure("reset OAuth client", "storage")),
+                    ),
+                  );
+                  yield* dropTokens(rejected);
+                  yield* invalidate(id);
+                  yield* notify;
+                  registered = yield* protocol.register(server, redirectUri);
+                  registration = registered.registration;
+                  clientId = registration.clientId;
+                  // Deliberately outside another catch: a second refusal reaches the caller.
+                  yield* protocol.checkAuthorization(link());
+                }),
+            }),
+          );
           const nowMs = yield* Clock.currentTimeMillis;
           yield* Ref.update(pendingSignIns, (current) => {
             const next = new Map([...current].filter(([, pending]) => pending.expiresAtMs > nowMs));
@@ -2839,24 +2903,25 @@ const make = (options: IntegrationsOptions = {}) =>
               expiresAtMs: nowMs + SIGN_IN_TTL_MS,
             });
           });
-          const scope = auth.scope?.trim() || server.scopesSupported?.join(" ") || undefined;
+          yield* Ref.update(checks, (current) => {
+            const next = new Map(current);
+            next.delete(id);
+            return next;
+          });
+          yield* notify;
           return {
-            authorizationUrl: OAuth.authorizationUrl({
-              server,
-              clientId,
-              redirectUri,
-              state,
-              challenge,
-              scope,
-            }),
+            authorizationUrl: link(),
             redirectUri,
           };
         }).pipe(
           Effect.tapError((error) =>
-            Effect.gen(function* () {
-              const integration = yield* getById(id).pipe(Effect.option);
-              if (Option.isSome(integration)) yield* recordCheck(integration.value, error);
-            }),
+            // The agent hands the sign-in to the browser card when it cannot know its origin.
+            from.fromAgent && error.operation === "start sign-in"
+              ? Effect.void
+              : Effect.gen(function* () {
+                  const integration = yield* getById(id).pipe(Effect.option);
+                  if (Option.isSome(integration)) yield* recordCheck(integration.value, error);
+                }),
           ),
           Effect.mapError(failure("sign in", "upstream_error")),
         ),
