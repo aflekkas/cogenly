@@ -259,6 +259,13 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
       if (disposed || positions === null) return;
       positions = measure(frameTop());
     },
+    /** The whole list fades in once where it stands, for a swap too large to
+     * animate row by row (a project filter). One animation on the list, no
+     * clones; call it after an `update(false)`. */
+    fadeInList() {
+      if (disposed) return;
+      parent.animate([{ opacity: 0 }, { opacity: 1 }], motionTiming);
+    },
     suspend,
     dispose() {
       suspend();

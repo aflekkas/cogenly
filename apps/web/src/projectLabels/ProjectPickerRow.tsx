@@ -15,6 +15,8 @@ export function ProjectPickerRow(
     readonly chosen?: boolean;
     /** Opens the project's own list, as Start Work's project rows do. */
     readonly submenu?: boolean;
+    /** A trailing figure, such as how many items the project holds here. */
+    readonly meta?: ReactNode;
   } & (
     | { readonly project: ProjectIconProject | null; readonly icon?: never }
     | { readonly project?: never; readonly icon: ReactNode }
@@ -33,6 +35,7 @@ export function ProjectPickerRow(
       label={props.label}
       chosen={props.chosen ?? false}
       submenu={props.submenu ?? false}
+      meta={props.meta}
     />
   );
 }

@@ -241,6 +241,17 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarSearchDock, type SidebarDockAction } from "./sidebar/SidebarSearchDock";
+import { setSidebarProjectFilter, useSidebarProjectFilter } from "./sidebar/sidebarProjectFilter";
+import {
+  filterBySidebarProject,
+  resolveSidebarProjectFilter,
+  SIDEBAR_NO_PROJECT,
+  sidebarProjectFilterName,
+  sidebarProjectFilterOptions,
+  sidebarProjectFilterValue,
+  type SidebarProjectFilter,
+} from "./sidebar/sidebarProjectFilter.logic";
+import { useAgents } from "../agents/agentsClient";
 import { PanOnHoverText } from "./sidebar/PanOnHoverText";
 import { PendingTitleSlot } from "./sidebar/PendingTitleSlot";
 import { useSidebarRowActionsOverlap } from "./sidebar/useSidebarRowActionsOverlap";
@@ -2762,6 +2773,60 @@ export default function Sidebar() {
       rowFolderByKey.get(projectLabelKey(environmentId, labelId)) ?? null,
     [rowFolderByKey],
   );
+  // The dock's project filter, one per mode for the session. It narrows the
+  // mode's threads before they split into sections, so sections, search and
+  // the count bar all read the narrowed list. Matched by the project's unified
+  // key, so one project on two machines is one filter.
+  const storedProjectFilter = useSidebarProjectFilter(sidebarMode);
+  const projectFilter = resolveSidebarProjectFilter(
+    storedProjectFilter,
+    projectLabelDirectory.byKey,
+  );
+  const changeProjectFilter = useCallback(
+    (next: SidebarProjectFilter) => setSidebarProjectFilter(sidebarMode, next),
+    [sidebarMode],
+  );
+  // The project a row names: Work follows its repository's, a chat its filing.
+  const threadFilterProject = useCallback(
+    (thread: EnvironmentThreadShell): EnvironmentProjectLabel | null => {
+      if (sidebarMode === "tasks") {
+        return workThreadFolder(thread, projectLabelDirectory, workInRepository);
+      }
+      const folderId = threadProjectFolderId(thread);
+      return folderId === null
+        ? null
+        : (projectLabelDirectory.byKey.get(projectLabelKey(thread.environmentId, folderId)) ??
+            null);
+    },
+    [projectLabelDirectory, sidebarMode, workInRepository],
+  );
+  // A project picked on a draft (the composer's picker, or the Work hero) rides
+  // on it until its first send; until then Work drafts follow their repository.
+  const pendingFolderByThreadId = usePendingProjectFolderStore((state) => state.byThreadId);
+  const draftFilterProject = useCallback(
+    (draft: {
+      readonly environmentId: EnvironmentId;
+      readonly projectId: ProjectId;
+      readonly threadId: ThreadId;
+    }): EnvironmentProjectLabel | null => {
+      const picked = pendingFolderByThreadId[draft.threadId];
+      return picked?.environmentId === draft.environmentId
+        ? (projectLabelDirectory.byKey.get(projectLabelKey(draft.environmentId, picked.folderId)) ??
+            null)
+        : (projectLabelDirectory.folderByRepository.get(
+            scopedRepositoryKey(draft.environmentId, draft.projectId),
+          ) ?? null);
+    },
+    [pendingFolderByThreadId, projectLabelDirectory],
+  );
+  // Which drafts the list shows: the mode's, inside the project filter.
+  const draftInList = useCallback(
+    (draft: DraftSessionState): boolean =>
+      sidebarModes.draftInMode(draft) &&
+      (projectFilter === null ||
+        sidebarProjectFilterValue(draftFilterProject(draft)) === projectFilter),
+    [draftFilterProject, projectFilter, sidebarModes],
+  );
   const chatProjectMetaAnimates = useChatProjectMetaAnimates(
     projectLabelDirectory.labels.length > 0,
   );
@@ -2789,7 +2854,7 @@ export default function Sidebar() {
       if (!composerDraftHasUserContent(store.draftsByThreadKey[draftKey])) {
         continue;
       }
-      if (!sidebarModes.draftInMode(session)) {
+      if (!draftInList(session)) {
         continue;
       }
       count += 1;
@@ -2821,7 +2886,7 @@ export default function Sidebar() {
     if (sidebarMode !== "tasks") return "";
     const parts: string[] = [];
     for (const [draftKey, session] of Object.entries(store.draftThreadsByThreadKey)) {
-      if (session.promotedTo != null || !sidebarModes.draftInMode(session)) continue;
+      if (session.promotedTo != null || !draftInList(session)) continue;
       if (
         !shouldListWorkDraft({
           isRouteDraft: draftKey === routeDraftIdForRows,
@@ -2896,6 +2961,16 @@ export default function Sidebar() {
       });
     },
   );
+  // Subagent child threads live in the parent's Agents surface, not the
+  // sidebar roster (v2 models them as real threads with lineage).
+  const modeVisibleThreads = useMemo(
+    () => filterSidebarV2VisibleThreads(sidebarModes.modeThreads, null),
+    [sidebarModes.modeThreads],
+  );
+  const filteredModeThreads = useMemo(
+    () => filterBySidebarProject(modeVisibleThreads, projectFilter, threadFilterProject),
+    [modeVisibleThreads, projectFilter, threadFilterProject],
+  );
   const { activeThreads, workingThreads, snoozedThreads, settledThreads, snoozeNow } =
     useMemo(() => {
       // Snooze classification uses a REAL clock, not the quantized minute:
@@ -2904,9 +2979,7 @@ export default function Sidebar() {
       // memo exactly at the next wake boundary.
       void snoozeWakeTick;
       const preciseNow = new Date().toISOString();
-      // Subagent child threads live in the parent's Agents surface, not the
-      // sidebar roster (v2 models them as real threads with lineage).
-      const visible = filterSidebarV2VisibleThreads(sidebarModes.modeThreads, null);
+      const visible = filteredModeThreads;
       inboxReturns.observe(workingShelfEnabled ? threads : null);
       const active: EnvironmentThreadShell[] = [];
       const working: EnvironmentThreadShell[] = [];
@@ -2960,10 +3033,10 @@ export default function Sidebar() {
         snoozeNow: preciseNow,
       };
     }, [
+      filteredModeThreads,
       nowMinute,
       serverConfigs,
       sidebarMode,
-      sidebarModes.modeThreads,
       snoozeWakeTick,
       threads,
       workingShelfEnabled,
@@ -4071,9 +4144,6 @@ export default function Sidebar() {
     visibleWorkingThreads,
     workingThreads.length,
   ]);
-  // A project picked in the Work hero rides on a draft until its first send,
-  // and files the draft's card under that project.
-  const pendingFolderByThreadId = usePendingProjectFolderStore((state) => state.byThreadId);
   // Work's cards as drawn, top to bottom, with new work nearest the dock: in
   // the top layout the unsent drafts, newest first, then the filter's threads
   // in their order (new work first); in the bottom layout the reverse, the
@@ -4133,6 +4203,7 @@ export default function Sidebar() {
     const cards: WorkCardEntry[] = readUp
       ? [...threadCards, ...draftCards]
       : [...draftCards, ...threadCards];
+    // A project picked in the Work hero files the draft's card under it.
     const groups = groupWorkCards(cards, (card) => {
       if (card.kind === "thread") {
         const thread = threadByKey.get(card.key);
@@ -4140,21 +4211,13 @@ export default function Sidebar() {
           thread && workThreadFolder(thread, projectLabelDirectory, workInRepository),
         );
       }
-      const { draft } = card;
-      const picked = pendingFolderByThreadId[draft.threadId];
-      return projectOf(
-        picked?.environmentId === draft.environmentId
-          ? projectLabelDirectory.byKey.get(projectLabelKey(draft.environmentId, picked.folderId))
-          : projectLabelDirectory.folderByRepository.get(
-              scopedRepositoryKey(draft.environmentId, draft.projectId),
-            ),
-      );
+      return projectOf(draftFilterProject(card.draft));
     });
     return { shown, threads: previewed, groups, dropLanded };
   }, [
     attentionThreadKeys,
+    draftFilterProject,
     openShelf,
-    pendingFolderByThreadId,
     projectLabelDirectory,
     rowFolderByKey,
     sidebarLayout,
@@ -4279,13 +4342,15 @@ export default function Sidebar() {
   // The column (SidebarListColumn) anchors it in a child layout effect, so the
   // scroll settles before the list motion below measures rows.
   const agentListFilter = useAgentListFilter();
-  const sidebarModeListKey = isSearchingThreads
-    ? "search"
-    : sidebarMode === "tasks"
-      ? `tasks:${openShelf ?? "active"}`
-      : sidebarMode === "agents"
-        ? `agents:${agentListFilter}`
-        : sidebarMode;
+  const sidebarModeListKey = `${
+    isSearchingThreads
+      ? "search"
+      : sidebarMode === "tasks"
+        ? `tasks:${openShelf ?? "active"}`
+        : sidebarMode === "agents"
+          ? `agents:${agentListFilter}`
+          : sidebarMode
+  }${projectFilter === null ? "" : `|${projectFilter}`}`;
   const sidebarModeListEdge = sidebarListEdge({
     layout: sidebarLayout,
     searching: isSearchingThreads,
@@ -4294,6 +4359,7 @@ export default function Sidebar() {
   });
   const listMotionModeRef = useRef(sidebarMode);
   const listMotionShelfRef = useRef(openShelf);
+  const listMotionProjectFilterRef = useRef(projectFilter);
   const listMotionRevealRef = useRef({ chats: chatVisibleCount, settled: settledVisibleCount });
   const listMotionCollapsedRef = useRef(collapsedInSpace);
   useLayoutEffect(() => {
@@ -4316,18 +4382,29 @@ export default function Sidebar() {
     // instantly, with no fade.
     const shelfChanged = listMotionShelfRef.current !== openShelf;
     listMotionShelfRef.current = openShelf;
+    // A project filter swaps most of the list too: the rows snap to the
+    // narrowed list, which fades in as one (opacity only), never per row.
+    const projectFilterChanged = listMotionProjectFilterRef.current !== projectFilter;
+    listMotionProjectFilterRef.current = projectFilter;
     // A revealed page fades its rows in where they land; nothing travels.
     const revealed =
       chatVisibleCount > listMotionRevealRef.current.chats ||
       settledVisibleCount > listMotionRevealRef.current.settled;
     listMotionRevealRef.current = { chats: chatVisibleCount, settled: settledVisibleCount };
     listMotionRef.current?.update(
-      sidebarListHasRows && !modeChanged && !shelfChanged && !folded && !sortDropped,
+      sidebarListHasRows &&
+        !modeChanged &&
+        !shelfChanged &&
+        !projectFilterChanged &&
+        !folded &&
+        !sortDropped,
       { inPlace: revealed },
     );
+    if (projectFilterChanged && !modeChanged) listMotionRef.current?.fadeInList();
   }, [
     chatVisibleCount,
     openShelf,
+    projectFilter,
     routeDraftIdForRows,
     settledVisibleCount,
     sidebarListHasRows,
@@ -5295,8 +5372,52 @@ export default function Sidebar() {
         ];
     }
   })();
+  // The dock's project choices: the projects this mode's list holds, with
+  // counts. None while no project exists anywhere, so the button stays away.
+  const { agents: dockAgents } = useAgents();
+  const projectFilterChoices = useMemo(() => {
+    if (projectLabelDirectory.labels.length === 0) return null;
+    if (sidebarMode === "agents") {
+      return {
+        options: sidebarProjectFilterOptions(
+          dockAgents,
+          (agent) =>
+            agent.projectFolderId === null
+              ? null
+              : (projectLabelDirectory.byKey.get(
+                  projectLabelKey(agent.environmentId, agent.projectFolderId),
+                ) ?? null),
+          projectFilter,
+          projectLabelDirectory.byKey,
+        ),
+        total: dockAgents.length,
+      };
+    }
+    return {
+      options: sidebarProjectFilterOptions(
+        modeVisibleThreads,
+        threadFilterProject,
+        projectFilter,
+        projectLabelDirectory.byKey,
+      ),
+      total: modeVisibleThreads.length,
+    };
+  }, [
+    dockAgents,
+    modeVisibleThreads,
+    projectFilter,
+    projectLabelDirectory,
+    sidebarMode,
+    threadFilterProject,
+  ]);
+  const projectFilterName = sidebarProjectFilterName(projectFilter, projectLabelDirectory.byKey);
   const threadHeader = (
     <SidebarSearchDock
+      projectFilter={
+        projectFilterChoices
+          ? { value: projectFilter, ...projectFilterChoices, onChange: changeProjectFilter }
+          : undefined
+      }
       actions={dockActions}
       searchInputRef={threadSearchInputRef}
       searchQuery={threadSearchQuery}
@@ -5443,7 +5564,11 @@ export default function Sidebar() {
                 role="status"
                 className="flex flex-1 items-center justify-center px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
               >
-                {threadSearch.isPending ? "Searching thread messages…" : "No threads found"}
+                {threadSearch.isPending
+                  ? "Searching thread messages…"
+                  : projectFilterName
+                    ? `No threads found in ${projectFilterName}`
+                    : "No threads found"}
               </p>
             )
           ) : null}
@@ -5732,7 +5857,7 @@ export default function Sidebar() {
                         key="draft-sessions"
                         projectByKey={projectByKey}
                         projectDisplayNameByKey={projectDisplayNameByKey}
-                        draftInMode={sidebarModes.draftInMode}
+                        draftInMode={draftInList}
                         routeDraftId={routeDraftIdForRows}
                         slim={sidebarMode === "chats"}
                         onNavigateToDraft={navigateToDraft}
@@ -5869,20 +5994,29 @@ export default function Sidebar() {
             settledThreads.length ===
             0 ? (
             <SidebarListEmptyState
+              // A project filter can outlive its last item (moved or settled
+              // elsewhere); the way out sits on the line, as on the chip.
+              key={projectFilter ?? "all"}
               label={
-                sidebarMode === "chats"
-                  ? "No chats yet"
-                  : projects.length === 0
-                    ? "No repositories yet"
-                    : "No work yet"
+                projectFilter !== null
+                  ? projectFilter === SIDEBAR_NO_PROJECT
+                    ? "Nothing outside a project"
+                    : `Nothing in ${projectFilterName ?? "this project"}`
+                  : sidebarMode === "chats"
+                    ? "No chats yet"
+                    : projects.length === 0
+                      ? "No repositories yet"
+                      : "No work yet"
               }
               action={
-                sidebarMode === "chats"
-                  ? // Chats need no repository, so the empty list offers a chat.
-                    { label: "New chat", onClick: sidebarModeActions.startChat }
-                  : projects.length === 0
-                    ? { label: "Add repository", onClick: openAddProjectCommandPalette }
-                    : undefined
+                projectFilter !== null
+                  ? { label: "Show all", onClick: () => changeProjectFilter(null) }
+                  : sidebarMode === "chats"
+                    ? // Chats need no repository, so the empty list offers a chat.
+                      { label: "New chat", onClick: sidebarModeActions.startChat }
+                    : projects.length === 0
+                      ? { label: "Add repository", onClick: openAddProjectCommandPalette }
+                      : undefined
               }
             />
           ) : null}

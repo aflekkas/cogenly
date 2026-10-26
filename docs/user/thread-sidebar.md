@@ -376,6 +376,12 @@ Work, agents, open items, projects, and pull requests, with the matching words i
 bold. An open item opens in its agent's **Open items**, or in the thread it came
 from; a project opens its project view; a pull request opens in your browser.
 
+To narrow the sidebar to one project, click the folder beside its search field in
+Chats, Work or Agents, or choose **Filter sidebar by project…** in the command palette.
+The list keeps its headings and shows only that project's items, or those in no
+project; search then looks only there. Each tab keeps its own filter until you reload.
+Clear it with the project's chip in the search field, or pick **All**.
+
 Use **Settings → Keybindings** to find or customize shortcuts for searching files
 and copying a thread reference. A copied reference uses the thread's pull request
 link when available, otherwise its thread ID. See [keybindings](./keybindings.md)

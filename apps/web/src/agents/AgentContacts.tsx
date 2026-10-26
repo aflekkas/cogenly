@@ -36,6 +36,11 @@ import {
   SidebarList,
 } from "~/components/sidebar/SidebarList";
 import { SidebarListEmptyState } from "~/components/sidebar/SidebarListEmptyState";
+import { setSidebarProjectFilter } from "~/components/sidebar/sidebarProjectFilter";
+import {
+  SIDEBAR_NO_PROJECT,
+  sidebarProjectFilterName,
+} from "~/components/sidebar/sidebarProjectFilter.logic";
 import {
   SIDEBAR_SORT_DISTANCE,
   SidebarSortContext,
@@ -76,7 +81,6 @@ import {
   type EnvironmentProjectLabel,
 } from "~/projectLabels/projectLabels.logic";
 import { toggleCollapsedGroup } from "~/projectLabels/projectMeta.logic";
-import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
 import { deriveProviderInstanceEntries } from "~/providerInstances";
 import { agentsRpc } from "~/rpc/agents";
 import { useServerConfigs } from "~/state/entities";
@@ -86,7 +90,7 @@ import { takeAgentArrival } from "./agentArrivals";
 import { groupAgentsByProject, orderAgentsForList } from "./agentGroups.logic";
 import { AgentProjectGroup } from "./AgentProjectGroup";
 import { requestAgentCreation } from "./AgentsCreateHost";
-import { useShownAgentListFilter } from "./AgentsShelfBar";
+import { useAgentProjectFilter, useShownAgentListFilter } from "./AgentsShelfBar";
 import { AgentAvatarPicker } from "./AgentAvatarPicker";
 import { agentViewKey, requestAgentView } from "./agentViewIntent";
 import { agentContactKey, agentDraft, agentStatusLabel } from "./agents.logic";
@@ -138,12 +142,8 @@ export function AgentContacts({
   const { agents, loading, reconnecting, error } = useAgents();
   const client = useAgentsClient();
   const { filter } = useShownAgentListFilter();
-  const environmentKey = [...new Set(agents.map((agent) => agent.environmentId))].join("\0");
-  const environmentIds = useMemo(
-    () => (environmentKey === "" ? [] : (environmentKey.split("\0") as EnvironmentId[])),
-    [environmentKey],
-  );
-  const directory = useProjectLabelDirectory(environmentIds);
+  // The dock's project filter for Agents, inside the Needs attention filter.
+  const { directory, projectFilter, inProject } = useAgentProjectFilter(agents);
   const foldersByEnvironment = useMemo(() => {
     const map = new Map<EnvironmentId, EnvironmentProjectLabel[]>();
     for (const entry of directory.labels) {
@@ -164,7 +164,12 @@ export function AgentContacts({
     const result = groupAgentsByProject({
       agents: orderAgentsForList(agents),
       folders: directory.labels,
-      include: filter === "attention" ? (agent) => agentAttentionCount(agent) > 0 : undefined,
+      include:
+        filter === "attention"
+          ? (agent) => agentAttentionCount(agent) > 0 && inProject(agent)
+          : projectFilter === null
+            ? undefined
+            : inProject,
     });
     if (dragPreview === null) return { ...result, dropLanded: true };
     let landed = true;
@@ -177,7 +182,7 @@ export function AgentContacts({
       return { ...group, agents: order.map((key) => byKey.get(key)!) };
     });
     return { ...result, groups: previewed, dropLanded: landed };
-  }, [agents, directory.labels, filter, dragPreview]);
+  }, [agents, directory.labels, filter, dragPreview, inProject, projectFilter]);
   useEffect(() => {
     if (dragPreview?.settled !== true) return;
     const key = dragPreview.key;
@@ -343,7 +348,8 @@ export function AgentContacts({
         </span>
         <SidebarList
           ref={listRef}
-          key={filter}
+          // A new filter remounts the list, which fades in (reveal-motion).
+          key={`${filter}|${projectFilter ?? "all"}`}
           aria-label={filter === "attention" ? "Agents needing attention" : "Agents"}
           data-agents-list
           // Groups hold cards: no row gap between them, only the group space.
@@ -353,16 +359,31 @@ export function AgentContacts({
           onTransitionEnd={onTransitionEnd}
         >
           {shownCount === 0 && !loading && !reconnecting ? (
-            // A filter never lands on nothing (see useShownAgentListFilter), so
-            // only a list with no agents at all gets here.
+            // The count bar's filter never lands on nothing (see
+            // useShownAgentListFilter), so only a list with no agents at all,
+            // or a project filter holding none of them, gets here.
             <li className="flex flex-1 list-none">
-              <SidebarListEmptyState
-                label="No agents yet"
-                action={{
-                  label: "New agent",
-                  onClick: () => requestAgentCreation(agents[0]?.environmentId ?? null),
-                }}
-              />
+              {projectFilter !== null ? (
+                <SidebarListEmptyState
+                  label={
+                    projectFilter === SIDEBAR_NO_PROJECT
+                      ? "Nothing outside a project"
+                      : `Nothing in ${sidebarProjectFilterName(projectFilter, directory.byKey) ?? "this project"}`
+                  }
+                  action={{
+                    label: "Show all",
+                    onClick: () => setSidebarProjectFilter("agents", null),
+                  }}
+                />
+              ) : (
+                <SidebarListEmptyState
+                  label="No agents yet"
+                  action={{
+                    label: "New agent",
+                    onClick: () => requestAgentCreation(agents[0]?.environmentId ?? null),
+                  }}
+                />
+              )}
             </li>
           ) : null}
           {groups.map((group) => (

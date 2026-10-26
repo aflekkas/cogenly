@@ -32,6 +32,7 @@ import {
   SearchListRowDescription,
   SearchListRowIcon,
   SearchListRowLabel,
+  SearchListRowMeta,
   SearchListRowSubmenu,
   SearchListRowText,
   SearchListRowTrailing,
@@ -474,6 +475,8 @@ export function PickerRowContent(props: {
   readonly label: ReactNode;
   readonly chosen?: boolean;
   readonly submenu?: boolean;
+  /** A quiet trailing figure, such as how many items the row holds. */
+  readonly meta?: ReactNode;
 }) {
   return (
     <>
@@ -481,9 +484,11 @@ export function PickerRowContent(props: {
       <SearchListRowText>
         <SearchListRowLabel>{props.label}</SearchListRowLabel>
       </SearchListRowText>
-      {props.chosen || props.submenu ? (
+      {props.chosen || props.submenu || props.meta != null ? (
         <SearchListRowTrailing>
           {props.chosen ? <SearchListRowCheck /> : null}
+          {/* After the check, so figures line up down the list whichever row is checked. */}
+          {props.meta != null ? <SearchListRowMeta>{props.meta}</SearchListRowMeta> : null}
           {props.submenu ? <SearchListRowSubmenu /> : null}
         </SearchListRowTrailing>
       ) : null}

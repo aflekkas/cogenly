@@ -142,6 +142,12 @@ import { useReadRouteThreadKind, useThreadKind } from "../hooks/useThreadKind";
 import { threadCapabilities } from "../threadCapabilities";
 import { SIDEBAR_MODE_ICONS } from "./sidebar/modes/SidebarModeSwitcher";
 import { SIDEBAR_MODE_LABELS, SIDEBAR_MODES } from "./sidebar/modes/sidebarModes.logic";
+import { setSidebarProjectFilter, useSidebarProjectFilter } from "./sidebar/sidebarProjectFilter";
+import {
+  resolveSidebarProjectFilter,
+  SIDEBAR_NO_PROJECT,
+  type SidebarProjectFilter,
+} from "./sidebar/sidebarProjectFilter.logic";
 import {
   useCallback,
   useDeferredValue,
@@ -794,6 +800,8 @@ function OpenCommandPaletteDialog(props: {
   }, [activeThreadReferenceCopyTarget]);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const selectSidebarMode = useSelectSidebarMode();
+  const sidebarMode = useUiStateStore((store) => store.sidebarMode);
+  const sidebarProjectFilter = useSidebarProjectFilter(sidebarMode);
   const agents = useAgents().agents;
   const threads = useThreadShells();
   const serverConfigs = useServerConfigs();
@@ -2413,6 +2421,60 @@ function OpenCommandPaletteDialog(props: {
         // As from the rail: a utility page hands the column back to the list.
         selectSidebarMode(mode, { leaveUtilityPage: true });
       },
+    });
+  }
+
+  // The dock's folder button, for the list the sidebar shows now.
+  if (repositoryDirectory.active.length > 0) {
+    const modeLabel = SIDEBAR_MODE_LABELS[sidebarMode];
+    const current = resolveSidebarProjectFilter(sidebarProjectFilter, repositoryDirectory.byKey);
+    const filterTo = (next: SidebarProjectFilter) => async () => {
+      setSidebarProjectFilter(sidebarMode, next);
+      selectSidebarMode(sidebarMode, { leaveUtilityPage: true });
+    };
+    const currentTrailing = <span className="text-xs text-muted-foreground/70">Current</span>;
+    actionItems.push({
+      kind: "submenu",
+      value: "action:filter-sidebar-by-project",
+      searchTerms: ["filter sidebar", "filter by project", "folder", "project", modeLabel],
+      title: "Filter sidebar by project…",
+      icon: <FolderIcon className={ITEM_ICON_CLASS} />,
+      addonIcon: <FolderIcon className={ADDON_ICON_CLASS} />,
+      groups: [
+        {
+          value: "sidebar-project-filter",
+          label: modeLabel,
+          items: [
+            {
+              kind: "action" as const,
+              value: "sidebar-project-filter:all",
+              searchTerms: ["all", "show all", "clear filter"],
+              title: "All",
+              icon: <FolderIcon className="size-4" />,
+              ...(current === null ? { titleTrailingContent: currentTrailing } : {}),
+              run: filterTo(null),
+            },
+            ...repositoryDirectory.active.map((entry) => ({
+              kind: "action" as const,
+              value: `sidebar-project-filter:${entry.key}`,
+              searchTerms: [entry.label.name],
+              title: entry.label.name,
+              icon: <ProjectFolderIcon project={entry} className="size-4" />,
+              ...(current === entry.key ? { titleTrailingContent: currentTrailing } : {}),
+              run: filterTo(entry.key),
+            })),
+            {
+              kind: "action" as const,
+              value: "sidebar-project-filter:none",
+              searchTerms: ["no project", "unfiled"],
+              title: "No project",
+              icon: <FolderMinusIcon className="size-4" />,
+              ...(current === SIDEBAR_NO_PROJECT ? { titleTrailingContent: currentTrailing } : {}),
+              run: filterTo(SIDEBAR_NO_PROJECT),
+            },
+          ],
+        },
+      ],
     });
   }
 
