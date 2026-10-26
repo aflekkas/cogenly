@@ -559,6 +559,12 @@ export function SourceControlSettingsPanel() {
         onRefresh={handleScan}
       />
     );
+  const rescanButton = (
+    <Button size="xs" variant="outline" onClick={handleScan} disabled={discovery.isPending}>
+      <RefreshIcon size="sm" refreshing={discovery.isPending} />
+      Rescan
+    </Button>
+  );
 
   const hostingRows =
     environmentId === null ? (
@@ -592,19 +598,17 @@ export function SourceControlSettingsPanel() {
           )}
         </DiscoveryItemRow>
       ))
+    ) : discovery.error !== null ? (
+      <SettingsRow
+        title="Could not scan this machine"
+        description={discovery.error}
+        control={rescanButton}
+      />
     ) : (
       <SettingsEmpty
         icon={<PullRequestGlyph.pullRequest />}
-        title={discovery.error !== null ? "Could not scan this machine" : "No hosting found"}
-        description={
-          discovery.error ?? "Save a GitHub token or sign in with gh on this machine, then rescan."
-        }
-        action={
-          <Button size="sm" variant="outline" onClick={handleScan} disabled={discovery.isPending}>
-            <RefreshIcon size="sm" refreshing={discovery.isPending} />
-            Rescan
-          </Button>
-        }
+        label="Save a GitHub token or sign in with gh on this machine, then rescan."
+        action={rescanButton}
       />
     );
 

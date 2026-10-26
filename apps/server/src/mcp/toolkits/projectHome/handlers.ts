@@ -84,7 +84,12 @@ const handlers = {
       const id = yield* projectOf("project_file_write", input.projectFolderId);
       const home = yield* ProjectHome.ProjectHome;
       return yield* home
-        .writeFile({ id, title: input.title, text: input.text })
+        .writeFile({
+          id,
+          title: input.title,
+          text: input.text,
+          ...(input.folder === undefined ? {} : { folder: input.folder }),
+        })
         .pipe(Effect.mapError(failure));
     }),
   ),

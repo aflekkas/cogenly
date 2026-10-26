@@ -355,8 +355,7 @@ export function ScheduledTasksSettings(target: {
         ) : environments.length === 0 ? (
           <SettingsListEmpty
             icon={<Clock3Icon />}
-            title="No machines available"
-            description="Connect a machine to manage scheduled tasks."
+            label="Connect a machine to manage scheduled tasks."
           />
         ) : environments.length > 1 ? (
           <ScheduledTaskEnvironmentList
@@ -414,26 +413,26 @@ function ScheduledTasksEmpty({ view, hasTasks }: { view: TaskListView; hasTasks:
   return hasTasks || view.filtered ? (
     <SettingsListEmpty
       icon={<Clock3Icon />}
-      title="Nothing matches"
-      description="Try another search or status."
-    >
-      <Button variant="outline" onClick={view.onClearFilters}>
-        Clear filters
-      </Button>
-    </SettingsListEmpty>
+      label="No tasks match these filters."
+      action={
+        <Button size="xs" variant="outline" onClick={view.onClearFilters}>
+          Clear filters
+        </Button>
+      }
+    />
   ) : (
     <SettingsListEmpty
       icon={<Clock3Icon />}
-      title="No scheduled tasks yet"
-      description="Run a prompt on a schedule, when a webhook is called, or when something happens in Work."
-    >
-      {view.onCreate ? (
-        <Button onClick={view.onCreate}>
-          <PlusIcon />
-          New task
-        </Button>
-      ) : null}
-    </SettingsListEmpty>
+      label="Run a prompt on a schedule, from a webhook, or when Work changes."
+      action={
+        view.onCreate ? (
+          <Button size="xs" variant="outline" onClick={view.onCreate}>
+            <PlusIcon />
+            New task
+          </Button>
+        ) : null
+      }
+    />
   );
 }
 

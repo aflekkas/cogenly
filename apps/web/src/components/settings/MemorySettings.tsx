@@ -69,6 +69,8 @@ export function MemorySettings() {
   };
   const rememberButton = (
     <Button
+      size="xs"
+      variant="outline"
       disabled={!actions.canWrite}
       title={actions.canWrite ? undefined : NO_WRITE_TITLE}
       onClick={() => setCreating(true)}
@@ -142,31 +144,29 @@ export function MemorySettings() {
               filtered ? (
                 <SettingsListEmpty
                   icon={<BrainIcon />}
-                  title="Nothing matches"
-                  description="Try another search, project, agent or status."
-                >
-                  <Button variant="outline" onClick={clearFilters}>
-                    Clear filters
-                  </Button>
-                </SettingsListEmpty>
+                  label="No memory matches these filters."
+                  action={
+                    <Button size="xs" variant="outline" onClick={clearFilters}>
+                      Clear filters
+                    </Button>
+                  }
+                />
               ) : list.facts.length > 0 ? (
                 <SettingsListEmpty
                   icon={<BrainIcon />}
-                  title="Nothing current"
-                  description="Everything here was forgotten or replaced."
-                >
-                  <Button variant="outline" onClick={() => setStatus("all")}>
-                    Show all
-                  </Button>
-                </SettingsListEmpty>
+                  label="Everything here was forgotten or replaced."
+                  action={
+                    <Button size="xs" variant="outline" onClick={() => setStatus("all")}>
+                      Show all
+                    </Button>
+                  }
+                />
               ) : (
                 <SettingsListEmpty
                   icon={<BrainIcon />}
-                  title="Nothing remembered yet"
-                  description="Save what chats and agents should know. Agents also propose facts for you to confirm."
-                >
-                  {rememberButton}
-                </SettingsListEmpty>
+                  label="Save what chats and agents should know."
+                  action={rememberButton}
+                />
               )
             ) : (
               <FactList

@@ -27,6 +27,7 @@ import { CloudEnvironmentConnectRows } from "./CloudEnvironmentConnectList";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Dialog } from "../ui/dialog";
+import { Empty, EmptyDescription } from "../ui/empty";
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { WizardSteps, WizardPopup, WizardHeader, WizardPanel, WizardFooter } from "../ui/wizard";
@@ -418,10 +419,11 @@ function DevicesStep() {
         savedEnvironments={savedEnvironments}
         showSavedEnvironments
         empty={
-          <p className="px-4 py-6 text-center text-sm text-muted-foreground">
-            No other machines are published to your account yet. Publish one from another device and
-            it will show up here.
-          </p>
+          <Empty size="inline">
+            <EmptyDescription>
+              Machines you publish to your account from another device show up here.
+            </EmptyDescription>
+          </Empty>
         }
       />
     </div>

@@ -30,14 +30,7 @@ import { Button } from "../ui/button";
 import { RefreshIcon } from "../ui/refresh-icon";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { DisclosureChevron } from "../ui/disclosure";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "../ui/empty";
+import { Empty, EmptyContent, EmptyDescription, EmptyMedia } from "../ui/empty";
 import {
   NumberField,
   NumberFieldDecrement,
@@ -394,30 +387,24 @@ export function SettingsNote({
 }
 
 /**
- * An empty list inside a card. `default` for the main list of a page,
- * `sm` for a secondary list. Loading and failures are `SettingsRow`s with a
- * title ("Loading memory…", "Could not load memory") instead.
+ * An empty list inside a card (settings, project cards): the `inline` `Empty`,
+ * one short muted sentence with an optional glyph and one `xs` action. Loading
+ * and failures are `SettingsRow`s with a title ("Loading memory…", "Could not
+ * load memory") instead.
  */
 export function SettingsEmpty({
   icon,
-  title,
-  description,
+  label,
   action,
-  size = "default",
 }: {
   icon?: ReactNode;
-  title: ReactNode;
-  description?: ReactNode;
+  label: ReactNode;
   action?: ReactNode;
-  size?: "default" | "sm";
 }) {
   return (
-    <Empty size={size}>
-      <EmptyHeader>
-        {icon ? <EmptyMedia>{icon}</EmptyMedia> : null}
-        <EmptyTitle>{title}</EmptyTitle>
-        {description ? <EmptyDescription>{description}</EmptyDescription> : null}
-      </EmptyHeader>
+    <Empty size="inline">
+      {icon ? <EmptyMedia>{icon}</EmptyMedia> : null}
+      <EmptyDescription>{label}</EmptyDescription>
       {action ? <EmptyContent>{action}</EmptyContent> : null}
     </Empty>
   );

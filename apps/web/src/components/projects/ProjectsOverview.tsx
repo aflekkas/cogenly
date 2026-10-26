@@ -239,19 +239,12 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
         {shown.length === 0 ? (
           <SettingsListEmpty
             icon={<FolderIcon />}
-            title={
+            label={
               query
-                ? "Nothing matches"
-                : shownFilter === "archived"
-                  ? "No archived projects"
-                  : "No projects yet"
-            }
-            description={
-              query
-                ? "Try another search."
+                ? "No projects match this search."
                 : shownFilter === "archived"
                   ? "Archive a project from its menu to tuck it away here."
-                  : "A project groups the repositories, chats, Work, files and agents of a multi-repo or large effort. A single repository works fine without one."
+                  : "A project groups the repositories, chats, Work and agents of a large effort."
             }
           />
         ) : (

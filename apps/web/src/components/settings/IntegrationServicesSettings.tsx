@@ -77,7 +77,7 @@ export function IntegrationServicesSettings() {
     integrations?.[0] ??
     null;
   const addButton = (
-    <Button size="sm" variant="outline" disabled={addDisabled} onClick={add}>
+    <Button size="xs" variant="outline" disabled={addDisabled} onClick={add}>
       <PlusIcon />
       Add integration
     </Button>
@@ -98,7 +98,7 @@ export function IntegrationServicesSettings() {
         </SettingsGroup>
       ) : integrations.length === 0 ? (
         <SettingsGroup>
-          <SettingsEmpty title="No integrations yet" action={addButton} />
+          <SettingsEmpty label="No integrations yet." action={addButton} />
         </SettingsGroup>
       ) : (
         <SettingsMasterDetail

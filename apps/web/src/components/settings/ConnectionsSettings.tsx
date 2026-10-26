@@ -1953,11 +1953,10 @@ function EmptyRemoteEnvironments({ cloudEnabled = true }: { readonly cloudEnable
   return (
     <SettingsEmpty
       icon={<ChevronsLeftRightEllipsisIcon />}
-      title="No other machines connected"
-      description={
+      label={
         cloudEnabled
-          ? "Use another machine running Cogenly from this app, by its address, over SSH, or through Cogenly Connect."
-          : "Use another machine running Cogenly from this app, by its address or over SSH."
+          ? "Connect another Cogenly machine by its address, over SSH, or through Cogenly Connect."
+          : "Connect another Cogenly machine by its address or over SSH."
       }
     />
   );

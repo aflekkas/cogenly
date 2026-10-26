@@ -2082,26 +2082,26 @@ export function ArchivedThreadsPanel() {
           ) : (
             <SettingsListEmpty
               icon={<ArchiveIcon />}
-              title={filtered ? "Nothing matches" : "No archived threads"}
-              description={
+              label={
                 filtered
-                  ? "Try another search or project."
-                  : "Archive a thread from its menu to put it away without deleting it. Unarchive it here any time."
+                  ? "No archived threads match these filters."
+                  : "Archive a thread from its menu to put it away without deleting it."
               }
-            >
-              {filtered ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setQuery("");
-                    setProjectFilter("all");
-                  }}
-                >
-                  Clear filters
-                </Button>
-              ) : null}
-            </SettingsListEmpty>
+              action={
+                filtered ? (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() => {
+                      setQuery("");
+                      setProjectFilter("all");
+                    }}
+                  >
+                    Clear filters
+                  </Button>
+                ) : null
+              }
+            />
           )
         ) : (
           shownGroups.map(({ key, project, title, threads: projectThreads }) => (

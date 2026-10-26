@@ -20,7 +20,7 @@ export const SETTINGS_MASTER_DETAIL_HEIGHT = {
  * A list of things beside the selected one's details: Providers and
  * Integrations. Stacks on a narrow page. `list` takes `SettingsMasterDetailRow`s
  * and a `SettingsMasterDetailAddRow`; `detail` takes `SettingsMasterDetailEditor`
- * or a `SettingsEmpty`.
+ * or an `Empty size="sm"`.
  */
 export function SettingsMasterDetail({
   size,

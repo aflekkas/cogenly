@@ -99,7 +99,6 @@ import {
 } from "./SettingsPanels.logic";
 import {
   SettingResetButton,
-  SettingsEmpty,
   SettingsNumberField,
   SettingsRefreshAction,
   SettingsRow,
@@ -976,15 +975,19 @@ export function EnvironmentProviderSettings({
                 {renderProviderInstance(selectedRow, "editor")}
               </SettingsMasterDetailEditor>
             ) : (
-              <SettingsEmpty
-                title={targetInstanceMissing ? "Provider not found" : "No providers yet"}
-                description={
-                  targetInstanceMissing
-                    ? `This provider is no longer set up on ${environmentLabel}. Pick another one from the list.`
-                    : "Add Codex, Claude or another agent CLI so threads can run on this machine."
-                }
-                action={
-                  readOnly ? undefined : (
+              <Empty size="sm">
+                <EmptyHeader>
+                  <EmptyTitle>
+                    {targetInstanceMissing ? "Provider not found" : "No providers yet"}
+                  </EmptyTitle>
+                  <EmptyDescription>
+                    {targetInstanceMissing
+                      ? `This provider is no longer set up on ${environmentLabel}. Pick another one from the list.`
+                      : "Add Codex, Claude or another agent CLI so threads can run on this machine."}
+                  </EmptyDescription>
+                </EmptyHeader>
+                {readOnly ? null : (
+                  <EmptyContent>
                     <Button
                       size="sm"
                       variant="outline"
@@ -993,9 +996,9 @@ export function EnvironmentProviderSettings({
                       <PlusIcon />
                       Add provider
                     </Button>
-                  )
-                }
-              />
+                  </EmptyContent>
+                )}
+              </Empty>
             )
           }
         />
