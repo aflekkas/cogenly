@@ -1023,7 +1023,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/project-tags",
     searchTerms: [
       "folders new project archive github org sources files agents repositories",
-      "orphan folders without a project outside adopt make project remove empty projects root",
+      "leftover folders orphan unused without a project deleted project turn into project adopt move to trash remove clean up tidy projects root",
     ],
   },
 ] as const satisfies ReadonlyArray<SettingsSearchItem>;

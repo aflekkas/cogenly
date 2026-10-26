@@ -321,6 +321,7 @@ describe("searchSettings", () => {
     ["connect a machine", "remote-environments", "/settings/connections"],
     ["private access", "machines", "/settings/machines"],
     ["orphan folders", "project-folders", "/settings/project-tags"],
+    ["leftover folders", "project-folders", "/settings/project-tags"],
     ["automatically pull", "automatic-pull", "/settings/source-control"],
     ["background fetch", "git-fetch-interval", "/settings/source-control"],
     ["pull request templates", "follow-change-request-templates", "/settings/source-control"],

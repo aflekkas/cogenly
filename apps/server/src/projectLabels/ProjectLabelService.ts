@@ -16,7 +16,7 @@ import {
   ThreadProjectLabel,
   type ProjectLabelCreateInput,
   type ProjectOrphanFolderInput,
-  type ProjectOrphanFolderRemoveResult,
+  type ProjectOrphanFolderTrashResult,
   type ProjectOrphanFoldersResult,
   type ProjectLabelRepositoryCheckout,
   type ProjectLabelUpdateInput,
@@ -111,10 +111,10 @@ export class ProjectLabelService extends Context.Service<
     readonly adoptOrphanFolder: (
       input: ProjectOrphanFolderInput,
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
-    /** Deletes an orphan folder that is only an empty skeleton; false otherwise. */
-    readonly removeOrphanFolder: (
+    /** Moves a leftover folder to this machine's Trash; false when it is no longer a leftover. */
+    readonly trashOrphanFolder: (
       input: ProjectOrphanFolderInput,
-    ) => Effect.Effect<ProjectOrphanFolderRemoveResult, ProjectLabelError>;
+    ) => Effect.Effect<ProjectOrphanFolderTrashResult, ProjectLabelError>;
     /**
      * Archives the project: it leaves pickers but keeps its threads, chat,
      * repositories and filing, and refuses new threads and repositories until
@@ -1108,12 +1108,21 @@ const make = Effect.gen(function* () {
           Effect.mapError(failure("adoptOrphanFolder")),
         );
       }),
-    removeOrphanFolder: (input) =>
+    trashOrphanFolder: (input) =>
       Option.isNone(folders)
-        ? Effect.succeed({ removed: false })
-        : folders.value.removeOrphan(input.dirName).pipe(
-            Effect.map((removed) => ({ removed })),
-            Effect.mapError(failure("removeOrphanFolder")),
+        ? Effect.succeed({ trashed: false })
+        : folders.value.trashOrphan(input.dirName).pipe(
+            Effect.map((trashed) => ({ trashed })),
+            Effect.mapError((cause) =>
+              cause._tag === "FolderTrashError"
+                ? new ProjectLabelError({
+                    operation: "trashOrphanFolder",
+                    reason: "trash",
+                    detail: cause.message,
+                    cause,
+                  })
+                : failure("trashOrphanFolder")(cause),
+            ),
           ),
     archive: (id) =>
       mutate(

@@ -392,16 +392,16 @@ export const ProjectLabelAdoptRepositoryResult = Schema.Struct({
 export type ProjectLabelAdoptRepositoryResult = typeof ProjectLabelAdoptRepositoryResult.Type;
 
 /**
- * A folder directly under the projects root that no project claims: it has
- * no project marker (`no_marker`), or its marker names a project that no
- * longer exists (`deleted_project`). `empty` folders hold only the skeleton
- * Cogenly made and can be removed; anything else can only be adopted.
+ * A leftover folder directly under the projects root that no project claims:
+ * it has no project marker (`no_marker`), or its marker names a project that
+ * no longer exists (`deleted_project`). Leftovers holding only the empty
+ * skeleton Cogenly made are tidied away when listed, so every one listed
+ * holds something; it can be adopted as a project or moved to the Trash.
  */
 export const ProjectOrphanFolder = Schema.Struct({
   dirName: TrimmedNonEmptyString,
   path: TrimmedNonEmptyString,
   reason: Schema.Literals(["no_marker", "deleted_project"]),
-  empty: Schema.Boolean,
 });
 export type ProjectOrphanFolder = typeof ProjectOrphanFolder.Type;
 export const ProjectOrphanFoldersResult = Schema.Struct({
@@ -410,12 +410,13 @@ export const ProjectOrphanFoldersResult = Schema.Struct({
 export type ProjectOrphanFoldersResult = typeof ProjectOrphanFoldersResult.Type;
 export const ProjectOrphanFolderInput = Schema.Struct({ dirName: TrimmedNonEmptyString });
 export type ProjectOrphanFolderInput = typeof ProjectOrphanFolderInput.Type;
-export const ProjectOrphanFolderRemoveResult = Schema.Struct({ removed: Schema.Boolean });
-export type ProjectOrphanFolderRemoveResult = typeof ProjectOrphanFolderRemoveResult.Type;
-/** `project_folders_reconcile`: list orphans, or adopt / remove one first. */
+/** False when the folder is no longer a leftover (adopted, renamed or gone). */
+export const ProjectOrphanFolderTrashResult = Schema.Struct({ trashed: Schema.Boolean });
+export type ProjectOrphanFolderTrashResult = typeof ProjectOrphanFolderTrashResult.Type;
+/** `project_folders_reconcile`: list leftovers, or adopt / trash one first. */
 export const ProjectFoldersReconcileInput = Schema.Struct({
-  action: Schema.Literals(["list", "adopt", "remove"]),
-  /** The orphan's folder name, for `adopt` and `remove`. */
+  action: Schema.Literals(["list", "adopt", "trash"]),
+  /** The leftover's folder name, for `adopt` and `trash`. */
   dirName: Schema.optional(TrimmedNonEmptyString),
 });
 export type ProjectFoldersReconcileInput = typeof ProjectFoldersReconcileInput.Type;
@@ -423,8 +424,8 @@ export const ProjectFoldersReconcileResult = Schema.Struct({
   folders: Schema.Array(ProjectOrphanFolder),
   /** The project an `adopt` created for the folder. */
   adopted: Schema.optional(ProjectLabelWithRepositories),
-  /** Whether a `remove` deleted the folder (only skeleton folders go). */
-  removed: Schema.optional(Schema.Boolean),
+  /** Whether a `trash` moved the folder to this machine's Trash. */
+  trashed: Schema.optional(Schema.Boolean),
 });
 export type ProjectFoldersReconcileResult = typeof ProjectFoldersReconcileResult.Type;
 
@@ -599,6 +600,8 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
       "project_chat",
       // The machine that runs the thread could not be reached or refused.
       "remote",
+      // A leftover folder could not go to the Trash; `detail` says why.
+      "trash",
     ]),
     /** The project's name, so an `archived` or `project_chat` refusal can say which one. */
     projectName: Schema.optional(Schema.String),
@@ -636,6 +639,8 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
         return "Could not access project folders.";
       case "remote":
         return this.detail ?? "The machine that runs this thread could not move it.";
+      case "trash":
+        return this.detail ?? "Could not move the folder to the Trash.";
     }
   }
 }

@@ -70,10 +70,14 @@ it does not own a copy.
   repoints records whose folder was renamed. A rename re-emits project changes
   after the folder moves on disk, because that move happens after the commit.
 - Deleting a project removes its folder only when it is the bare skeleton.
-  Anything else stays as an orphan: a folder with no marker, or with one
-  naming a project that is gone. Settings › Projects and
-  `project_folders_reconcile` list orphans, adopt them as projects, or remove
-  them when empty. Creating a project adopts a folder whose marker names a
+  Anything else stays as an orphan ("leftover folder" in the UI): a folder
+  with no marker, or with one naming a project that is gone. Listing orphans
+  (Settings › Projects, `project_folders_reconcile`) removes bare-skeleton
+  ones instead of returning them, once they are ten minutes old so a create
+  in flight is not mistaken for one. Skeleton removal only ever `rmdir`s, so
+  a file nobody expected keeps the folder. Orphans with content can be
+  adopted as projects or moved to the OS Trash (`FolderDisposal.ts`), never
+  deleted outright. Creating a project adopts a folder whose marker names a
   deleted project, rather than making "Name (2)" beside it.
 - Links and notes are files too (`.url` / `.md`), so the folder stays complete
   without the database.

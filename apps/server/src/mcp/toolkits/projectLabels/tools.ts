@@ -216,6 +216,6 @@ export const ProjectLabelsToolkit = Toolkit.make(
     parameters: ProjectFoldersReconcileInput,
     success: ProjectFoldersReconcileResult,
     description:
-      "Find and settle folders under the projects root that no project claims (left by a deleted project, or made by hand). action 'list' returns them; 'adopt' with dirName makes the folder a project of the same name, keeping everything in it; 'remove' with dirName deletes it only when it holds nothing but the empty skeleton Cogenly made (removed:false otherwise). Every action returns the orphans that remain. Confirm adopt and remove with the user first.",
+      "Find and settle this machine's leftover folders: folders under the projects root that no project claims (left by a deleted project or a failed create, or made by hand). Settings → Projects shows the same list as Leftover folders. Empty leftovers (only the skeleton Cogenly made) are removed automatically, so every one listed holds something. action 'list' returns them; 'adopt' with dirName makes the folder a project of the same name, keeping everything in it; 'trash' with dirName moves it to this machine's Trash, where the user can put it back (trashed:false when it is no longer a leftover). Every action returns the leftovers that remain. Confirm adopt and trash with the user first.",
   }).annotate(Tool.Destructive, true),
 );

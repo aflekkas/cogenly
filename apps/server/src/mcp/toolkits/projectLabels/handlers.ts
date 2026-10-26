@@ -63,23 +63,23 @@ export const layer = McpToolAccess.toLayer(ProjectLabelsToolkit, {
       if (input.action !== "list" && name === undefined)
         return yield* new OrchestratorMcpFailure({
           code: "invalid_request",
-          message: `Pass dirName to ${input.action} an orphan folder; list them with action 'list'.`,
+          message: `Pass dirName to ${input.action} a leftover folder; list them with action 'list'.`,
         });
       const adopted =
         input.action === "adopt" && name !== undefined
           ? (yield* labels.adoptOrphanFolder({ dirName: name }).pipe(Effect.mapError(failure)))
               .label
           : undefined;
-      const removed =
-        input.action === "remove" && name !== undefined
-          ? (yield* labels.removeOrphanFolder({ dirName: name }).pipe(Effect.mapError(failure)))
-              .removed
+      const trashed =
+        input.action === "trash" && name !== undefined
+          ? (yield* labels.trashOrphanFolder({ dirName: name }).pipe(Effect.mapError(failure)))
+              .trashed
           : undefined;
       const { folders } = yield* labels.listOrphanFolders().pipe(Effect.mapError(failure));
       return {
         folders,
         ...(adopted === undefined ? {} : { adopted }),
-        ...(removed === undefined ? {} : { removed }),
+        ...(trashed === undefined ? {} : { trashed }),
       };
     }),
   ),

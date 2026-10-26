@@ -573,7 +573,7 @@ export const WS_METHODS = {
   projectLabelsAdoptRepository: "projectLabels.adoptRepository",
   projectLabelsListOrphanFolders: "projectLabels.listOrphanFolders",
   projectLabelsAdoptOrphanFolder: "projectLabels.adoptOrphanFolder",
-  projectLabelsRemoveOrphanFolder: "projectLabels.removeOrphanFolder",
+  projectLabelsTrashOrphanFolder: "projectLabels.trashOrphanFolder",
   projectLabelsListResources: "projectLabels.listResources",
   projectLabelsSubscribeResources: "projectLabels.subscribeResources",
   projectLabelsAddResource: "projectLabels.addResource",
@@ -2237,9 +2237,9 @@ const WsProjectLabelsAdoptOrphanFolderRpc = Rpc.make(WS_METHODS.projectLabelsAdo
   success: ProjectLabels.ProjectLabelMutationResult,
   error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
 });
-const WsProjectLabelsRemoveOrphanFolderRpc = Rpc.make(WS_METHODS.projectLabelsRemoveOrphanFolder, {
+const WsProjectLabelsTrashOrphanFolderRpc = Rpc.make(WS_METHODS.projectLabelsTrashOrphanFolder, {
   payload: ProjectLabels.ProjectOrphanFolderInput,
-  success: ProjectLabels.ProjectOrphanFolderRemoveResult,
+  success: ProjectLabels.ProjectOrphanFolderTrashResult,
   error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
 });
 const WsProjectLabelsListResourcesRpc = Rpc.make(WS_METHODS.projectLabelsListResources, {
@@ -2953,7 +2953,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsAdoptRepositoryRpc,
   WsProjectLabelsListOrphanFoldersRpc,
   WsProjectLabelsAdoptOrphanFolderRpc,
-  WsProjectLabelsRemoveOrphanFolderRpc,
+  WsProjectLabelsTrashOrphanFolderRpc,
   WsProjectLabelsListResourcesRpc,
   WsProjectLabelsSubscribeResourcesRpc,
   WsProjectLabelsAddResourceRpc,

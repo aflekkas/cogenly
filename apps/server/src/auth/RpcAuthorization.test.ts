@@ -291,7 +291,7 @@ describe("RPC authorization scopes", () => {
     }
   });
 
-  it.each([WS_METHODS.projectLabelsAdoptOrphanFolder, WS_METHODS.projectLabelsRemoveOrphanFolder])(
+  it.each([WS_METHODS.projectLabelsAdoptOrphanFolder, WS_METHODS.projectLabelsTrashOrphanFolder])(
     "requires operate access for %s, on the client too, while listing orphans is a read",
     (method) => {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
