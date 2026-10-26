@@ -12,6 +12,8 @@ import {
   type MachineListResult,
 } from "@cogenly/contracts";
 
+import { integrationAccountLabel } from "./integrationServices.logic";
+
 export const HEALTH_STATUS_LABELS = {
   ok: "Healthy",
   warn: "Needs attention",
@@ -214,13 +216,14 @@ export function alertChannelIntegrations(
       ({ integration }) =>
         integration.deletedAt === null && integrationCatalogEntryFor(integration)?.id === catalogId,
     )
-    .map(({ integration, status }) => ({
-      name: integration.name,
-      label: integration.accountLabel?.trim()
-        ? `${integration.displayName} (${integration.accountLabel.trim()})`
-        : integration.displayName,
-      connected: status === "connected",
-    }));
+    .map(({ integration, status }) => {
+      const account = integrationAccountLabel(integration);
+      return {
+        name: integration.name,
+        label: account ? `${integration.displayName} (${account})` : integration.displayName,
+        connected: status === "connected",
+      };
+    });
   if (saved !== null && !options.some((option) => option.name === saved)) {
     return [...options, { name: saved, label: `${saved} (removed)`, connected: false }];
   }

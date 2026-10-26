@@ -203,4 +203,11 @@ describe("display helpers", () => {
       ),
     ).toBe("Cogenly");
   });
+  it("names the account only when it adds something to the service's name", () => {
+    expect(integrationTitle({ ...integration, accountLabel: "Spawn Partners" })).toBe(
+      "Gmail · Spawn Partners",
+    );
+    expect(integrationTitle({ ...integration, accountLabel: " gmail " })).toBe("Gmail");
+    expect(integrationTitle(integration)).toBe("Gmail");
+  });
 });

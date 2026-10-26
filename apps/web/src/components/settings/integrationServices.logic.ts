@@ -65,9 +65,19 @@ export interface IntegrationStatusView {
   readonly checkedAt?: string;
 }
 
+/**
+ * The account label worth showing beside the service: none when it only repeats the
+ * service's name ("Linear · Linear").
+ */
+export function integrationAccountLabel(integration: Integration): string | null {
+  const account = integration.accountLabel?.trim();
+  if (!account) return null;
+  return integration.displayName.trim().toLowerCase() === account.toLowerCase() ? null : account;
+}
+
 /** "Linear · Spawn Partners": how two accounts of one service read apart. */
 export function integrationTitle(integration: Integration): string {
-  const account = integration.accountLabel?.trim();
+  const account = integrationAccountLabel(integration);
   return account ? `${integration.displayName} · ${account}` : integration.displayName;
 }
 

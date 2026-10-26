@@ -28,6 +28,7 @@ import { IntegrationSourceIcon } from "../chat/ComposerSourcesPicker";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import {
+  integrationAccountLabel,
   integrationErrorText,
   integrationStatus,
   integrationTitle,
@@ -177,7 +178,7 @@ function IntegrationListRow({
   const status = integrationStatus(summary, undefined);
   const statusRef = useStatusFade<HTMLSpanElement>(status.label);
   const icon = integrationIcon(integration);
-  const account = integration.accountLabel?.trim();
+  const account = integrationAccountLabel(integration);
   const attention = integrationAttentionTone(
     useOpenMachineHealthAlerts(),
     environmentId,
@@ -404,7 +405,7 @@ function IntegrationDetail({
       >
         <AnimatedHeight>
           {error || status.reason ? (
-            <p role="status" className="pb-2 text-sm text-destructive">
+            <p role="status" className="pt-2 pb-2 text-sm text-destructive">
               {error ?? status.reason}
             </p>
           ) : null}
@@ -495,7 +496,8 @@ function SetupNotes({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="pb-3">
+    // Set apart from the Status buttons above, like a section of its own.
+    <div className="mt-2 border-t border-border/65 pt-2.5 pb-3">
       <DisclosureTrigger
         open={open}
         variant="quiet"
