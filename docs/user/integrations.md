@@ -59,7 +59,9 @@ never adds new tools to every conversation:
 - `integration_call(name, tool, args)` — call a tool.
 
 Agents can also set integrations up for you (`integration_add`,
-`integration_update`, `integration_remove`), subject to the approval above.
+`integration_update`, `integration_remove`), subject to the approval above. A
+thread can change or remove only integrations its project can use, and making
+one available to more projects is yours to approve.
 
 ## Not yet
 

@@ -6,6 +6,7 @@ import {
   type IntegrationCreateInput,
   type IntegrationListResult,
   type IntegrationName,
+  type IntegrationScope,
   type IntegrationSummary,
   type IntegrationTestResult,
   type IntegrationToolsResult,
@@ -155,6 +156,24 @@ export const resolveHeaderTemplates = (
     return resolved;
   });
 
+/** Whether `scope` reaches a project; `undefined` is the unrestricted owner view. */
+export const integrationScopeIncludes = (
+  scope: IntegrationScope,
+  labelId: ProjectLabelId | null | undefined,
+): boolean =>
+  labelId === undefined ||
+  scope.type === "all" ||
+  (labelId !== null && scope.labelIds.includes(labelId));
+
+/** Whether moving from `current` to `next` makes an integration reach a project it did not. */
+export const integrationScopeExpands = (
+  current: IntegrationScope,
+  next: IntegrationScope | undefined,
+): boolean =>
+  next !== undefined &&
+  current.type === "projects" &&
+  (next.type === "all" || next.labelIds.some((id) => !current.labelIds.includes(id)));
+
 /**
  * Whether an integration is usable from a project. `null` means the caller
  * has no project (only all-project integrations), a label id scopes to that
@@ -167,9 +186,7 @@ export const integrationVisibleTo = (
 ): boolean =>
   integration.deletedAt === null &&
   integration.enabled &&
-  (labelId === undefined ||
-    integration.scope.type === "all" ||
-    (labelId !== null && integration.scope.labelIds.includes(labelId)));
+  integrationScopeIncludes(integration.scope, labelId);
 
 interface CachedTools {
   readonly key: string;

@@ -59,11 +59,20 @@ const callerLabel = Effect.gen(function* () {
   return (folder?.labelId ?? null) as ProjectLabelId | null;
 });
 
+/**
+ * An integration the caller may manage: one whose scope reaches the caller's
+ * project, enabled or not. A thread cannot change an integration it cannot see.
+ */
 const byName = (name: string) =>
   Effect.gen(function* () {
     const service = yield* Integrations.Integrations;
+    const label = yield* callerLabel;
     const { integrations } = yield* service.list().pipe(Effect.mapError(failure));
-    const found = integrations.find((summary) => summary.integration.name === name);
+    const found = integrations.find(
+      (summary) =>
+        summary.integration.name === name &&
+        Integrations.integrationScopeIncludes(summary.integration.scope, label),
+    );
     if (found === undefined) {
       return yield* new OrchestratorMcpFailure({
         code: "invalid_request",
@@ -111,6 +120,17 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
     Effect.gen(function* () {
       const service = yield* Integrations.Integrations;
       const current = yield* byName(input.name);
+      // Reaching more projects is the owner's call: an agent proposes it, and
+      // a thread asks the owner. The owner's own clients outside a thread may.
+      if (
+        (yield* callerLabel) !== undefined &&
+        Integrations.integrationScopeExpands(current.scope, input.scope)
+      )
+        return yield* new OrchestratorMcpFailure({
+          code: "capability_denied",
+          message:
+            "Making an integration available to more projects needs the owner. Ask them to change its projects in Settings → Integrations.",
+        });
       const scope = yield* Invocation.McpInvocationContext;
       const agents = yield* AgentStore.AgentStore;
       const agent =
