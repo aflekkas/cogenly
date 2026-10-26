@@ -122,12 +122,14 @@ describe("groupInlineImageGalleries figure paragraphs", () => {
           img(MUSEUM, "Museum"),
           text(" "),
           em(text("The museum at dusk")),
+          // oxlint-disable-next-line t3code/no-em-dash-in-copy -- authored markdown keeps the separator it was written with
           text(" — "),
           a(COMMONS, text("Wikimedia Commons")),
         ),
       ),
     );
     // Separators between authored parts stay as written.
+    // oxlint-disable-next-line t3code/no-em-dash-in-copy -- authored markdown keeps the separator it was written with
     expect(captionText(authored)).toEqual(["The museum at dusk — Wikimedia Commons"]);
   });
 
@@ -240,6 +242,7 @@ describe("groupInlineImageGalleries", () => {
       root(
         p(
           img("https://a.test/tower.jpg", "Eiffel Tower"),
+          // oxlint-disable-next-line t3code/no-em-dash-in-copy -- authored markdown keeps the separator it was written with
           text(" — Source: "),
           a("https://en.wikipedia.org/wiki/Eiffel_Tower", text("Wikipedia")),
           text("\n"),

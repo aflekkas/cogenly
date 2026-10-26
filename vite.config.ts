@@ -176,6 +176,11 @@ export default defineConfig({
     },
     overrides: [
       {
+        // Strings in the product reach users and agents as copy, which never uses an em dash.
+        files: ["apps/**", "packages/**"],
+        rules: { "t3code/no-em-dash-in-copy": "error" },
+      },
+      {
         files: ["packages/client-runtime/src/state/**", "apps/{web,desktop}/src/**"],
         rules: { "t3code/no-rpc-permission-bypass": ["error", { allowRawClientAccess: false }] },
       },
