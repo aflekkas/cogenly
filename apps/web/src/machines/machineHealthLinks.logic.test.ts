@@ -36,9 +36,13 @@ function context(
     originMachineName: "Cloud server",
     viaEnvironmentId: HUB,
     isConnected: (id) => ids.has(id),
+    supportsHealthFix: () => true,
     ...overrides,
   };
 }
+
+/** A client on 0.3.2 talking to servers that predate `machines.healthFix`. */
+const OLD_SERVERS = { supportsHealthFix: () => false };
 
 function problem(overrides: Partial<MachineHealthProblem> = {}): MachineHealthProblem {
   return {
@@ -92,6 +96,72 @@ describe("healthFixAction", () => {
     expect(
       problemsLeftForAgent(action, ["stuck-runs:thread:thread-2"]).map((entry) => entry.itemKey),
     ).toEqual(["stuck-runs:thread:thread-2", "integrations:linear"]);
+  });
+
+  it("sends a server without machines.healthFix its older per-item commands", () => {
+    const runNow = problem({
+      itemKey: "scheduled-tasks:nightly",
+      checkId: "scheduled-tasks",
+      fix: "run-now",
+      target: { _tag: "scheduledTask", taskId: task },
+    });
+    expect(healthFixAction([runNow], context([HUB], OLD_SERVERS))).toMatchObject({
+      kind: "fix",
+      direct: {
+        kind: "legacy",
+        commands: [{ kind: "runTask", itemKey: runNow.itemKey, environmentId: HUB, taskId: task }],
+      },
+    });
+    // Sync retries from whichever side this client reaches.
+    const sync = problem({
+      itemKey: "sync:laptop",
+      checkId: "sync",
+      fix: "retry-sync",
+      target: { _tag: "machine", environmentId: LAPTOP },
+    });
+    expect(
+      healthFixAction([sync], context([LAPTOP], { ...OLD_SERVERS, viaEnvironmentId: LAPTOP })),
+    ).toMatchObject({
+      direct: {
+        kind: "legacy",
+        commands: [{ kind: "retrySync", environmentId: LAPTOP, peerEnvironmentId: HUB }],
+      },
+    });
+    expect(
+      healthFixAction(
+        [problem({ fix: "setup-sandbox", target: null })],
+        context([HUB], OLD_SERVERS),
+      ),
+    ).toMatchObject({ direct: { kind: "legacy", commands: [{ kind: "setupSandbox" }] } });
+  });
+
+  it("gives an older server's items with no older command to the agent", () => {
+    // Servers before 0.3.2 can't stop stuck runs, and run-now needs the origin itself.
+    expect(healthFixAction([problem()], context([HUB], OLD_SERVERS))?.kind).toBe("agent");
+    const runNow = problem({
+      fix: "run-now",
+      target: { _tag: "scheduledTask", taskId: task },
+    });
+    expect(
+      healthFixAction([runNow], context([LAPTOP], { ...OLD_SERVERS, viaEnvironmentId: LAPTOP })),
+    ).toMatchObject({ kind: "agent", request: { environmentId: LAPTOP } });
+    const action = healthFixAction(
+      [
+        problem(),
+        problem({
+          itemKey: "sync:laptop",
+          checkId: "sync",
+          fix: "retry-sync",
+          target: { _tag: "machine", environmentId: LAPTOP },
+        }),
+      ],
+      context([HUB], OLD_SERVERS),
+    );
+    expect(action).toMatchObject({ kind: "fix", direct: { kind: "legacy" } });
+    if (action?.kind !== "fix") return;
+    expect(healthFixFollowUp(action, []).agent.map((entry) => entry.itemKey)).toEqual([
+      "stuck-runs:thread:thread-1",
+    ]);
   });
 
   it("treats a pre-0.3.2 resume item as a direct fix", () => {

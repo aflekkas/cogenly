@@ -29,6 +29,7 @@ import {
 } from "../machines/useRunMachineHealthAction";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { machinesRpc } from "../rpc/machines";
+import { readEnvironmentSupportsHealthFix } from "../state/entities";
 import { useConnectedEnvironmentIds, useEnvironmentIds } from "../state/environments";
 import {
   hasNotificationSound,
@@ -93,6 +94,7 @@ export function MachineHealthAlertCoordinator() {
       originMachineName: alert.originMachineName,
       viaEnvironmentId: entry.via,
       isConnected: (id: EnvironmentId) => connected.has(id),
+      supportsHealthFix: readEnvironmentSupportsHealthFix,
     };
     const details: MachineHealthAction = {
       kind: "open",

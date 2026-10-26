@@ -8,11 +8,13 @@ import { useCallback } from "react";
 import { toastManager } from "../components/ui/toast";
 import { useOpenAgentChat } from "../hooks/useOpenAgentChat";
 import { machinesRpc } from "../rpc/machines";
+import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
 import {
   healthFixFollowUp,
   machineHealthAgentPrompt,
   type MachineHealthAction,
+  type MachineHealthLegacyCommand,
 } from "./machineHealthLinks.logic";
 import { useOpenMachineHealthLink } from "./useOpenMachineHealthLink";
 
@@ -24,14 +26,37 @@ export function machineHealthActionPermissionAtom(action: MachineHealthAction): 
     case "open":
       return ALWAYS_PERMITTED;
     case "fix":
-      return action.direct === null
-        ? ALWAYS_PERMITTED
-        : machinesRpc.healthFix.permissionAtom(action.direct.environmentId);
+      switch (action.direct?.kind) {
+        case undefined:
+          return ALWAYS_PERMITTED;
+        case "healthFix":
+          return machinesRpc.healthFix.permissionAtom(action.direct.environmentId);
+        case "legacy":
+          // A group's items share a check, so its commands share a grant.
+          return legacyCommandPermissionAtom(action.direct.commands[0]);
+      }
     // Starting a chat is an operate grant on the server it opens on, as Fix is.
     case "agent":
       return machinesRpc.healthFix.permissionAtom(action.request.environmentId);
   }
 }
+
+function legacyCommandPermissionAtom(command: MachineHealthLegacyCommand): Atom.Atom<boolean> {
+  switch (command.kind) {
+    case "runTask":
+      return serverEnvironment.runScheduledTaskNow.permissionAtom(command.environmentId);
+    case "retrySync":
+      return machinesRpc.healthRetrySync.permissionAtom(command.environmentId);
+    case "setupSandbox":
+      return machinesRpc.sandboxSetup.permissionAtom(command.environmentId);
+  }
+}
+
+const LEGACY_COMMAND_COPY = {
+  runTask: { done: "Task started", failed: "Couldn't run the task" },
+  retrySync: { done: "Retrying sync", failed: "Couldn't retry sync" },
+  setupSandbox: { done: "Chat commands enabled", failed: "Couldn't set up the sandbox" },
+} as const satisfies Record<MachineHealthLegacyCommand["kind"], { done: string; failed: string }>;
 
 function failureMessage(cause: unknown): string {
   return cause instanceof Error && cause.message.trim().length > 0
@@ -39,15 +64,64 @@ function failureMessage(cause: unknown): string {
     : "Try again in a moment.";
 }
 
+/** Runs one older server's fix command and toasts its outcome; resolves whether it worked. */
+function useRunLegacyHealthCommand(): (command: MachineHealthLegacyCommand) => Promise<boolean> {
+  const runTask = useAtomCommand(serverEnvironment.runScheduledTaskNow, { reportFailure: false });
+  const retrySync = useAtomCommand(machinesRpc.healthRetrySync, { reportFailure: false });
+  const setupSandbox = useAtomCommand(machinesRpc.sandboxSetup, { reportFailure: false });
+  return useCallback(
+    async (command: MachineHealthLegacyCommand) => {
+      const copy = LEGACY_COMMAND_COPY[command.kind];
+      const { environmentId } = command;
+      const sandbox =
+        command.kind === "setupSandbox" ? await setupSandbox({ environmentId, input: {} }) : null;
+      const outcome =
+        sandbox ??
+        (command.kind === "runTask"
+          ? await runTask({ environmentId, input: { id: command.taskId } })
+          : command.kind === "retrySync"
+            ? await retrySync({
+                environmentId,
+                input: { environmentId: command.peerEnvironmentId },
+              })
+            : null);
+      if (outcome === null) return false;
+      if (outcome._tag !== "Success") {
+        if (!isAtomCommandInterrupted(outcome))
+          toastManager.add({
+            type: "error",
+            title: copy.failed,
+            description: failureMessage(squashAtomCommandFailure(outcome)),
+          });
+        return false;
+      }
+      if (sandbox?._tag === "Success" && !sandbox.value.available) {
+        toastManager.add({
+          type: "info",
+          title: "Chat sandbox needs attention",
+          description: sandbox.value.message,
+          timeout: 0,
+        });
+        return false;
+      }
+      toastManager.add({ type: "success", title: copy.done });
+      return true;
+    },
+    [retrySync, runTask, setupSandbox],
+  );
+}
+
 /**
  * Runs a health Fix or opens its target. A direct fix reports its outcome in
- * a toast and hands what it couldn't fix to an agent chat, which opens with
- * the problem filled in. Resolves true when the action went through.
+ * a toast, then Fix opens the first sign-in or hands what it couldn't fix to
+ * an agent chat, which opens with the problem filled in. Resolves true when
+ * the action went through.
  */
 export function useRunMachineHealthAction(): (action: MachineHealthAction) => Promise<boolean> {
   const open = useOpenMachineHealthLink();
   const openAgentChat = useOpenAgentChat();
   const healthFix = useAtomCommand(machinesRpc.healthFix, { reportFailure: false });
+  const runLegacy = useRunLegacyHealthCommand();
   return useCallback(
     async (action: MachineHealthAction) => {
       switch (action.kind) {
@@ -60,7 +134,12 @@ export function useRunMachineHealthAction(): (action: MachineHealthAction) => Pr
           let failed = false;
           let manual: ReadonlyArray<string> = [];
           const { direct } = action;
-          if (direct !== null) {
+          if (direct?.kind === "legacy") {
+            for (const command of direct.commands) {
+              if (!(await runLegacy(command))) failed = true;
+            }
+          }
+          if (direct?.kind === "healthFix") {
             const outcome = await healthFix({
               environmentId: direct.environmentId,
               input: {
@@ -121,6 +200,6 @@ export function useRunMachineHealthAction(): (action: MachineHealthAction) => Pr
         }
       }
     },
-    [healthFix, open, openAgentChat],
+    [healthFix, open, openAgentChat, runLegacy],
   );
 }

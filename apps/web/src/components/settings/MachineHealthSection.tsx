@@ -49,7 +49,7 @@ import {
   type EnvironmentPresentation,
 } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
-import { serverEnvironment } from "../../state/server";
+import { environmentServerConfigsAtom, serverEnvironment } from "../../state/server";
 import { useEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
@@ -134,6 +134,7 @@ export function MachineHealthSections({
     environmentId === null ? null : machinesRpc.list({ environmentId, input: {} }),
   ).data;
   const connectedIds = useConnectedEnvironmentIds();
+  const serverConfigs = useAtomValue(environmentServerConfigsAtom);
   if (environment === null || list === null) return null;
   const canaryId = canaryMachineId(list);
   const connected = new Set(connectedIds);
@@ -154,6 +155,9 @@ export function MachineHealthSections({
             list={list}
             runsCanary={machine.environmentId === canaryId}
             isConnected={(id) => connected.has(id)}
+            supportsHealthFix={(id) =>
+              serverConfigs.get(id)?.environment.capabilities.machineHealthFix === true
+            }
           />
         ))}
     </SettingsSearchTarget>
@@ -183,12 +187,14 @@ function MachineHealthSection({
   list,
   runsCanary,
   isConnected,
+  supportsHealthFix,
 }: {
   readonly viewed: EnvironmentPresentation;
   readonly machine: MachineInfo;
   readonly list: MachineListResult;
   readonly runsCanary: boolean;
   readonly isConnected: (environmentId: EnvironmentId) => boolean;
+  readonly supportsHealthFix: (environmentId: EnvironmentId) => boolean;
 }) {
   const isThis = machine.relation === "this";
   const query = useEnvironmentQuery(
@@ -225,6 +231,7 @@ function MachineHealthSection({
     originMachineName: machine.name,
     viaEnvironmentId: viewed.environmentId,
     isConnected,
+    supportsHealthFix,
   };
 
   return (

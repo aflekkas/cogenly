@@ -62,6 +62,16 @@ export const machinesRpc = {
     label: "machines:healthFix",
     tag: "machines.healthFix",
   }),
+  /** What Fix sends servers without `healthFix`: retries sync with one paired machine. */
+  healthRetrySync: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "machines:healthRetrySync",
+    tag: "machines.healthRetrySync",
+  }),
+  /** What Fix sends servers without `healthFix`: installs the chat sandbox. */
+  sandboxSetup: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "machines:sandboxSetup",
+    tag: "machines.sandboxSetup",
+  }),
   /** Sends a test alert through each enabled external channel of the target server. */
   healthTestAlertChannels: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "machines:healthTestAlertChannels",

@@ -57,14 +57,44 @@ export interface MachineHealthAgentRequest {
   readonly prompt: string;
 }
 
-/**
- * `machines.healthFix` sent to `environmentId`, which runs it on the origin
- * (over the peer link when that is another machine).
- */
-export interface MachineHealthDirectFix {
-  readonly environmentId: EnvironmentId;
-  readonly itemKeys: readonly [string, ...Array<string>];
-}
+/** One item's fix as a server from before `machines.healthFix` (0.3.1 and earlier) runs it. */
+export type MachineHealthLegacyCommand =
+  | {
+      readonly kind: "runTask";
+      readonly itemKey: string;
+      readonly environmentId: EnvironmentId;
+      readonly taskId: ScheduledTaskId;
+    }
+  | {
+      readonly kind: "retrySync";
+      readonly itemKey: string;
+      readonly environmentId: EnvironmentId;
+      readonly peerEnvironmentId: EnvironmentId;
+    }
+  | {
+      readonly kind: "setupSandbox";
+      readonly itemKey: string;
+      readonly environmentId: EnvironmentId;
+    };
+
+export type MachineHealthDirectFix =
+  | {
+      /**
+       * `machines.healthFix` sent to `environmentId`, which runs it on the
+       * origin (over the peer link when that is another machine).
+       */
+      readonly kind: "healthFix";
+      readonly environmentId: EnvironmentId;
+      readonly itemKeys: readonly [string, ...Array<string>];
+    }
+  | {
+      /** The older per-item commands, for a server that doesn't advertise `machineHealthFix`. */
+      readonly kind: "legacy";
+      readonly commands: readonly [
+        MachineHealthLegacyCommand,
+        ...Array<MachineHealthLegacyCommand>,
+      ];
+    };
 
 export type MachineHealthAction =
   | { readonly kind: "open"; readonly label: string; readonly link: MachineHealthLink }
@@ -99,6 +129,8 @@ export interface MachineHealthActionContext {
   readonly viaEnvironmentId: EnvironmentId;
   /** Whether this client is connected to a server, so a command can be sent to it. */
   readonly isConnected: (environmentId: EnvironmentId) => boolean;
+  /** Whether a server advertises `machineHealthFix`; older ones get their per-item commands. */
+  readonly supportsHealthFix: (environmentId: EnvironmentId) => boolean;
 }
 
 /** Fixes the origin machine runs itself through `machines.healthFix`. */
@@ -259,6 +291,47 @@ export function healthTargetAction(
   }
 }
 
+/**
+ * The command a pre-0.3.2 server runs for a direct fix, or null when it has
+ * none this client can send. Sync is between two machines, so it can be
+ * retried from either side this client reaches: the target names the other
+ * machine when the item has one, otherwise it is the server the item came
+ * through. Those servers can't stop stuck runs, so `stop-runs` gets the agent.
+ */
+function legacyHealthCommand(
+  problem: MachineHealthProblem,
+  context: MachineHealthActionContext,
+): MachineHealthLegacyCommand | null {
+  const origin = context.originEnvironmentId;
+  const { itemKey, target } = problem;
+  switch (problem.fix) {
+    case "run-now":
+      return target?._tag === "scheduledTask" && context.isConnected(origin)
+        ? { kind: "runTask", itemKey, environmentId: origin, taskId: target.taskId }
+        : null;
+    case "setup-sandbox":
+      return context.isConnected(origin)
+        ? { kind: "setupSandbox", itemKey, environmentId: origin }
+        : null;
+    case "retry-sync": {
+      const peer =
+        target?._tag === "machine" && target.environmentId !== origin
+          ? target.environmentId
+          : context.viaEnvironmentId !== origin
+            ? context.viaEnvironmentId
+            : null;
+      if (peer === null) return null;
+      if (context.isConnected(origin))
+        return { kind: "retrySync", itemKey, environmentId: origin, peerEnvironmentId: peer };
+      return context.isConnected(peer)
+        ? { kind: "retrySync", itemKey, environmentId: peer, peerEnvironmentId: origin }
+        : null;
+    }
+    default:
+      return null;
+  }
+}
+
 /** The provider or integration sign-in a `sign-in` item opens, or null when its target has none. */
 function signInLink(
   problem: MachineHealthProblem,
@@ -274,7 +347,8 @@ function signInLink(
 /**
  * The one Fix for a problem or a group of them, or null when it has nothing
  * this client can do:
- * - items with a direct fix run it on their machine (`machines.healthFix`);
+ * - items with a direct fix run it on their machine (`machines.healthFix`,
+ *   or the older per-item command on a server without it);
  * - a sign-in opens the provider or integration sign-in, which needs the
  *   owner. Fix opens the first; each has its own Sign in on the machine's health;
  * - only items with neither start a chat with an agent, pre-filled with them.
@@ -286,15 +360,24 @@ export function healthFixAction(
   if (problems.length === 0) return null;
   const label = "Fix";
   const commandEnvironmentId = commandEnvironment(context);
+  const legacy = commandEnvironmentId !== null && !context.supportsHealthFix(commandEnvironmentId);
   const directKeys: Array<string> = [];
+  const legacyCommands: Array<MachineHealthLegacyCommand> = [];
   const signIns = new Map<string, MachineHealthLink>();
   const forAgent: Array<MachineHealthProblem> = [];
   for (const problem of problems) {
     if (commandEnvironmentId !== null && problem.fix !== null && DIRECT_FIXES.has(problem.fix)) {
-      directKeys.push(problem.itemKey);
-      // A direct fix that comes back manual goes to the agent.
-      forAgent.push(problem);
-      continue;
+      if (!legacy) {
+        directKeys.push(problem.itemKey);
+        // A direct fix that comes back manual goes to the agent.
+        forAgent.push(problem);
+        continue;
+      }
+      const command = legacyHealthCommand(problem, context);
+      if (command !== null) {
+        legacyCommands.push(command);
+        continue;
+      }
     }
     const link = signInLink(problem, context);
     // Two integrations sign in on the same screen; open it once.
@@ -302,10 +385,17 @@ export function healthFixAction(
     else forAgent.push(problem);
   }
   const [firstKey, ...restKeys] = directKeys;
+  const [firstCommand, ...restCommands] = legacyCommands;
   const direct: MachineHealthDirectFix | null =
-    firstKey === undefined || commandEnvironmentId === null
-      ? null
-      : { environmentId: commandEnvironmentId, itemKeys: [firstKey, ...restKeys] };
+    firstCommand !== undefined
+      ? { kind: "legacy", commands: [firstCommand, ...restCommands] }
+      : firstKey === undefined || commandEnvironmentId === null
+        ? null
+        : {
+            kind: "healthFix",
+            environmentId: commandEnvironmentId,
+            itemKeys: [firstKey, ...restKeys],
+          };
   const [onlySignIn, ...moreSignIns] = signIns.values();
   if (direct === null) {
     if (onlySignIn === undefined) {
@@ -335,7 +425,8 @@ export function problemsLeftForAgent(
   manualItemKeys: ReadonlyArray<string>,
 ): ReadonlyArray<MachineHealthProblem> {
   const manual = new Set(manualItemKeys);
-  const sent = new Set<string>(action.direct?.itemKeys ?? []);
+  // Items sent as legacy commands never come back manual, so they aren't in `problems`.
+  const sent = new Set<string>(action.direct?.kind === "healthFix" ? action.direct.itemKeys : []);
   return action.problems.filter(
     (problem) => manual.has(problem.itemKey) || !sent.has(problem.itemKey),
   );

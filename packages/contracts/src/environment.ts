@@ -214,6 +214,10 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       "server"`) and streams them over `/api/preview-stream`. Clients
       without a local browser runtime open server tabs here. */
   serverBrowser: Schema.optionalKey(Schema.Boolean),
+  /** Server answers machines.healthFix. Absent on servers before 0.3.2, where
+      clients fall back to machines.healthRetrySync, scheduled-task run-now and
+      machines.sandboxSetup per item. */
+  machineHealthFix: Schema.optionalKey(Schema.Boolean),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 
