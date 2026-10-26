@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import {
   CommandId,
+  EventId,
   MessageId,
   NodeId,
   ProjectId,
@@ -26,6 +27,7 @@ import {
   deliverDelegatedTaskFailureNotice,
 } from "./DelegatedTaskFailureNotice.ts";
 import * as Events from "./EventStore.ts";
+import * as Sink from "./EventSink.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as Registry from "./ProviderAdapterRegistry.ts";
 import { layerWithRegistry } from "./testkit/ProviderReplayHarness.ts";
@@ -213,6 +215,8 @@ interface Child {
   readonly run: OrchestrationV2Run;
   readonly turnItems: ReadonlyArray<OrchestrationV2TurnItem>;
   readonly followUpOf?: NodeId;
+  readonly status?: OrchestrationV2Subagent["status"];
+  readonly completionDelivery?: OrchestrationV2Subagent["completionDelivery"];
 }
 
 const child = (name: string, overrides: Partial<Child> = {}): Child => ({
@@ -237,6 +241,10 @@ const withThreads = (children: ReadonlyArray<Child>) =>
           childThreadId: entry.threadId,
           title: entry.title,
           prompt: entry.title,
+          status: entry.status ?? "failed",
+          ...(entry.completionDelivery === undefined
+            ? {}
+            : { completionDelivery: entry.completionDelivery }),
           ...(entry.followUpOf === undefined ? {} : { followUpOf: entry.followUpOf }),
         }) as unknown as OrchestrationV2Subagent,
     );
@@ -356,6 +364,62 @@ describe("deliverDelegatedTaskFailureNotice", () => {
       yield* h.deliver(stopped, true);
       const after = yield* h.parent();
       expect(after.messages.map((message) => message.id)).toEqual(["message:parent-user"]);
+    }).pipe(Effect.provide(runtime)),
+  );
+
+  it.effect("does not re-batch a failure whose earlier notice already started and failed", () =>
+    Effect.gen(function* () {
+      const first = child("old");
+      const second = child("new");
+      const h = yield* withThreads([first, second]);
+      yield* h.orchestrator.dispatch(createParent);
+      yield* h.orchestrator.dispatch(startParentTurn);
+      yield* h.deliver(first);
+      const before = yield* h.parent();
+      const noticeRun = before.runs.find((run) => run.status === "queued")!;
+      const sink = yield* Sink.EventSinkV2;
+      // A provider accepted the notice, then failed. Its run remains a durable receipt.
+      yield* sink.writeWithEffects({
+        commandId: CommandId.make("notice-failed"),
+        events: [
+          {
+            id: EventId.make("event:notice-failed"),
+            type: "run.updated",
+            threadId: parentId,
+            runId: noticeRun.id,
+            occurredAt: at,
+            payload: { ...noticeRun, status: "failed", startedAt: at, completedAt: at },
+          },
+        ],
+        effects: [],
+      });
+      yield* h.deliver(second, true);
+      yield* h.deliver(first, true);
+      const after = yield* h.parent();
+      const queued = after.runs.find((run) => run.status === "queued")!;
+      const notice = after.messages.find((message) => message.id === queued.userMessageId)!;
+      expect(notice.notification?.delegatedFailures?.map((failure) => failure.taskId)).toEqual([
+        second.taskId,
+      ]);
+      expect(
+        after.messages.filter((message) =>
+          message.id.startsWith("message:delegated-task-failure:"),
+        ),
+      ).toHaveLength(2);
+    }).pipe(Effect.provide(runtime)),
+  );
+
+  it.effect("suppresses a stopped task after an explicitly linked follow-up succeeds", () =>
+    Effect.gen(function* () {
+      const stopped = child("stopped");
+      const retry = child("retry", { followUpOf: stopped.taskId, status: "completed" });
+      const h = yield* withThreads([stopped, retry]);
+      yield* h.orchestrator.dispatch(createParent);
+      yield* h.orchestrator.dispatch(startParentTurn);
+      yield* h.deliver(stopped, true);
+      expect((yield* h.parent()).messages.map((message) => message.id)).toEqual([
+        "message:parent-user",
+      ]);
     }).pipe(Effect.provide(runtime)),
   );
 

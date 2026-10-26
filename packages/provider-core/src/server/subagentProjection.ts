@@ -56,6 +56,9 @@ export function makeSubagentChildThread(input: {
 }): OrchestrationV2AppThread {
   return {
     ...input.parentThread,
+    // Delegated work has its own tool policy, even when launched from Chat or a builder.
+    surface: "work",
+    agent: undefined,
     createdBy: input.createdBy,
     creationSource: input.creationSource,
     id: input.childThreadId,
