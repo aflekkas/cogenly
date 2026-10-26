@@ -3,8 +3,90 @@ import type { OrchestrationV2PendingBackgroundTask } from "@cogenly/contracts";
 import {
   backgroundWorkHoldsCompletion,
   derivePendingBackgroundWork,
+  deriveVisibleBackgroundWork,
   turnItemUpdateCanEndBackgroundWork,
 } from "./orchestrationV2PendingBackgroundWork.ts";
+
+describe("deriveVisibleBackgroundWork", () => {
+  const subagent = (id: string, runId: string, status: "running" | "completed" = "running") => ({
+    id,
+    type: "subagent" as const,
+    status,
+    title: `Subagent ${id}`,
+    runId,
+    nativeItemRef: { nativeId: id },
+  });
+  const fleet = [subagent("sub-1", "run-1"), subagent("sub-2", "run-1")];
+  const settled = { id: "run-1" as never, ordinal: 1, status: "completed" as const };
+  const steered = { id: "run-2" as never, ordinal: 2, status: "running" as const };
+  const taskIds = (input: Parameters<typeof deriveVisibleBackgroundWork>[0]) =>
+    deriveVisibleBackgroundWork(input).map((task) => task.taskId);
+
+  it("keeps an earlier run's subagents while a steered turn runs", () => {
+    const idle = taskIds({
+      latestRun: settled,
+      runs: [settled],
+      providerThreads: [],
+      turnItems: fleet,
+    });
+    const steering = taskIds({
+      latestRun: steered,
+      runs: [settled, steered],
+      providerThreads: [],
+      turnItems: fleet,
+    });
+    expect(idle).toEqual(["sub-1", "sub-2"]);
+    expect(steering).toEqual(idle);
+  });
+
+  it("leaves the running turn's own foreground work out", () => {
+    expect(
+      taskIds({
+        latestRun: steered,
+        runs: [settled, steered],
+        providerThreads: [],
+        turnItems: [...fleet, subagent("sub-now", "run-2")],
+      }),
+    ).toEqual(["sub-1", "sub-2"]);
+  });
+
+  it("keeps the provider roster and pull request watches while a turn runs", () => {
+    expect(
+      taskIds({
+        latestRun: steered,
+        runs: [settled, steered],
+        providerThreads: [
+          {
+            id: "pt-1" as never,
+            pendingBackgroundTasks: [{ taskId: "bg-1", description: "dev", kind: "command" }],
+          },
+        ],
+        turnItems: [],
+        pullRequests: [
+          {
+            host: "github.com",
+            repository: "acme/app",
+            number: 7,
+            url: "https://github.com/acme/app/pull/7",
+            source: "agent",
+            watch: {} as never,
+          },
+        ],
+      }),
+    ).toEqual(["bg-1", "pull-request-watch:github.com/acme/app#7"]);
+  });
+
+  it("drops a subagent once it finishes, whatever the turn is doing", () => {
+    expect(
+      taskIds({
+        latestRun: steered,
+        runs: [settled, steered],
+        providerThreads: [],
+        turnItems: [subagent("sub-1", "run-1", "completed"), subagent("sub-2", "run-1")],
+      }),
+    ).toEqual(["sub-2"]);
+  });
+});
 
 describe("turnItemUpdateCanEndBackgroundWork", () => {
   it.each([

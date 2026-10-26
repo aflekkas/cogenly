@@ -139,7 +139,7 @@ import {
   resolveSelectableModel,
 } from "@cogenly/shared/model";
 import { projectScriptCwd } from "@cogenly/shared/projectScripts";
-import { derivePendingBackgroundWork } from "@cogenly/shared/orchestrationV2PendingBackgroundWork";
+import { deriveVisibleBackgroundWork } from "@cogenly/shared/orchestrationV2PendingBackgroundWork";
 import {
   latestUnheldRun,
   usageLimitRunPresentedAsLatest,
@@ -2980,7 +2980,7 @@ export default function ChatView(props: ChatViewProps) {
         sessionError,
       ) ?? latestUnheldRun(serverProjection.runs);
     return [
-      ...derivePendingBackgroundWork({
+      ...deriveVisibleBackgroundWork({
         latestRun,
         providerThreads: serverProjection.providerThreads,
         turnItems: serverProjection.turnItems,
@@ -5516,10 +5516,12 @@ export default function ChatView(props: ChatViewProps) {
   // ordering is priority: system banners, then the branch-mismatch notice,
   // and the informational parked-thread banner last — it must never cover another.
   // Background work (subagent fleets, workflow runs, watch loops, dev servers) can outlive
-  // the turn; once it settles, the composer stop button is gone, so this
-  // banner is the only visible stop affordance. The interrupt path also
-  // accepts a completed run while its provider still has background work.
-  const activeBackgroundTasks = !isWorking && activeThread ? pendingBackgroundTasks : [];
+  // the turn, and stays listed while a steer or wake runs a new one. Once the turn
+  // settles the composer stop button is gone, so this banner is the only visible stop
+  // affordance. The interrupt path also accepts a completed run while its provider
+  // still has background work. While a turn runs, Stop would interrupt that turn, which
+  // is the composer's own stop button, so the banner's waits for it to settle.
+  const activeBackgroundTasks = activeThread ? pendingBackgroundTasks : [];
   const [stoppingBackgroundWorkKey, setStoppingBackgroundWorkKey] = useState<string | null>(null);
   const isStoppingBackgroundWork =
     stoppingBackgroundWorkKey === `${environmentId}:${activeThreadId}`;
@@ -5774,7 +5776,7 @@ export default function ChatView(props: ChatViewProps) {
           environmentId={activeThread.environmentId}
           threadId={activeThread.id}
           presentation={presentation}
-          canStop={canOperateThread}
+          canStop={canOperateThread && !isWorking}
           stopping={isStoppingBackgroundWork}
           onStop={() => void handleStopBackgroundWorkStable()}
           onOpenThread={onOpenRelatedThreadStable}
@@ -5787,6 +5789,7 @@ export default function ChatView(props: ChatViewProps) {
     canOperateThread,
     handleStopBackgroundWorkStable,
     isStoppingBackgroundWork,
+    isWorking,
     onOpenRelatedThreadStable,
   ]);
   // Settled, snoozed, and woke are thread state, not composer actions: each
