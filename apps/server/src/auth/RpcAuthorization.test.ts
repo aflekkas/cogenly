@@ -197,15 +197,6 @@ describe("RPC authorization scopes", () => {
     );
   });
 
-  it("reads usage-limit handoff options with read access and accepts one with operate access", () => {
-    expect(requiredScopeForRpcMethod(ORCHESTRATION_V2_WS_METHODS.recommendUsageLimitHandoff)).toBe(
-      AuthOrchestrationReadScope,
-    );
-    expect(requiredScopeForRpcMethod(ORCHESTRATION_V2_WS_METHODS.acceptUsageLimitHandoff)).toBe(
-      AuthOrchestrationOperateScope,
-    );
-  });
-
   it("authorizes background policy reporting and observation deliberately", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.serverReportClientActivity)).toBe(
       AuthOrchestrationReadScope,

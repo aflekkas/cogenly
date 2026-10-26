@@ -104,7 +104,7 @@ import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { limitRecoveryStatus } from "../orchestration-v2/UsageLimitRecoveryWorker.ts";
-import { providerUsageHeadroom } from "../orchestration-v2/UsageLimitHandoff.ts";
+import { providerUsageHeadroom } from "../orchestration-v2/providerUsageHeadroom.ts";
 import {
   clientRuntimeModeCeiling,
   type McpInvocationScope,

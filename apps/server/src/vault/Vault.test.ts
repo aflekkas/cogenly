@@ -1,3 +1,4 @@
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import {
   AgentId,
   EnvironmentId,
@@ -358,6 +359,7 @@ describe("Vault service", () => {
               Layer.mock(Agents.AgentService)({}),
               Layer.mock(Work.WorkHandoffService)({}),
               Layer.mock(Schedules.ScheduledTaskService)({}),
+              Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
             ),
           ),
         ),
@@ -447,6 +449,7 @@ describe("Vault service", () => {
               Layer.mock(Agents.AgentService)({}),
               Layer.mock(Work.WorkHandoffService)({}),
               Layer.mock(Schedules.ScheduledTaskService)({}),
+              Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
             ),
           ),
           Layer.provideMerge(ApprovalChanges.layer),
@@ -495,6 +498,7 @@ describe("Vault service", () => {
               Layer.mock(Agents.AgentService)({}),
               Layer.mock(Work.WorkHandoffService)({}),
               Layer.mock(Schedules.ScheduledTaskService)({}),
+              Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
             ),
           ),
         ),

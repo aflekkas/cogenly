@@ -1,6 +1,7 @@
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import { MessageId } from "@cogenly/contracts";
 import { decideFallback } from "./providerFallback.ts";
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as AccountAccess from "../accounts/AccountAccess.ts";
 import * as Access from "./AgentAccessScope.ts";
 import {
@@ -175,6 +176,7 @@ const make = Effect.gen(function* () {
   const access = yield* Access.AgentAccessScope;
   const crypto = yield* Crypto.Crypto;
   const store = yield* Store.AgentStore;
+  const providers = yield* ProviderRegistry.ProviderRegistry;
   const agents = yield* Agents.AgentService;
   const accountAccess = yield* Effect.serviceOption(AccountAccess.AccountAccess);
   const work = yield* Work.WorkHandoffService;
@@ -396,8 +398,11 @@ const make = Effect.gen(function* () {
         messageId: MessageId.make(key),
         text: `The owner ${approval.status} your ${approval.action.actionKind} request (${approval.id}).${approval.resultThreadId ? ` Work thread: ${approval.resultThreadId}.` : ""} Continue within the decided permissions; a rejection does not authorize the action.`,
         attachments: [],
-        modelSelection: decideFallback(agent, DateTime.toEpochMillis(yield* DateTime.now))
-          .selection,
+        modelSelection: decideFallback(
+          agent,
+          DateTime.toEpochMillis(yield* DateTime.now),
+          yield* providers.getProviders,
+        ).selection,
         mode: "queue",
         createdBy: "agent",
         creationSource: "server",
@@ -418,7 +423,11 @@ const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       const agent = yield* store.get(input.agentId);
-      const fallback = decideFallback(agent, DateTime.toEpochMillis(yield* DateTime.now));
+      const fallback = decideFallback(
+        agent,
+        DateTime.toEpochMillis(yield* DateTime.now),
+        yield* providers.getProviders,
+      );
       if (fallback.restored)
         yield* store.setFallback(agent.id, { index: 0, reason: null, until: null });
       const id = ThreadId.make(`agent-work:${agent.id}:${key}`);

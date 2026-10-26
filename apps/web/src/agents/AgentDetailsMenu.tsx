@@ -1,3 +1,5 @@
+import { agentFallbackEntries } from "@cogenly/contracts";
+import { useServerConfigs } from "~/state/entities";
 import { useAtomValue } from "@effect/atom-react";
 import { ChevronDownIcon, FolderIcon, HammerIcon, SlidersHorizontalIcon } from "lucide-react";
 import { useState } from "react";
@@ -46,6 +48,11 @@ export function AgentDetailsMenu({
 }) {
   const client = useAgentsClient();
   const { models } = useAgents();
+  const configs = useServerConfigs();
+  const fallbackEntries = agentFallbackEntries(
+    [agent.modelSelection, ...(agent.fallbackChain ?? [])],
+    configs.get(agent.environmentId)?.providers ?? [],
+  ).slice(1);
   const canWrite = client.canWrite?.(agent.environmentId) ?? true;
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -81,6 +88,17 @@ export function AgentDetailsMenu({
                 </span>
               </span>
             </div>
+            {fallbackEntries.length > 0 && (
+              <div className="px-4 py-2 text-xs text-muted-foreground">
+                <p>Fallback chain</p>
+                {fallbackEntries.map((entry) => (
+                  <p key={entry.index} className="swap-motion">
+                    {entry.selection.instanceId} · {entry.selection.model}
+                    {entry.skipReason === null ? "" : ` — skipped: ${entry.skipReason}`}
+                  </p>
+                ))}
+              </div>
+            )}
             <AgentProjectRow agent={agent} />
             <DetailRow
               icon={HammerIcon}

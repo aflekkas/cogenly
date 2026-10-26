@@ -43,7 +43,7 @@ import {
   ProviderOptionSelectionValue,
 } from "./model.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
-import { ProviderUsageHeadroom } from "./usageLimitHandoff.ts";
+import { ProviderUsageHeadroom } from "./providerUsageHeadroom.ts";
 
 const OrchestratorMcpPrompt = TrimmedNonEmptyString.check(Schema.isMaxLength(120_000)).annotate({
   description: "Complete task or message text for the target agent.",

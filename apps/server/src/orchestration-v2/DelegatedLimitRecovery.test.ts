@@ -27,7 +27,6 @@ import * as ProjectionStore from "./ProjectionStore.ts";
 import { makeControllableProvider } from "./testkit/ControllableProvider.ts";
 import { layerWithRegistry } from "./testkit/ProviderReplayHarness.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
-import * as UsageLimitHandoff from "./UsageLimitHandoff.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
 import { decideLimitStop, limitRecoveryCommand } from "./UsageLimitRecoveryWorker.ts";
 
@@ -411,22 +410,19 @@ const account = (instanceId: ProviderInstanceId, usedPercent: number, now: DateT
   }) satisfies ServerProvider;
 
 /**
- * Two accounts of one driver and the real limit-recovery sweep, captured from
- * its scheduler registration so the test runs each tick by hand. Account A is
- * spent; B has headroom.
+ * Two accounts of one driver and the real recovery sweep. Account A is spent;
+ * B has headroom, but recovery must stay on A.
  */
-const setupHandoff = (options?: {
-  readonly firstCandidateRefuses?: boolean;
-  /** Runs once, mid-sweep, after the sweep read its candidates and before it hands off. */
-  readonly midSweep?: (orchestrator: Orchestrator.OrchestratorV2["Service"]) => Effect.Effect<void>;
-}) => {
+const setupRecovery = (
+  beforeArm?: (orchestrator: Orchestrator.OrchestratorV2["Service"]) => Effect.Effect<void>,
+) => {
+  let onArm = beforeArm;
   const accountC = ProviderInstanceId.make("codex-c");
   const provider = makeControllableProvider(CodexProviderCapabilitiesV2, [
     accountA,
     accountB,
     accountC,
   ]);
-  let midSweep = options?.midSweep;
   const database = Sqlite.layerMemory;
   const base = Layer.mergeAll(
     database,
@@ -449,23 +445,15 @@ const setupHandoff = (options?: {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
       return Layer.mock(ThreadManagementService.ThreadManagementService)({
         dispatch: (command) =>
-          options?.firstCandidateRefuses &&
-          command.type === "message.dispatch" &&
-          command.modelSelection?.instanceId === accountB
-            ? Effect.fail(
-                new Orchestrator.OrchestratorDispatchError({
-                  commandId: command.commandId,
-                  commandType: command.type,
-                  cause: "Target refused",
-                }),
-              )
-            : orchestrator.dispatch(command),
-        getThreadRecords: (...args) =>
-          Effect.suspend(() => {
-            const hook = midSweep;
-            midSweep = undefined;
-            return hook === undefined ? Effect.void : hook(orchestrator);
-          }).pipe(Effect.andThen(orchestrator.getThreadRecords(...args))),
+          Effect.gen(function* () {
+            if (command.type === "thread.metadata.update" && onArm !== undefined) {
+              const hook = onArm;
+              onArm = undefined;
+              yield* hook(orchestrator);
+            }
+            return yield* orchestrator.dispatch(command);
+          }),
+        getThreadRecords: orchestrator.getThreadRecords,
         getThreadShell: orchestrator.getThreadShell,
       });
     }),
@@ -474,12 +462,10 @@ const setupHandoff = (options?: {
     getProviders: Effect.map(DateTime.now, (now) => [
       account(accountA, 100, now),
       account(accountB, 20, now),
-      ...(options?.firstCandidateRefuses ? [account(accountC, 30, now)] : []),
     ]),
   });
   const settings = ServerSettings.layerTest({ autoResumeLimitedThreads: true }).pipe(Layer.orDie);
   const recovery = UsageLimitRecoveryWorker.layer.pipe(
-    Layer.provide(UsageLimitHandoff.layer),
     Layer.provideMerge(Layer.mergeAll(threads, registry, settings, scheduler)),
   );
   const runtime = recovery.pipe(Layer.provideMerge(base));
@@ -570,310 +556,81 @@ const delegateIntoQuota = (provider: ReturnType<typeof makeControllableProvider>
     return { orchestrator, worker, childInput, childId, failedRun };
   });
 
-it.effect(
-  "hands a delegated child out of quota to an account with headroom, and its result is the task's",
-  () => {
-    const { provider, runtime, sweep } = setupHandoff();
-    return Effect.gen(function* () {
-      const { orchestrator, worker, childInput, childId, failedRun } =
-        yield* delegateIntoQuota(provider);
-
-      // The server slept through the stop for days. Its task still waits, so
-      // the sweep still decides it: the child moves to B and re-runs the
-      // stopped request there.
-      yield* TestClock.adjust("2 days");
-      yield* sweep;
-      const handedOff = yield* orchestrator.getThreadProjection(childId);
-      expect(handedOff.thread.modelSelection.instanceId).toBe(accountB);
-      const continuation = handedOff.runs.find((run) => run.id !== failedRun.id)!;
-      expect(continuation).toMatchObject({
-        providerInstanceId: accountB,
-        userMessageId: `limit-handoff:${childId}:${failedRun.id}:${accountB}`,
-      });
-      expect(continuation.delegatedTaskId).toBe(failedRun.delegatedTaskId);
-      // The parent hears where its task went, and the task is still running.
-      yield* worker.drain();
-      const notified = yield* orchestrator.getThreadProjection(parentId);
-      expect(
-        notified.messages.find((message) =>
-          message.id.startsWith("message:delegated-task-recovery:"),
-        )?.notification?.delegatedFailures?.[0]?.recovery,
-      ).toEqual({ type: "handed_off", providerInstanceId: accountB, model: "gpt-5" });
-      expect(notified.subagents[0]!.result).toBeNull();
-      // A second tick finds nothing left to recover: no second handoff or resume.
-      yield* sweep;
-      expect((yield* orchestrator.getThreadProjection(childId)).runs).toHaveLength(2);
-
-      yield* worker.drain();
-      const continuationInput = provider.turns.at(-1)!;
-      expect(continuationInput).toMatchObject({ threadId: childId, runId: continuation.id });
-      expect(continuationInput.providerThread.providerInstanceId).toBe(accountB);
-      yield* waitFor(
-        orchestrator,
-        childId,
-        (row) =>
-          row.event.type === "provider-turn.updated" &&
-          row.event.payload.runAttemptId === continuationInput.attemptId,
-      );
-      // B starts a fresh native thread seeded with the child's history from A.
-      const seeded = yield* orchestrator.getThreadProjection(childId);
-      const handoff = seeded.contextHandoffs.find(
-        (candidate) => candidate.targetRunId === continuation.id,
-      );
-      expect(handoff?.fromProviderThreadIds).toContain(childInput.providerThread.id);
-      expect(handoff?.toProviderThreadId).toBe(continuationInput.providerThread.id);
-      expect(handoff?.summaryText).toContain("Audit the billing module");
-      const continuationTurn = seeded.providerTurns.find(
-        (turn) => turn.runAttemptId === continuationInput.attemptId,
-      )!;
-
-      // B finishes the work; its answer is the task's result.
-      const now = yield* DateTime.now;
-      yield* provider.publishFor(continuationInput, {
-        type: "message.updated",
-        driver: ProviderDriverKind.make("codex"),
-        message: {
-          id: MessageId.make("message:child-answer"),
-          threadId: childId,
-          runId: continuation.id,
-          nodeId: continuationInput.rootNodeId,
-          createdBy: "agent",
-          creationSource: "provider",
-          role: "assistant",
-          text: "Billing audit done: two rounding bugs.",
-          attachments: [],
-          streaming: false,
-          createdAt: now,
-          updatedAt: now,
-        },
-      });
-      yield* provider.finish(continuationInput, continuationTurn.id);
-      yield* waitFor(
-        orchestrator,
-        childId,
-        (row) =>
-          row.event.type === "run.updated" &&
-          row.event.payload.id === continuation.id &&
-          row.event.payload.status === "waiting",
-      );
-      yield* worker.drain();
-      yield* waitFor(
-        orchestrator,
-        parentId,
-        (row) => row.event.type === "subagent.updated" && row.event.payload.status === "completed",
-      );
-      const parent = yield* orchestrator.getThreadProjection(parentId);
-      expect(parent.subagents[0]).toMatchObject({
-        status: "completed",
-        result: "Billing audit done: two rounding bugs.",
-      });
-      expect(
-        parent.messages.some((message) => message.id.startsWith("message:delegated-task-failure:")),
-      ).toBe(false);
-    }).pipe(Effect.provide(runtime));
-  },
-);
-
-it.effect(
-  "a Don't resume that lands mid-sweep is not overwritten by the sweep's stale read",
-  () => {
-    let childId: ThreadId | undefined;
-    let stoppedRunId: string | undefined;
-    let resetAt: string | undefined;
-    const { provider, runtime, sweep } = setupHandoff({
-      midSweep: (orchestrator) =>
-        orchestrator
-          .dispatch({
-            type: "thread.metadata.update",
-            commandId: CommandId.make("no-resume"),
-            threadId: childId!,
-            limitRecovery: { runId: stoppedRunId as never, resetAt: resetAt!, autoResume: false },
-          })
-          .pipe(Effect.orDie, Effect.asVoid),
-    });
-    return Effect.gen(function* () {
-      const stopped = yield* delegateIntoQuota(provider);
-      childId = stopped.childId;
-      stoppedRunId = stopped.failedRun.id;
-      resetAt = (yield* stopped.orchestrator.getThreadShell(stopped.childId))!.usageLimitResetAt!;
-      const { orchestrator, worker } = stopped;
-
-      // The sweep read the stop as unrecorded; the choice arrives before it acts.
-      yield* sweep;
-      const child = yield* orchestrator.getThreadProjection(stopped.childId);
-      expect(child.runs).toHaveLength(1);
-      expect(child.thread.limitRecovery).toMatchObject({
-        autoResume: false,
-        requestId: "no-resume",
-      });
-      // The parent has the limit as its result, and no notice that it moved or will resume.
-      yield* worker.drain();
-      const parent = yield* orchestrator.getThreadProjection(parentId);
-      expect(parent.subagents[0]).toMatchObject({ status: "failed" });
-      expect(
-        parent.messages.some((message) =>
-          message.id.startsWith("message:delegated-task-recovery:"),
-        ),
-      ).toBe(false);
-    }).pipe(Effect.provide(runtime));
-  },
-);
-
-it.effect("the parent's handoff notice survives a stop right after the handoff commits", () => {
-  const { provider, runtime } = setupHandoff();
+it.effect("a usage-limited child waits for reset without suggesting or switching accounts", () => {
+  const { provider, runtime, sweep } = setupRecovery();
   return Effect.gen(function* () {
     const { orchestrator, worker, childId, failedRun } = yield* delegateIntoQuota(provider);
-    // The sweep's handoff commits, then the server stops before it does anything else.
-    const identity = `${childId}:${failedRun.id}:${accountB}`;
-    yield* orchestrator.dispatch({
-      type: "message.dispatch",
-      commandId: CommandId.make(`limit-handoff:${identity}`),
-      messageId: MessageId.make(`limit-handoff:${identity}`),
-      threadId: childId,
-      manualContinuationOfRunId: failedRun.id,
-      modelSelection: { instanceId: accountB, model: "gpt-5" },
-      text: "Continue where you left off.",
-      attachments: [],
-      dispatchMode: { type: "start_immediately" },
-      createdBy: "system",
-      creationSource: "server",
-    });
-    // Back up, the outbox still owes the parent its notice.
+    yield* sweep;
     yield* worker.drain();
+    const child = yield* orchestrator.getThreadProjection(childId);
+    expect(child.thread.modelSelection.instanceId).toBe(accountA);
+    expect(child.runs).toHaveLength(1);
+    expect(child.thread.limitRecovery).toMatchObject({ runId: failedRun.id, autoResume: true });
     const parent = yield* orchestrator.getThreadProjection(parentId);
-    expect(
-      parent.messages.find((message) => message.id.startsWith("message:delegated-task-recovery:"))
-        ?.notification?.delegatedFailures?.[0]?.recovery,
-    ).toEqual({ type: "handed_off", providerInstanceId: accountB, model: "gpt-5" });
+    expect(parent.subagents[0]!.result).toBeNull();
+    const notice = parent.messages.find((message) =>
+      message.id.startsWith("message:delegated-task-recovery:"),
+    );
+    expect(notice?.notification?.delegatedFailures?.[0]?.recovery?.type).toBe("resuming_at_reset");
+    expect(parent.messages.map((message) => message.text).join("\n")).not.toMatch(
+      /Continue on|thread_limit_handoff|another account|headroom/,
+    );
+    yield* sweep;
+    expect((yield* orchestrator.getThreadProjection(childId)).runs).toHaveLength(1);
+    yield* TestClock.adjust("3 hours");
+    yield* sweep;
+    const resumed = yield* orchestrator.getThreadProjection(childId);
+    expect(resumed.runs).toHaveLength(2);
+    expect(resumed.runs.at(-1)?.providerInstanceId).toBe(accountA);
   }).pipe(Effect.provide(runtime));
 });
 
-it.effect("a Stop on a delegated child still recovering from a limit ends the recovery", () => {
-  const { provider, runtime, sweep } = setupHandoff();
+it.effect("stopping a child waiting for reset cancels its recovery", () => {
+  const { provider, runtime, sweep } = setupRecovery();
   return Effect.gen(function* () {
     const { orchestrator, worker, childId, failedRun } = yield* delegateIntoQuota(provider);
-
-    // task_cancel and a parent's Stop reach the child as this Stop.
+    yield* sweep;
     yield* orchestrator.dispatch({
       type: "thread.stop",
       commandId: CommandId.make("stop-child"),
       threadId: childId,
     });
-    const child = yield* orchestrator.getThreadProjection(childId);
-    expect(child.thread.limitRecovery).toMatchObject({ runId: failedRun.id, autoResume: false });
-    // The limit is now the task's result, and nothing hands the child off.
-    const parent = yield* orchestrator.getThreadProjection(parentId);
-    expect(parent.subagents[0]).toMatchObject({ status: "failed" });
-    expect(parent.subagents[0]!.result).toContain("usage limit");
+    expect((yield* orchestrator.getThreadProjection(childId)).thread.limitRecovery).toMatchObject({
+      runId: failedRun.id,
+      autoResume: false,
+    });
+    yield* TestClock.adjust("3 hours");
     yield* sweep;
+    yield* worker.drain();
     expect((yield* orchestrator.getThreadProjection(childId)).runs).toHaveLength(1);
-    // A deliberate Stop owes the parent no failure notice.
-    yield* worker.drain();
-    expect(
-      (yield* orchestrator.getThreadProjection(parentId)).messages.some((message) =>
-        message.id.startsWith("message:delegated-task-failure:"),
-      ),
-    ).toBe(false);
+    expect((yield* orchestrator.getThreadProjection(parentId)).subagents[0]?.status).toBe("failed");
   }).pipe(Effect.provide(runtime));
 });
 
-// A refusal restores the scheduled reset before the next candidate is tried.
-it.effect("hands off to the second target after the first target refuses", () => {
-  const { provider, runtime, sweep } = setupHandoff({ firstCandidateRefuses: true });
-  return Effect.gen(function* () {
-    const { orchestrator, childId } = yield* delegateIntoQuota(provider);
-    yield* sweep;
-    expect(
-      (yield* orchestrator.getThreadProjection(childId)).thread.modelSelection.instanceId,
-    ).toBe("codex-c");
-  }).pipe(Effect.provide(runtime));
-});
-
-it.effect("releases a delegated child's held messages onto its handoff model", () => {
-  const { provider, runtime, sweep } = setupHandoff();
-  return Effect.gen(function* () {
-    const { orchestrator, worker, childId, failedRun } = yield* delegateIntoQuota(provider);
-    yield* orchestrator.dispatch({
-      type: "message.dispatch",
-      commandId: CommandId.make("queued-notice"),
-      threadId: childId,
-      messageId: MessageId.make("message:held"),
-      text: "Check the background result",
-      attachments: [],
-      dispatchMode: { type: "queue_after_active" },
-      createdBy: "agent",
-      creationSource: "server",
-    });
-    expect((yield* orchestrator.getThreadProjection(childId)).runs.at(-1)?.queueHeld).toBe(true);
-    yield* sweep;
-    const queued = (yield* orchestrator.getThreadProjection(childId)).runs.find(
-      (run) => run.status === "queued",
-    )!;
-    expect(queued).toMatchObject({
-      queueHeld: false,
-      providerInstanceId: accountB,
-      modelSelection: { instanceId: accountB, model: "gpt-5" },
-    });
-    yield* worker.drain();
-    const input = provider.turns.find(
-      (turn) => turn.threadId === childId && turn.runId !== failedRun.id,
-    )!;
-    yield* waitFor(
-      orchestrator,
-      childId,
-      (row) =>
-        row.event.type === "provider-turn.updated" &&
-        row.event.payload.runAttemptId === input.attemptId,
-    );
-    const turn = (yield* orchestrator.getThreadProjection(childId)).providerTurns.find(
-      (turn) => turn.runAttemptId === input.attemptId,
-    )!;
-    yield* provider.finish(input, turn.id);
-    yield* waitFor(
-      orchestrator,
-      childId,
-      (row) =>
-        row.event.type === "run.updated" &&
-        row.event.payload.id === input.runId &&
-        row.event.payload.status === "waiting",
-    );
-    yield* worker.drain();
-    expect(
-      provider.turns.find((turn) => turn.runId === queued.id)?.providerThread.providerInstanceId,
-    ).toBe(accountB);
-  }).pipe(Effect.provide(runtime));
-});
-
-it.effect("a manual handoff after Don't resume leaves the parent's published result alone", () => {
-  const { provider, runtime } = setupHandoff();
+it.effect("a Don't resume arriving mid-sweep keeps the owner's choice", () => {
+  let cancel: Effect.Effect<void> = Effect.void;
+  const { provider, runtime, sweep } = setupRecovery(() => cancel);
   return Effect.gen(function* () {
     const { orchestrator, worker, childId, failedRun } = yield* delegateIntoQuota(provider);
     const resetAt = (yield* orchestrator.getThreadShell(childId))!.usageLimitResetAt!;
-    yield* orchestrator.dispatch({
-      type: "thread.metadata.update",
-      commandId: CommandId.make("dont-resume"),
-      threadId: childId,
-      limitRecovery: { runId: failedRun.id, resetAt, autoResume: false },
-    });
-    const published = (yield* orchestrator.getThreadProjection(parentId)).subagents[0]!.result;
-    expect(published).not.toBeNull();
-    const identity = `${childId}:${failedRun.id}:${accountB}`;
-    yield* orchestrator.dispatch({
-      type: "message.dispatch",
-      commandId: CommandId.make(`limit-handoff:${identity}`),
-      messageId: MessageId.make(`limit-handoff:${identity}`),
-      threadId: childId,
-      manualContinuationOfRunId: failedRun.id,
-      modelSelection: { instanceId: accountB, model: "gpt-5" },
-      text: "Continue where you left off.",
-      attachments: [],
-      dispatchMode: { type: "start_immediately" },
-      createdBy: "user",
-      creationSource: "web",
-    });
+    cancel = orchestrator
+      .dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("dont-resume"),
+        threadId: childId,
+        limitRecovery: { runId: failedRun.id, resetAt, autoResume: false },
+      })
+      .pipe(Effect.asVoid, Effect.orDie);
+    yield* sweep;
     yield* worker.drain();
+    const child = yield* orchestrator.getThreadProjection(childId);
+    expect(child.runs).toHaveLength(1);
+    expect(child.thread.limitRecovery).toMatchObject({
+      autoResume: false,
+      requestId: "dont-resume",
+    });
     const parent = yield* orchestrator.getThreadProjection(parentId);
-    expect(parent.subagents[0]!.result).toBe(published);
+    expect(parent.subagents[0]?.status).toBe("failed");
     expect(
       parent.messages.some((message) => message.id.startsWith("message:delegated-task-recovery:")),
     ).toBe(false);

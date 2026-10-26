@@ -1,3 +1,4 @@
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Option from "effect/Option";
@@ -196,6 +197,11 @@ const makeHarness = (scratchUnavailable = false) =>
       .pipe(Layer.provide(layerSharedIdentity))
       .pipe(Layer.provide(Layer.merge(database, LabelEvents.layer.pipe(Layer.provide(database)))));
     const agents = Agents.layer
+      .pipe(
+        Layer.provide(
+          Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+        ),
+      )
       .pipe(Layer.provide(RemoteLaunch.layer))
       .pipe(Layer.provide(layerSharedIdentity))
       .pipe(Layer.provide(Layer.mergeAll(boundaries, store, labels, database)));

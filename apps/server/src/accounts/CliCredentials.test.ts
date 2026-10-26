@@ -1,3 +1,4 @@
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as AccountsMcp from "../mcp/AccountsMcpService.ts";
 import * as Invocation from "../mcp/McpInvocationContext.ts";
 import { SecretRef } from "@cogenly/contracts";
@@ -596,6 +597,7 @@ describe("portable CLI process credentials", () => {
                 Layer.mock(AgentService.AgentService)({}),
                 Layer.mock(WorkHandoff.WorkHandoffService)({}),
                 Layer.mock(ScheduledTasks.ScheduledTaskService)({}),
+                Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
               ),
             ),
           ),

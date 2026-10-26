@@ -1,3 +1,4 @@
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { loopbackHttpsFetch, loopbackHttpsPolicy } from "./https.testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -439,6 +440,7 @@ describe("Integrations gateway", () => {
                 Layer.mock(Agents.AgentService)({}),
                 Layer.mock(Work.WorkHandoffService)({}),
                 Layer.mock(Schedules.ScheduledTaskService)({}),
+                Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
               ),
             ),
             Layer.provide(NodeServices.layer),
@@ -504,6 +506,7 @@ describe("Integrations gateway", () => {
               Layer.mock(Agents.AgentService)({}),
               Layer.mock(Work.WorkHandoffService)({}),
               Layer.mock(Schedules.ScheduledTaskService)({}),
+              Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
             ),
           ),
           Layer.provide(NodeServices.layer),

@@ -1,3 +1,4 @@
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { ProjectRepositoryMismatchError } from "@cogenly/contracts";
 import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
 import { isReplayedCommandId } from "../orchestration-v2/ReplayedCommandIds.ts";
@@ -131,6 +132,7 @@ export class AgentService extends Context.Service<
 >()("cogenly-server/agents/AgentService") {}
 
 const make = Effect.gen(function* () {
+  const providers = yield* ProviderRegistry.ProviderRegistry;
   const crypto = yield* Crypto.Crypto;
   const shared = yield* SharedState.SharedState;
   const machines = yield* Effect.serviceOption(Machines.Machines);
@@ -344,7 +346,8 @@ const make = Effect.gen(function* () {
     const chain = fallbackChainOf(agent);
     const failedIndex = chainIndexOf(chain, run.modelSelection);
     const advance = advanceFallback({
-      chainLength: chain.length,
+      chain,
+      providers: yield* providers.getProviders,
       failedIndex,
       reason: classifyProviderFailure(error.failure),
       resetAt: error.failure.resetAt,
@@ -466,7 +469,8 @@ const make = Effect.gen(function* () {
           const advance =
             failureItem?.type === "error"
               ? advanceFallback({
-                  chainLength: fallbackChainOf(agent).length,
+                  chain: fallbackChainOf(agent),
+                  providers: yield* providers.getProviders,
                   failedIndex: chainIndexOf(fallbackChainOf(agent), run.modelSelection),
                   reason: classifyProviderFailure(failureItem.failure),
                   resetAt: failureItem.failure.resetAt,
@@ -892,7 +896,11 @@ const make = Effect.gen(function* () {
         // Backoff and daily caps govern background reservations only.
         // An owner text always reaches the provider. Intake claims its pending
         // uploads into the conversation, as it does for a chat send.
-        const fallback = decideFallback(agent, DateTime.toEpochMillis(yield* DateTime.now));
+        const fallback = decideFallback(
+          agent,
+          DateTime.toEpochMillis(yield* DateTime.now),
+          yield* providers.getProviders,
+        );
         if (fallback.restored)
           yield* store.setFallback(agent.id, { index: 0, reason: null, until: null });
         const result = yield* ThreadMessageIntake.sendToThread({
@@ -972,7 +980,11 @@ const make = Effect.gen(function* () {
                 yield* sql`SELECT 1 FROM agent_work_runs WHERE agent_id = ${agent.id} AND status IN ('starting', 'running')`;
               return busy.length > 0 ? ("skipped_busy" as const) : ("skipped_not_owner" as const);
             }
-            const decision = decideFallback(agent, DateTime.toEpochMillis(yield* DateTime.now));
+            const decision = decideFallback(
+              agent,
+              DateTime.toEpochMillis(yield* DateTime.now),
+              yield* providers.getProviders,
+            );
             if (decision.restored)
               yield* store.setFallback(agent.id, { index: 0, reason: null, until: null });
             usedSelection = decision.selection;

@@ -63,7 +63,6 @@ import * as RepositoryCheckout from "../../project/RepositoryCheckout.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import * as ThreadLaunchService from "../../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadSearch from "../../orchestration-v2/ThreadSearch.ts";
-import * as UsageLimitHandoff from "../../orchestration-v2/UsageLimitHandoff.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
 import * as SourceControlRepositoryService from "../../sourceControl/SourceControlRepositoryService.ts";
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
@@ -301,7 +300,6 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(RepositoryCheckout.RepositoryCheckout)({}),
   Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({}),
   Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
-  Layer.mock(UsageLimitHandoff.UsageLimitHandoffService)({}),
   Layer.mock(ThreadSearch.ThreadSearch)({
     search: () =>
       Effect.succeed({
@@ -785,8 +783,6 @@ const smokeCases = [
       "thread_configuration",
       "thread_configure",
       "thread_fork",
-      "thread_limit_handoff",
-      "thread_limit_handoff_options",
       "thread_merge_back",
       "thread_organize",
       "thread_search",

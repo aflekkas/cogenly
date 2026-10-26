@@ -36,6 +36,9 @@ Replies and Work use the agent's selected model. Ask it to set a fallback chain 
 you want another provider or model when one hits its usage limit or signs out. An
 eligible failed run retries once on the next entry. The primary is tried again at
 the provider's reset time, or after an hour when no reset time is available.
+Only cross-provider fallbacks run, such as Claude → Codex. Entries for another
+account of the same provider stay saved but are skipped; **Details** labels them
+**skipped: same provider account**.
 
 ## Memory and deleting
 
