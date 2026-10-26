@@ -325,7 +325,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "data-export",
     title: "Export",
     to: "/settings/data",
-    searchTerms: ["export backup download portable data jsonl validate bundle"],
+    searchTerms: [
+      "export backup download portable data jsonl validate check bundle recent exports",
+    ],
   },
   {
     id: "t3-import",
