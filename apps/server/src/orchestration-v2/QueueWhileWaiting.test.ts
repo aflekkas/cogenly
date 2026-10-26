@@ -200,6 +200,20 @@ it.effect.each(
         Stream.take(1),
         Stream.runDrain,
       );
+      // Steering targets the run's running provider turn, persisted after the run itself.
+      const followupAttempt = (yield* orchestrator.getThreadProjection(threadId)).runs.find(
+        (run) => run.id === queued.id,
+      )?.activeAttemptId;
+      yield* orchestrator.streamStoredEventsFrom({ afterSequence: 0, threadId }).pipe(
+        Stream.filter(
+          (row) =>
+            row.event.type === "provider-turn.updated" &&
+            row.event.payload.runAttemptId === followupAttempt &&
+            row.event.payload.status === "running",
+        ),
+        Stream.take(1),
+        Stream.runDrain,
+      );
       const duringFollowup = yield* orchestrator.getThreadProjection(threadId);
       expect(duringFollowup.subagents[0]?.status).toBe("running");
       expect(provider.turns.filter((turn) => turn.threadId === threadId)).toHaveLength(2);
