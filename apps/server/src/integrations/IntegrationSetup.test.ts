@@ -238,6 +238,44 @@ describe("agentNextStep", () => {
     expect(text).toContain("Retry integration_add");
     expect(text).not.toContain("The user can do this in Settings");
   });
+  it("has the agent do console work itself, named Cogenly, leaving only consent to the user", () => {
+    const google = setupActionFor({
+      entry: entry("google-workspace"),
+      reason: "google_client_missing",
+      redirectUri: "https://cogenly.example.com/oauth/integrations/google/callback",
+    })!;
+    const cases = [
+      [google, entry("google-workspace")],
+      [catalogSetupFor({ entry: entry("slack"), mode: "oauth_app" })!, entry("slack")],
+      [catalogSetupFor({ entry: entry("github"), mode: "oauth_app" })!, entry("github")],
+      [catalogSetupFor({ entry: entry("github"), mode: "api_key" })!, entry("github")],
+      [catalogSetupFor({ entry: entry("linear"), mode: "api_key" })!, entry("linear")],
+    ] as const;
+    for (const [action, service] of cases) {
+      const text = agentNextStep(action, {
+        settingsUrl: settingsSetupUrl(undefined),
+        entry: service,
+      });
+      expect(text).toContain("collaborative browser");
+      expect(text).toContain("Cogenly");
+      expect(text).toContain("setupNotes");
+      expect(text).toContain("Do not hand these steps to the user.");
+      // The old guides handed the user the console steps.
+      expect(text).not.toMatch(/help the user create|paste (it|them) here|may require the user/i);
+      expect(text).not.toMatch(/into view|reply "?go/i);
+    }
+    const googleText = agentNextStep(google, {
+      settingsUrl: settingsSetupUrl(undefined),
+      entry: entry("google-workspace"),
+    });
+    // Reuse before create, and the client goes straight to the vault.
+    expect(googleText.indexOf("Reuse it if it exists")).toBeLessThan(
+      googleText.indexOf("https://console.cloud.google.com/projectcreate"),
+    );
+    expect(googleText).toContain('vault_save {name: "google-oauth-client"');
+    expect(googleText).toContain("cogenly-");
+  });
+
   it("keeps precise failures while directing setup to the agent", () => {
     const { message, transient } = agentFailureMessage(
       { reason: "google_client_missing" },

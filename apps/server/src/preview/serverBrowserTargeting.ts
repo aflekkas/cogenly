@@ -81,7 +81,7 @@ export interface TabRenderingStatus {
 }
 
 export const BACKGROUND_TAB_NOTICE =
-  "This tab runs in Cogenly's background browser, not in the browser panel the user sees, so it does not share their logins. A sign-in page here does not mean the user is signed out. Cogenly asked the panel to show this tab and moves it there once the user has this thread open; until then, say the browser sessions differ instead of asking the user to sign in again.";
+  "This tab runs in Cogenly's background browser, not in the browser panel the user sees, so it does not share their logins yet. A sign-in page here does not mean the user is signed out. Cogenly asked the panel to show this tab and moves it there on its own once a client has this thread open. Keep working: retry or use preview_wait_for rather than asking the user to show the panel or reply. If a sign-in page remains, sign in with vault_fill, or ask for a missing login privately; do not ask the user to sign in again in chat.";
 
 export const notShownNotice = (shownTab: { readonly tabId: string; readonly url: string | null }) =>
   `The user is looking at another tab (${shownTab.tabId}${shownTab.url ? `, ${shownTab.url}` : ""}), not this one. Pass that tabId to work on the page they see.`;
