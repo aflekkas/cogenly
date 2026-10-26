@@ -29,6 +29,7 @@ import {
   ThreadMachineCatalog,
   ThreadTaskProgress,
   ThreadAgentCreate,
+  ThreadAgentDelete,
   ThreadTaskBranch,
   ThreadScheduleUpsert,
   ThreadScheduleRun,
@@ -777,6 +778,39 @@ const make = Effect.gen(function* () {
     }),
   );
 
+  yield* registry.registerAgentDelete((machine, agentId) =>
+    routing.callMachine(machine, ThreadAgentDelete, { target: machine, agentId }, LAUNCH_TIMEOUT),
+  );
+  yield* channels.register(ThreadAgentDelete, (payload, caller) =>
+    Effect.gen(function* () {
+      if (payload.target !== self) {
+        const result = yield* routing.callMachine(
+          payload.target,
+          ThreadAgentDelete,
+          payload,
+          LAUNCH_TIMEOUT,
+        );
+        yield* sharedSync.sync(caller.environmentId).pipe(Effect.ignore);
+        yield* threadSync.sync(caller.environmentId).pipe(Effect.ignore);
+        return result;
+      }
+      if (Option.isNone(agentService))
+        return yield* new ThreadRemoteError({
+          reason: "rejected",
+          detail: "This server cannot delete agents.",
+        });
+      const result = yield* agentService.value
+        .delete(payload.agentId)
+        .pipe(
+          Effect.mapError(
+            (cause) => new ThreadRemoteError({ reason: "rejected", detail: cause.message }),
+          ),
+        );
+      yield* sharedSync.sync(caller.environmentId).pipe(Effect.ignore);
+      yield* threadSync.sync(caller.environmentId).pipe(Effect.ignore);
+      return result;
+    }),
+  );
   yield* registry.registerAgentCreate((machine, input, agentId) =>
     Effect.gen(function* () {
       const view = yield* topology;

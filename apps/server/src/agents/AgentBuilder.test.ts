@@ -11,6 +11,7 @@ import {
   ProviderInstanceId,
   RunId,
   ThreadId,
+  ThreadRemoteError,
   defaultAgentPermissions,
   type AgentApprovalAction,
   type AgentBuilderProposal,
@@ -62,147 +63,152 @@ const proposal = (overrides: Partial<AgentBuilderProposal> = {}): AgentBuilderPr
   ...overrides,
 });
 
-const makeHarness = Effect.sync(() => {
-  const projections = new Map<ThreadId, OrchestrationV2ThreadProjection>();
-  const launches: Launch.ThreadLaunchInput[] = [];
-  const sends: Threads.ThreadManagementSendInput[] = [];
-  const posts: Parameters<Events.EventSinkV2["Service"]["commitCommand"]>[0][] = [];
-  const runFor = (threadId: ThreadId): OrchestrationV2Run => ({
-    id: RunId.make(`run:${threadId}`),
-    threadId,
-    ordinal: 1,
-    providerInstanceId: modelSelection.instanceId,
-    modelSelection,
-    providerThreadId: null,
-    userMessageId: MessageId.make(`message:${threadId}`),
-    rootNodeId: null,
-    activeAttemptId: null,
-    status: "completed",
-    requestedAt: DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"),
-    startedAt: null,
-    completedAt: null,
-    checkpointId: null,
-    contextHandoffId: null,
-  });
-  const seedThread = (threadId: ThreadId, surface?: "chat" | "work" | "builder") => {
-    const projection = idleThreadProjection({
-      ...liveThreadShell(threadId),
-      ...(surface === undefined ? {} : { surface }),
+const makeHarness = (scratchUnavailable = false) =>
+  Effect.sync(() => {
+    const projections = new Map<ThreadId, OrchestrationV2ThreadProjection>();
+    const launches: Launch.ThreadLaunchInput[] = [];
+    const sends: Threads.ThreadManagementSendInput[] = [];
+    const posts: Parameters<Events.EventSinkV2["Service"]["commitCommand"]>[0][] = [];
+    const runFor = (threadId: ThreadId): OrchestrationV2Run => ({
+      id: RunId.make(`run:${threadId}`),
+      threadId,
+      ordinal: 1,
+      providerInstanceId: modelSelection.instanceId,
+      modelSelection,
+      providerThreadId: null,
+      userMessageId: MessageId.make(`message:${threadId}`),
+      rootNodeId: null,
+      activeAttemptId: null,
+      status: "completed",
+      requestedAt: DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"),
+      startedAt: null,
+      completedAt: null,
+      checkpointId: null,
+      contextHandoffId: null,
     });
-    projections.set(threadId, projection);
-    return projection;
-  };
-  const boundaries = Layer.mergeAll(
-    Layer.mock(Folders.ManagedProjectFolders)({
-      namedProjectsRoot: Effect.succeed("/unused"),
-      scratchRoot: Effect.succeed(Option.none()),
-      ensureScratchProject: Effect.succeed({ projectId: scratchProjectId }),
-    }),
-    Layer.mock(Launch.ThreadLaunchService)({
-      launch: (input) =>
-        Effect.sync(() => {
-          launches.push(input);
-          const threadId = input.threadId!;
-          const projection = idleThreadProjection({
-            ...liveThreadShell(threadId),
-            ...(input.surface === undefined ? {} : { surface: input.surface }),
-            ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
-            ...(input.title === undefined ? {} : { title: input.title }),
-          });
-          projections.set(threadId, projection);
-          return { threadId, projection, resumed: false };
-        }),
-    }),
-    Layer.mock(Threads.ThreadManagementService)({
-      getThreadShell: (id) => Effect.succeed(projections.has(id) ? liveThreadShell(id) : null),
-      sendToThread: (input) =>
-        Effect.sync(() => {
-          sends.push(input);
-          const run = runFor(input.threadId);
-          return {
-            dispatch: { sequence: 0, storedEvents: [] },
-            projection: projections.get(input.threadId)!,
-            message: {
-              id: input.messageId,
-              threadId: input.threadId,
-              runId: run.id,
-              nodeId: null,
-              role: "user" as const,
-              text: input.text,
-              attachments: [],
-              streaming: false,
-              createdAt: DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"),
-              updatedAt: DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"),
-              createdBy: input.createdBy,
-              creationSource: input.creationSource,
-            },
-            run,
-            turnItem: null,
-            delivery: "queued" as const,
-          };
-        }),
-      dispatch: () => Effect.succeed({ sequence: 0, storedEvents: [] }),
-    }),
-    Layer.mock(Projections.ProjectionStoreV2)({
-      getThreadRecords: (id) => {
-        const projection = projections.get(id);
-        return projection
-          ? Effect.succeed(projection)
-          : Effect.fail(new Projections.ProjectionStoreThreadNotFoundError({ threadId: id }));
-      },
-      getThread: (id) => Effect.succeed(projections.get(id)!.thread),
-      getThreadShell: (id) =>
-        Effect.succeed(
-          projections.has(id) ? { ...liveThreadShell(id), ...projections.get(id)!.thread } : null,
-        ),
-    }),
-    Layer.mock(Events.EventSinkV2)({
-      commitCommand: (input) =>
-        Effect.succeed({
-          receipt: {
-            commandId: input.commandId,
-            threadId: input.threadId,
-            commandType: input.commandType,
-            status: "accepted" as const,
-            acceptedAt: input.acceptedAt,
-            resultSequence: 0,
-            error: null,
-          },
-          storedEvents: [],
-          committed: true,
-          cancelledEffectCount: 0,
-        }).pipe(
-          Effect.tap(() =>
-            Effect.sync(() => {
-              posts.push(input);
-            }),
+    const seedThread = (threadId: ThreadId, surface?: "chat" | "work" | "builder") => {
+      const projection = idleThreadProjection({
+        ...liveThreadShell(threadId),
+        ...(surface === undefined ? {} : { surface }),
+      });
+      projections.set(threadId, projection);
+      return projection;
+    };
+    const boundaries = Layer.mergeAll(
+      Layer.mock(Folders.ManagedProjectFolders)({
+        namedProjectsRoot: Effect.succeed("/unused"),
+        scratchRoot: Effect.succeed(Option.none()),
+        ensureScratchProject: scratchUnavailable
+          ? Effect.fail(new Folders.ScratchUnavailableError())
+          : Effect.succeed({ projectId: scratchProjectId }),
+      }),
+      Layer.mock(Launch.ThreadLaunchService)({
+        launch: (input) =>
+          Effect.sync(() => {
+            launches.push(input);
+            const threadId = input.threadId!;
+            const projection = idleThreadProjection({
+              ...liveThreadShell(threadId),
+              ...(input.surface === undefined ? {} : { surface: input.surface }),
+              ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+              ...(input.title === undefined ? {} : { title: input.title }),
+            });
+            projections.set(threadId, projection);
+            return { threadId, projection, resumed: false };
+          }),
+      }),
+      Layer.mock(Threads.ThreadManagementService)({
+        getThreadShell: (id) => Effect.succeed(projections.has(id) ? liveThreadShell(id) : null),
+        sendToThread: (input) =>
+          Effect.sync(() => {
+            sends.push(input);
+            const run = runFor(input.threadId);
+            return {
+              dispatch: { sequence: 0, storedEvents: [] },
+              projection: projections.get(input.threadId)!,
+              message: {
+                id: input.messageId,
+                threadId: input.threadId,
+                runId: run.id,
+                nodeId: null,
+                role: "user" as const,
+                text: input.text,
+                attachments: [],
+                streaming: false,
+                createdAt: DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"),
+                updatedAt: DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"),
+                createdBy: input.createdBy,
+                creationSource: input.creationSource,
+              },
+              run,
+              turnItem: null,
+              delivery: "queued" as const,
+            };
+          }),
+        dispatch: () => Effect.succeed({ sequence: 0, storedEvents: [] }),
+      }),
+      Layer.mock(Projections.ProjectionStoreV2)({
+        getThreadRecords: (id) => {
+          const projection = projections.get(id);
+          return projection
+            ? Effect.succeed(projection)
+            : Effect.fail(new Projections.ProjectionStoreThreadNotFoundError({ threadId: id }));
+        },
+        getThread: (id) => Effect.succeed(projections.get(id)!.thread),
+        getThreadShell: (id) =>
+          Effect.succeed(
+            projections.has(id) ? { ...liveThreadShell(id), ...projections.get(id)!.thread } : null,
           ),
-        ),
-    }),
-    Layer.succeed(Scheduler.Scheduler, {
-      register: <E, R>(_name: string, _work: Effect.Effect<void, E, R>) => Effect.void,
-    }),
-    ServerConfig.layerTest(process.cwd(), { prefix: "t3-agent-builder-" }),
-  );
-  const database = Sqlite.layerMemory;
-  const store = Store.layer.pipe(Layer.provide(layerSharedIdentity)).pipe(Layer.provide(database));
-  const labels = Labels.layer
-    .pipe(Layer.provide(layerSharedIdentity))
-    .pipe(Layer.provide(Layer.merge(database, LabelEvents.layer.pipe(Layer.provide(database)))));
-  const agents = Agents.layer
-    .pipe(Layer.provide(RemoteLaunch.layer))
-    .pipe(Layer.provide(layerSharedIdentity))
-    .pipe(Layer.provide(Layer.mergeAll(boundaries, store, labels, database)));
-  const layer = Layer.mergeAll(
-    store,
-    agents,
-    labels,
-    database,
-    boundaries,
-    RemoteLaunch.layer,
-  ).pipe(Layer.provide(NodeServices.layer));
-  return { launches, sends, posts, projections, seedThread, runFor, layer };
-});
+      }),
+      Layer.mock(Events.EventSinkV2)({
+        commitCommand: (input) =>
+          Effect.succeed({
+            receipt: {
+              commandId: input.commandId,
+              threadId: input.threadId,
+              commandType: input.commandType,
+              status: "accepted" as const,
+              acceptedAt: input.acceptedAt,
+              resultSequence: 0,
+              error: null,
+            },
+            storedEvents: [],
+            committed: true,
+            cancelledEffectCount: 0,
+          }).pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                posts.push(input);
+              }),
+            ),
+          ),
+      }),
+      Layer.succeed(Scheduler.Scheduler, {
+        register: <E, R>(_name: string, _work: Effect.Effect<void, E, R>) => Effect.void,
+      }),
+      ServerConfig.layerTest(process.cwd(), { prefix: "t3-agent-builder-" }),
+    );
+    const database = Sqlite.layerMemory;
+    const store = Store.layer
+      .pipe(Layer.provide(layerSharedIdentity))
+      .pipe(Layer.provide(database));
+    const labels = Labels.layer
+      .pipe(Layer.provide(layerSharedIdentity))
+      .pipe(Layer.provide(Layer.merge(database, LabelEvents.layer.pipe(Layer.provide(database)))));
+    const agents = Agents.layer
+      .pipe(Layer.provide(RemoteLaunch.layer))
+      .pipe(Layer.provide(layerSharedIdentity))
+      .pipe(Layer.provide(Layer.mergeAll(boundaries, store, labels, database)));
+    const layer = Layer.mergeAll(
+      store,
+      agents,
+      labels,
+      database,
+      boundaries,
+      RemoteLaunch.layer,
+    ).pipe(Layer.provide(NodeServices.layer));
+    return { launches, sends, posts, projections, seedThread, runFor, layer };
+  });
 
 const createInput = (overrides: Partial<AgentUpsertInput> = {}): AgentUpsertInput => ({
   name: "Juniper",
@@ -219,7 +225,7 @@ const createInput = (overrides: Partial<AgentUpsertInput> = {}): AgentUpsertInpu
 describe("builderStart", () => {
   it.effect("launches a builder-surface thread with the owner's first words", () =>
     Effect.gen(function* () {
-      const h = yield* makeHarness;
+      const h = yield* makeHarness();
       yield* Effect.gen(function* () {
         const agents = yield* Agents.AgentService;
         const result = yield* agents.builderStart({
@@ -245,7 +251,7 @@ describe("builderStart", () => {
 
   it.effect("falls back to Scratch without a project", () =>
     Effect.gen(function* () {
-      const h = yield* makeHarness;
+      const h = yield* makeHarness();
       yield* Effect.gen(function* () {
         const agents = yield* Agents.AgentService;
         const result = yield* agents.builderStart({ modelSelection, text: "Help me plan" });
@@ -257,7 +263,7 @@ describe("builderStart", () => {
 
   it.effect("refuses a project folder that no longer exists before launching", () =>
     Effect.gen(function* () {
-      const h = yield* makeHarness;
+      const h = yield* makeHarness();
       yield* Effect.gen(function* () {
         const agents = yield* Agents.AgentService;
         const failure = yield* agents
@@ -283,7 +289,7 @@ describe("builder turn context", () => {
 
   it.effect("briefs builder threads with the builder prompt, and nothing else", () =>
     Effect.gen(function* () {
-      const h = yield* makeHarness;
+      const h = yield* makeHarness();
       yield* Effect.gen(function* () {
         const store = yield* Store.AgentStore;
         const builder = ThreadId.make("agent-builder:test");
@@ -301,7 +307,7 @@ describe("builder turn context", () => {
 describe("recordProposal", () => {
   it.effect("emits one proposal item per thread; later calls replace earlier ones", () =>
     Effect.gen(function* () {
-      const h = yield* makeHarness;
+      const h = yield* makeHarness();
       yield* Effect.gen(function* () {
         const agents = yield* Agents.AgentService;
         const threadId = ThreadId.make("agent-builder:test");
@@ -338,7 +344,7 @@ describe("recordProposal", () => {
 
   it.effect("refuses threads that are not builders", () =>
     Effect.gen(function* () {
-      const h = yield* makeHarness;
+      const h = yield* makeHarness();
       yield* Effect.gen(function* () {
         const agents = yield* Agents.AgentService;
         const chat = ThreadId.make("thread:chat");
@@ -356,7 +362,7 @@ describe("recordProposal", () => {
 describe("kickoff", () => {
   it.effect("opens a create with the agent's own turn, never an owner message", () =>
     Effect.gen(function* () {
-      const h = yield* makeHarness;
+      const h = yield* makeHarness();
       yield* Effect.gen(function* () {
         const agents = yield* Agents.AgentService;
         const { agent } = yield* agents.upsert(createInput({ kickoff: true }));
@@ -375,7 +381,7 @@ describe("kickoff", () => {
 
   it.effect("stays quiet without kickoff, and on edits", () =>
     Effect.gen(function* () {
-      const h = yield* makeHarness;
+      const h = yield* makeHarness();
       yield* Effect.gen(function* () {
         const agents = yield* Agents.AgentService;
         const { agent } = yield* agents.upsert(createInput());
@@ -694,7 +700,7 @@ it.effect(
   "creating a remotely owned agent delegates creation and keeps its target-authored identity",
   () =>
     Effect.gen(function* () {
-      const harness = yield* makeHarness;
+      const harness = yield* makeHarness();
       yield* Effect.gen(function* () {
         const remote = yield* RemoteLaunch.RemoteThreadLaunch;
         const store = yield* Store.AgentStore;
@@ -719,4 +725,78 @@ it.effect(
         expect(harness.sends).toEqual([]);
       }).pipe(Effect.provide(harness.layer));
     }).pipe(Effect.scoped),
+);
+
+it.effect("forwards edits of a replica to its owner and returns the owner result", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness();
+    yield* Effect.gen(function* () {
+      const store = yield* Store.AgentStore;
+      const remote = yield* RemoteLaunch.RemoteThreadLaunch;
+      const agents = yield* Agents.AgentService;
+      const machine = EnvironmentId.make("machine:owner");
+      const existing = yield* store.save({ ...agentFixture("edit-remote"), ownerMachine: machine });
+      const calls: AgentUpsertInput[] = [];
+      yield* remote.registerAgentCreate((target, input, id) => {
+        expect(target).toBe(machine);
+        expect(id).toBe(existing.id);
+        calls.push(input);
+        return Effect.succeed({ agent: { ...existing, instructions: input.instructions } });
+      });
+      const { agent } = yield* agents.upsert(
+        createInput({ id: existing.id, instructions: "Watch CI carefully." }),
+      );
+      expect(agent.instructions).toBe("Watch CI carefully.");
+      expect(calls).toHaveLength(1);
+      expect((yield* store.get(existing.id)).instructions).toBe(existing.instructions);
+      expect(h.launches).toEqual([]);
+      yield* remote.registerAgentCreate(() =>
+        Effect.fail(new ThreadRemoteError({ reason: "offline" })),
+      );
+      const refused = yield* agents.upsert(createInput({ id: existing.id })).pipe(Effect.flip);
+      expect(refused.message).toContain(`Edit on ${machine} (offline)`);
+    }).pipe(Effect.provide(h.layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("starts the builder in a repository when Scratch is unavailable", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness(true);
+    yield* Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at) VALUES ('repository:builder', 'Builder repo', '/repo', '[]', '2026-01-01', '2026-01-01')`;
+      const agents = yield* Agents.AgentService;
+      const result = yield* agents.builderStart({ modelSelection, text: "Help with CI" });
+      expect(result.projectId).toBe("repository:builder");
+      expect(h.launches[0]?.surface).toBe("builder");
+    }).pipe(Effect.provide(h.layer));
+  }),
+);
+
+it.effect("routes replica deletion to its owner and refuses an offline owner", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness();
+    yield* Effect.gen(function* () {
+      const store = yield* Store.AgentStore;
+      const remote = yield* RemoteLaunch.RemoteThreadLaunch;
+      const agents = yield* Agents.AgentService;
+      const machine = EnvironmentId.make("machine:owner");
+      const existing = yield* store.save({
+        ...agentFixture("delete-remote"),
+        ownerMachine: machine,
+      });
+      const refused = yield* agents.delete(existing.id).pipe(Effect.flip);
+      expect(refused.message).toContain("offline");
+      const calls: string[] = [];
+      yield* remote.registerAgentDelete((target, id) =>
+        Effect.sync(() => {
+          calls.push(`${target}:${id}`);
+          return { deleted: true };
+        }),
+      );
+      expect(yield* agents.delete(existing.id)).toEqual({ deleted: true });
+      expect(calls).toEqual([`${machine}:${existing.id}`]);
+      expect((yield* store.get(existing.id)).name).toBe(existing.name);
+    }).pipe(Effect.provide(h.layer));
+  }).pipe(Effect.scoped),
 );

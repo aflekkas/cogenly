@@ -322,3 +322,19 @@ export function stepTypingSlot(
     typingKey,
   };
 }
+
+/** A completed projection clears a formerly running contact instead of retaining its old face. */
+export function agentConversationState(input: {
+  needsInput: boolean;
+  runStatuses: ReadonlyArray<string>;
+  prior: AgentContact["state"];
+}): AgentContact["state"] {
+  if (input.needsInput) return "blocked";
+  if (
+    input.runStatuses.some((status) =>
+      ["queued", "preparing", "starting", "running"].includes(status),
+    )
+  )
+    return "thinking";
+  return input.prior === "thinking" || input.prior === "working" ? "idle" : input.prior;
+}

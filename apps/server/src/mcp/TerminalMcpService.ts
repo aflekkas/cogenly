@@ -118,7 +118,7 @@ const make = Effect.gen(function* () {
       );
     if (terminalPolicy === null)
       return yield* denied(
-        "Agent terminals require enabled tools, full-access/default mode and all sensitive agent grants.",
+        "Agent terminals require enabled tools, full-access/default mode, read and execute grants, and an available sandbox for limited agents.",
       );
     return { ...context, terminalPolicy };
   });

@@ -1,3 +1,6 @@
+import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
+import { MessageId } from "@cogenly/contracts";
+import { decideFallback } from "./providerFallback.ts";
 import * as AccountAccess from "../accounts/AccountAccess.ts";
 import * as Access from "./AgentAccessScope.ts";
 import {
@@ -379,6 +382,34 @@ const make = Effect.gen(function* () {
         yield* notifyApprovals;
         return { approval: yield* getApproval(id) };
       }).pipe(Effect.mapError(wrap));
+  const threadManagement = yield* Effect.serviceOption(Threads.ThreadManagementService);
+  const notifyDecision = ({ approval }: { approval: AgentApproval }) =>
+    Effect.gen(function* () {
+      if (approval.agentId === null || threadManagement._tag === "None") return;
+      const agent = yield* store.get(approval.agentId);
+      if (agent.projectId === null) return;
+      const key = `agent-approval-decision:${approval.id}`;
+      yield* threadManagement.value.sendToThread({
+        projectId: agent.projectId,
+        threadId: agent.conversationThreadId,
+        commandId: CommandId.make(key),
+        messageId: MessageId.make(key),
+        text: `The owner ${approval.status} your ${approval.action.actionKind} request (${approval.id}).${approval.resultThreadId ? ` Work thread: ${approval.resultThreadId}.` : ""} Continue within the decided permissions; a rejection does not authorize the action.`,
+        attachments: [],
+        modelSelection: decideFallback(agent, DateTime.toEpochMillis(yield* DateTime.now))
+          .selection,
+        mode: "queue",
+        createdBy: "agent",
+        creationSource: "server",
+      });
+    }).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("Could not deliver an agent approval decision", {
+          approvalId: approval.id,
+          cause,
+        }),
+      ),
+    );
   const executeWork = (
     input: AgentStartWorkInput,
     key: string,
@@ -387,6 +418,9 @@ const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       const agent = yield* store.get(input.agentId);
+      const fallback = decideFallback(agent, DateTime.toEpochMillis(yield* DateTime.now));
+      if (fallback.restored)
+        yield* store.setFallback(agent.id, { index: 0, reason: null, until: null });
       const id = ThreadId.make(`agent-work:${agent.id}:${key}`);
       // Stable launch identity and the standard launch service make approval retries safe.
       yield* sql`INSERT OR IGNORE INTO agent_run_threads(thread_id, agent_id, trigger_kind, source_run_id) VALUES (${id}, ${agent.id}, ${triggerKind}, ${sourceRunId})`;
@@ -400,7 +434,7 @@ const make = Effect.gen(function* () {
             : { projectFolderId: input.projectFolderId }),
           title: input.title,
           scopeSummary: input.prompt,
-          modelSelection: agent.modelSelection,
+          modelSelection: fallback.selection,
         },
         {
           origin: "agent",
@@ -713,6 +747,7 @@ const make = Effect.gen(function* () {
         )
         .pipe(
           Effect.tap(() => notifyApprovals),
+          Effect.tap(notifyDecision),
           Effect.mapError(wrap),
         ),
     reject: (id) =>
@@ -728,6 +763,7 @@ const make = Effect.gen(function* () {
         )
         .pipe(
           Effect.tap(() => notifyApprovals),
+          Effect.tap(notifyDecision),
           Effect.mapError(wrap),
         ),
     activity: (agentId) =>
@@ -744,7 +780,7 @@ const make = Effect.gen(function* () {
         }>`SELECT r.*, CASE WHEN r.ordinal = 1 THEN w.trigger_context_json END AS trigger_context_json, CASE WHEN r.ordinal = 1 THEN COALESCE(t.trigger_kind, CASE WHEN w.run_id IS NOT NULL THEN 'trigger' ELSE 'owner_message' END) ELSE 'owner_message' END AS trigger_kind,
         (SELECT substr(json_extract(m.payload_json, '$.text'), 1, 1200) FROM orchestration_v2_projection_messages m WHERE m.thread_id = r.thread_id AND m.run_id = r.run_id AND m.role = 'assistant' AND m.streaming = 0 ORDER BY m.created_at DESC LIMIT 1) AS summary
         FROM orchestration_v2_projection_runs r LEFT JOIN agent_run_threads t ON t.thread_id = r.thread_id LEFT JOIN agent_work_runs w ON w.work_thread_id = r.thread_id
-        WHERE r.thread_id = ${agent.conversationThreadId} OR t.agent_id = ${agentId} OR w.agent_id = ${agentId} ORDER BY r.requested_at DESC, r.run_id LIMIT 100`;
+        WHERE (r.thread_id = ${agent.conversationThreadId} OR t.agent_id = ${agentId} OR w.agent_id = ${agentId}) AND COALESCE(json_extract(r.payload_json, '$.userMessageId'), '') NOT LIKE 'agent-kickoff:%' ORDER BY r.requested_at DESC, r.run_id LIMIT 100`;
         const runs = yield* Effect.forEach(rows, (r) =>
           Effect.gen(function* () {
             const data = yield* decodeJsonRecord(r.payload_json);

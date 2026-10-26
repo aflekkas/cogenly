@@ -56,6 +56,11 @@ export type RemoteAgentCreate = (
   agentId: AgentId,
 ) => Effect.Effect<AgentMutationResult, ThreadRemoteError>;
 
+export type RemoteAgentDelete = (
+  machine: EnvironmentId,
+  id: AgentId,
+) => Effect.Effect<{ deleted: boolean }, ThreadRemoteError>;
+
 export type RemoteTaskBranch = (
   threadId: ThreadId,
   resultKey: string,
@@ -90,6 +95,10 @@ export class RemoteThreadLaunch extends Context.Service<
     readonly registerCopyResult: (
       copy: RemoteTaskBranch,
     ) => Effect.Effect<void, never, Scope.Scope>;
+    readonly deleteAgent: RemoteAgentDelete;
+    readonly registerAgentDelete: (
+      remove: RemoteAgentDelete,
+    ) => Effect.Effect<void, never, Scope.Scope>;
     readonly createAgent: RemoteAgentCreate;
     readonly registerAgentCreate: (
       create: RemoteAgentCreate,
@@ -111,6 +120,7 @@ export const layer = Layer.effect(
     const delegation = yield* Ref.make<RemoteDelegation | undefined>(undefined);
     const catalog = yield* Ref.make<RemoteMachineCatalog | undefined>(undefined);
     const progress = yield* Ref.make<RemoteTaskPending | undefined>(undefined);
+    const agentDeletion = yield* Ref.make<RemoteAgentDelete | undefined>(undefined);
     const agents = yield* Ref.make<RemoteAgentCreate | undefined>(undefined);
     const results = yield* Ref.make<RemoteTaskBranch | undefined>(undefined);
     const schedules = yield* Ref.make<
@@ -141,6 +151,18 @@ export const layer = Layer.effect(
         Ref.get(results).pipe(
           Effect.flatMap((copy) =>
             copy === undefined ? Effect.succeed(undefined) : copy(threadId, key),
+          ),
+        ),
+      registerAgentDelete: (remove) =>
+        Effect.acquireRelease(Ref.set(agentDeletion, remove), () =>
+          Ref.set(agentDeletion, undefined),
+        ),
+      deleteAgent: (machine, id) =>
+        Ref.get(agentDeletion).pipe(
+          Effect.flatMap((remove) =>
+            remove === undefined
+              ? Effect.fail(new ThreadRemoteError({ reason: "offline" }))
+              : remove(machine, id),
           ),
         ),
       registerAgentCreate: (create) =>

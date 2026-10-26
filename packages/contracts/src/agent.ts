@@ -140,6 +140,15 @@ export const AgentOwnProfileUpdateInput = Schema.Struct({
   fallbackChain: Schema.optional(Schema.Array(ModelSelection)),
 });
 export type AgentOwnProfileUpdateInput = typeof AgentOwnProfileUpdateInput.Type;
+export const AgentUpdateInput = Schema.Struct({
+  id: AgentId,
+  ...AgentOwnProfileUpdateInput.fields,
+  permissions: Schema.optional(AgentPermissions),
+  runtimeMode: Schema.optional(RuntimeMode),
+  dailyRunCap: Schema.optional(AgentFields.dailyRunCap),
+  notifyPolicy: Schema.optional(AgentPolicyFields.notifyPolicy),
+});
+export type AgentUpdateInput = typeof AgentUpdateInput.Type;
 export const AgentKey = Schema.Struct({ id: AgentId });
 /**
  * Re-file an agent's conversation in a project folder, or null for none. An
@@ -249,3 +258,7 @@ export class AgentError extends Schema.TaggedError<AgentError>()("AgentError", {
   message: Schema.String,
   cause: Schema.optional(Schema.Defect()),
 }) {}
+
+/** App-authored setup and retry inputs are never owner-authored conversation content. */
+export const isAgentInternalMessage = (id: string | undefined): boolean =>
+  id?.startsWith("agent-kickoff:") === true || id?.startsWith("agent-fallback:") === true;

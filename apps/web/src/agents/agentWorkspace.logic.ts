@@ -711,6 +711,10 @@ export function describeRunAction(
     return title ? `${verb} “${title}”` : `${verb} an open item`;
   };
   switch (action.kind) {
+    case "mcp:memory_remember":
+      return { text: "Remembered a note" };
+    case "mcp:memory_forget":
+      return { text: "Forgot a note" };
     case "commitment_proposed":
       return { text: item("Proposed") };
     case "commitment_status_changed":

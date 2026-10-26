@@ -185,6 +185,13 @@ const make = Effect.gen(function* () {
           return yield* denied(
             "Persistent agents cannot start agent builders; only the owner creates agents.",
           );
+        if (
+          name === "update_agent" &&
+          (params.permissions !== undefined || params.runtimeMode !== undefined)
+        )
+          return yield* denied(
+            "Only the owner can change agent authority. Use request_agent_approval for your own permissions.",
+          );
         if (name === "update_agent_project" && params.id !== agent.id)
           return yield* denied(
             "An agent can only move its own conversation between projects. Ask the owner to move other agents.",
@@ -420,11 +427,12 @@ const make = Effect.gen(function* () {
                     ? "draft"
                     : "execute";
         if (!agent.permissions[grant]) return yield* denied(`This agent has no ${grant} grant.`);
-        // Arbitrary shell/browser/device writes can send, merge, deploy or delete.
+        // Terminals enforce their sandbox in TerminalMcpService. Browser/device writes
+        // can send, merge, deploy or delete.
         // They cannot safely be reduced to an execute grant by parsing model text.
         // Computer use and adding a project (create or clone) use the ordinary execute grant.
         if (
-          /^(terminal_|preview_(?!close$|list$)|device_(?!setup_status$)|project_(?:update|delete)$)/.test(
+          /^(preview_(?!close$|list$)|device_(?!setup_status$)|project_(?:update|delete)$)/.test(
             name,
           ) &&
           !["send", "create_pr", "merge", "deploy", "delete"].every(

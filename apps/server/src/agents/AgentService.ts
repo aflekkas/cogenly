@@ -1,17 +1,20 @@
 import { ProjectRepositoryMismatchError } from "@cogenly/contracts";
 import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
 import { isReplayedCommandId } from "../orchestration-v2/ReplayedCommandIds.ts";
+import * as Machines from "../machines/Machines.ts";
 import * as Access from "./AgentAccessScope.ts";
 import { canReceiveAgentEvent } from "./agentEventPolicy.ts";
 import { agentKickoffText } from "./builderPrompt.ts";
 import {
   BUILDER_THREAD_TITLE,
   defaultAgentPermissions,
+  defaultAgentOwner,
   AgentError,
   AgentId,
   CommandId,
   EventId,
   MessageId,
+  ProjectId,
   ThreadId,
   TurnItemId,
   AgentEventContext,
@@ -25,9 +28,11 @@ import {
   type AgentSetProjectInput,
   type ProjectLabelId,
   type AgentUpsertInput,
+  type AgentUpdateInput,
   type AgentSendInput,
   type AgentWorkRun,
   type ScheduledTask,
+  type ScheduledTaskRunStatus,
 } from "@cogenly/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Schema from "effect/Schema";
@@ -87,6 +92,7 @@ export class AgentService extends Context.Service<
       input: AgentUpsertInput,
       creationId?: AgentId,
     ) => Effect.Effect<{ agent: Agent }, AgentError>;
+    readonly update: (input: AgentUpdateInput) => Effect.Effect<{ agent: Agent }, AgentError>;
     /** Re-file the agent's conversation in a project folder, or unfile it with null. */
     readonly setProject: (
       input: AgentSetProjectInput,
@@ -113,7 +119,10 @@ export class AgentService extends Context.Service<
       fireKey: string,
       prompt: string,
       context?: AgentEventContext,
-    ) => Effect.Effect<boolean, AgentError>;
+    ) => Effect.Effect<
+      "started" | Extract<ScheduledTaskRunStatus, `skipped_${string}`>,
+      AgentError
+    >;
     /** Also called on startup; terminal runs with undelivered postbacks survive restarts. */
     readonly reconcile: (options?: {
       readonly afterRestart?: boolean;
@@ -124,6 +133,7 @@ export class AgentService extends Context.Service<
 const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const shared = yield* SharedState.SharedState;
+  const machines = yield* Effect.serviceOption(Machines.Machines);
   const remoteLaunch = yield* Effect.serviceOption(RemoteLaunch.RemoteThreadLaunch);
   const store = yield* Store.AgentStore;
   const launch = yield* ThreadLaunch.ThreadLaunchService;
@@ -274,6 +284,26 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const agent = (yield* store.list()).find((candidate) => candidate.id === id);
       if (agent === undefined) return { deleted: false };
+      if (agent.ownerMachine !== undefined && agent.ownerMachine !== shared.environmentId) {
+        if (Option.isNone(remoteLaunch))
+          return yield* new AgentError({
+            message: "The owner machine is offline. Reconnect it to delete this agent.",
+          });
+        const result = yield* remoteLaunch.value.deleteAgent(agent.ownerMachine, id).pipe(
+          Effect.mapError(
+            (cause) =>
+              new AgentError({
+                message:
+                  cause.reason === "offline"
+                    ? "The owner machine is offline. Reconnect it to delete this agent."
+                    : cause.message,
+                cause,
+              }),
+          ),
+        );
+        yield* changed;
+        return result;
+      }
       // Retire before stopping work so a due trigger cannot launch while deletion waits.
       yield* store.retire(id);
       const runs = yield* store.runs(id);
@@ -300,6 +330,46 @@ const make = Effect.gen(function* () {
       yield* changed;
       return { deleted };
     }).pipe(Effect.mapError(failure));
+  const retryFallback = Effect.fn("AgentService.retryFallback")(function* (
+    agent: Agent,
+    threadId: ThreadId,
+    projection: ProjectionStore.ProjectionRecords<"runs" | "messages" | "turnItems">,
+  ) {
+    const run = projection.runs.at(-1);
+    if (run?.status !== "failed" || run.userMessageId?.startsWith("agent-fallback:")) return false;
+    const error = projection.turnItems.find(
+      (item) => item.type === "error" && item.runId === run.id,
+    );
+    if (error?.type !== "error") return false;
+    const chain = fallbackChainOf(agent);
+    const failedIndex = chainIndexOf(chain, run.modelSelection);
+    const advance = advanceFallback({
+      chainLength: chain.length,
+      failedIndex,
+      reason: classifyProviderFailure(error.failure),
+      resetAt: error.failure.resetAt,
+      nowMs: DateTime.toEpochMillis(yield* DateTime.now),
+      existingUntil: agent.fallbackUntil ?? null,
+    });
+    if (advance === null) return false;
+    yield* store.setFallback(agent.id, advance);
+    const message = projection.messages.find((message) => message.id === run.userMessageId);
+    if (!message || advance.index <= failedIndex) return false;
+    const key = `agent-fallback:${run.id}`;
+    yield* threads.sendToThread({
+      projectId: projection.thread.projectId,
+      threadId,
+      commandId: CommandId.make(key),
+      messageId: MessageId.make(key),
+      text: message.text,
+      attachments: message.attachments,
+      modelSelection: chain[advance.index]!,
+      mode: "queue",
+      createdBy: "agent",
+      creationSource: "server",
+    });
+    return true;
+  });
   const reconcile: AgentService["Service"]["reconcile"] = (options) =>
     Effect.gen(function* () {
       const deletions = yield* sql<{
@@ -307,6 +377,26 @@ const make = Effect.gen(function* () {
       }>`SELECT d.id FROM shared_documents d JOIN agents a ON a.agent_id=d.id WHERE d.kind='agent' AND d.tombstone_json IS NOT NULL`;
       for (const document of deletions) yield* removeAgent(AgentId.make(document.id));
       const runs = yield* store.runs();
+      // Conversation and governed Work runs share the same retry path. Background
+      // records are handled below so their reservation remains active during retry.
+      for (const agent of yield* store.list()) {
+        if (agent.ownerMachine !== undefined && agent.ownerMachine !== shared.environmentId)
+          continue;
+        const work = yield* sql<{
+          thread_id: string;
+        }>`SELECT thread_id FROM agent_run_threads WHERE agent_id = ${agent.id}`;
+        const ids = new Set([
+          agent.conversationThreadId,
+          ...work.map((row) => ThreadId.make(row.thread_id)),
+        ]);
+        for (const threadId of ids) {
+          if (runs.some((record) => record.workThreadId === threadId)) continue;
+          yield* projections.getThreadRecords(threadId, ["runs", "messages", "turnItems"]).pipe(
+            Effect.flatMap((projection) => retryFallback(agent, threadId, projection)),
+            Effect.ignore,
+          );
+        }
+      }
       for (const record of runs) {
         yield* Effect.gen(function* () {
           const agent = yield* store.get(record.agentId);
@@ -332,7 +422,7 @@ const make = Effect.gen(function* () {
               : "This job was interrupted before its first turn started.";
             yield* sql.withTransaction(
               Effect.gen(function* () {
-                yield* store.outcome(agent.id, false);
+                if (!options?.afterRestart) yield* store.outcome(agent.id, false);
                 yield* store.finishRun(record.id, "failed", summary);
               }),
             );
@@ -360,6 +450,7 @@ const make = Effect.gen(function* () {
               .length > 0
           )
             return;
+          if (yield* retryFallback(agent, record.workThreadId, projection)) return;
           const succeeded = run.status === "completed";
           const response = projection.messages
             .filter((m) => m.role === "assistant" && m.runId === run.id)
@@ -376,7 +467,7 @@ const make = Effect.gen(function* () {
             failureItem?.type === "error"
               ? advanceFallback({
                   chainLength: fallbackChainOf(agent).length,
-                  failedIndex: chainIndexOf(fallbackChainOf(agent), record.modelSelection),
+                  failedIndex: chainIndexOf(fallbackChainOf(agent), run.modelSelection),
                   reason: classifyProviderFailure(failureItem.failure),
                   resetAt: failureItem.failure.resetAt,
                   nowMs: DateTime.toEpochMillis(yield* DateTime.now),
@@ -385,7 +476,13 @@ const make = Effect.gen(function* () {
               : null;
           const updated = yield* sql.withTransaction(
             Effect.gen(function* () {
-              yield* store.outcome(agent.id, succeeded);
+              const restarted = projection.turnItems.some(
+                (item) =>
+                  item.runId === run.id &&
+                  item.type === "error" &&
+                  item.failure.code === "server_restarted",
+              );
+              if (!restarted) yield* store.outcome(agent.id, succeeded);
               if (advance !== null)
                 yield* store.setFallback(agent.id, {
                   index: advance.index,
@@ -433,6 +530,170 @@ const make = Effect.gen(function* () {
           ),
         );
       }
+    }).pipe(Effect.mapError(failure));
+  const upsert: AgentService["Service"]["upsert"] = (input, creationId) =>
+    Effect.gen(function* () {
+      const at = DateTime.formatIso(yield* DateTime.now);
+      const existing =
+        input.id === undefined
+          ? creationId === undefined
+            ? null
+            : yield* store.get(creationId).pipe(Effect.orElseSucceed(() => null))
+          : yield* store.get(input.id);
+      const machineList = Option.isSome(machines)
+        ? ((yield* machines.value.list.pipe(Effect.orElseSucceed(() => null)))?.machines ?? [])
+        : [];
+      const ownerMachine =
+        input.ownerMachine ??
+        existing?.ownerMachine ??
+        defaultAgentOwner(shared.environmentId, machineList);
+      const ownsAgent = ownerMachine === shared.environmentId;
+      const id =
+        existing?.id ?? creationId ?? AgentId.make(`agent:${yield* crypto.randomUUIDv4()}`);
+      if (!ownsAgent) {
+        if (Option.isNone(remoteLaunch))
+          return yield* new AgentError({
+            message: "That machine is unavailable. Create the agent on this machine instead.",
+          });
+        const ownerName = Option.isSome(machines)
+          ? ((yield* machines.value.list.pipe(Effect.orElseSucceed(() => null)))?.machines.find(
+              (machine) => machine.environmentId === ownerMachine,
+            )?.name ?? ownerMachine)
+          : ownerMachine;
+        const result = yield* remoteLaunch.value
+          .createAgent(ownerMachine, { ...input, ownerMachine }, id)
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new AgentError({
+                  message:
+                    cause.reason === "offline"
+                      ? `Edit on ${ownerName} (offline). Reconnect that machine to save changes.`
+                      : cause.message,
+                  cause,
+                }),
+            ),
+          );
+        yield* changed;
+        return result;
+      }
+      const conversationThreadId =
+        existing?.conversationThreadId ?? ThreadId.make(`agent-conversation:${id}`);
+      if (ownsAgent) {
+        const folderId =
+          input.projectFolderId === undefined ? existing?.projectFolderId : input.projectFolderId;
+        if (input.projectId !== null)
+          yield* membership.validate({ projectId: input.projectId, projectFolderId: folderId });
+      }
+      if (existing === null && ownsAgent) {
+        if (input.projectId === null)
+          return yield* new AgentError({ message: "Choose a project to create an agent." });
+        // Before the launch, so a refused project leaves no orphan conversation.
+        if (input.projectFolderId !== undefined && input.projectFolderId !== null)
+          yield* requireActiveProject(input.projectFolderId);
+        yield* launch.launch({
+          agent: { id, role: "conversation" },
+          commandId: CommandId.make(`agent-create:${id}`),
+          threadId: conversationThreadId,
+          projectId: input.projectId,
+          ...(input.projectFolderId == null ? {} : { projectFolderId: input.projectFolderId }),
+          title: input.name,
+          modelSelection: input.modelSelection,
+          runtimeMode: input.runtimeMode,
+          interactionMode: "default",
+          workspaceStrategy: { type: "root" },
+          createdBy: "user",
+          creationSource: "web",
+        });
+      }
+      if (
+        ownsAgent &&
+        input.projectFolderId !== undefined &&
+        (existing === null
+          ? input.projectFolderId !== null
+          : input.projectFolderId !== existing.projectFolderId)
+      )
+        yield* fileConversation(conversationThreadId, input.projectFolderId);
+      const { kickoff: _kickoff, projectFolderId: _projectFolderId, ...profile } = input;
+      // Editing the primary or the chain restarts fallback from the primary.
+      const sameSelection = (a: Agent["modelSelection"], b: Agent["modelSelection"]) => {
+        const aOptions = Object.entries(a.options ?? {});
+        const bOptions = new Map(Object.entries(b.options ?? {}));
+        return (
+          a.instanceId === b.instanceId &&
+          a.model === b.model &&
+          aOptions.length === bOptions.size &&
+          aOptions.every(([key, value]) => bOptions.get(key) === value)
+        );
+      };
+      // An edit that omits the chain keeps the stored one; only a chain
+      // that actually differs (or a new primary) restarts fallback.
+      const nextChain = input.fallbackChain ?? existing?.fallbackChain ?? [];
+      const chainChanged =
+        existing !== null &&
+        (!sameSelection(input.modelSelection, existing.modelSelection) ||
+          nextChain.length !== (existing.fallbackChain ?? []).length ||
+          nextChain.some(
+            (entry, index) => !sameSelection(entry, (existing.fallbackChain ?? [])[index]!),
+          ));
+      const agent = yield* store.save({
+        ...profile,
+        ownerMachine,
+        fallbackChain: nextChain,
+        projectFolderId: null,
+        responsibility: input.responsibility ?? existing?.responsibility ?? "",
+        permissions: input.permissions ?? existing?.permissions ?? defaultAgentPermissions,
+        notifyPolicy: input.notifyPolicy ?? existing?.notifyPolicy ?? "meaningful_changes",
+        id,
+        conversationThreadId,
+        createdAt: existing?.createdAt ?? at,
+        updatedAt: at,
+        consecutiveFailures: existing?.consecutiveFailures ?? 0,
+        backoffUntil: existing?.backoffUntil ?? null,
+        fallbackIndex: chainChanged ? 0 : (existing?.fallbackIndex ?? 0),
+        fallbackReason: chainChanged ? null : (existing?.fallbackReason ?? null),
+        fallbackUntil: chainChanged ? null : (existing?.fallbackUntil ?? null),
+      });
+      if (existing !== null && ownsAgent) {
+        yield* ensureConversation(agent);
+        yield* threads.dispatch({
+          type: "thread.runtime-mode.set",
+          commandId: CommandId.make(`agent-mode:${id}:${at}`),
+          threadId: conversationThreadId,
+          runtimeMode: agent.runtimeMode,
+        });
+        yield* threads.dispatch({
+          type: "thread.metadata.update",
+          commandId: CommandId.make(`agent-name:${id}:${at}`),
+          threadId: conversationThreadId,
+          title: agent.name,
+        });
+      }
+      if (existing === null && ownsAgent && input.kickoff === true) {
+        // The agent opens with its own turn; clients hide a turn the owner
+        // did not write. The agent exists either way, so a lost greeting
+        // is a warning, not a failed create.
+        yield* threads
+          .sendToThread({
+            projectId: yield* workspace(agent),
+            commandId: CommandId.make(`agent-kickoff:${id}`),
+            messageId: MessageId.make(`agent-kickoff:${id}`),
+            threadId: conversationThreadId,
+            text: agentKickoffText,
+            attachments: [],
+            modelSelection: agent.modelSelection,
+            mode: "auto",
+            createdBy: "agent",
+            creationSource: "server",
+          })
+          .pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("Agent kickoff turn did not start", { agentId: id, cause }),
+            ),
+          );
+      }
+      yield* changed;
+      return { agent };
     }).pipe(Effect.mapError(failure));
   yield* scheduler.register("agents", reconcile());
   return AgentService.of({
@@ -488,152 +749,34 @@ const make = Effect.gen(function* () {
           );
         }),
       ),
-    upsert: (input, creationId) =>
+    upsert,
+    update: (input) =>
       Effect.gen(function* () {
-        const at = DateTime.formatIso(yield* DateTime.now);
-        const existing =
-          input.id === undefined
-            ? creationId === undefined
-              ? null
-              : yield* store.get(creationId).pipe(Effect.orElseSucceed(() => null))
-            : yield* store.get(input.id);
-        const ownerMachine =
-          input.ownerMachine ?? existing?.ownerMachine ?? (yield* shared.defaultOwner);
-        const ownsAgent = ownerMachine === shared.environmentId;
-        const id =
-          existing?.id ?? creationId ?? AgentId.make(`agent:${yield* crypto.randomUUIDv4()}`);
-        if (existing === null && !ownsAgent) {
-          if (Option.isNone(remoteLaunch))
-            return yield* new AgentError({
-              message: "That machine is unavailable. Create the agent on this machine instead.",
-            });
-          yield* remoteLaunch.value
-            .createAgent(ownerMachine, input, id)
-            .pipe(Effect.mapError((cause) => new AgentError({ message: cause.message, cause })));
-          yield* changed;
-          return { agent: yield* store.get(id) };
-        }
-        const conversationThreadId =
-          existing?.conversationThreadId ?? ThreadId.make(`agent-conversation:${id}`);
-        if (ownsAgent) {
-          const folderId =
-            input.projectFolderId === undefined ? existing?.projectFolderId : input.projectFolderId;
-          if (input.projectId !== null)
-            yield* membership.validate({ projectId: input.projectId, projectFolderId: folderId });
-        }
-        if (existing === null && ownsAgent) {
-          if (input.projectId === null)
-            return yield* new AgentError({ message: "Choose a project to create an agent." });
-          // Before the launch, so a refused project leaves no orphan conversation.
-          if (input.projectFolderId !== undefined && input.projectFolderId !== null)
-            yield* requireActiveProject(input.projectFolderId);
-          yield* launch.launch({
-            agent: { id, role: "conversation" },
-            commandId: CommandId.make(`agent-create:${id}`),
-            threadId: conversationThreadId,
-            projectId: input.projectId,
-            ...(input.projectFolderId == null ? {} : { projectFolderId: input.projectFolderId }),
-            title: input.name,
-            modelSelection: input.modelSelection,
-            runtimeMode: input.runtimeMode,
-            interactionMode: "default",
-            workspaceStrategy: { type: "root" },
-            createdBy: "user",
-            creationSource: "web",
-          });
-        }
-        if (
-          ownsAgent &&
-          input.projectFolderId !== undefined &&
-          (existing === null
-            ? input.projectFolderId !== null
-            : input.projectFolderId !== existing.projectFolderId)
-        )
-          yield* fileConversation(conversationThreadId, input.projectFolderId);
-        const { kickoff: _kickoff, projectFolderId: _projectFolderId, ...profile } = input;
-        // Editing the primary or the chain restarts fallback from the primary.
-        const sameSelection = (a: Agent["modelSelection"], b: Agent["modelSelection"]) => {
-          const aOptions = Object.entries(a.options ?? {});
-          const bOptions = new Map(Object.entries(b.options ?? {}));
-          return (
-            a.instanceId === b.instanceId &&
-            a.model === b.model &&
-            aOptions.length === bOptions.size &&
-            aOptions.every(([key, value]) => bOptions.get(key) === value)
-          );
-        };
-        // An edit that omits the chain keeps the stored one; only a chain
-        // that actually differs (or a new primary) restarts fallback.
-        const nextChain = input.fallbackChain ?? existing?.fallbackChain ?? [];
-        const chainChanged =
-          existing !== null &&
-          (!sameSelection(input.modelSelection, existing.modelSelection) ||
-            nextChain.length !== (existing.fallbackChain ?? []).length ||
-            nextChain.some(
-              (entry, index) => !sameSelection(entry, (existing.fallbackChain ?? [])[index]!),
-            ));
-        const agent = yield* store.save({
-          ...profile,
-          ownerMachine,
-          fallbackChain: nextChain,
-          projectFolderId: null,
-          responsibility: input.responsibility ?? existing?.responsibility ?? "",
-          permissions: input.permissions ?? existing?.permissions ?? defaultAgentPermissions,
-          notifyPolicy: input.notifyPolicy ?? existing?.notifyPolicy ?? "meaningful_changes",
-          id,
-          conversationThreadId,
-          createdAt: existing?.createdAt ?? at,
-          updatedAt: at,
-          consecutiveFailures: existing?.consecutiveFailures ?? 0,
-          backoffUntil: existing?.backoffUntil ?? null,
-          fallbackIndex: chainChanged ? 0 : (existing?.fallbackIndex ?? 0),
-          fallbackReason: chainChanged ? null : (existing?.fallbackReason ?? null),
-          fallbackUntil: chainChanged ? null : (existing?.fallbackUntil ?? null),
+        const existing = yield* store.get(input.id);
+        return yield* upsert({
+          ...existing,
+          ...input,
+          name: input.name ?? existing.name,
+          instructions: input.instructions ?? existing.instructions,
+          modelSelection: input.modelSelection ?? existing.modelSelection,
+          runtimeMode: input.runtimeMode ?? existing.runtimeMode,
+          dailyRunCap: input.dailyRunCap ?? existing.dailyRunCap,
+          avatar:
+            input.avatar === undefined
+              ? existing.avatar
+              : {
+                  ...existing.avatar,
+                  ...input.avatar,
+                  seed: input.avatar.seed ?? existing.avatar.seed,
+                },
         });
-        if (existing !== null && ownsAgent) {
-          yield* ensureConversation(agent);
-          yield* threads.dispatch({
-            type: "thread.runtime-mode.set",
-            commandId: CommandId.make(`agent-mode:${id}:${at}`),
-            threadId: conversationThreadId,
-            runtimeMode: agent.runtimeMode,
-          });
-          yield* threads.dispatch({
-            type: "thread.metadata.update",
-            commandId: CommandId.make(`agent-name:${id}:${at}`),
-            threadId: conversationThreadId,
-            title: agent.name,
-          });
-        }
-        if (existing === null && ownsAgent && input.kickoff === true) {
-          // The agent opens with its own turn; clients hide a turn the owner
-          // did not write. The agent exists either way, so a lost greeting
-          // is a warning, not a failed create.
-          yield* threads
-            .sendToThread({
-              projectId: yield* workspace(agent),
-              commandId: CommandId.make(`agent-kickoff:${id}`),
-              messageId: MessageId.make(`agent-kickoff:${id}`),
-              threadId: conversationThreadId,
-              text: agentKickoffText,
-              attachments: [],
-              modelSelection: agent.modelSelection,
-              mode: "auto",
-              createdBy: "agent",
-              creationSource: "server",
-            })
-            .pipe(
-              Effect.catch((cause) =>
-                Effect.logWarning("Agent kickoff turn did not start", { agentId: id, cause }),
-              ),
-            );
-        }
-        yield* changed;
-        return { agent };
       }).pipe(Effect.mapError(failure)),
     setProject: (input) =>
       Effect.gen(function* () {
         const existing = yield* store.get(input.id);
+        if (existing.ownerMachine !== undefined && existing.ownerMachine !== shared.environmentId) {
+          return yield* upsert({ ...existing, projectFolderId: input.projectFolderId });
+        }
         if (existing.projectFolderId !== input.projectFolderId)
           yield* fileConversation(existing.conversationThreadId, input.projectFolderId);
         yield* changed;
@@ -644,9 +787,24 @@ const make = Effect.gen(function* () {
         const projectId =
           input.projectId ??
           (yield* folders.ensureScratchProject.pipe(
+            Effect.catchTags({
+              ScratchUnavailableError: () =>
+                Effect.gen(function* () {
+                  const [project] = yield* sql<{
+                    project_id: string;
+                  }>`SELECT project_id FROM projection_projects WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT 1`;
+                  if (!project)
+                    return yield* new AgentError({
+                      message: "Open a repository on this machine to start the agent builder.",
+                    });
+                  return { projectId: ProjectId.make(project.project_id) };
+                }),
+            }),
             Effect.mapBoth({
               onFailure: () =>
-                new AgentError({ message: "This machine can't start a conversation right now." }),
+                new AgentError({
+                  message: "Open a repository on this machine to start the agent builder.",
+                }),
               onSuccess: (scratch) => scratch.projectId,
             }),
           ));
@@ -730,12 +888,13 @@ const make = Effect.gen(function* () {
     send: (input) =>
       Effect.gen(function* () {
         const agent = yield* store.get(input.id);
-        if (agent.ownerMachine !== undefined && agent.ownerMachine !== shared.environmentId)
-          return yield* new AgentError({ message: "This agent runs on another machine." });
         yield* ensureConversation(agent);
         // Backoff and daily caps govern background reservations only.
         // An owner text always reaches the provider. Intake claims its pending
         // uploads into the conversation, as it does for a chat send.
+        const fallback = decideFallback(agent, DateTime.toEpochMillis(yield* DateTime.now));
+        if (fallback.restored)
+          yield* store.setFallback(agent.id, { index: 0, reason: null, until: null });
         const result = yield* ThreadMessageIntake.sendToThread({
           projectId: yield* workspace(agent),
           commandId: input.commandId,
@@ -743,7 +902,7 @@ const make = Effect.gen(function* () {
           threadId: agent.conversationThreadId,
           text: input.text,
           attachments: input.attachments ?? [],
-          modelSelection: agent.modelSelection,
+          modelSelection: fallback.selection,
           mode: input.mode ?? "auto",
           createdBy: "user",
           creationSource: "web",
@@ -765,7 +924,7 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.mapError(failure)),
     trigger: (task, fireKey, prompt, context) =>
       Effect.gen(function* () {
-        if (task.agentId == null) return false;
+        if (task.agentId == null) return "skipped_ineligible" as const;
         if (task.schedule.type === "event" && context === undefined)
           return yield* new AgentError({
             message: "Event triggers require a source event and cannot be run manually.",
@@ -775,7 +934,7 @@ const make = Effect.gen(function* () {
           (agent.ownerMachine !== undefined && agent.ownerMachine !== shared.environmentId) ||
           (task.ownerMachine !== undefined && task.ownerMachine !== shared.environmentId)
         )
-          return false;
+          return "skipped_not_owner" as const;
         yield* ensureConversation(agent);
         const id = `agent-work:${fireKey}`;
         const workThreadId = ThreadId.make(id);
@@ -788,14 +947,31 @@ const make = Effect.gen(function* () {
               const scheduleJson = yield* encodeEventSchedule(task.schedule);
               const current =
                 yield* sql`SELECT 1 FROM scheduled_tasks WHERE task_id = ${task.id} AND enabled = 1 AND agent_id = ${agent.id} AND project_id = ${task.projectId} AND created_at = ${task.createdAt} AND schedule_json = ${scheduleJson}`;
-              if (current.length === 0) return false;
+              if (current.length === 0) return "skipped_ineligible" as const;
               if (!canReceiveAgentEvent(yield* access.resolve(agent.id), task, context))
-                return false;
+                return "skipped_ineligible" as const;
               const prior =
                 yield* sql`SELECT 1 FROM agent_event_deliveries WHERE agent_id = ${agent.id} AND event_key = ${context.dedupKey}`;
-              if (prior.length) return false;
+              if (prior.length) return "skipped_ineligible" as const;
             }
-            if (!(yield* store.reserve(agent.id))) return false;
+            if (!(yield* store.reserve(agent.id))) {
+              const [state] = yield* sql<{
+                enabled: number;
+                backoff_until: string | null;
+                run_day: string | null;
+                daily_runs: number;
+                daily_run_cap: number;
+              }>`SELECT * FROM agents WHERE agent_id = ${agent.id}`;
+              const now = DateTime.formatIso(yield* DateTime.now);
+              if (!state?.enabled) return "skipped_disabled" as const;
+              if (state.backoff_until !== null && state.backoff_until > now)
+                return "skipped_backoff" as const;
+              if (state.run_day === now.slice(0, 10) && state.daily_runs >= state.daily_run_cap)
+                return "skipped_daily_cap" as const;
+              const busy =
+                yield* sql`SELECT 1 FROM agent_work_runs WHERE agent_id = ${agent.id} AND status IN ('starting', 'running')`;
+              return busy.length > 0 ? ("skipped_busy" as const) : ("skipped_not_owner" as const);
+            }
             const decision = decideFallback(agent, DateTime.toEpochMillis(yield* DateTime.now));
             if (decision.restored)
               yield* store.setFallback(agent.id, { index: 0, reason: null, until: null });
@@ -826,10 +1002,10 @@ const make = Effect.gen(function* () {
               modelSelection: usedSelection,
               ...(usedFallbackReason === null ? {} : { fallbackReason: usedFallbackReason }),
             });
-            return true;
+            return "started" as const;
           }),
         );
-        if (!accepted) return false;
+        if (accepted !== "started") return accepted;
         const conversation = yield* projections.getThreadRecords(agent.conversationThreadId, [
           "messages",
         ]);
@@ -874,9 +1050,14 @@ const make = Effect.gen(function* () {
             yield* changed;
             return yield* result.failure;
           }
+          yield* changed;
+          return yield* new AgentError({
+            message: "Could not start this agent run.",
+            cause: result.failure,
+          });
         }
         yield* changed;
-        return true;
+        return "started" as const;
       }).pipe(Effect.mapError(failure)),
     reconcile,
   });

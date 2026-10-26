@@ -552,3 +552,9 @@ it("shows exact executable arguments and environment mappings in thread approval
   expect(description?.details).toContain(`Command: "/bin/sh" "-c" "printf 'synthetic value'"`);
   expect(description?.details).toContain(`Environment: ${JSON.stringify(command.env)}`);
 });
+
+it("names memory actions in the owner's language", () => {
+  expect(
+    describeRunAction({ kind: "mcp:memory_remember", targetId: null }, () => undefined).text,
+  ).toBe("Remembered a note");
+});

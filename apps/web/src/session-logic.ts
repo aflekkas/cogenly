@@ -1,5 +1,6 @@
 import { resolveThreadWorkingStartedAt } from "@cogenly/client-runtime/state/models";
 import {
+  isAgentInternalMessage,
   type AssetResource,
   type ComputerUsePermission,
   type OrchestrationV2ExecutionNode,
@@ -663,7 +664,11 @@ function buildTimelineEntries(input: TimelineEntriesInput): TimelineEntry[] {
     if (turnItemIsWorkspacePreparation(item)) continue;
     // Task progress belongs in the composer, not between conversation entries.
     if (item.type === "todo_list" || item.type === "checkpoint") continue;
-    if (item.type === "user_message" && foldedAnswerMessageIds.has(item.messageId)) continue;
+    if (
+      item.type === "user_message" &&
+      (foldedAnswerMessageIds.has(item.messageId) || isAgentInternalMessage(item.messageId))
+    )
+      continue;
     const createdAt = projectedItemCreatedAt(row);
     const attempt = resolveAttempt(item);
     const attemptMetadata = attempt === undefined ? {} : { attempt };
@@ -805,7 +810,7 @@ function buildTimelineEntries(input: TimelineEntriesInput): TimelineEntry[] {
 
   const retainedMessageIds = new Set([...committedMessageIds, ...foldedAnswerMessageIds]);
   for (const message of input.anchoredMessages ?? []) {
-    if (retainedMessageIds.has(message.id)) continue;
+    if (retainedMessageIds.has(message.id) || isAgentInternalMessage(message.id)) continue;
     retainedMessageIds.add(message.id);
     const entry: TimelineEntry = {
       id: message.id,

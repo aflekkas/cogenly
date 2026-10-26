@@ -70,7 +70,9 @@ const encodeUnknown = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))
 const makeHarness = Effect.sync(() => {
   const projections = new Map<ThreadId, OrchestrationV2ThreadProjection>();
   const launches: Launch.ThreadLaunchInput[] = [];
-  const launchFailure: { current: ProjectRepositoryMismatchError | null } = { current: null };
+  const launchFailure: {
+    current: ProjectRepositoryMismatchError | Launch.ThreadLaunchError | null;
+  } = { current: null };
   const posts: Parameters<Events.EventSinkV2["Service"]["commitCommand"]>[0][] = [];
   const jobs = new Map<string, Effect.Effect<void>>();
   const receipts = new Set<string>();
@@ -301,6 +303,48 @@ const makeHarness = Effect.sync(() => {
   };
 });
 
+it.effect("drains a deferred webhook fire without a next scheduled time", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const store = yield* Store.AgentStore;
+      const schedules = yield* Schedules.ScheduledTaskService;
+      const sql = yield* SqlClient.SqlClient;
+      yield* store.save(h.fixture);
+      const { task } = yield* schedules.upsert({
+        ...h.triggerInput,
+        schedule: { type: "webhook" },
+      });
+      expect(task.nextRunAt).toBeNull();
+      yield* sql`INSERT INTO deferred_agent_fires(fire_key, task_id, task_created_at, prompt, manual, created_at) VALUES ('webhook:held', ${task.id}, ${task.createdAt}, 'Rendered webhook prompt', 0, ${task.createdAt})`;
+      yield* h.jobs.get("scheduled-tasks")!;
+      expect(h.launches).toHaveLength(1);
+      expect(h.launches[0]?.initialMessage?.text).toContain("Rendered webhook prompt");
+      expect(yield* sql`SELECT * FROM deferred_agent_fires`).toEqual([]);
+    }).pipe(Effect.provide(h.layer));
+  }),
+);
+
+it.effect("records a provider launch refusal as failed rather than succeeded", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      yield* (yield* Store.AgentStore).save(h.fixture);
+      const schedules = yield* Schedules.ScheduledTaskService;
+      const { task } = yield* schedules.upsert(h.triggerInput);
+      h.launchFailure.current = new Launch.ThreadLaunchError({
+        operation: "dispatch-message",
+        commandId: CommandId.make("refused"),
+        projectId: h.fixture.projectId!,
+        cause: new Error("refused"),
+      });
+      const result = yield* schedules.runNow({ id: task.id });
+      expect(result.task.lastRunStatus).toBe("failed");
+      expect(result.task.lastRunError).not.toBeNull();
+    }).pipe(Effect.provide(h.layer));
+  }),
+);
+
 describe("agent execution", () => {
   it.effect(
     "records a refused agent launch as a failed schedule and run with the membership error",
@@ -439,8 +483,9 @@ describe("agent execution", () => {
           const record = (yield* store.runs(h.fixture.id))[0]!;
           expect(record).toMatchObject({ status: "failed", posted: true });
           expect(record.completedAt).not.toBeNull();
+          expect((yield* store.get(h.fixture.id)).backoffUntil).toBeNull();
           expect(record.summary).toContain("Cogenly restarted during this run");
-          expect((yield* store.get(h.fixture.id)).consecutiveFailures).toBe(1);
+          expect((yield* store.get(h.fixture.id)).consecutiveFailures).toBe(0);
           expect(h.posts).toHaveLength(1);
           expect(h.posts[0]?.effects).toEqual([]);
           expect(h.calls).toEqual([]);
@@ -496,11 +541,12 @@ describe("agent execution", () => {
         yield* agents.reconcile();
         const record = (yield* store.runs(h.fixture.id))[0]!;
         expect(record).toMatchObject({ status: "failed", posted: true });
+        expect((yield* store.get(h.fixture.id)).backoffUntil).toBeNull();
         expect(record.summary).toContain("Cogenly restarted during this run");
         const posted = h.posts[0]?.events[0];
         expect(posted?.type === "message.updated" && posted.payload.text).toBe(record.summary);
         expect(h.posts).toHaveLength(1);
-        expect((yield* store.get(h.fixture.id)).consecutiveFailures).toBe(1);
+        expect((yield* store.get(h.fixture.id)).consecutiveFailures).toBe(0);
       }).pipe(Effect.provide(h.layer));
     }),
   );
@@ -515,7 +561,7 @@ describe("agent execution", () => {
         const sql = yield* SqlClient.SqlClient;
         yield* store.save(h.fixture);
         const { task } = yield* schedules.upsert(h.triggerInput);
-        expect(yield* agents.trigger(task, "delete-running", task.prompt)).toBe(true);
+        expect(yield* agents.trigger(task, "delete-running", task.prompt)).toBe("started");
         const context = yield* Layer.build(
           SharedState.layer.pipe(Layer.provide(layerSharedIdentity)),
         );
@@ -569,7 +615,7 @@ describe("agent execution", () => {
         yield* sql`UPDATE scheduled_tasks SET owner_machine=${ownerMachine}, next_run_at='1969-01-01T00:00:00.000Z' WHERE task_id=${task.id}`;
         expect(yield* store.reserve(h.fixture.id)).toBe(false);
         expect(yield* agents.trigger({ ...task, ownerMachine }, "off-owner", task.prompt)).toBe(
-          false,
+          "skipped_not_owner",
         );
         yield* h.jobs.get("scheduled-tasks")!;
         yield* agents.reconcile();
@@ -664,7 +710,7 @@ describe("agent execution", () => {
         });
         expect(h.calls).toHaveLength(1);
         expect(h.calls[0]?.threadId).toBe(backingOff.conversationThreadId);
-        expect(yield* agents.trigger(task, "backoff:trigger", task.prompt)).toBe(false);
+        expect(yield* agents.trigger(task, "backoff:trigger", task.prompt)).toBe("skipped_backoff");
         expect(h.launches).toEqual([]);
       }).pipe(Effect.provide(h.layer));
     }),
@@ -690,6 +736,28 @@ describe("agent execution", () => {
         expect(h.calls[0]?.text).toBe("Remember green");
       }).pipe(Effect.provide(h.layer));
     }),
+  );
+
+  it.effect(
+    "sends replica conversations through thread routing without creating local agent work",
+    () =>
+      Effect.gen(function* () {
+        const h = yield* makeHarness;
+        yield* Effect.gen(function* () {
+          const store = yield* Store.AgentStore;
+          const agents = yield* Agents.AgentService;
+          yield* store.save({ ...h.fixture, ownerMachine: EnvironmentId.make("remote:owner") });
+          const result = yield* agents.send({
+            id: h.fixture.id,
+            commandId: CommandId.make("remote:send"),
+            messageId: MessageId.make("remote:message"),
+            text: "Hello",
+          });
+          expect(result.threadId).toBe(h.fixture.conversationThreadId);
+          expect(result.delivery).toBe("queued");
+          expect(h.launches).toEqual([]);
+        }).pipe(Effect.provide(h.layer));
+      }),
   );
 
   it.effect("owner texts claim their uploads into the conversation, as a chat send does", () =>
@@ -800,7 +868,7 @@ it.effect("keeps running jobs after repeated provider failures once each backoff
       for (let attempt = 0; attempt < 5; attempt++) {
         yield* sql`UPDATE agents SET backoff_until = NULL WHERE agent_id = ${h.fixture.id}`;
         const started = yield* agents.trigger(task, `failure:${attempt}`, task.prompt);
-        expect(started).toBe(true);
+        expect(started).toBe("started");
         const launch = h.launches.at(-1)!;
         const projection = h.projections.get(launch.threadId!)!;
         h.projections.set(launch.threadId!, {
@@ -811,9 +879,9 @@ it.effect("keeps running jobs after repeated provider failures once each backoff
         yield* agents.reconcile();
       }
       expect((yield* store.get(h.fixture.id)).consecutiveFailures).toBe(5);
-      expect(yield* agents.trigger(task, "during-backoff", task.prompt)).toBe(false);
+      expect(yield* agents.trigger(task, "during-backoff", task.prompt)).toBe("skipped_backoff");
       yield* sql`UPDATE agents SET backoff_until = NULL WHERE agent_id = ${h.fixture.id}`;
-      expect(yield* agents.trigger(task, "after-backoff", task.prompt)).toBe(true);
+      expect(yield* agents.trigger(task, "after-backoff", task.prompt)).toBe("started");
       expect(h.launches).toHaveLength(6);
     }).pipe(Effect.provide(h.layer));
   }),
@@ -830,7 +898,7 @@ it.effect("a usage-limited run makes the next run use the next fallback entry", 
       const fallback = { instanceId: ProviderInstanceId.make("claude-backup"), model: "opus" };
       yield* store.save({ ...h.fixture, dailyRunCap: 100, fallbackChain: [fallback] });
       const { task } = yield* schedules.upsert(h.triggerInput);
-      expect(yield* agents.trigger(task, "fallback:first", task.prompt)).toBe(true);
+      expect(yield* agents.trigger(task, "fallback:first", task.prompt)).toBe("started");
       expect(h.launches.at(-1)?.modelSelection).toEqual(h.fixture.modelSelection);
       const first = h.launches.at(-1)!;
       const projection = h.projections.get(first.threadId!)!;
@@ -876,7 +944,7 @@ it.effect("a usage-limited run makes the next run use the next fallback entry", 
       expect(runs[0]?.fallbackReason).toBe("usage_limit");
       expect(runs[0]?.fallbackResetAt).toBe("2099-01-01T00:00:00.000Z");
       yield* sql`UPDATE agents SET backoff_until = NULL WHERE agent_id = ${h.fixture.id}`;
-      expect(yield* agents.trigger(task, "fallback:second", task.prompt)).toBe(true);
+      expect(yield* agents.trigger(task, "fallback:second", task.prompt)).toBe("started");
       expect(h.launches.at(-1)?.modelSelection).toEqual(fallback);
       const secondRuns = yield* store.runs(h.fixture.id);
       const secondRun = secondRuns.find((run) => run.id === "agent-work:fallback:second");
@@ -1470,6 +1538,7 @@ describe("agent scope, approvals and shared commitments", () => {
             sourceRefs: [],
             evidenceRefs: [],
           });
+          yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id, thread_id, ordinal, provider, status, requested_at, payload_json) VALUES ('kickoff-run', ${agent.conversationThreadId}, 99, 'codex', 'completed', ${agent.createdAt}, ${yield* encodeUnknown({ ...run, userMessageId: `agent-kickoff:${agent.id}` })})`;
           const activity = yield* workspace.activity(agent.id);
           expect(activity.runs).toHaveLength(1);
           expect(activity.runs[0]).toMatchObject({
@@ -1592,7 +1661,6 @@ it.effect(
           "merge_pull_request",
           "deploy",
           "delete_project",
-          "terminal_run",
           "preview_click",
           "preview_type",
           "create_threads",
@@ -2289,3 +2357,224 @@ describe("event-driven agent triggers", () => {
       }),
   );
 });
+
+it.effect.each([true, false])(
+  "durably defers a busy manual fire (enabled=%s) without counting it",
+  (enabled) =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const agents = yield* Agents.AgentService;
+        const schedules = yield* Schedules.ScheduledTaskService;
+        yield* store.save({ ...h.fixture, dailyRunCap: 100 });
+        const sql = yield* SqlClient.SqlClient;
+        const { task } = yield* schedules.upsert({ ...h.triggerInput, enabled });
+        expect(yield* agents.trigger(task, "busy:first", task.prompt)).toBe("started");
+        const { task: deferred } = yield* schedules.runNow({ id: task.id });
+        expect(deferred.lastRunStatus).toBe("skipped_busy");
+        expect(deferred.runCount).toBe(0);
+        expect(yield* sql`SELECT prompt FROM deferred_agent_fires`).toEqual([
+          { prompt: task.prompt },
+        ]);
+        const threadId = h.launches[0]!.threadId!;
+        const projection = h.projections.get(threadId)!;
+        h.projections.set(threadId, {
+          ...projection,
+          runs: projection.runs.map((run) => ({ ...run, status: "completed" })),
+        });
+        yield* agents.reconcile();
+        yield* h.jobs.get("scheduled-tasks")!;
+        expect(h.launches).toHaveLength(2);
+        expect(yield* sql`SELECT * FROM deferred_agent_fires`).toEqual([]);
+        expect((yield* schedules.list()).tasks[0]?.lastRunStatus).toBe("succeeded");
+      }).pipe(Effect.provide(h.layer));
+    }),
+);
+
+it.effect("direct texts and governed Work use the saved fallback selection", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const store = yield* Store.AgentStore;
+      const agents = yield* Agents.AgentService;
+      const workspace = yield* Workspace.AgentWorkspaceService;
+      const fallback = { instanceId: ProviderInstanceId.make("claude"), model: "opus" };
+      yield* store.save({
+        ...h.fixture,
+        fallbackChain: [fallback],
+        fallbackIndex: 1,
+        fallbackReason: "auth",
+        fallbackUntil: "2099-01-01T00:00:00.000Z",
+      });
+      yield* agents.send({
+        id: h.fixture.id,
+        commandId: CommandId.make("fallback:send"),
+        messageId: MessageId.make("fallback:text"),
+        text: "Check CI",
+      });
+      expect(h.calls.at(-1)?.modelSelection).toEqual(fallback);
+      yield* workspace.startWork({
+        agentId: h.fixture.id,
+        projectId: h.fixture.projectId!,
+        title: "Check CI",
+        prompt: "Check CI",
+      });
+      expect(h.launches.at(-1)?.modelSelection).toEqual(fallback);
+    }).pipe(Effect.provide(h.layer));
+  }),
+);
+
+it.effect.each(["conversation", "work"] as const)(
+  "retries a failed %s once on the next fallback",
+  (kind) =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const agents = yield* Agents.AgentService;
+        const sql = yield* SqlClient.SqlClient;
+        const fallback = { instanceId: ProviderInstanceId.make("claude"), model: "opus" };
+        yield* store.save({ ...h.fixture, fallbackChain: [fallback] });
+        const threadId =
+          kind === "conversation" ? h.fixture.conversationThreadId : ThreadId.make("governed:work");
+        if (kind === "work")
+          yield* sql`INSERT INTO agent_run_threads(thread_id, agent_id, trigger_kind) VALUES (${threadId}, ${h.fixture.id}, 'work')`;
+        const base = h.projections.get(h.fixture.conversationThreadId)!;
+        const at = DateTime.makeUnsafe(h.fixture.createdAt);
+        const run = {
+          id: RunId.make("fallback:failed"),
+          threadId,
+          ordinal: 1,
+          providerInstanceId: h.fixture.modelSelection.instanceId,
+          modelSelection: h.fixture.modelSelection,
+          providerThreadId: null,
+          userMessageId: MessageId.make("fallback:original"),
+          rootNodeId: null,
+          activeAttemptId: null,
+          status: "failed" as const,
+          requestedAt: at,
+          startedAt: at,
+          completedAt: at,
+          checkpointId: null,
+          contextHandoffId: null,
+        };
+        const projection = {
+          ...base,
+          thread: { ...base.thread, id: threadId },
+          runs: [run],
+          messages: [
+            {
+              id: run.userMessageId,
+              threadId,
+              runId: run.id,
+              nodeId: null,
+              role: "user" as const,
+              text: "Check CI",
+              attachments: [],
+              streaming: false,
+              createdAt: at,
+              updatedAt: at,
+              createdBy: "user" as const,
+              creationSource: "web" as const,
+            },
+          ],
+          turnItems: [
+            {
+              id: TurnItemId.make("fallback:error"),
+              threadId,
+              runId: run.id,
+              nodeId: null,
+              providerThreadId: null,
+              providerTurnId: null,
+              nativeItemRef: null,
+              parentItemId: null,
+              ordinal: 0,
+              status: "failed" as const,
+              title: "Usage limit",
+              startedAt: at,
+              completedAt: at,
+              updatedAt: at,
+              type: "error" as const,
+              failure: {
+                class: "usage_limit" as const,
+                message: "Limit reached",
+                code: "429",
+                retryable: true,
+              },
+            },
+          ],
+        };
+        h.projections.set(threadId, projection);
+        yield* agents.reconcile();
+        expect(h.calls.at(-1)?.modelSelection).toEqual(fallback);
+        expect(h.calls.at(-1)?.text).toBe("Check CI");
+        const retry = h.calls.at(-1)!;
+        h.projections.set(threadId, {
+          ...projection,
+          runs: [
+            {
+              ...run,
+              id: RunId.make("fallback:retry"),
+              modelSelection: fallback,
+              userMessageId: retry.messageId,
+            },
+          ],
+        });
+        const count = h.calls.length;
+        yield* agents.reconcile();
+        expect(h.calls).toHaveLength(count);
+      }).pipe(Effect.provide(h.layer));
+    }),
+);
+
+it.effect(
+  "partial agent edits retain omitted settings and approval decisions reach the conversation",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const agents = yield* Agents.AgentService;
+        const workspace = yield* Workspace.AgentWorkspaceService;
+        const agent = yield* store.save(h.fixture);
+        const updated = yield* agents.update({ id: agent.id, instructions: "Watch CI carefully" });
+        expect(updated.agent.instructions).toBe("Watch CI carefully");
+        expect(updated.agent.modelSelection).toEqual(agent.modelSelection);
+        const { approval } = yield* workspace.requestApproval(agent.id, {
+          actionKind: "change_permissions",
+          payload: { permissions: defaultAgentPermissions },
+        });
+        yield* workspace.approve(approval.id);
+        expect(h.calls.at(-1)?.text).toContain("owner approved");
+        expect(h.calls.at(-1)?.mode).toBe("queue");
+        const next = yield* workspace.requestApproval(agent.id, {
+          actionKind: "change_permissions",
+          payload: { permissions: defaultAgentPermissions },
+        });
+        yield* workspace.reject(next.approval.id);
+        expect(h.calls.at(-1)?.text).toContain("owner rejected");
+        const policy = yield* Policy.AgentMcpPolicy;
+        expect(
+          yield* policy
+            .beforeTool(
+              scopeFor(agent.conversationThreadId),
+              "update_agent",
+              { id: agent.id, permissions: h.fixture.permissions },
+              false,
+            )
+            .pipe(Effect.result),
+        ).toMatchObject({ _tag: "Failure" });
+        expect(
+          yield* policy
+            .beforeTool(
+              scopeFor(agent.conversationThreadId),
+              "delete_agent",
+              { id: agent.id },
+              false,
+            )
+            .pipe(Effect.result),
+        ).toMatchObject({ _tag: "Failure" });
+      }).pipe(Effect.provide(h.layer));
+    }),
+);

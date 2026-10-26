@@ -1,4 +1,6 @@
-import { requestLaunchMachine } from "~/machines/LaunchMachineDialog";
+import { defaultAgentOwner } from "@cogenly/contracts";
+import { serverEnvironment } from "~/state/server";
+import { useEnvironmentQuery } from "~/state/query";
 import { useNavigate } from "@tanstack/react-router";
 import type {
   EnvironmentId,
@@ -39,7 +41,7 @@ import { prefersReducedMotion } from "~/lib/sendMotion";
 import { cn, newMessageId, randomUUID } from "~/lib/utils";
 import { ComposerProjectChip } from "~/projectLabels/ComposerProjectPicker";
 import { agentsRpc } from "~/rpc/agents";
-import { useThreadShells } from "~/state/entities";
+import { useProjects, useThreadShells } from "~/state/entities";
 import { usePrimaryEnvironmentId } from "~/state/environments";
 import { threadEnvironment, useEnvironmentThread } from "~/state/threads";
 import { useOrchestrationCommand } from "~/state/use-orchestration-command";
@@ -152,7 +154,12 @@ export function AgentBuilderConversation({
   const shells = useThreadShells();
   const primary = usePrimaryEnvironmentId();
   const { scratchEnvironmentId, openScratchProject } = useScratchProject();
-  const environmentId = resume?.environmentId ?? scratchEnvironmentId(requested ?? primary);
+  const projects = useProjects();
+  const local = requested ?? primary;
+  const fallbackProject = projects.find((project) => project.environmentId === local);
+  const scratchEnvironment = scratchEnvironmentId(local);
+  const environmentId =
+    resume?.environmentId ?? scratchEnvironment ?? fallbackProject?.environmentId ?? null;
   const setSidebarMode = useUiStateStore((store) => store.setSidebarMode);
   const startTurn = useOrchestrationCommand(threadEnvironment.startTurn, { reportFailure: false });
   const builderStart = useOrchestrationCommand(agentsRpc.builderStart, {
@@ -189,6 +196,13 @@ export function AgentBuilderConversation({
   const [startFolderId, setStartFolderId] = useState<ProjectLabelId | null>(
     requestedFolderId ?? null,
   );
+  const [chosenOwner, setChosenOwner] = useState<EnvironmentId | null>(null);
+  const machineQuery = useEnvironmentQuery(
+    environmentId === null ? null : serverEnvironment.machinesLive({ environmentId, input: {} }),
+  );
+  const ownerMachines = machineQuery.data?.machines ?? [];
+  const ownerMachine =
+    environmentId === null ? null : defaultAgentOwner(environmentId, ownerMachines);
   const [cardFolderId, setCardFolderId] = useState<ProjectLabelId | null | undefined>(undefined);
   const { folders } = useAgentProjectFolders(thread?.environmentId ?? environmentId, null);
   const folderExists = (id: ProjectLabelId) => folders.some((entry) => entry.label.id === id);
@@ -305,7 +319,10 @@ export function AgentBuilderConversation({
       ]);
       try {
         if (thread === null) {
-          const project = await openScratchProject(environmentId, "Could not start the builder");
+          const project =
+            scratchEnvironment === null
+              ? fallbackProject
+              : await openScratchProject(environmentId, "Could not start the builder");
           if (!project) throw new Error("This machine can't start a conversation right now.");
           const result = await builderStart({
             environmentId,
@@ -349,6 +366,8 @@ export function AgentBuilderConversation({
       environmentId,
       modelSelection,
       openScratchProject,
+      scratchEnvironment,
+      fallbackProject,
       sending,
       startFolder,
       startTurn,
@@ -371,7 +390,7 @@ export function AgentBuilderConversation({
         }),
         kickoff: true,
       };
-      const machine = proposal.machine ?? (await requestLaunchMachine(thread.environmentId, true));
+      const machine = chosenOwner ?? proposal.machine ?? ownerMachine;
       if (machine === null) return;
       const contact = await client.save(
         thread.environmentId,
@@ -407,7 +426,17 @@ export function AgentBuilderConversation({
       // The server opens the agent's own first turn; nothing visible to send.
       setCreated(contact);
     }
-  }, [client, creating, modelSelection, proposal, proposalFolderId, seed, thread]);
+  }, [
+    chosenOwner,
+    ownerMachine,
+    client,
+    creating,
+    modelSelection,
+    proposal,
+    proposalFolderId,
+    seed,
+    thread,
+  ]);
 
   // The save returns before the live lists carry the agent; wait so the route can't
   // mistake the conversation for a missing thread, then leave and drop the builder thread.
@@ -479,6 +508,11 @@ export function AgentBuilderConversation({
         seed={seed}
         proposal={proposal}
         modelName={modelName}
+        owner={{
+          machines: ownerMachines,
+          value: chosenOwner ?? proposal?.machine ?? ownerMachine,
+          onChange: setChosenOwner,
+        }}
         project={
           // Nothing to pick on a machine without projects.
           thread && folders.length > 0
@@ -513,8 +547,10 @@ export function AgentBuilderConversation({
           )}
           {environmentId === null ? (
             <p className="agent-conversation-empty">
-              Agents aren't available here.
-              <span>This machine can't start a conversation without a repository right now.</span>
+              Open a repository to create an agent.
+              <span>
+                The builder uses a repository when this machine has no No project workspace.
+              </span>
             </p>
           ) : (
             <BuilderComposer
@@ -551,6 +587,7 @@ function Transcript({
   seed,
   proposal,
   modelName,
+  owner,
   project,
   creating,
   cardRef,
@@ -566,6 +603,7 @@ function Transcript({
   seed: string;
   proposal: ReturnType<typeof proposalFromMessages>;
   modelName: string | null;
+  owner: ComponentProps<typeof AgentProposalCard>["owner"];
   project: ComponentProps<typeof AgentProposalCard>["project"];
   creating: boolean;
   cardRef: RefObject<HTMLDivElement | null>;
@@ -655,6 +693,7 @@ function Transcript({
                           proposal={proposal}
                           seed={seed}
                           modelName={modelName}
+                          owner={owner}
                           project={project}
                           creating={creating}
                           onCreate={onCreate}

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 import { clientRpcRequiredScopes } from "./clientRpcPermissions.ts";
 import * as Schema from "effect/Schema";
-import { MachineCreatePeerGrantInput, PeerPush } from "./machine.ts";
+import { defaultAgentOwner, MachineCreatePeerGrantInput, PeerPush } from "./machine.ts";
+import { EnvironmentId } from "./baseSchemas.ts";
 import { WS_METHODS } from "./rpc.ts";
 
 const isCreatePeerGrantInput = Schema.is(MachineCreatePeerGrantInput);
@@ -48,4 +49,18 @@ it("exchanges Machines pushes with 0.3.2 peers that omit routes or ignore new fi
   const oldPush = { _tag: "Machines", machines: [] };
   expect(decodePush(oldPush)).toEqual(oldPush);
   expect(decodeLegacyPush({ ...oldPush, hubRoutes: ["https://hub.ts.net/"] })).toEqual(oldPush);
+});
+
+it("defaults new agents to an online paired hub and falls back to local", () => {
+  const local = EnvironmentId.make("local");
+  const hub = {
+    environmentId: EnvironmentId.make("hub"),
+    relation: "hub" as const,
+    online: true,
+    pairing: "paired" as const,
+  };
+  expect(defaultAgentOwner(local, [hub])).toBe(hub.environmentId);
+  expect(defaultAgentOwner(local, [{ ...hub, online: false }])).toBe(local);
+  expect(defaultAgentOwner(local, [{ ...hub, pairing: "revoked" }])).toBe(local);
+  expect(defaultAgentOwner(local, [])).toBe(local);
 });

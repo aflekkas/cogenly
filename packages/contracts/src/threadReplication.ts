@@ -577,6 +577,15 @@ export const ThreadAgentCreate = makePeerChannel({
   error: ThreadRemoteError,
 });
 
+/** Agent deletion executes on the owner, then syncs its tombstone to the caller. */
+export const ThreadAgentDelete = makePeerChannel({
+  name: "threads.agent-delete.v1",
+  scope: AuthPeerDelegateScope,
+  payload: Schema.Struct({ target: EnvironmentId, agentId: AgentId }),
+  success: Schema.Struct({ deleted: Schema.Boolean }),
+  error: ThreadRemoteError,
+});
+
 /** Committed task results can return without a push to the repository remote. */
 export const ThreadTaskBranch = makePeerChannel({
   name: "threads.task-branch.v1",

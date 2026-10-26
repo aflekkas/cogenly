@@ -23,3 +23,14 @@ describe("scheduledTaskLastRun", () => {
     });
   });
 });
+
+it.each([
+  "skipped_busy",
+  "skipped_backoff",
+  "skipped_daily_cap",
+  "skipped_not_owner",
+  "skipped_disabled",
+  "skipped_ineligible",
+] as const)("explains %s", (status) => {
+  expect(scheduledTaskLastRun(status, null)).toMatchObject({ tone: "warning" });
+});

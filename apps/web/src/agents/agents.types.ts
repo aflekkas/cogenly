@@ -10,6 +10,7 @@ import type {
   ModelSelection,
   RunId,
   ScheduledTaskSchedule,
+  ScheduledTaskRunStatus,
   ThreadId,
 } from "@cogenly/contracts";
 import type { AgentFaceState } from "~/components/agents/face";
@@ -27,6 +28,7 @@ export interface AgentTrigger {
   prompt: string;
   enabled: boolean;
   schedule: ScheduledTaskSchedule;
+  lastRunStatus?: ScheduledTaskRunStatus;
 }
 export interface AgentMessage {
   id: string;
@@ -73,6 +75,8 @@ export interface AgentRequest {
 }
 export interface AgentContact extends AgentListItem {
   environmentId: EnvironmentId;
+  ownerName?: string | undefined;
+  ownerOnline?: boolean;
   state: AgentFaceState;
   messages: ReadonlyArray<AgentMessage>;
   hasMoreMessages?: boolean;
