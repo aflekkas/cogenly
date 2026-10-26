@@ -16,7 +16,7 @@ One workspace for chats, coding tasks and always-on agents. Cogenly runs the Cla
 
 ## Install
 
-Sign in to at least one provider on the machine that runs your agents, such as `claude auth login` or `codex login`.
+Install at least one provider CLI (Claude Code or Codex) on the machine that runs your agents, then sign it in from **Settings → Providers**.
 
 **Mac.** Download the `.dmg` from [the latest release](https://github.com/alexandros-lekkas/cogenly/releases/latest). It is built for Apple Silicon, runs its own server and updates itself. To install the `cogenly` command, open **Settings → General → About**.
 
