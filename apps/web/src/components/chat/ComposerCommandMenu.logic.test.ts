@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { composerMenuEmptyText, composerMenuSections } from "./ComposerCommandMenu.logic";
+import {
+  composerMenuEmptyText,
+  composerMenuRowChanges,
+  composerMenuSections,
+} from "./ComposerCommandMenu.logic";
 
 type Item = { readonly id: string; readonly group: "chats" | "files" | null };
 const groupOf = (item: Item) => item.group;
@@ -55,5 +59,21 @@ describe("composerMenuEmptyText", () => {
     expect(composerMenuEmptyText({ triggerKind: "slash-command", isLoading: false })).toBe(
       "No matching command.",
     );
+  });
+});
+
+describe("composerMenuRowChanges", () => {
+  const rows = (...ids: string[]) => ids.map((id) => ({ id }));
+
+  it("fades in only new ids and keeps dropped rows in order, nearest the new rows last", () => {
+    const changes = composerMenuRowChanges(rows("a", "b", "c", "d", "e"), rows("b", "f", "e"), 2);
+    expect([...changes.arrived]).toEqual(["f"]);
+    expect(changes.leaving).toEqual(rows("c", "d"));
+  });
+
+  it("does not fade a row that only moved", () => {
+    const changes = composerMenuRowChanges(rows("a", "b"), rows("b", "a"), 8);
+    expect(changes.arrived.size).toBe(0);
+    expect(changes.leaving).toEqual([]);
   });
 });
