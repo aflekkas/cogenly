@@ -10,8 +10,14 @@ it("finishes providers, each spoke, then hub, before the local install", async (
     [hub, "0.3.2"],
     [spoke, "0.3.2"],
   ]);
-  const spokeStarted = Promise.withResolvers<void>();
-  const spokeFinished = Promise.withResolvers<void>();
+  let markSpokeStarted!: () => void;
+  let finishSpoke!: () => void;
+  const spokeStarted = new Promise<void>((resolve) => {
+    markSpokeStarted = resolve;
+  });
+  const spokeFinished = new Promise<void>((resolve) => {
+    finishSpoke = resolve;
+  });
   const run = runUpdateEverything({
     updateProviders: async () => {
       calls.push("providers");
@@ -28,8 +34,8 @@ it("finishes providers, each spoke, then hub, before the local install", async (
         update: async (server) => {
           calls.push(server.environmentId);
           if (server.environmentId === spoke) {
-            spokeStarted.resolve();
-            await spokeFinished.promise;
+            markSpokeStarted();
+            await spokeFinished;
           }
           versions.set(server.environmentId, "0.3.3");
           return { status: "updated" };
@@ -40,9 +46,9 @@ it("finishes providers, each spoke, then hub, before the local install", async (
         },
       }),
   });
-  await spokeStarted.promise;
+  await spokeStarted;
   expect(calls).toEqual(["providers", "spoke"]);
-  spokeFinished.resolve();
+  finishSpoke();
   const result = await run;
   calls.push("local install");
   expect(calls).toEqual([

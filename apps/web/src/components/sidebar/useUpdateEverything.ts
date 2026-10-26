@@ -144,6 +144,9 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
       downloadLocal?: (reportError: ReportLocalUpdateError) => Promise<boolean>;
       installLocal?: (reportError: ReportLocalUpdateError) => Promise<boolean>;
     }) => {
+      if (servers.length > 1 && servers.some((server) => !directory.has(server.environmentId))) {
+        throw new Error("Machine connections are still loading. Try Update all again.");
+      }
       const localFailures: Array<string> = [];
       const reportLocalError: ReportLocalUpdateError = (title, description) => {
         localFailures.push(`${title}: ${description}`);
