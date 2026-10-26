@@ -140,12 +140,18 @@ export function MachineHealthAlertCoordinator() {
 
   const present = (entry: MergedHealthAlert, connected: ReadonlySet<EnvironmentId>): ShownAlert => {
     let toastId = "";
+    const key = healthAlertGroupKey(entry.alert);
     const { view, details, content } = toastContent(entry, connected, () => toastId);
     toastId = toastManager.add({
       ...content,
       // A failure stays until dismissed or it clears; a warning leaves after the
       // usual time. Settings → Machines and the nav-rail dot keep showing both.
       ...(view.status === "fail" ? { timeout: 0 } : {}),
+      // Closed by X, Fix or its timeout: the group's items stay seen, and the
+      // next new one shows a fresh toast instead of updating this closed one.
+      onClose: () => {
+        if (shown.current.get(key)?.toastId === toastId) shown.current.delete(key);
+      },
     });
     // A click on the notification only opens a screen; it never runs a command.
     const notification = showBackgroundNotification(mode, {

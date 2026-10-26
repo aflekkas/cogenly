@@ -29,6 +29,8 @@ export interface MergedHealthAlert {
   readonly ids: ReadonlyArray<string>;
   /** One alert per distinct item, oldest first. A toast counts these. */
   readonly items: ReadonlyArray<MachineHealthAlert>;
+  /** `ids` by item key: an item is new while none of its ids is seen. */
+  readonly idsByItem: ReadonlyMap<string, ReadonlyArray<string>>;
 }
 
 /**
@@ -130,7 +132,13 @@ export function mergeHealthAlertSnapshots(
   for (const [via, snapshot] of snapshots) {
     for (const alert of snapshot.recentlyResolved) {
       if (!resolved.has(alert.id))
-        resolved.set(alert.id, { alert, via, ids: [alert.id], items: [alert] });
+        resolved.set(alert.id, {
+          alert,
+          via,
+          ids: [alert.id],
+          items: [alert],
+          idsByItem: new Map([[alert.itemKey, [alert.id]]]),
+        });
     }
     for (const alert of snapshot.open) {
       if (!openById.has(alert.id)) openById.set(alert.id, { alert, via });
@@ -143,19 +151,24 @@ export function mergeHealthAlertSnapshots(
   );
   for (const entry of byAge) {
     const key = healthAlertGroupKey(entry.alert);
+    const { id, itemKey } = entry.alert;
     const group = groups.get(key);
-    groups.set(
-      key,
-      group === undefined
-        ? { ...entry, ids: [entry.alert.id], items: [entry.alert] }
-        : {
-            ...group,
-            ids: [...group.ids, entry.alert.id],
-            items: group.items.some((item) => item.itemKey === entry.alert.itemKey)
-              ? group.items
-              : [...group.items, entry.alert],
-          },
-    );
+    if (group === undefined) {
+      groups.set(key, {
+        ...entry,
+        ids: [id],
+        items: [entry.alert],
+        idsByItem: new Map([[itemKey, [id]]]),
+      });
+      continue;
+    }
+    const itemIds = group.idsByItem.get(itemKey);
+    groups.set(key, {
+      ...group,
+      ids: [...group.ids, id],
+      items: itemIds === undefined ? [...group.items, entry.alert] : group.items,
+      idsByItem: new Map(group.idsByItem).set(itemKey, [...(itemIds ?? []), id]),
+    });
   }
   return { open: [...groups.values()], resolved: [...resolved.values()] };
 }
@@ -188,10 +201,11 @@ export interface HealthAlertNotificationPlan {
 /**
  * What changes on screen for a merged snapshot. `seen` is every alert id
  * this device has ever toasted (persisted, so a reload or reconnect stays
- * quiet); a problem is seen when any of its collapsed ids is. `shown` holds
- * the group keys (`healthAlertGroupKey`) toasted in this session and not
- * yet retracted: a problem one server resolved stays up while another
- * still reports it open.
+ * quiet); an item is seen when any of its collapsed ids is. `shown` holds
+ * the group keys (`healthAlertGroupKey`) whose toast is on screen: it
+ * updates in place as items come and go, and a problem one server resolved
+ * stays up while another still reports it open. A group whose toast was
+ * closed toasts again only for an item that is new since.
  */
 export function planHealthAlertNotifications(
   merged: MergedHealthAlerts,
@@ -204,7 +218,11 @@ export function planHealthAlertNotifications(
     const key = healthAlertGroupKey(entry.alert);
     if (shown.has(key) && !openKeys.has(key) && !retract.has(key)) retract.set(key, entry);
   }
-  const toast = merged.open.filter(({ ids }) => !ids.some((id) => seen.has(id)));
+  const toast = merged.open.filter(
+    ({ alert, idsByItem }) =>
+      !shown.has(healthAlertGroupKey(alert)) &&
+      [...idsByItem.values()].some((ids) => !ids.some((id) => seen.has(id))),
+  );
   return {
     toast,
     retract: [...retract.values()],

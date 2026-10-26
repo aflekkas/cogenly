@@ -141,17 +141,37 @@ describe("planHealthAlertNotifications", () => {
     expect(plan.retract).toEqual([]);
   });
 
-  it("keeps a seen group quiet when another of its items opens, across reloads", () => {
+  it("updates a group's open toast in place when another of its items opens", () => {
     const first = mergeHealthAlertSnapshots([[HUB, snapshot([alert("a")])]]);
     const toasted = planHealthAlertNotifications(first, new Set(), new Set());
     expect(toasted.toast).toHaveLength(1);
     const seen = rememberSeenHealthAlertIds([], toasted.remember, new Set());
-    // A reload, then one more provider problem on the same machine.
+    const shown = new Set([healthAlertGroupKey(alert("a"))]);
+    const grown = mergeHealthAlertSnapshots([
+      [HUB, snapshot([alert("a"), alert("b", { openedAt: DateTime.makeUnsafe(2_000) })])],
+    ]);
+    const next = planHealthAlertNotifications(grown, new Set(seen), shown);
+    expect(next.toast).toEqual([]);
+    expect(next.remember).toEqual(["b"]);
+  });
+
+  it("toasts a closed group again for a new item, but not for the items it already showed", () => {
+    const first = mergeHealthAlertSnapshots([[HUB, snapshot([alert("a")])]]);
+    const toasted = planHealthAlertNotifications(first, new Set(), new Set());
+    const seen = rememberSeenHealthAlertIds([], toasted.remember, new Set());
+    // The toast was dismissed or closed by Fix, so the group is no longer shown.
+    expect(planHealthAlertNotifications(first, new Set(seen), new Set()).toast).toEqual([]);
+    // Another server raising its own id for the same item is not a new item.
+    const echoed = mergeHealthAlertSnapshots([
+      [HUB, snapshot([alert("a")])],
+      [LAPTOP, snapshot([alert("a2", { itemKey: "providers:a" })])],
+    ]);
+    expect(planHealthAlertNotifications(echoed, new Set(seen), new Set()).toast).toEqual([]);
     const grown = mergeHealthAlertSnapshots([
       [HUB, snapshot([alert("a"), alert("b", { openedAt: DateTime.makeUnsafe(2_000) })])],
     ]);
     const next = planHealthAlertNotifications(grown, new Set(seen), new Set());
-    expect(next.toast).toEqual([]);
+    expect(next.toast.map(({ items }) => items.map((item) => item.id))).toEqual([["a", "b"]]);
     expect(next.remember).toEqual(["b"]);
   });
 
