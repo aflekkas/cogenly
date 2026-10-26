@@ -49,6 +49,8 @@ export interface AgentScopeShape {
 export interface AgentScopeCommand {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
+  /** The transient scope the command runs in, when it has one. Killing it reaches every descendant. */
+  readonly unit?: string | undefined;
 }
 
 export const AgentScope = Context.Reference<AgentScopeShape>("@cogenly/shared/AgentScope", {
@@ -106,6 +108,7 @@ export function agentScopeCommand(input: {
   }
   return {
     command: "/bin/sh",
+    unit: scope.unit,
     args: [
       "-c",
       SCOPED_LAUNCH_SCRIPT,

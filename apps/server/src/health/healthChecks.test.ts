@@ -30,6 +30,7 @@ import {
   SYNC_STUCK_AFTER_MS,
   type SyncPeerSample,
   buildReport,
+  agentProcessesCheck,
   chatSandboxCheck,
   diskCheck,
   integrationsCheck,
@@ -849,4 +850,23 @@ describe("machine version skew", () => {
     expect(inspect([machine({ serverVersion: "0.3.3" })]).items).toEqual([]);
     expect(inspect([machine({})]).items).toEqual([]);
   });
+});
+
+it("agent process health warns about live orphans only, with a Fix", () => {
+  const live = { orphaned: false, command: "npm run dev", pids: [10] };
+  expect(agentProcessesCheck({ processes: [live] })).toMatchObject({ status: "ok", items: [] });
+  // An orphan whose processes all exited is nothing to fix.
+  expect(
+    agentProcessesCheck({ processes: [{ orphaned: true, command: "gone", pids: [] }] }).status,
+  ).toBe("ok");
+  const check = agentProcessesCheck({
+    processes: [live, { orphaned: true, command: "vite --port 5173\necho done", pids: [20, 21] }],
+  });
+  expect(check.status).toBe("warn");
+  expect(check.items[0]).toMatchObject({
+    key: "agent-processes:orphaned",
+    title: "1 orphaned agent command still running",
+    fix: "kill-orphans",
+  });
+  expect(check.items[0]?.detail).toContain('"vite --port 5173" (2 processes)');
 });

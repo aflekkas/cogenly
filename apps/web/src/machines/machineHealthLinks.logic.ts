@@ -142,6 +142,7 @@ const DIRECT_FIXES: ReadonlySet<MachineHealthFix> = new Set([
   "retry-sync",
   "setup-sandbox",
   "update-machine",
+  "kill-orphans",
 ]);
 
 const targetLine = (target: MachineHealthTarget | null): string | null => {

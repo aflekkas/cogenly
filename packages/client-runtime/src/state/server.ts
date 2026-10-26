@@ -1087,6 +1087,10 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:process-diagnostics",
       tag: WS_METHODS.serverGetProcessDiagnostics,
     }),
+    agentProcesses: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:agent-processes",
+      tag: WS_METHODS.serverGetAgentProcesses,
+    }),
     hostResources: createEnvironmentQueryAtomFamily(runtime, {
       label: "environment-data:server:host-resources",
       idleTtlMs: 0,
@@ -1406,6 +1410,10 @@ export function createServerEnvironmentAtoms<R, E>(
     signalProcess: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:signal-process",
       tag: WS_METHODS.serverSignalProcess,
+    }),
+    killAgentProcess: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:kill-agent-process",
+      tag: WS_METHODS.serverKillAgentProcess,
     }),
     startWork: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:work:start",

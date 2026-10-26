@@ -34,6 +34,7 @@ import * as MachineIdentity from "../machines/MachineIdentity.ts";
 import * as Machines from "../machines/Machines.ts";
 import * as PeerChannels from "../machines/PeerChannels.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
+import * as AgentProcesses from "../process/AgentProcesses.ts";
 import * as ScheduledTasks from "../scheduledTasks/ScheduledTaskService.ts";
 import * as MachineHealth from "./MachineHealth.ts";
 import { STUCK_RUN_AFTER_MS, newestMachineVersion } from "./healthChecks.ts";
@@ -79,6 +80,7 @@ const make = Effect.gen(function* () {
   const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
   const sql = yield* SqlClient.SqlClient;
   const crypto = yield* Crypto.Crypto;
+  const agentProcesses = yield* AgentProcesses.AgentProcesses;
 
   const commandId = (suffix: string) =>
     crypto.randomUUIDv4().pipe(
@@ -314,6 +316,20 @@ const make = Effect.gen(function* () {
         return target?._tag !== "thread"
           ? Effect.succeed(failed("The thread to stop is missing."))
           : stopStaleRuns(target.threadId, itemKey);
+      case "kill-orphans":
+        return agentProcesses.killOrphans.pipe(
+          Effect.map(
+            (pids) =>
+              ({
+                itemKey,
+                status: "fixed",
+                message:
+                  pids.length === 0
+                    ? "They had already exited."
+                    : `Killed ${pids.length} ${pids.length === 1 ? "process" : "processes"}.`,
+              }) as const,
+          ),
+        );
     }
   };
 

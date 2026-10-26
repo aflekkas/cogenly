@@ -315,7 +315,13 @@ Manually settling an idle thread dismisses unanswered async questions without
 sending an answer or restarting the agent. Settling also closes the thread's
 terminals that wait at an idle prompt, and keeps their output. A project script you
 started stays open while it runs a command. Agent-run terminals, including dev servers
-and their child processes, stop when you settle, archive, or delete the thread.
+and every process they start, stop when you stop the thread, cancel its task, or settle,
+archive, or delete it. A command left running in a thread with no activity for four hours
+is stopped too. To keep a server up, ask the agent to start it with keep-running; it then
+survives stop, settle and the idle sweep, and only archiving or deleting the thread ends it.
+**Settings → Diagnostics → Agent processes** lists what agents are running, per thread, with a
+Kill button and a log of what was stopped and why. After a restart, machine health reports
+commands an earlier server left running, and its Fix stops them.
 
 Every shell command the agent runs appears in the terminal panel under the conversation
 (see [Terminal](terminal.md)), newest first and labelled with the command. The panel never

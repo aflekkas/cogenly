@@ -858,6 +858,39 @@ export function tailscaleServeCheck(input: {
   );
 }
 
+export const AGENT_ORPHANS_ITEM_KEY = "agent-processes:orphaned";
+
+/**
+ * Commands agents started that an earlier server left running: ones marked
+ * keep-running, or ones the restart could not kill. Fix kills them all.
+ */
+export function agentProcessesCheck(input: {
+  readonly processes: ReadonlyArray<{
+    readonly orphaned: boolean;
+    readonly command: string;
+    readonly pids: ReadonlyArray<number>;
+  }>;
+}): MachineHealthCheck {
+  const orphans = input.processes.filter((entry) => entry.orphaned && entry.pids.length > 0);
+  if (orphans.length === 0) return check("agent-processes", "No orphaned processes", []);
+  const pids = orphans.reduce((total, entry) => total + entry.pids.length, 0);
+  const title = `${plural(orphans.length, "orphaned agent command")} still running`;
+  return check("agent-processes", title, [
+    item({
+      key: AGENT_ORPHANS_ITEM_KEY,
+      status: "warn",
+      title,
+      detail: `A previous server started ${orphans
+        .slice(0, 3)
+        .map((entry) => quoted(entry.command.split("\n")[0] ?? ""))
+        .join(
+          ", ",
+        )}${orphans.length > 3 ? " and more" : ""} (${pids} ${pids === 1 ? "process" : "processes"}). Nothing reads their output now. Fix kills them; Settings → Diagnostics lists each one.`,
+      fix: "kill-orphans",
+    }),
+  ]);
+}
+
 export const chatSandboxCheck = (status: SandboxStatus): MachineHealthCheck => {
   if (status.available)
     return {

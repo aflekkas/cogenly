@@ -7,6 +7,7 @@ import * as Schema from "effect/Schema";
 
 import { resolveAttachmentPathById } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
+import * as AgentProcesses from "../process/AgentProcesses.ts";
 import * as PreviewManager from "../preview/Manager.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 
@@ -46,14 +47,27 @@ export const layer = Layer.effect(
     const previews = yield* PreviewManager.PreviewManager;
     const fileSystem = yield* FileSystem.FileSystem;
     const config = yield* ServerConfig.ServerConfig;
+    const processes = yield* AgentProcesses.AgentProcesses;
     return {
+      // Settle and stop (`agentOnly`) spare kept commands; archive and delete
+      // kill everything. Either way the ledger catches trees whose terminal is
+      // already gone, such as an evicted session's leftover children.
       cleanupTerminals: (threadId: string, agentOnly = false, before?: string) =>
         (agentOnly
           ? terminals.stopAgents(threadId, before)
           : terminals
-              .stopAgents(threadId)
+              .stopAgents(threadId, undefined, { includeKeepRunning: true })
               .pipe(Effect.andThen(terminals.close({ threadId, deleteHistory: true })))
         ).pipe(
+          Effect.andThen(
+            processes.terminateThread({
+              threadId,
+              includeKeepRunning: !agentOnly,
+              before: agentOnly ? before : undefined,
+              reason: "stopped",
+            }),
+          ),
+          Effect.asVoid,
           Effect.mapError(
             (cause) => new ResourceCleanupError({ operation: "terminal", threadId, cause }),
           ),
