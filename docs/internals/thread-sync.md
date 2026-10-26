@@ -45,8 +45,10 @@ A held thread catches up in its original order once every item decodes. Readable
 schema decoding drops fields; event data, metadata extensions and command
 receipts survive relaying and later ownership changes. Receipts travel with
 events and remap their result sequence to the receiving log. A projection
-failure quarantines that thread's items with a reason, preserving its history
-while other threads advance. Lock timeouts retry without advancing the cursor
+failure quarantines that thread's incoming items with a reason while other threads advance.
+Held incoming history is bounded; a capacity-trimmed quarantine must be discarded, never
+partially replayed. The explicit per-thread health Fix drops only held incoming rows,
+leaves local history intact, and logs the discarded count. Lock timeouts retry without advancing the cursor
 or quarantining the batch.
 
 ## Continuing a thread from another machine

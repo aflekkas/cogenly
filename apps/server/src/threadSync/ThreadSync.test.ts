@@ -8,6 +8,8 @@ import {
   ThreadReplicationApply,
   CommandId,
 } from "@cogenly/contracts";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as TestClock from "effect/testing/TestClock";
@@ -697,6 +699,21 @@ it.live.each(["payload", "missing-meta", "missing-thread", "wrong-owner"])(
         (yield* hub.sql`SELECT reason FROM thread_replication_deferred WHERE reason IS NOT NULL`)
           .length,
       ).toBeGreaterThan(0);
+      if (kind !== "payload") {
+        expect(
+          (yield* hub.sql`SELECT reason FROM thread_replication_deferred WHERE reason IS NOT NULL`).some(
+            (row) => row.reason === kind,
+          ),
+        ).toBe(true);
+        // Upgrade a database written by a build that omitted structural reasons.
+        yield* hub.sql`UPDATE thread_replication_deferred SET reason = NULL`;
+        yield* hub.restartReplication;
+        expect(
+          (yield* hub.sql`SELECT reason FROM thread_replication_deferred WHERE reason IS NOT NULL`).some(
+            (row) => row.reason === kind,
+          ),
+        ).toBe(true);
+      }
       yield* hub.replication.replayHeld;
       expect((yield* hub.projections.getThreadProjection(good)).thread.title).toBe("On the laptop");
     }).pipe(Effect.scoped),
@@ -725,6 +742,10 @@ it.live("retries a transient lock without quarantining or advancing the cursor",
       ).toMatchObject({ reason: "busy" });
       expect((yield* hub.replication.cursors(peer.environmentId)).received.events).toBe(0);
       expect(yield* hub.sql`SELECT 1 FROM thread_replication_deferred`).toEqual([]);
+      write.mockReturnValueOnce(Effect.fail(lock));
+      expect(
+        yield* Effect.flip(peer.machines.call(hub.environmentId, ThreadReplicationApply, batch)),
+      ).toMatchObject({ reason: "handler-failed", error: { reason: "storage" } });
       yield* hub.replication.receive(batch, peer.environmentId, false);
       expect(yield* hub.replication.eventCount(threadId)).toBe(1);
     } finally {
@@ -753,5 +774,157 @@ it.effect("the hourly scheduler replays held history after its blocker clears", 
       (yield* hub.projections.getThreadProjection(threadId)).messages.map((row) => row.text),
     ).toEqual(["replayed"]);
     expect(yield* hub.sql`SELECT 1 FROM thread_replication_deferred`).toEqual([]);
+  }).pipe(Effect.scoped),
+);
+
+it.live("discarding a bounded quarantine preserves local history and lets later events apply", () =>
+  Effect.gen(function* () {
+    const hub = yield* start("discard-hub", "cloud-server");
+    const peer = yield* start("discard-peer", "computer");
+    yield* pair(hub, peer);
+    const at = yield* DateTime.now;
+    yield* peer.sink.write({
+      events: [thread("event:base", at), message("event:local", at, "kept")],
+    });
+    yield* peer.sync.sync(hub.environmentId);
+    const batch = yield* peer.replication.readBatch(
+      { events: 0, meta: 0 },
+      hub.environmentId,
+      true,
+    );
+    const before = (yield* hub.replication.cursors(peer.environmentId)).received;
+    yield* hub.replication.receive(
+      {
+        ...batch,
+        after: before,
+        cursor: { ...before, events: before.events + 1 },
+        events: [
+          {
+            ...(encodeEvent(message("event:poison", at, "bad")) as object),
+            payload: { threadId: "another-thread" },
+          },
+        ],
+      },
+      peer.environmentId,
+      false,
+    );
+    yield* hub.replication.receive(
+      {
+        ...batch,
+        after: before,
+        cursor: { ...before, events: before.events + 1005 },
+        events: Array.from({ length: 1005 }, (_, i) =>
+          encodeEvent(message(`event:held:${i}`, at, "held")),
+        ),
+      },
+      peer.environmentId,
+      false,
+    );
+    const rows = yield* hub.sql<{ n: number; bytes: number; reason: string }>`SELECT COUNT(*) AS n,
+      SUM(length(CAST(item_json AS BLOB))) AS bytes, MIN(reason) AS reason FROM thread_replication_deferred`;
+    expect(rows[0]?.n).toBe(1000);
+    expect(rows[0]?.bytes).toBeLessThanOrEqual(16 * 1024 * 1024);
+    expect(rows[0]?.reason).toBe("capacity");
+    yield* hub.replication.replayHeld;
+    expect(yield* hub.replication.discardQuarantined(threadId)).toBe(1000);
+    expect(yield* hub.replication.discardQuarantined(threadId)).toBe(0);
+    expect(
+      (yield* hub.projections.getThreadProjection(threadId)).messages.map((m) => m.text),
+    ).toEqual(["kept"]);
+    const cursor = (yield* hub.replication.cursors(peer.environmentId)).received;
+    yield* hub.replication.receive(
+      {
+        ...batch,
+        after: cursor,
+        cursor: { ...cursor, events: cursor.events + 1 },
+        events: [encodeEvent(message("event:after-discard", at, "new"))],
+      },
+      peer.environmentId,
+      false,
+    );
+    expect(
+      (yield* hub.projections.getThreadProjection(threadId)).messages.map((m) => m.text),
+    ).toEqual(expect.arrayContaining(["kept", "new"]));
+  }).pipe(Effect.scoped),
+);
+
+it.live("priority receive waits for the bulk replay permit", () =>
+  Effect.gen(function* () {
+    const hub = yield* start("permit-hub", "cloud-server");
+    const peer = yield* start("permit-peer", "computer");
+    yield* pair(hub, peer);
+    yield* peer.sink.write({ events: [thread("event:permit", yield* DateTime.now)] });
+    const batch = yield* peer.replication.readBatch(
+      { events: 0, meta: 0 },
+      hub.environmentId,
+      true,
+    );
+    const entered = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    const original = hub.sink.writeReplica;
+    let calls = 0;
+    const spy = vi.spyOn(hub.sink, "writeReplica").mockImplementation((input) =>
+      Effect.gen(function* () {
+        calls++;
+        if (calls === 1) {
+          yield* Deferred.succeed(entered, undefined);
+          yield* Deferred.await(release);
+        }
+        return yield* original(input);
+      }),
+    );
+    try {
+      const bulk = yield* hub.replication
+        .receive(batch, peer.environmentId, false)
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(entered);
+      const priority = yield* hub.replication
+        .receivePriority(threadId, batch, peer.environmentId, false)
+        .pipe(Effect.forkChild);
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(bulk);
+      yield* Fiber.join(priority);
+      expect(calls).toBe(1);
+      expect(yield* hub.replication.eventCount(threadId)).toBe(1);
+      expect(yield* hub.sql`SELECT 1 FROM thread_replication_deferred`).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+  }).pipe(Effect.scoped),
+);
+
+it.live("quarantine byte retention is bounded and version skew cannot be discarded", () =>
+  Effect.gen(function* () {
+    const hub = yield* start("bytes-hub", "cloud-server");
+    const peer = yield* start("bytes-peer", "computer");
+    yield* pair(hub, peer);
+    const at = yield* DateTime.now;
+    yield* peer.sink.write({ events: [thread("event:bytes", at)] });
+    const batch = yield* peer.replication.readBatch(
+      { events: 0, meta: 0 },
+      hub.environmentId,
+      true,
+    );
+    yield* hub.sql`INSERT INTO thread_replication_deferred(thread_id,item_kind,source_env,trusted_relay,item_json,reason)
+      VALUES (${threadId},'event',${peer.environmentId},0,'{}','invalid-batch')`;
+    const events = [1, 2].map((i) => ({
+      ...(encodeEvent(message(`event:large:${i}`, at, "held")) as object),
+      future: "x".repeat(9 * 1024 * 1024),
+    }));
+    yield* hub.replication.receive({ ...batch, events }, peer.environmentId, false);
+    const rows = yield* hub.sql<{
+      bytes: number;
+      n: number;
+    }>`SELECT SUM(length(CAST(item_json AS BLOB))) AS bytes,
+      COUNT(*) AS n FROM thread_replication_deferred`;
+    expect(rows[0]?.bytes).toBeLessThanOrEqual(16 * 1024 * 1024);
+    expect(rows[0]?.n).toBe(1);
+    yield* hub.sql`INSERT INTO thread_replication_deferred(thread_id,item_kind,source_env,trusted_relay,item_json)
+      VALUES ('future-thread','event',${peer.environmentId},0,'{}')`;
+    expect(yield* hub.replication.discardQuarantined("future-thread")).toBe(0);
+    expect(
+      (yield* hub.sql`SELECT 1 FROM thread_replication_deferred WHERE thread_id = 'future-thread'`)
+        .length,
+    ).toBe(1);
   }).pipe(Effect.scoped),
 );

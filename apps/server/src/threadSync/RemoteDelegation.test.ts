@@ -538,3 +538,88 @@ it.live.each([
     }).pipe(Effect.scoped),
   30000,
 );
+
+it.live("abandon preserves a just-attached cloud child while its parent projection lags", () =>
+  Effect.gen(function* () {
+    const hub = yield* startThreadMachine("lag-hub", "cloud-server", () => [], undefined, true);
+    const laptop = yield* startThreadMachine("lag-laptop", "computer", () => [], undefined, true);
+    yield* pair(hub, laptop);
+    const parent = Option.getOrThrow(laptop.engine);
+    const config = yield* laptop.run(ServerConfig.ServerConfig);
+    const projectId = ProjectId.make("scratch");
+    yield* laptop.sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at)
+      VALUES (${projectId},'No project',${`${config.baseDir}/scratch`},'[]','2026-10-24T00:00:00Z','2026-10-24T00:00:00Z')`;
+    const parentId = ThreadId.make("parent");
+    const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" };
+    yield* parent.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("parent-create"),
+      threadId: parentId,
+      projectId,
+      title: "Parent",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* parent.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("parent-message"),
+      threadId: parentId,
+      messageId: MessageId.make("message:parent"),
+      text: "Delegate work",
+      attachments: [],
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* Option.getOrThrow(laptop.worker).drain();
+    const run = (yield* parent.getThreadProjection(parentId)).runs[0]!;
+    // Simulate a committed attachment whose projection has not caught up.
+    yield* laptop.sql`CREATE TRIGGER lag_subagents AFTER INSERT ON orchestration_v2_projection_subagents
+        WHEN NEW.origin = 'app_owned' BEGIN DELETE FROM orchestration_v2_projection_subagents
+        WHERE subagent_id = NEW.subagent_id; END`;
+    const before = yield* laptop.replication.cursors(hub.environmentId);
+    const accepted = yield* parent.dispatch({
+      type: "delegated_task.request",
+      commandId: CommandId.make("delegate-to-hub"),
+      parentThreadId: parentId,
+      parentRunId: run.id,
+      parentNodeId: run.rootNodeId!,
+      machine: hub.environmentId,
+      task: "Do the task on the hub",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      completionWake: "always",
+      createdBy: "agent",
+      creationSource: "mcp",
+    });
+    const task = accepted.storedEvents.find((row) => row.event.type === "subagent.updated")!;
+    if (task.event.type !== "subagent.updated") return yield* Effect.die("Missing task");
+    const childId = task.event.payload.childThreadId!;
+    expect(hub.launched.map((launch) => launch.threadId)).toEqual([childId]);
+    expect((yield* parent.getThreadProjection(childId)).thread.ownerMachine).toBe(
+      hub.environmentId,
+    );
+    expect((yield* laptop.replication.cursors(hub.environmentId)).received).toEqual(
+      before.received,
+    );
+    expect((yield* parent.getThreadProjection(childId)).messages[0]?.text).toBe(
+      "Do the task on the hub",
+    );
+
+    expect(
+      yield* laptop.sql`SELECT 1 FROM orchestration_v2_projection_subagents WHERE child_thread_id = ${childId}`,
+    ).toEqual([]);
+    expect(
+      yield* laptop.sql`SELECT 1 FROM remote_delegation_intents WHERE child_thread_id = ${childId}`,
+    ).toEqual([]);
+    const stopped =
+      yield* hub.sql`SELECT 1 FROM orchestration_command_receipts WHERE command_id LIKE '%abandon-child:%'`;
+    expect(stopped).toEqual([]);
+  }).pipe(Effect.scoped),
+);

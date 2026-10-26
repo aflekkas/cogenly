@@ -131,7 +131,11 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       // A committed parent link wins, including a crash just after attachment.
       const attached = yield* sql`SELECT 1 FROM orchestration_v2_projection_subagents
-        WHERE child_thread_id = ${childThreadId} AND origin = 'app_owned'`;
+        WHERE child_thread_id = ${childThreadId} AND origin = 'app_owned'
+        UNION ALL SELECT 1 FROM orchestration_events
+        WHERE event_type = 'subagent.updated'
+          AND json_extract(payload_json, '$.childThreadId') = ${childThreadId}
+          AND json_extract(payload_json, '$.origin') = 'app_owned' LIMIT 1`;
       if (attached.length === 0)
         yield* routing.callMachine(
           target,

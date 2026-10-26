@@ -30,6 +30,8 @@ import {
   SYNC_STUCK_AFTER_MS,
   type SyncPeerSample,
   buildReport,
+  directlyFixableItemKeys,
+  quarantinedThreadItem,
   agentProcessesCheck,
   chatSandboxCheck,
   diskCheck,
@@ -415,7 +417,7 @@ describe("sync tracking", () => {
     ...overrides,
   });
 
-  it("reports quarantined history as a failure with a retry Fix", () => {
+  it("reports quarantined history without suggesting a deterministic retry", () => {
     const peer = sample({ heldChanges: 3, heldThreads: 1, quarantined: 3, backlog: 0 });
     const result = syncCheck({
       peers: [{ sample: peer, progress: trackSyncProgress(undefined, peer, NOW_MS) }],
@@ -427,7 +429,7 @@ describe("sync tracking", () => {
         {
           key: `sync:quarantined:${vps}`,
           status: "fail",
-          fix: "retry-sync",
+          fix: null,
           target: { _tag: "machine", environmentId: vps },
         },
       ],
@@ -869,4 +871,28 @@ it("agent process health warns about live orphans only, with a Fix", () => {
     fix: "kill-orphans",
   });
   expect(check.items[0]?.detail).toContain('"vite --port 5173" (2 processes)');
+});
+
+it("names the quarantine and volume, and requires an explicit item for discard", () => {
+  const held = quarantinedThreadItem({
+    threadId: ThreadId.make("thread:bad"),
+    title: "Brakes",
+    count: 7,
+    bytes: 2048,
+  });
+  expect(held).toMatchObject({
+    title: "Discard quarantined changes for Brakes",
+    fix: "discard-quarantined",
+    detail: expect.stringContaining("7 incoming items (2048 bytes)"),
+    target: { _tag: "thread", threadId: "thread:bad" },
+  });
+  const report = buildReport({
+    environmentId: EnvironmentId.make("self"),
+    machineName: "MacBook",
+    observedAt: DateTime.makeUnsafe(0),
+    serverVersion: "0.3.3",
+    uptimeSeconds: 1,
+    checks: [{ id: "sync", status: "fail", summary: "Quarantined", items: [held] }],
+  });
+  expect(directlyFixableItemKeys(report)).toEqual([]);
 });

@@ -140,6 +140,7 @@ const DIRECT_FIXES: ReadonlySet<MachineHealthFix> = new Set([
   "stop-runs",
   "send-queue",
   "retry-sync",
+  "discard-quarantined",
   "setup-sandbox",
   "update-machine",
   "kill-orphans",

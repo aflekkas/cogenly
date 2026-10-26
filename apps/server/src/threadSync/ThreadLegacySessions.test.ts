@@ -248,30 +248,40 @@ it.live(
     }).pipe(Effect.scoped),
 );
 
-it.live("a peer still cannot claim another thread's machine-scoped session", () =>
-  Effect.gen(function* () {
-    const hub = yield* start("legacy-conflict-hub", "cloud-server");
-    const mac = yield* start("legacy-conflict-mac", "computer");
-    yield* pair(hub, mac);
-    const at = yield* DateTime.now;
-    const local = ThreadId.make("thread:local-session");
-    const remote = ThreadId.make("thread:conflicting-session");
-    const sessionId = ProviderSessionId.make(
-      `${shared}:machine:${encodeURIComponent(hub.environmentId)}`,
-    );
-    yield* hub.sink.write({ events: history(local, at, sessionId) });
-    yield* mac.sink.write({ events: history(remote, at, sessionId) });
-    const batch = yield* mac.replication.readBatch({ events: 0, meta: 0 }, hub.environmentId, true);
-    yield* hub.replication.receive(batch, mac.environmentId, false);
-    expect(
-      (yield* hub.sql`SELECT DISTINCT reason FROM thread_replication_deferred`)[0]?.reason,
-    ).toBe("projection");
-    expect((yield* hub.replication.cursors(mac.environmentId)).received).toEqual(batch.cursor);
-    expect(
-      (yield* hub.sql`SELECT event_id FROM orchestration_events WHERE stream_id = ${remote}`)
-        .length,
-    ).toBe(0);
-  }).pipe(Effect.scoped),
+it.live(
+  "legacy machine-only session identities are split by thread without claiming the local session",
+  () =>
+    Effect.gen(function* () {
+      const hub = yield* start("legacy-conflict-hub", "cloud-server");
+      const mac = yield* start("legacy-conflict-mac", "computer");
+      yield* pair(hub, mac);
+      const at = yield* DateTime.now;
+      const local = ThreadId.make("thread:local-session");
+      const remote = ThreadId.make("thread:conflicting-session");
+      const sessionId = ProviderSessionId.make(
+        `${shared}:machine:${encodeURIComponent(hub.environmentId)}`,
+      );
+      yield* hub.sink.write({ events: history(local, at, sessionId) });
+      yield* mac.sink.write({ events: history(remote, at, sessionId) });
+      const batch = yield* mac.replication.readBatch(
+        { events: 0, meta: 0 },
+        hub.environmentId,
+        true,
+      );
+      yield* hub.replication.receive(batch, mac.environmentId, false);
+      expect(yield* hub.sql`SELECT reason FROM thread_replication_deferred`).toEqual([]);
+      expect(
+        (yield* hub.projections.getThreadProjection(remote)).providerThreads[0]?.providerSessionId,
+      ).toBe(`${sessionId}:thread:${encodeURIComponent(remote)}`);
+      expect(
+        (yield* hub.projections.getThreadProjection(local)).providerThreads[0]?.providerSessionId,
+      ).toBe(sessionId);
+      expect((yield* hub.replication.cursors(mac.environmentId)).received).toEqual(batch.cursor);
+      expect(
+        (yield* hub.sql`SELECT event_id FROM orchestration_events WHERE stream_id = ${remote}`)
+          .length,
+      ).toBeGreaterThan(0);
+    }).pipe(Effect.scoped),
 );
 
 it.live("machine-scoped sessions can reattach after a sibling thread moves to the hub", () =>
@@ -311,7 +321,7 @@ it.live("machine-scoped sessions can reattach after a sibling thread moves to th
       (yield* hub.projections.getThreadProjection(stays)).providerSessions.map(
         (session) => session.id,
       ),
-    ).toContain(sessionId);
+    ).toContain(`${sessionId}:thread:${encodeURIComponent(stays)}`);
     expect((yield* hub.replication.cursors(mac.environmentId)).received).toEqual(
       (yield* mac.replication.cursors(hub.environmentId)).acknowledged,
     );
@@ -547,7 +557,7 @@ it.live.each(["moved-first", "moved-last"])(
       for (const id of [moved, stays]) {
         expect(
           (yield* other.projections.getThreadProjection(id)).providerThreads[0]?.providerSessionId,
-        ).toBe(sessionId);
+        ).toBe(`${sessionId}:thread:${encodeURIComponent(id)}`);
       }
       expect(
         (yield* other.sql`SELECT count(*) AS count FROM thread_replication_deferred`)[0]?.count,
@@ -838,5 +848,27 @@ it.live.each([
     const before = (yield* machine.sql<{ n: number }>`SELECT total_changes() AS n`)[0]!.n;
     yield* machine.run(migrateImportIdentities);
     expect((yield* machine.sql<{ n: number }>`SELECT total_changes() AS n`)[0]!.n).toBe(before);
+  }).pipe(Effect.scoped),
+);
+
+it.live("a replica cannot claim another thread's fully scoped session", () =>
+  Effect.gen(function* () {
+    const hub = yield* start("scoped-conflict-hub", "cloud-server");
+    const mac = yield* start("scoped-conflict-mac", "computer");
+    yield* pair(hub, mac);
+    const at = yield* DateTime.now;
+    const local = ThreadId.make("thread:scoped-local");
+    const remote = ThreadId.make("thread:scoped-remote");
+    const sessionId = ProviderSessionId.make(scoped(hub.environmentId, local));
+    yield* hub.sink.write({ events: history(local, at, sessionId) });
+    yield* mac.sink.write({ events: history(remote, at, sessionId) });
+    const batch = yield* mac.replication.readBatch({ events: 0, meta: 0 }, hub.environmentId, true);
+    yield* hub.replication.receive(batch, mac.environmentId, false);
+    expect(
+      (yield* hub.sql`SELECT DISTINCT reason FROM thread_replication_deferred`)[0]?.reason,
+    ).toBe("projection");
+    expect(
+      (yield* hub.sql`SELECT 1 FROM orchestration_events WHERE stream_id = ${remote}`).length,
+    ).toBe(0);
   }).pipe(Effect.scoped),
 );

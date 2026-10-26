@@ -243,6 +243,12 @@ sign-in opens its sign-in. Anything else opens a new chat with the problem
 filled in, so an agent can investigate and fix it once you send it. A paired
 machine that can't be reached is shown from what this machine last saw of it.
 
+For invalid incoming thread history, health offers **Discard quarantined changes for
+<thread>**, with the incoming item count and size. Its Fix discards only those held
+changes, keeping the thread's local data so later changes can sync. Review the named
+thread before discarding. Agents use `machine_health_fix` with that item's key;
+Fix without named items does not discard quarantines.
+
 From a terminal on the machine, run `cogenly health` (or `cogenly doctor
 --health`). Add `--machine <environment-id>` to read a paired machine,
 and `--json` for structured output. The command exits with status 1 when a

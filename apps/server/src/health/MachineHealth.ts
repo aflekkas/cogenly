@@ -15,6 +15,7 @@ import * as NodeFSP from "node:fs/promises";
 
 import {
   type EnvironmentId,
+  ThreadId,
   type ChatSandboxSetupResult,
   MachineHealthError,
   type MachineHealthCheck,
@@ -81,6 +82,7 @@ import {
   stuckRunsCheck,
   stuckQueuesItems,
   syncCheck,
+  quarantinedThreadItem,
   tailscaleServeCheck,
   trackSyncProgress,
   unknownCheck,
@@ -96,6 +98,7 @@ export class MachineHealth extends Context.Service<
   {
     /** This machine's report. Never fails: a check that cannot run is `unknown`. */
     readonly report: Effect.Effect<MachineHealthReport>;
+    readonly discardQuarantined: (threadId: string) => Effect.Effect<number, MachineHealthError>;
     readonly setupSandbox: Effect.Effect<ChatSandboxSetupResult>;
     /** This machine, or a paired one read over the peer link. */
     readonly reportFor: (
@@ -364,7 +367,35 @@ const make = Effect.gen(function* () {
           return { sample, progress };
         }),
       );
-      return syncCheck({ peers: samples, nowMs });
+      const base = syncCheck({ peers: samples, nowMs });
+      const quarantines = yield* sql<{
+        thread_id: string;
+        title: string | null;
+        count: number;
+        bytes: number;
+      }>`
+        SELECT d.thread_id, COALESCE(json_extract(t.payload_json, '$.title'),
+          (SELECT json_extract(h.item_json, '$.payload.title') FROM thread_replication_deferred h
+            WHERE h.thread_id = d.thread_id AND h.item_kind = 'event'
+              AND json_extract(h.item_json, '$.type') = 'thread.created' LIMIT 1)) AS title,
+          COUNT(*) AS count, SUM(length(CAST(d.item_json AS BLOB))) AS bytes
+        FROM thread_replication_deferred d LEFT JOIN orchestration_v2_projection_threads t ON t.thread_id = d.thread_id
+        GROUP BY d.thread_id HAVING MAX(d.reason IS NOT NULL) = 1`;
+      return {
+        ...base,
+        status: quarantines.length > 0 ? ("fail" as const) : base.status,
+        items: [
+          ...base.items.filter((entry) => !entry.key.startsWith("sync:quarantined:")),
+          ...quarantines.map((row) =>
+            quarantinedThreadItem({
+              threadId: ThreadId.make(row.thread_id),
+              title: row.title,
+              count: row.count,
+              bytes: row.bytes,
+            }),
+          ),
+        ],
+      };
     });
 
   const activeRuns = (now: DateTime.Utc) =>
@@ -533,6 +564,8 @@ const make = Effect.gen(function* () {
     reportFor,
     subscribe,
     retrySync,
+    discardQuarantined: (threadId) =>
+      replication.discardQuarantined(threadId).pipe(Effect.mapError(unavailable)),
     setupSandbox: sandbox.setup.pipe(Effect.tap(() => report)),
   });
 });

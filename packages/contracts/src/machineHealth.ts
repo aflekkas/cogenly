@@ -64,6 +64,7 @@ export const MachineHealthFix = Schema.Literals([
   "stop-runs",
   "send-queue",
   "retry-sync",
+  "discard-quarantined",
   "setup-sandbox",
   "update-machine",
   "kill-orphans",

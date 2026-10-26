@@ -69,7 +69,17 @@ const make = Effect.gen(function* () {
       const { link } = yield* topology;
       // A spoke trusts relayed authorship only from the hub it pinned.
       const trustedRelay = link._tag === "spoke" && link.hubEnvironmentId === caller.environmentId;
-      return yield* replication.receive(batch, caller.environmentId, trustedRelay);
+      // The v1 channel is also served to 0.3.2, whose error schema has no busy literal.
+      // Keep the internal classification; use its compatible transient error on this wire.
+      return yield* replication
+        .receive(batch, caller.environmentId, trustedRelay)
+        .pipe(
+          Effect.mapError((error) =>
+            error.reason === "busy"
+              ? new ThreadReplicationError({ reason: "storage", cause: error })
+              : error,
+          ),
+        );
     }),
   );
 
