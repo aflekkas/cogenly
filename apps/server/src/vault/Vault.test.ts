@@ -211,6 +211,44 @@ describe("Vault service", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("asks again after a decided approval, reusing only a pending one", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const sql = yield* SqlClient.SqlClient;
+      const agentId = AgentId.make("agent:1");
+      yield* sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap) VALUES (${agentId}, 'thread:agent', '{}', 1, 10)`;
+      const { item } = yield* vault.create({
+        name: "Deploy key",
+        type: "api_key",
+        secretFields: { value: "deploy-key-value-123" },
+      });
+      const ask = () =>
+        vault.use({
+          itemId: item.id,
+          field: "value",
+          caller: { kind: "agent", agentId },
+          threadId,
+        });
+      const first = yield* ask();
+      const again = yield* ask();
+      expect(first.status === "approval_required" && first.approvalId).toBeTruthy();
+      expect(again.status === "approval_required" && again.approvalId).toBe(
+        first.status === "approval_required" && first.approvalId,
+      );
+
+      // The owner rejects (or approves, then revokes the grant): the next use asks afresh.
+      yield* sql`UPDATE agent_approvals SET status = 'rejected', decided_by = 'user'`;
+      const afterDecision = yield* ask();
+      expect(afterDecision.status).toBe("approval_required");
+      if (afterDecision.status === "approval_required" && first.status === "approval_required")
+        expect(afterDecision.approvalId).not.toBe(first.approvalId);
+      const pending = yield* sql<{
+        n: number;
+      }>`SELECT COUNT(*) AS n FROM agent_approvals WHERE status = 'pending'`;
+      expect(pending[0]?.n).toBe(1);
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("stores a card in encrypted card fields and fills each by field", () =>
     Effect.gen(function* () {
       const vault = yield* Vault.Vault;

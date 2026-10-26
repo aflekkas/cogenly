@@ -660,10 +660,12 @@ const make = Effect.gen(function* () {
         // Reuse the existing agent approval mechanism: one pending approval
         // per agent/item/field/domain, decided by the owner (see
         // AgentWorkspaceService.approve's vault_use case, which grants the
-        // item policy so a retry succeeds).
+        // item policy so a retry succeeds). Once one is decided, a later use
+        // that still asks (rejected, expired, or granted then revoked) starts
+        // a new request.
         let approvalId: string | null = null;
         if (input.caller.kind === "agent") {
-          approvalId = `approval:vault:${row.id}:${input.caller.agentId}:${input.field}:${input.domain ?? ""}`;
+          const agentId = input.caller.agentId;
           const actionJson = encodeApprovalActionJson({
             actionKind: "vault_use",
             payload: {
@@ -674,9 +676,20 @@ const make = Effect.gen(function* () {
               threadId: input.threadId ?? null,
             },
           });
-          yield* sql`INSERT OR IGNORE INTO agent_approvals(id, agent_id, action_json, status, requested_at, source_run_id) VALUES (${approvalId}, ${input.caller.agentId}, ${actionJson}, 'pending', ${yield* now}, ${null})`.pipe(
-            Effect.mapError(wrap),
-          );
+          const requestedAt = yield* now;
+          const newId = `approval:vault:${row.id}:${yield* crypto.randomUUIDv4()}`;
+          approvalId = yield* sql
+            .withTransaction(
+              Effect.gen(function* () {
+                const pending = yield* sql<{
+                  id: string;
+                }>`SELECT id FROM agent_approvals WHERE status = 'pending' AND agent_id = ${agentId} AND json_extract(action_json, '$.actionKind') = 'vault_use' AND json_extract(action_json, '$.payload.processExposure') IS NULL AND json_extract(action_json, '$.payload.vaultItemId') = ${row.id} AND json_extract(action_json, '$.payload.field') = ${input.field} AND IFNULL(json_extract(action_json, '$.payload.domain'), '') = ${input.domain ?? ""} ORDER BY requested_at LIMIT 1`;
+                if (pending[0]) return pending[0].id;
+                yield* sql`INSERT INTO agent_approvals(id, agent_id, action_json, status, requested_at, source_run_id) VALUES (${newId}, ${agentId}, ${actionJson}, 'pending', ${requestedAt}, ${null})`;
+                return newId;
+              }),
+            )
+            .pipe(Effect.mapError(wrap));
         }
         yield* record("approval_required");
         return {
