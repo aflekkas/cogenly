@@ -21,6 +21,7 @@ export const LEGACY_PROJECT_ACTIONS_FILE_NAME = "legacy-project-actions.json";
 export const LegacyProjectActions = Schema.Struct({
   /** The settings had folded the repository record's own scripts into overrides. */
   folded: Schema.Boolean,
+  defaultScripts: Schema.optional(Schema.Array(ProjectScript)),
   /** A repository's own list; `null` meant "use the machine's actions". */
   scripts: Schema.Record(ProjectId, Schema.NullOr(Schema.Array(ProjectScript))),
 });
@@ -62,20 +63,32 @@ export function readLegacyProjectActions(stored: unknown): LegacyProjectActions 
       }
     }
   }
-  if (!folded && Object.keys(scripts).length === 0) return null;
-  return { folded, scripts: scripts as LegacyProjectActions["scripts"] };
+  const defaults = decodeScripts(stored.defaultProjectScripts);
+  if (!folded && Object.keys(scripts).length === 0 && Option.isNone(defaults)) return null;
+  return {
+    folded,
+    scripts: scripts as LegacyProjectActions["scripts"],
+    ...(Option.isSome(defaults) ? { defaultScripts: defaults.value } : {}),
+  };
 }
 
 /**
  * The actions a repository should hold so it keeps the actions it ran before,
  * or null to leave it as it is. After the fold, a repository without its own
- * list followed the machine's actions, so it holds none of its own.
+ * list followed the machine's actions. Explicit empty lists remain opt-outs.
  */
 export function legacyProjectActionsTarget(
   legacy: LegacyProjectActions,
   project: { readonly id: ProjectId; readonly scripts: ReadonlyArray<ProjectScript> },
 ): ReadonlyArray<ProjectScript> | null {
   const stored = Object.hasOwn(legacy.scripts, project.id) ? legacy.scripts[project.id] : undefined;
-  const target = legacy.folded ? (stored ?? []) : stored === undefined ? null : (stored ?? []);
+  const fallback = legacy.defaultScripts ?? [];
+  const target = legacy.folded
+    ? (stored ?? fallback)
+    : stored === undefined
+      ? project.scripts.length > 0
+        ? null
+        : fallback
+      : (stored ?? fallback);
   return target === null || Equal.equals(target, project.scripts) ? null : target;
 }

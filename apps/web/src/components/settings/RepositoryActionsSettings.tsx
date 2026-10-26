@@ -4,7 +4,6 @@ import {
   squashAtomCommandFailure,
 } from "@cogenly/client-runtime/state/runtime";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@cogenly/shared/keybindings";
-import { resolveProjectScripts } from "@cogenly/shared/projectScripts";
 import { ChevronDownIcon, PlusIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useProjectConfigFileState } from "../../hooks/useProjectConfigFile";
@@ -61,7 +60,7 @@ export function RepositoryActionsSettings({
     : undefined;
   const scripts =
     representative && representativeConfig
-      ? resolveProjectScripts(representativeConfig.settings, representative)
+      ? representative.scripts
       : [];
   const keybindings = representativeConfig?.keybindings ?? DEFAULT_RESOLVED_KEYBINDINGS;
   const [request, setRequest] = useState<ProjectScriptEditorRequest | null>(null);

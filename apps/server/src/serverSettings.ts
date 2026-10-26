@@ -72,8 +72,8 @@ import {
 import { mapSettingsSecrets, SECRET_REDACTED, type SettingsSecret } from "./settingsSecrets.ts";
 import {
   LEGACY_PROJECT_ACTIONS_FILE_NAME,
-  type LegacyProjectActions,
   LegacyProjectActionsJson,
+  type LegacyProjectActions,
   readLegacyProjectActions,
 } from "./project/legacyProjectActions.ts";
 
@@ -623,18 +623,29 @@ const make = Effect.gen(function* () {
 
   // Keep legacy actions on every settings rewrite until their sidecar is durable.
   let pendingLegacyProjectActions: LegacyProjectActions | null = null;
+  // Keep every retired per-project value until legacy-project-settings.json is durable.
+  let pendingLegacyProjectSettings: Record<string, unknown> = {};
   const writeSettingsAtomically = Effect.fnUntraced(
     function* (settings: ServerSettings) {
       const sparse = stripDefaultServerSettings(settings, DEFAULT_SERVER_SETTINGS) ?? {};
       const sparseSettingsJson =
-        pendingLegacyProjectActions === null
+        pendingLegacyProjectActions === null &&
+        Object.keys(pendingLegacyProjectSettings).length === 0
           ? yield* encodeServerSettingsJson(sparse)
           : yield* Schema.encodeUnknownEffect(
               fromJsonStringPretty(Schema.Record(Schema.String, Schema.Unknown)),
             )({
               ...sparse,
-              projectSettingsFolded: pendingLegacyProjectActions.folded,
-              projectScriptOverrides: pendingLegacyProjectActions.scripts,
+              ...(pendingLegacyProjectActions === null
+                ? {}
+                : {
+                    projectSettingsFolded: pendingLegacyProjectActions.folded,
+                    projectScriptOverrides: pendingLegacyProjectActions.scripts,
+                    ...(pendingLegacyProjectActions.defaultScripts !== undefined
+                      ? { defaultProjectScripts: pendingLegacyProjectActions.defaultScripts }
+                      : {}),
+                  }),
+              ...pendingLegacyProjectSettings,
             });
       return yield* writeFileStringAtomically({
         filePath: settingsPath,
@@ -694,10 +705,47 @@ const make = Effect.gen(function* () {
   /** Keeps a sidecar that is still waiting for the migration: it holds the older copy. */
   const saveLegacyProjectActions = (actions: LegacyProjectActions) =>
     Effect.gen(function* () {
-      if (yield* fs.exists(legacyProjectActionsPath)) return;
+      if (yield* fs.exists(legacyProjectActionsPath)) {
+        const previous = yield* fs
+          .readFileString(legacyProjectActionsPath)
+          .pipe(Effect.flatMap(Schema.decodeUnknownEffect(LegacyProjectActionsJson)));
+        // An unfinished older migration owns its lists; only add the retired machine fallback.
+        actions = {
+          ...actions,
+          ...previous,
+          ...(previous.defaultScripts === undefined && actions.defaultScripts !== undefined
+            ? { defaultScripts: actions.defaultScripts }
+            : {}),
+        };
+      }
       yield* writeFileStringAtomically({
         filePath: legacyProjectActionsPath,
         contents: `${yield* encodeLegacyProjectActions(actions)}\n`,
+      }).pipe(
+        Effect.provideService(FileSystem.FileSystem, fs),
+        Effect.provideService(Path.Path, pathService),
+      );
+    });
+
+  const legacyProjectSettingsPath = pathService.join(
+    pathService.dirname(settingsPath),
+    "legacy-project-settings.json",
+  );
+  const legacyProjectSettingsSchema = Schema.Record(Schema.String, Schema.Unknown);
+  const legacyProjectSettingsJson = fromJsonStringPretty(legacyProjectSettingsSchema);
+  const saveLegacyProjectSettings = (values: Record<string, unknown>) =>
+    Effect.gen(function* () {
+      const previous = (yield* fs.exists(legacyProjectSettingsPath))
+        ? yield* fs
+            .readFileString(legacyProjectSettingsPath)
+            .pipe(Effect.flatMap(Schema.decodeUnknownEffect(legacyProjectSettingsJson)))
+        : {};
+      yield* writeFileStringAtomically({
+        filePath: legacyProjectSettingsPath,
+        contents: `${yield* Schema.encodeUnknownEffect(legacyProjectSettingsJson)({
+          ...values,
+          ...previous,
+        })}\n`,
       }).pipe(
         Effect.provideService(FileSystem.FileSystem, fs),
         Effect.provideService(Path.Path, pathService),
@@ -781,6 +829,31 @@ const make = Effect.gen(function* () {
     const folded = settingsFileTrusted ? deviceFolded : loaded;
     // Repository actions saved as pre-0.3.2 project settings go to a sidecar
     // for LegacyProjectActionsMigration before the rewrite below drops them.
+    const storedRecord = Schema.decodeUnknownOption(legacyProjectSettingsSchema)(storedSettings);
+    pendingLegacyProjectSettings =
+      settingsFileTrusted && Option.isSome(storedRecord)
+        ? Object.fromEntries(
+            Object.entries(storedRecord.value).filter(
+              ([key]) =>
+                key === "projectSettingsFolded" ||
+                key === "projectSettingsOverrides" ||
+                key === "projectScriptOverrides" ||
+                key === "projectAutoPullOverrides" ||
+                key === "projectAgentBrowserAccessOverrides",
+            ),
+          )
+        : {};
+    const legacyProjectSettingsSaved =
+      Object.keys(pendingLegacyProjectSettings).length > 0 &&
+      (yield* saveLegacyProjectSettings(pendingLegacyProjectSettings).pipe(
+        Effect.as(true),
+        Effect.catch((cause) =>
+          Effect.logWarning("failed to preserve retired per-project settings", { cause }).pipe(
+            Effect.as(false),
+          ),
+        ),
+      ));
+    if (legacyProjectSettingsSaved) pendingLegacyProjectSettings = {};
     const legacyActions = settingsFileTrusted ? readLegacyProjectActions(storedSettings) : null;
     pendingLegacyProjectActions = legacyActions;
     const legacyActionsSaved =
@@ -829,7 +902,8 @@ const make = Effect.gen(function* () {
       migrated !== loaded ||
       (settingsFileTrusted && legacyProviders !== undefined) ||
       hasLegacySourceControl ||
-      legacyActionsSaved
+      legacyActionsSaved ||
+      legacyProjectSettingsSaved
     ) {
       yield* writeSettingsAtomically(migrated);
       for (const move of sourceControlMigration.secretMoves) {

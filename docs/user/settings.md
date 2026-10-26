@@ -14,6 +14,7 @@ your primary machine until you pick another.
 
 Before 0.3.2 a setting could be overridden for one project. Those overrides no longer apply:
 every project now uses the global value. A repository's own actions moved to its Repository page.
+The old per-project values are kept in `legacy-project-settings.json` beside `settings.json`.
 
 ## Worktree branch names
 
