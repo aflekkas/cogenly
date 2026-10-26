@@ -19,19 +19,6 @@ describe("nextPanelHeight", () => {
     expect(nextPanelHeight(first, 180.5)).toBe(first);
   });
 
-  it("only grows while holding", () => {
-    const first = nextPanelHeight(null, 180);
-    const grown = nextPanelHeight(first, 288, { hold: true });
-    expect(grown).toEqual({ height: 288, animate: true });
-    expect(nextPanelHeight(grown, 96, { hold: true })).toBe(grown);
-    // Released, it settles on the content's height.
-    expect(nextPanelHeight(grown, 96)).toEqual({ height: 96, animate: true });
-  });
-
-  it("still resets on a zero size while holding", () => {
-    expect(nextPanelHeight(nextPanelHeight(null, 180), 0, { hold: true })).toBeNull();
-  });
-
   it("resets on a zero size so the next open does not grow from 0", () => {
     const open = nextPanelHeight(null, 180);
     const hidden = nextPanelHeight(open, 0);

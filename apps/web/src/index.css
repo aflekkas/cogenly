@@ -1073,6 +1073,23 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   }
 }
 
+/* A result row that arrives while its list is already open (a keystroke
+   widened the composer menu's matches) fades in where it lands. */
+@utility animate-row-enter {
+  animation: message-send-fade var(--motion-duration-base) --theme(--ease-out) both;
+}
+
+/* Rows a keystroke dropped, fading out while the panel's edge glides over them. */
+@utility animate-row-leave {
+  animation: row-leave-fade var(--motion-duration-base) --theme(--ease-out) both;
+}
+
+@keyframes row-leave-fade {
+  to {
+    opacity: 0;
+  }
+}
+
 /* A floating panel (popover, menu, command palette, composer drawer) gliding to
    its content's new height. useAnimatedPanelHeight (components/ui) measures
    the content and sets the px height and data-panel-height; only changes after

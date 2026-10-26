@@ -30,6 +30,24 @@ export function composerMenuSections<Item, Group extends string>(
   return { sections, showHeadings };
 }
 
+/**
+ * What a keystroke changed in the rows. `arrived` are the ids that fade in. `leaving` are the
+ * dropped rows in their old order, nearest the new rows last and at most `max` of them: the drawer
+ * draws them above the new rows, fading, while its top edge glides down.
+ */
+export function composerMenuRowChanges<Item extends { readonly id: string }>(
+  previous: ReadonlyArray<Item>,
+  next: ReadonlyArray<Item>,
+  max: number,
+): { readonly arrived: ReadonlySet<string>; readonly leaving: Item[] } {
+  const before = new Set(previous.map((item) => item.id));
+  const after = new Set(next.map((item) => item.id));
+  return {
+    arrived: new Set(next.filter((item) => !before.has(item.id)).map((item) => item.id)),
+    leaving: previous.filter((item) => !after.has(item.id)).slice(-max),
+  };
+}
+
 /** What the menu says while it has no rows: searching, or nothing matched for this trigger. */
 export function composerMenuEmptyText(input: {
   readonly triggerKind: ComposerTriggerKind | null;
