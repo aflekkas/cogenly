@@ -5955,7 +5955,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             key={activeThreadId}
             className="relative z-0"
             items={bannerStackItems}
-            attachedAbove={props.queuedRunsControl}
+            attachedBelow={props.queuedRunsControl}
           />
           <AttachmentPresence
             show={!activityStackItem && Boolean(shownSyncPhase || inlineTasksBadge)}

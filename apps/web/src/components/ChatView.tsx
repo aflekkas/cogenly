@@ -6116,12 +6116,14 @@ export default function ChatView(props: ChatViewProps) {
     Array<ComposerBannerStackItem | ComposerBannerStackContent>
   >(() => {
     const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];
+    // Up from the queue: background work, then the rate-limit backoff, so
+    // the two keep their places whether or not an activity row leads.
     const backgroundWorkItems = [
+      backgroundWorkBannerItem,
       backoffBannerItem,
       subagentBannerItem,
       childInputBannerItem,
       goalBannerItem,
-      backgroundWorkBannerItem,
     ].filter((item) => item !== null);
     // The user asked for this one, so it leads the notice tier instead of trailing it.
     const usageLimitsItems = usageLimitsBanner === null ? [] : [usageLimitsBanner];
