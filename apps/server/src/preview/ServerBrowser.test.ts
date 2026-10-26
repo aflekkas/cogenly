@@ -35,6 +35,8 @@ import { ServerBrowserContexts } from "./ServerBrowserContexts.ts";
 
 const environmentId = EnvironmentId.make("environment:test");
 const threadId = ThreadId.make("thread:browser");
+// Snapshots default to compact elements; these tests read the full page text.
+const FULL = { output: "full" } as const;
 const scope: McpThreadInvocationScope = {
   environmentId,
   capabilities: new Set(["preview"]),
@@ -218,7 +220,7 @@ it.effect("keeps snapshot, evaluate, and login across background → panel → b
     Effect.gen(function* () {
       const r = yield* rig();
       const check = Effect.gen(function* () {
-        const snapshot = yield* r.invoke<PreviewAutomationSnapshot>("snapshot", r.tabId);
+        const snapshot = yield* r.invoke<PreviewAutomationSnapshot>("snapshot", r.tabId, FULL);
         expect(snapshot.visibleText).toBe("Signed in");
         expect(yield* r.invoke("evaluate", r.tabId, { expression: "sessionStorage.login" })).toBe(
           "signed-in-session",
@@ -287,7 +289,7 @@ it.effect("reconnects a native tab without replacing it and reports a detached d
       r.reconnect();
       const reconnected = yield* r.invoke<PreviewAutomationStatus>("status", r.tabId);
       expect(reconnected.automation).toEqual({ connected: true, state: "ready" });
-      expect((yield* r.invoke<PreviewAutomationSnapshot>("snapshot", r.tabId)).visibleText).toBe(
+      expect((yield* r.invoke<PreviewAutomationSnapshot>("snapshot", r.tabId, FULL)).visibleText).toBe(
         "Signed in",
       );
       expect(yield* r.invoke("evaluate", r.tabId, { expression: "sessionStorage.login" })).toBe(
@@ -320,7 +322,7 @@ it.effect(
         expect(result._tag).toBe("Failure");
         if (result._tag === "Failure") expect(result.failure.message).toContain("rendering=panel");
         expect((yield* r.invoke<PreviewAutomationStatus>("status", r.tabId)).available).toBe(true);
-        expect((yield* r.invoke<PreviewAutomationSnapshot>("snapshot", r.tabId)).visibleText).toBe(
+        expect((yield* r.invoke<PreviewAutomationSnapshot>("snapshot", r.tabId, FULL)).visibleText).toBe(
           "Signed in",
         );
         expect(r.connectDesktop).toHaveBeenCalledTimes(2);
@@ -443,7 +445,7 @@ it.effect("caller interruption leaves panel automation and its signed-in page al
       yield* Effect.promise(() => started.promise);
       yield* Fiber.interrupt(pending);
       snapshot.resolve('- document "Signed in"');
-      expect((yield* r.invoke<PreviewAutomationSnapshot>("snapshot", r.tabId)).visibleText).toBe(
+      expect((yield* r.invoke<PreviewAutomationSnapshot>("snapshot", r.tabId, FULL)).visibleText).toBe(
         "Signed in",
       );
       expect(yield* r.invoke("evaluate", r.tabId, { expression: "sessionStorage.login" })).toBe(
