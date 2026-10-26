@@ -1,4 +1,4 @@
-import Migration0107 from "./Migrations/107_AgentContinuity.ts";
+import Migration0108 from "./Migrations/108_AgentContinuity.ts";
 import Migration0106 from "./Migrations/106_LegacyImportProviderIdentity.ts";
 import Migration0105 from "./Migrations/105_ThreadHandoffRepositories.ts";
 import Migration0104 from "./Migrations/104_RepoMcpTrust.ts";
@@ -241,7 +241,7 @@ export const migrationEntries = [
   [104, "RepoMcpTrust", Migration0104],
   [105, "ThreadHandoffRepositories", Migration0105],
   [106, "LegacyImportProviderIdentity", Migration0106],
-  [107, "AgentContinuity", Migration0107],
+  [108, "AgentContinuity", Migration0108],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
