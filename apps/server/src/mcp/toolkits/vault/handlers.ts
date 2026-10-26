@@ -11,7 +11,11 @@ import * as ServerBrowser from "../../../preview/ServerBrowser.ts";
 import * as AgentStore from "../../../agents/AgentStore.ts";
 import * as Vault from "../../../vault/Vault.ts";
 import * as VaultSync from "../../../vault/VaultSync.ts";
-import { normalizeHost } from "../../../vault/VaultPolicy.ts";
+import {
+  normalizeHost,
+  vaultFillOriginDenial,
+  vaultFillOriginMessage,
+} from "../../../vault/VaultPolicy.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
@@ -105,9 +109,16 @@ export const layer = McpToolAccess.toLayer(VaultToolkit, {
           ...(tabId ? { tabId } : {}),
         })
         .pipe(Effect.mapError((cause) => failure(cause.message, "orchestration_error")));
-      const domain = status.url ? normalizeHost(status.url) || null : null;
-      if (!domain || !status.tabId)
+      const pageUrl = status.url;
+      const domain = pageUrl ? normalizeHost(pageUrl) || null : null;
+      if (!pageUrl || !domain || !status.tabId)
         return yield* failure("vault_fill needs an active preview tab with a page URL.");
+      // Non-loopback http (and anything non-https) is refused before the
+      // vault is even consulted; loopback http is re-checked against the
+      // item's allowed sites once the item is known, below.
+      const earlyDenial = vaultFillOriginDenial(pageUrl, []);
+      if (earlyDenial === "invalid-url" || earlyDenial === "requires-https")
+        return yield* failure(vaultFillOriginMessage(earlyDenial));
       // Typing into a field that isn't there waits out the whole request timeout, so check
       // the field exists first. Only a host's own "not found in time" answer fails the fill;
       // a host that can't check leaves it to typing, as before.
@@ -195,6 +206,8 @@ export const layer = McpToolAccess.toLayer(VaultToolkit, {
               ? "The owner blocked agents from using this vault item. Don't retry; ask the user if you need it."
               : "This vault item may not be used on that domain.",
         };
+      const originDenial = vaultFillOriginDenial(pageUrl, result.item.allowedDomains);
+      if (originDenial !== null) return yield* failure(vaultFillOriginMessage(originDenial));
       // Type server-side through the same machinery as preview_type; the
       // value never leaves this handler.
       yield* broker
