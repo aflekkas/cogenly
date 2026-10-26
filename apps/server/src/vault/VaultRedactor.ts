@@ -1,4 +1,5 @@
 /** Replaces vault secret values in text shown to agents. Pure helpers. */
+import * as DateTime from "effect/DateTime";
 
 const VAULT_REDACTION = "[redacted vault secret]";
 /** Shorter values need whole-token matching to avoid masking ordinary substrings. */
@@ -19,6 +20,8 @@ export const redactText = (text: string, secrets: Iterable<string>): string => {
 /** Deep-copies a tool result, rewriting every string inside it. */
 const mapStrings = <A>(value: A, rewrite: (text: string) => string): A => {
   const walk = (current: unknown): unknown => {
+    // Schema encoders need the DateTime prototype and its symbol brand intact.
+    if (DateTime.isDateTime(current)) return current;
     if (typeof current === "string") return rewrite(current);
     if (Array.isArray(current)) return current.map(walk);
     if (typeof current === "object" && current !== null)
