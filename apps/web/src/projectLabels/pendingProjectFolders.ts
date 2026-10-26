@@ -114,6 +114,11 @@ export function beginPendingProjectFolderLaunch(threadId: ThreadId): (created: b
   };
 }
 
+/** Whether a draft's first send is still creating its chat in its project. */
+export function usePendingProjectFolderLaunching(threadId: ThreadId): boolean {
+  return usePendingProjectFolderStore((state) => state.byThreadId[threadId]?.launching === true);
+}
+
 /**
  * What the coordinator does with one pending pick: wait for the thread (or
  * its launch), drop a spent pick, or file a thread that exists turnless.

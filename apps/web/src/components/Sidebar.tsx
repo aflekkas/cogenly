@@ -261,7 +261,10 @@ import {
   type ProjectLabelKey,
 } from "../projectLabels/projectLabels.logic";
 import { openCreateProjectDialog } from "../projectLabels/CreateProjectDialogHost";
-import { usePendingProjectFolderStore } from "../projectLabels/pendingProjectFolders";
+import {
+  usePendingProjectFolderLaunching,
+  usePendingProjectFolderStore,
+} from "../projectLabels/pendingProjectFolders";
 import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "../projectLabels/useProjectLabels";
 import { useThreadRepository } from "../projectLabels/useThreadRepository";
@@ -1157,7 +1160,8 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
   const isContextMenuOpen = useSidebarContextMenuTarget((state) => state.threadKey === threadKey);
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
-  const status = resolveSidebarThreadStatus(thread);
+  const launching = usePendingProjectFolderLaunching(thread.id);
+  const status = resolveSidebarThreadStatus(thread, { launching });
   const needsYou = status === "approval" || status === "input";
   const isRunning = status === "working" || status === "waiting";
   const statusLabel =
@@ -1470,7 +1474,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // Same semantics as the legacy sidebar (never-visited counts as read):
   // switching sidebars must not light up every historical thread as unread.
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
-  const status = resolveSidebarThreadStatus(thread);
+  const launching = usePendingProjectFolderLaunching(thread.id);
+  const status = resolveSidebarThreadStatus(thread, { launching });
   const isInFlight =
     status === "working" || status === "waiting" || status === "approval" || status === "input";
   // A woken thread reappears at its original position (the sort is

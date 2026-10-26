@@ -679,7 +679,19 @@ type SidebarThreadStatusInput = Pick<
   "hasPendingApprovals" | "hasPendingUserInput" | "pendingSubagentRequest" | "runtime"
 >;
 
-export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): SidebarThreadStatus {
+/**
+ * A row's live status. `launching` is a draft's first send that is still
+ * creating the thread: the server can publish the thread a moment before its
+ * first run, and the row reads as working from its first frame instead of
+ * flashing an idle state in between.
+ */
+export function resolveSidebarThreadStatus(
+  thread: SidebarThreadStatusInput & Partial<Pick<SidebarThreadSummary, "latestRun">>,
+  options?: { readonly launching?: boolean },
+): SidebarThreadStatus {
+  if (options?.launching === true && thread.runtime === null && thread.latestRun == null) {
+    return "working";
+  }
   if (thread.hasPendingApprovals || thread.pendingSubagentRequest === "approval") {
     return "approval";
   }

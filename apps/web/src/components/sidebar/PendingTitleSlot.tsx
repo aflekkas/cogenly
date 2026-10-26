@@ -10,11 +10,12 @@ const layerClassName =
 /**
  * A row title that is still being generated (a new chat's first title, or a
  * regeneration). While pending, the text the caller passes (the provisional
- * title, such as the first message or "New thread") shows dimmed, as T3 Code
- * does; there is no skeleton and nothing animates while it waits. When the
- * title lands, the dimmed text crossfades into the new title (opacity only,
- * 150ms, kept under reduced motion). Both layers sit in one grid cell, so the
- * row keeps its height and layout and nothing moves.
+ * title, such as the first message) shows exactly like any other title, so a
+ * chat a draft just became reads as an ordinary row from its first frame; the
+ * row's status slot carries the working state. When the title lands, the old
+ * text crossfades into the new one (opacity only, 150ms, kept under reduced
+ * motion). Both layers sit in one grid cell, so the row keeps its height and
+ * layout and nothing moves.
  *
  * Pass the title's layout classes (`min-w-0 flex-1`) in `className`.
  */
@@ -47,11 +48,7 @@ export function PendingTitleSlot(props: {
     <span className={cn("grid", props.className)}>
       <span
         key={landingCount}
-        className={cn(
-          layerClassName,
-          landingCount > 0 && "starting:opacity-0",
-          props.pending && "opacity-55",
-        )}
+        className={cn(layerClassName, landingCount > 0 && "starting:opacity-0")}
       >
         {props.children}
       </span>
@@ -59,7 +56,7 @@ export function PendingTitleSlot(props: {
         <span
           aria-hidden
           inert
-          className={cn(layerClassName, "pointer-events-none opacity-0 starting:opacity-55")}
+          className={cn(layerClassName, "pointer-events-none opacity-0 starting:opacity-100")}
         >
           {outgoing.node}
         </span>
