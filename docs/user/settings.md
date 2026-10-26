@@ -17,6 +17,12 @@ Before 0.3.2 a setting could be overridden for one project. Those overrides no l
 every project now uses the global value. A repository's own actions moved to its Repository page.
 The old per-project values are kept in `legacy-project-settings.json` beside `settings.json`.
 
+## Notifications
+
+Cogenly plays a short sound when an agent finishes, fails or needs you, unless it was a quick reply
+in the thread you are looking at. Change this in **Settings → General → Notifications → Thread
+notifications**: choose **Off**, or add desktop notifications.
+
 ## Providers on paired machines
 
 Add or edit a provider in **Settings → Providers** and its identity and model preferences follow you to your paired machines. CLI locations and sensitive environment values stay with their machine; use the vault for shared secrets.
