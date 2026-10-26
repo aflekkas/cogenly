@@ -11,7 +11,7 @@ import {
   ProjectLabel,
   ProjectLabelId,
   ProjectSourceLink,
-  ScheduledTask,
+  ScheduledTaskFields,
   TrimmedNonEmptyString,
   SharedStateError,
   SharedRepositoryRemote,
@@ -77,10 +77,10 @@ export const ScheduleFields = Schema.Struct({
   projectFolderId: Schema.optionalKey(Schema.NullOr(ProjectLabelId)),
   machine: Schema.optionalKey(Schema.NullOr(PortableId)),
   agentId: Schema.NullOr(PortableId),
-  title: ScheduledTask.fields.title,
-  prompt: ScheduledTask.fields.prompt,
+  title: ScheduledTaskFields.title,
+  prompt: ScheduledTaskFields.prompt,
   enabled: Schema.Boolean,
-  schedule: ScheduledTask.fields.schedule,
+  schedule: ScheduledTaskFields.schedule,
   repositoryRemote: Schema.NullOr(Remote),
   // An existing worktree travels by path relative to the owning repository.
   workspaceStrategy: Schema.Union([
@@ -101,8 +101,8 @@ export const ScheduleFields = Schema.Struct({
     }),
   ]),
   modelSelection: Selection,
-  runtimeMode: ScheduledTask.fields.runtimeMode,
-  interactionMode: ScheduledTask.fields.interactionMode,
+  runtimeMode: ScheduledTaskFields.runtimeMode,
+  interactionMode: ScheduledTaskFields.interactionMode,
   ownerMachine: PortableId,
   createdAt: Agent.fields.createdAt,
 });

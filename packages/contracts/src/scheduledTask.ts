@@ -1,6 +1,7 @@
 import { ProjectLabelId } from "./projectLabel.ts";
 import { AgentId } from "./agent.ts";
 import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 
 import {
   CommandId,
@@ -22,6 +23,7 @@ import { ProviderInteractionMode, RuntimeMode } from "./providerPolicy.ts";
 import {
   ScheduledTaskRunStatus,
   ScheduledTaskSchedule,
+  ScheduledTaskSkipStatus,
   ScheduledTaskUpsertSchedule,
 } from "./scheduledTaskSchedule.ts";
 
@@ -35,7 +37,7 @@ export const ScheduledTaskWebhookEndpoint = Schema.Struct({
 });
 export type ScheduledTaskWebhookEndpoint = typeof ScheduledTaskWebhookEndpoint.Type;
 
-export const ScheduledTask = Schema.Struct({
+export const ScheduledTaskFields = {
   id: ScheduledTaskId,
   ownerMachine: Schema.optionalKey(EnvironmentId),
   machine: Schema.optionalKey(Schema.NullOr(EnvironmentId)),
@@ -61,7 +63,31 @@ export const ScheduledTask = Schema.Struct({
   lastRunError: Schema.NullOr(Schema.String),
   runCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   webhook: Schema.optional(ScheduledTaskWebhookEndpoint),
-});
+};
+
+const isSkipStatus = Schema.is(ScheduledTaskSkipStatus);
+
+/**
+ * 0.3.2 clients and peers reject the agent skip statuses, so the wire carries
+ * `skipped_already_queued` in `lastRunStatus` and the exact one in
+ * `lastRunSkip`, which they ignore.
+ */
+export const ScheduledTask = Schema.Struct({
+  ...ScheduledTaskFields,
+  lastRunSkip: Schema.optionalKey(ScheduledTaskSkipStatus),
+}).pipe(
+  Schema.decodeTo(
+    Schema.toType(Schema.Struct(ScheduledTaskFields)),
+    SchemaTransformation.transform({
+      decode: ({ lastRunSkip, ...task }) =>
+        lastRunSkip === undefined ? task : { ...task, lastRunStatus: lastRunSkip },
+      encode: (task) =>
+        isSkipStatus(task.lastRunStatus)
+          ? { ...task, lastRunStatus: "skipped_already_queued" as const, lastRunSkip: task.lastRunStatus }
+          : task,
+    }),
+  ),
+);
 export type ScheduledTask = typeof ScheduledTask.Type;
 
 export const ScheduledTaskListInput = Schema.Struct({});

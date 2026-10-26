@@ -152,17 +152,24 @@ export const ScheduledTaskUpsertSchedule = Schema.Union([
 });
 export type ScheduledTaskUpsertSchedule = typeof ScheduledTaskUpsertSchedule.Type;
 
-export const ScheduledTaskRunStatus = Schema.Literals([
-  "never",
-  "running",
-  "succeeded",
-  "failed",
-  "skipped_already_queued",
+/** Why an agent trigger did not run. 0.3.2 clients cannot read these. */
+export const SCHEDULED_TASK_SKIP_STATUSES = [
   "skipped_busy",
   "skipped_backoff",
   "skipped_daily_cap",
   "skipped_not_owner",
   "skipped_disabled",
   "skipped_ineligible",
+] as const;
+export const ScheduledTaskSkipStatus = Schema.Literals(SCHEDULED_TASK_SKIP_STATUSES);
+export type ScheduledTaskSkipStatus = typeof ScheduledTaskSkipStatus.Type;
+
+export const ScheduledTaskRunStatus = Schema.Literals([
+  "never",
+  "running",
+  "succeeded",
+  "failed",
+  "skipped_already_queued",
+  ...SCHEDULED_TASK_SKIP_STATUSES,
 ]);
 export type ScheduledTaskRunStatus = typeof ScheduledTaskRunStatus.Type;

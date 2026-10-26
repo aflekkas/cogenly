@@ -1,6 +1,6 @@
 import {
   ScheduledTaskId,
-  ScheduledTask,
+  ScheduledTaskFields,
   OrchestrationSearchThreadsInput,
   OrchestrationThreadSearchMatch,
   OrchestrationV2ThreadForkSourcePoint,
@@ -341,10 +341,10 @@ const ScheduledTaskRunTool = Tool.make("run_scheduled_task_now", {
   parameters: Schema.Struct({ taskId: ScheduledTaskId }),
   success: Schema.Struct({
     taskId: ScheduledTaskId,
-    threadId: ScheduledTask.fields.threadId,
-    lastRunStatus: ScheduledTask.fields.lastRunStatus,
+    threadId: ScheduledTaskFields.threadId,
+    lastRunStatus: ScheduledTaskFields.lastRunStatus,
     runCount: NonNegativeInt,
-    nextRunAt: ScheduledTask.fields.nextRunAt,
+    nextRunAt: ScheduledTaskFields.nextRunAt,
   }),
   dependencies: [...commandTool.dependencies, ScheduledTaskService.ScheduledTaskService],
 })

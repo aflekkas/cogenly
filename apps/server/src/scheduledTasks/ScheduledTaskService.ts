@@ -13,6 +13,7 @@ import {
   MessageId,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   ScheduledTask,
+  ScheduledTaskFields,
   ScheduledTaskError,
   ScheduledTaskId,
   SharedDocumentId,
@@ -184,13 +185,13 @@ export type WebhookTriggerResult =
 const decodeTask = Schema.decodeUnknownEffect(ScheduledTask);
 const decodeTaskId = Schema.decodeUnknownOption(ScheduledTaskId);
 const decodeScheduleJson = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(ScheduledTask.fields.schedule),
+  Schema.fromJsonString(ScheduledTaskFields.schedule),
 );
 const decodeWorkspaceStrategyJson = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(ScheduledTask.fields.workspaceStrategy),
+  Schema.fromJsonString(ScheduledTaskFields.workspaceStrategy),
 );
 const decodeModelSelectionJson = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(ScheduledTask.fields.modelSelection),
+  Schema.fromJsonString(ScheduledTaskFields.modelSelection),
 );
 const HeadersJson = Schema.fromJsonString(Schema.Record(Schema.String, Schema.String));
 const MissingFieldsJson = Schema.fromJsonString(Schema.Array(Schema.String));
