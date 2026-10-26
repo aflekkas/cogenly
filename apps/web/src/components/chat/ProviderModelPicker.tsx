@@ -216,7 +216,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                       accentColor={selection.entry.accentColor}
                       showBadge={shouldShowInstanceBadge(selection.entry, props.instanceEntries)}
                       indicatorBackground="var(--provider-stack-ring)"
-                      iconClassName="size-4"
+                      size="md"
                     />
                   ),
                 },
@@ -287,7 +287,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 // Brand marks fill their box; the margin gives them the side bearing the
                 // lucide icons on the other controls have, so the gaps match.
                 className="mx-px size-4"
-                iconClassName={cn("size-4", props.activeProviderIconClassName)}
+                size="md"
+                iconClassName={props.activeProviderIconClassName}
                 indicatorBackground={props.instanceIndicatorBackground ?? "var(--contrast-input)"}
               />
             ) : null}

@@ -100,8 +100,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
               accentColor={props.providerAccentColor}
               showBadge={props.showInstanceMark === true}
               className="size-3"
-              iconClassName="size-3"
-              badgeClassName="size-1.5"
+              size="xs"
               indicatorBackground="var(--popover)"
             />
             <span className="truncate text-xs font-normal leading-snug text-muted-foreground/70">
