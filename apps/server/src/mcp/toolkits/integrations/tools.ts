@@ -17,6 +17,7 @@ import {
   OrchestratorMcpFailure,
 } from "@cogenly/contracts";
 import { Tool, Toolkit } from "effect/ai";
+import * as Schema from "effect/Schema";
 
 import * as Integrations from "../../../integrations/Integrations.ts";
 import * as AgentStore from "../../../agents/AgentStore.ts";
@@ -62,10 +63,10 @@ export const IntegrationsToolkit = Toolkit.make(
     .annotate(Tool.Destructive, false),
   Tool.make("integrations_list", {
     ...shared,
-    parameters: Tool.EmptyParams,
+    parameters: Schema.Struct({ detail: Schema.optional(Schema.Boolean) }),
     success: IntegrationAgentListResult,
     description:
-      "List Cogenly-managed integrations connected for this project: name, display name, account label, hint, setupNotes (what was created where during setup; read them before repairing one), status (connected, needs_sign_in, error with message) and tool count. An account that isn't usable carries nextStep (what to do next, and the part only the user can do) and settingsUrl (the account management page). One service can be connected several times, e.g. two Slack workspaces; the account label tells them apart. Credentials are never shown.",
+      "List Cogenly-managed integrations connected for this project as a compact summary: name, display name, account label, status (connected, needs_sign_in, error with message), tool count, and nextStep/settingsUrl for an account that isn't usable. Pass detail:true only when repairing one, to also get hint and setupNotes (what was created where during setup). One service can be connected several times, e.g. two Slack workspaces; the account label tells them apart. Credentials are never shown. When a service the user wants (e.g. Slack) is not listed at all, do not just report it as not connected: offer to connect it and start the flow with integration_add (catalogId for a default service) after reading integration_setup_guide.",
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false),

@@ -34,6 +34,8 @@ interface ComposerPrimaryActionsProps {
   /** Stop can reach a run, including one still preparing or starting. */
   canInterrupt: boolean;
   followUpBehavior?: "queue" | "steer";
+  /** The provider is waiting out a rate limit: sends queue, and the tooltip says why. */
+  providerBackoffActive?: boolean;
   alternateShortcutLabel?: string | null;
   showPlanFollowUpPrompt: boolean;
   promptHasText: boolean;
@@ -94,6 +96,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   isRunning,
   canInterrupt,
   followUpBehavior = "steer",
+  providerBackoffActive = false,
   alternateShortcutLabel = null,
   showPlanFollowUpPrompt,
   promptHasText,
@@ -126,6 +129,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       running: isRunning,
       activeTurnDefault: followUpBehavior,
       alternateModifier: shortcutModifiers.metaKey || shortcutModifiers.ctrlKey,
+      backingOff: providerBackoffActive,
     }) === "queue";
   const alternateAction = alternateComposerDispatchAction(followUpBehavior);
   const isSendDisabled = !canOperateThread || sendDisabledReason !== null;

@@ -131,9 +131,15 @@ const TASK_WAKE_EVENTS = [
 /** A person answers the card, so a slower poll is plenty. */
 const SECRET_REQUEST_POLL_INTERVAL_MS = 500;
 const DEFAULT_THREAD_LIST_LIMIT = 50;
-const DEFAULT_THREAD_READ_LIMIT = 50;
+/**
+ * A default `thread_read` page is context the caller pays for on every later
+ * turn, so it stays small: 20 items at 2k chars. Callers page explicitly
+ * with `afterPosition`/`limit`/`maxCharsPerItem` (and `itemId`/`textOffset`
+ * for one long item) when they need more.
+ */
+const DEFAULT_THREAD_READ_LIMIT = 20;
 const DEFAULT_THREAD_RUN_LIMIT = 10;
-const DEFAULT_THREAD_ITEM_MAX_CHARS = 20_000;
+const DEFAULT_THREAD_ITEM_MAX_CHARS = 2_000;
 
 interface ResolvedTarget {
   readonly modelSelection: ModelSelection;

@@ -13,8 +13,14 @@ export function resolveComposerDispatchMode(input: {
   readonly running: boolean;
   readonly alternateModifier: boolean;
   readonly activeTurnDefault?: ActiveTurnComposerAction;
+  /**
+   * The provider is waiting out a rate limit. Steering now makes it retry
+   * at once and earn another 429, so every send queues behind the turn.
+   */
+  readonly backingOff?: boolean;
 }): ComposerDispatchMode {
   if (!input.running) return "auto";
+  if (input.backingOff === true) return "queue";
   const defaultAction = input.activeTurnDefault ?? "steer";
   if (input.alternateModifier) return defaultAction === "queue" ? "steer" : "queue";
   return defaultAction;

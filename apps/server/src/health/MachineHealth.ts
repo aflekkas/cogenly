@@ -59,6 +59,7 @@ import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
 import * as ChatGreetingService from "../greeting/ChatGreetingService.ts";
 import * as HealthCanary from "./HealthCanary.ts";
 import * as ComputerUseService from "../computerUse/ComputerUseService.ts";
+import { readRateLimitStreaks } from "./rateLimitStreaks.ts";
 import { readStaleRuns, readStuckQueues } from "./staleRuns.ts";
 import * as AgentProcesses from "../process/AgentProcesses.ts";
 import {
@@ -75,6 +76,7 @@ import {
   integrationsCheck,
   machineLinksCheck,
   providersCheck,
+  rateLimitItems,
   sameReportContent,
   scheduledTasksCheck,
   serverCheck,
@@ -417,14 +419,23 @@ const make = Effect.gen(function* () {
         guarded(
           "providers",
           Effect.gen(function* () {
-            const check = providersCheck({ providers: yield* providers.getProviders, now });
+            const providerList = yield* providers.getProviders;
+            const check = providersCheck({ providers: providerList, now });
             const items = yield* greetings.healthItems;
+            const rateLimited = rateLimitItems({
+              providers: providerList,
+              streaks: yield* readRateLimitStreaks(now).pipe(
+                Effect.provideService(SqlClient.SqlClient, sql),
+                Effect.catch(() => Effect.succeed([])),
+              ),
+            });
+            const extra = [...items, ...rateLimited];
             return {
               ...check,
-              status: check.status === "ok" && items.length > 0 ? ("warn" as const) : check.status,
+              status: check.status === "ok" && extra.length > 0 ? ("warn" as const) : check.status,
               summary:
                 items.length > 0 ? `${check.summary} AI greetings keep failing.` : check.summary,
-              items: [...check.items, ...items],
+              items: [...check.items, ...extra],
             };
           }),
         ),

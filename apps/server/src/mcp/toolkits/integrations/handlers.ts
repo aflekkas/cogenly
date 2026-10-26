@@ -85,7 +85,8 @@ const byName = (name: string, fail: (cause: unknown) => OrchestratorMcpFailure) 
     if (found === undefined) {
       return yield* new OrchestratorMcpFailure({
         code: "invalid_request",
-        message: "No connected integration with that name is available in this project.",
+        message:
+          "No connected integration with that name is available in this project. If the user wants this service, offer to connect it: read integration_setup_guide, then call integration_add with its catalogId (slack, github, linear, notion, google-workspace, wispr-flow or fathom) and give the user the sign-in link it returns, instead of only reporting that it is not connected.",
       });
     }
     return found.integration;
@@ -124,7 +125,7 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
         .pipe(Effect.mapError(failureAt(scope.httpOrigin)));
     }),
   ),
-  integrations_list: McpToolAccess.reads(() =>
+  integrations_list: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const service = yield* Integrations.Integrations;
       const scope = yield* Invocation.McpInvocationContext;
@@ -132,8 +133,20 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
       const { integrations } = yield* (
         label === undefined ? service.list() : service.listForProject(label)
       ).pipe(Effect.mapError(failureAt(scope.httpOrigin)));
+      const summaries = integrations.map((summary) => agentSummary(summary, scope.httpOrigin));
+      // The default answer is context the caller pays for on every later
+      // turn. Setup notes (up to 4k chars each) only matter when repairing
+      // an integration, so they wait for detail:true.
+      if (input.detail === true) return { integrations: summaries };
       return {
-        integrations: integrations.map((summary) => agentSummary(summary, scope.httpOrigin)),
+        integrations: summaries.map((summary) => {
+          const {
+            setupNotes: _setupNotes,
+            setupNotesUpdatedAt: _updatedAt,
+            ...integration
+          } = summary.integration;
+          return { ...summary, integration };
+        }),
       };
     }),
   ),

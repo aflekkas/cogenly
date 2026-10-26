@@ -81,7 +81,7 @@ function integrationsLine(
   const availableText =
     available.length === 0
       ? ""
-      : `${integrations.length === 0 ? "Integrations available" : "Also available"} to connect: ${available.map(toSingleLine).join(", ")}. Read integration_setup_guide before integration_add.`;
+      : `${integrations.length === 0 ? "Integrations available" : "Also available"} to connect: ${available.map(toSingleLine).join(", ")}. When the user asks for one of these, do not just say it isn't connected: offer to connect it, read integration_setup_guide, then start the connect flow with integration_add (its catalogId) and give the user the sign-in link it returns.`;
   if (integrations.length === 0) return availableText;
   const nameOf = (integration: IntegrationContextEntry) => {
     const hint = integration.hint?.trim() ?? "";

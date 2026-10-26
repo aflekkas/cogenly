@@ -11,7 +11,12 @@ import {
   type OrchestrationV2ThreadProjection,
 } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
-import { deriveProviderSubagentStatus, deriveRunlessWorkStartedAt } from "./threadExecution.ts";
+import {
+  deriveProviderBackoff,
+  deriveProviderSubagentStatus,
+  deriveRunlessWorkStartedAt,
+  formatProviderBackoff,
+} from "./threadExecution.ts";
 
 const nativeStart = DateTime.makeUnsafe("2026-06-20T00:00:00.000Z");
 const nativeEnd = DateTime.makeUnsafe("2026-06-20T00:06:03.000Z");
@@ -164,5 +169,49 @@ describe("deriveProviderSubagentStatus", () => {
       startedAt: "2026-06-20T00:10:00.000Z",
       completedAt: "2026-06-20T00:12:00.000Z",
     });
+  });
+});
+
+describe("deriveProviderBackoff", () => {
+  const backoffStart = DateTime.makeUnsafe("2026-06-20T00:10:00.000Z");
+  const retryItem = {
+    type: "error",
+    status: "running",
+    runId: followUp.id,
+    startedAt: backoffStart,
+    updatedAt: backoffStart,
+    failure: {
+      class: "usage_limit",
+      limitKind: "rate_limit",
+      code: "rateLimitExceeded",
+      message: "429 Too Many Requests, retrying in 368.99s",
+      retryable: true,
+    },
+    retry: { attempt: 1, maxAttempts: 5, retryDelayMs: 368_990 },
+  };
+  const backingOff = {
+    ...nativeChild,
+    runs: [followUp],
+    turnItems: [retryItem],
+  } as unknown as OrchestrationV2ThreadProjection;
+  const duringMs = DateTime.toEpochMillis(backoffStart) + 60_000;
+
+  it("surfaces the retry time while the provider waits out a 429", () => {
+    const backoff = deriveProviderBackoff(backingOff, duringMs);
+    expect(backoff?.retryAtMs).toBe(DateTime.toEpochMillis(backoffStart) + 368_990);
+    expect(backoff?.attempt).toBe(1);
+    expect(formatProviderBackoff(backoff!, duringMs)).toContain("Rate-limited by");
+    expect(formatProviderBackoff(backoff!, duringMs)).toContain("retrying at");
+  });
+
+  it("clears once the retry time passes or the retry finishes", () => {
+    expect(
+      deriveProviderBackoff(backingOff, DateTime.toEpochMillis(backoffStart) + 400_000),
+    ).toBeNull();
+    const recovered = {
+      ...backingOff,
+      turnItems: [{ ...retryItem, status: "completed" }],
+    } as unknown as OrchestrationV2ThreadProjection;
+    expect(deriveProviderBackoff(recovered, duringMs)).toBeNull();
   });
 });

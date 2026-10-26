@@ -1653,3 +1653,56 @@ describe("Codex runtime approval transport", () => {
       }),
   );
 });
+
+describe("Codex backoff signal", () => {
+  it("parses the retry wait the CLI logs for a 429", () => {
+    assert.strictEqual(
+      CodexAdapterV2.parseCodexRetryDelayMs("429 Too Many Requests, retrying in 368.99s"),
+      368_990,
+    );
+    assert.strictEqual(CodexAdapterV2.parseCodexRetryDelayMs("Retry-After: 120"), 120_000);
+    assert.strictEqual(CodexAdapterV2.parseCodexRetryDelayMs("retry after 2m"), 120_000);
+    assert.strictEqual(CodexAdapterV2.parseCodexRetryDelayMs("retrying in 500ms"), 500);
+    assert.strictEqual(CodexAdapterV2.parseCodexRetryDelayMs("stream disconnected"), null);
+  });
+
+  it("recognizes a 429 retry as a rate limit, not a spent quota", () => {
+    assert.isTrue(
+      CodexAdapterV2.isCodexRateLimitRetry({
+        code: "rateLimitExceeded",
+        message: "Rate limit exceeded",
+      }),
+    );
+    assert.isTrue(
+      CodexAdapterV2.isCodexRateLimitRetry({
+        code: null,
+        message: "429 Too Many Requests, retrying in 368.99s",
+      }),
+    );
+    assert.isFalse(
+      CodexAdapterV2.isCodexRateLimitRetry({
+        code: "usageLimitExceeded",
+        message: "Usage limit reached",
+      }),
+    );
+  });
+
+  it("sends instruction context once, then only changed entries", () => {
+    const full = {
+      cogenly_orchestration: { kind: "application" as const, value: "instructions" },
+      cogenly_project: { kind: "application" as const, value: "manifest v1" },
+    };
+    // A new provider session gets the full set.
+    assert.deepEqual(CodexAdapterV2.diffCodexAdditionalContext(undefined, full), full);
+    // An unchanged turn sends nothing.
+    assert.deepEqual(CodexAdapterV2.diffCodexAdditionalContext(full, full), {});
+    // A changed project manifest sends only that entry.
+    assert.deepEqual(
+      CodexAdapterV2.diffCodexAdditionalContext(full, {
+        ...full,
+        cogenly_project: { kind: "application" as const, value: "manifest v2" },
+      }),
+      { cogenly_project: { kind: "application", value: "manifest v2" } },
+    );
+  });
+});

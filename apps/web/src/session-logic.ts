@@ -415,14 +415,19 @@ export function providerErrorPresentation(
     item.retry.maxAttempts === null
       ? `${item.retry.attempt}`
       : `${item.retry.attempt}/${item.retry.maxAttempts}`;
+  const rateLimited =
+    item.failure.class === "usage_limit" &&
+    (item.failure.limitKind === "rate_limit" || item.failure.code === "rateLimitExceeded");
   const label =
-    item.status === "running"
-      ? `Retrying provider (${progress})`
-      : item.status === "completed"
-        ? `Provider recovered (${progress} retries)`
-        : item.status === "failed"
-          ? `${item.failure.class === "usage_limit" ? "Usage limit reached" : "Provider error"} after ${progress} retries`
-          : `Provider retry stopped (${progress})`;
+    item.status === "running" && rateLimited
+      ? `Rate-limited · retrying (${progress})`
+      : item.status === "running"
+        ? `Retrying provider (${progress})`
+        : item.status === "completed"
+          ? `Provider recovered (${progress} retries)`
+          : item.status === "failed"
+            ? `${item.failure.class === "usage_limit" ? "Usage limit reached" : "Provider error"} after ${progress} retries`
+            : `Provider retry stopped (${progress})`;
   const retryDelay =
     item.status === "running" && item.retry.retryDelayMs !== null && item.retry.retryDelayMs > 0
       ? item.retry.retryDelayMs < 1_000

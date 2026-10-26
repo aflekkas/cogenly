@@ -9,6 +9,7 @@ import {
   RunId,
   ThreadId,
 } from "@cogenly/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
@@ -114,6 +115,70 @@ it.each(["preparing", "starting"] as const)(
     );
   },
 );
+
+it("queues steer and auto sends while the provider waits out a 429", () => {
+  const startedAt = DateTime.makeUnsafe("2026-10-26T13:35:33.000Z");
+  const backoffItem = {
+    type: "error",
+    status: "running",
+    runId: activeRunId,
+    startedAt,
+    updatedAt: startedAt,
+    failure: {
+      class: "usage_limit",
+      limitKind: "rate_limit",
+      code: "rateLimitExceeded",
+      message: "429 Too Many Requests, retrying in 368.99s",
+      retryable: true,
+    },
+    retry: { attempt: 1, maxAttempts: 5, retryDelayMs: 368_990 },
+  };
+  const projection = {
+    ...dispatchProjection(baseCapabilities),
+    turnItems: [backoffItem],
+  } as unknown as OrchestrationV2ThreadProjection;
+  const duringBackoff = DateTime.toEpochMillis(startedAt) + 60_000;
+  // Steering into the backoff would trigger an immediate retry and another
+  // 429, so both explicit steer and auto queue instead.
+  assert.deepEqual(
+    CommandPolicy.resolveMessageDispatchIntent(
+      projection,
+      { type: "start_immediately" },
+      "steer",
+      duringBackoff,
+    ),
+    { type: "queue_after_active" },
+  );
+  assert.deepEqual(
+    CommandPolicy.resolveMessageDispatchIntent(
+      projection,
+      { type: "start_immediately" },
+      "auto",
+      duringBackoff,
+    ),
+    { type: "queue_after_active" },
+  );
+  // Restart is the explicit escape hatch and still goes through.
+  assert.deepEqual(
+    CommandPolicy.resolveMessageDispatchIntent(
+      projection,
+      { type: "start_immediately" },
+      "restart",
+      duringBackoff,
+    ),
+    { type: "restart_active", targetRunId: activeRunId },
+  );
+  // Once the retry time passes, steering works again.
+  assert.deepEqual(
+    CommandPolicy.resolveMessageDispatchIntent(
+      projection,
+      { type: "start_immediately" },
+      "steer",
+      DateTime.toEpochMillis(startedAt) + 400_000,
+    ),
+    { type: "steer_active", targetRunId: activeRunId },
+  );
+});
 
 it("targets the latest active run for explicit steer and restart intent", () => {
   const projection = dispatchProjection(baseCapabilities);

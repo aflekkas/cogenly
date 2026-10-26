@@ -36,6 +36,7 @@ import {
   integrationsCheck,
   machineLinksCheck,
   providersCheck,
+  rateLimitItems,
   sameReportContent,
   scheduledTasksCheck,
   serverCheck,
@@ -249,6 +250,24 @@ describe("providersCheck", () => {
       statusOf(providersCheck({ providers: [provider({ enabled: false })], now })),
       "warn",
     );
+  });
+
+  it("warns once an account is rate-limited repeatedly, naming the likely cause", () => {
+    const codex = ProviderInstanceId.make("codex");
+    const items = rateLimitItems({
+      providers: [provider({ instanceId: codex, displayName: "Codex" })],
+      streaks: [
+        { providerInstanceId: codex, count: 5, latestAt: ago(minutes(4)) },
+        // Below the repeat threshold: an occasional 429 is not an item.
+        { providerInstanceId: ProviderInstanceId.make("claude"), count: 2, latestAt: now },
+      ],
+    });
+    assert.strictEqual(items.length, 1);
+    assert.strictEqual(items[0]?.key, "providers:codex:rate-limited");
+    assert.strictEqual(items[0]?.status, "warn");
+    assert.include(items[0]?.title ?? "", "rate-limited repeatedly");
+    assert.include(items[0]?.detail ?? "", "5 rate limits in the last hour");
+    assert.include(items[0]?.detail ?? "", "too many concurrent threads on one account");
   });
 });
 
