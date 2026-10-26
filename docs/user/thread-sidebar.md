@@ -5,94 +5,13 @@ need a separate branch and working directory.
 
 ## Message an agent
 
-An agent is a persistent specialist, such as "Spawn Ops", with its own conversation,
-responsibility and permissions. The sidebar's **Agents** tab lists them. Each row shows its status
-(**Needs approval**, **Needs you**, **Running** or **Idle**) and a
-count only when decisions are waiting on you. Drag an agent up or down within its project, or
-focus it and press `Alt+Up` or `Alt+Down`, to change its place. New agents arrive at the top of
-their project. The server saves the order, like Work's.
+The sidebar's **Agents** tab lists persistent assistants and the decisions waiting
+for you. Open an agent to read its conversation, give it direction, or open its
+Details. Drag it within its project, or focus it and press `Alt+Up` or `Alt+Down`,
+to change its place. New agents arrive at the top of their project.
 
-Choose **New agent** in the sidebar or command palette to create one. Tell the builder
-what the agent should take care of, in a sentence ("watch my GitHub PRs and summarize them
-every morning"). It asks a short question only when it has to, then proposes the agent as a
-card: its face, name, responsibility, when it runs, what it needs, and the model (your
-default). Keep talking to adjust anything ("make it run on Mondays only"); the card
-updates. **Create** makes the agent and opens its conversation, where it introduces itself
-and gets going. Nothing creates an agent for you.
-
-Opening an agent shows its chat. Ask it what is outstanding, give it direction, or
-ask it to start Work. **Details** in its header opens everything else in a side sheet:
-
-- **Responsibility**: its face, name, what it owns, and standing instructions.
-- **Schedule**: its triggers, each in plain words, with a switch, **Run now** and
-  **Delete**. **+** opens the full trigger editor.
-- **Tools & permissions**: what it may do on its own.
-- **Open items**: things to follow up on, owned by you, the agent or someone else,
-  with due dates, projects, and links to where they came from. Items the agent
-  finds stay **Proposed** until you confirm or dismiss them. **Mark done** asks
-  what finished it, optionally with a link as evidence; done and dismissed items
-  can be reopened. **Delete** removes an item and its history for good; dismiss it
-  instead to keep a record. **History** on an item lists every status change: who
-  made it, when, why, and any evidence. Pending approvals sit at the top, and also appear
-  in the chat.
-- **Recent activity**: each run with what woke it (your message, a trigger, an event, an
-  approved action, or Work), its recorded status, model and summary, and what it
-  did, such as items it proposed or Work it started. Work links open the session;
-  event runs also link the Work, pull request or open item the event was about.
-- **Memory**: facts it proposed wait there for you to confirm; see
-  [Memory](./memory-and-export.md#memory).
-- **Advanced**: notifications, the daily run cap, its home repository, and **Delete**.
-
-Everything in Details can also be changed by telling the agent in its chat; what it
-cannot do itself (a trigger, more permissions) it asks you to approve.
-
-Agents work on their own across all of your projects and repositories, and can add
-new projects. What they may do is set by permission switches: read, draft and start
-Work are on for a new agent; the high-impact send, create PRs, merge, deploy and
-delete stay off until you turn them on. An agent cannot grant itself anything.
-When it wants to start Work, add a trigger, or change its permissions, it
-asks, and you **Approve** or **Reject**. Approvals expire after seven days.
-
-**Start Work…** at the top of Details starts a coding session in any repository, its
-home repository first. Without the start Work permission the agent would ask you
-first; starting it yourself approves that one session. The session runs in a new worktree and appears in **Work**, named by its
-repository and marked with the agent's name.
-The command palette also has **Start Work with …** and **Open items for …** for
-each agent.
-
-The badge on **Agents** counts decisions waiting for you across all agents:
-approvals they asked for, and approvals or questions inside their runs. Unread
-replies show as a dot on the agent instead.
-
-Triggers wake an agent for one recorded run: on an interval, at a time, on a
-webhook, or **When something happens**, such as PR checks failing, a PR merging,
-Work finishing or becoming ready for review, or an open item coming due. An event
-trigger can be limited to some projects, repositories, or Work you, a chat or an
-agent started. Filters only narrow what wakes it, and a repeated event wakes it
-once. Event triggers have no **Run now**; they run when the event happens. Add triggers under
-**Details → Schedule**, by describing them when creating the agent, or in **Settings →
-Scheduled tasks**. An agent can suggest one, but it is added only if you approve.
-
-An agent uses the model picked in its chat, for its replies and its background runs.
-A new agent starts on the model a new chat in its workspace would get. Agents are
-always on: their triggers keep running, up to the daily run cap, and a run that fails
-waits a little longer before the next one. To stop a trigger, turn it off under
-**Schedule**. Messages sent while an agent is busy use its normal queue or steering
-behavior.
-
-An agent can also have a fallback chain: an ordered list of other provider
-instances and models to run on when its main one stops it. If a background run
-hits a usage limit ("You've hit your weekly limit") or finds that provider
-signed out, the next run uses the next entry in the chain instead of waiting
-on the same provider, and **Recent activity** shows which instance the run
-actually used and why it switched. When the provider names a reset time, the
-agent returns to its main instance then; otherwise it tries the main one
-again after an hour. Other failures, and agents without a chain, behave as
-before. Ask the agent in its chat to set or change its fallback chain, for
-example "fall back to Codex if Claude hits its limit".
-
-Coding work an agent starts appears in **Work** with your own threads, named by its
-repository and marked with the agent's name.
+See [Agents](agents.md) for creating one, triggers, permissions, memory, deleting,
+and choosing which machine runs it.
 
 ## Start Work from a chat
 

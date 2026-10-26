@@ -13,8 +13,8 @@ machine is offline catch up when it reconnects. A machine on an older version
 keeps syncing and picks up anything newer once it updates.
 
 Agents and schedule timers run only on their owner machine. A schedule can
-start each fresh conversation on another machine. New owners default to the
-online hub, or this machine when the hub is offline; existing ones keep the machine they were created on until you
+start each fresh conversation on another machine. New agents default to the
+online hub, or this machine when the hub is offline; existing agents keep the machine they were created on until you
 [move them](#move-threads-and-projects). Editing an agent profile from another machine sends the change to its owner.
 The owner must be online to save the edit; an offline notice identifies which machine to reconnect.
 Changes never start a second copy. Provider sign-ins and an agent's current fallback position stay on the
