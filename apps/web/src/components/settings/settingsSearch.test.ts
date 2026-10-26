@@ -347,6 +347,14 @@ describe("searchSettings", () => {
     ]);
   });
 
+  it("finds Scheduled tasks by the words people use for automations", () => {
+    expect(searchSettings("cron")[0]).toMatchObject({
+      id: "scheduled-tasks",
+      to: "/settings/scheduled-tasks",
+    });
+    expect(searchSettings("webhook deliveries")[0]?.id).toBe("scheduled-tasks");
+  });
+
   it("keeps environment settings discoverable without a primary environment", () => {
     const available = filterAvailableSettingsSearchItems({
       hasCloudPublicConfig: false,

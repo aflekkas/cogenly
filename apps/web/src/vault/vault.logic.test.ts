@@ -206,10 +206,10 @@ describe("vaultPolicySummary", () => {
   it("describes ask, any agent, and listed agents with domains", () => {
     expect(
       vaultPolicySummary({ mode: "ask", allowedAgentIds: [], allowedDomains: [] }, agentName),
-    ).toBe("Agents ask first");
+    ).toBe("Asks you first");
     expect(
       vaultPolicySummary({ mode: "allow", allowedAgentIds: [], allowedDomains: [] }, agentName),
-    ).toBe("Allowed for: all agents");
+    ).toBe("Any agent may use it");
     expect(
       vaultPolicySummary(
         {
@@ -219,7 +219,7 @@ describe("vaultPolicySummary", () => {
         },
         agentName,
       ),
-    ).toBe("Allowed for: Scout, a deleted agent on github.com");
+    ).toBe("Scout, a deleted agent may use it on github.com");
   });
 });
 

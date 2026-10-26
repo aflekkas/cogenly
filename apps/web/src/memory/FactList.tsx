@@ -1,4 +1,8 @@
-import { SettingsList, SettingsListItem } from "../components/settings/SettingsList";
+import {
+  SettingsList,
+  SettingsListItem,
+  SettingsListMeta,
+} from "../components/settings/SettingsList";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import type {
   EnvironmentId,
@@ -130,39 +134,82 @@ function FactRow({ fact, context }: { fact: Fact; context: FactListContext }) {
     });
   const refs = resolveFactRefs(fact.sourceRefs);
   return (
-    <SettingsListItem
-      title={fact.subject}
-      description={
-        fact.text.trim() !== fact.subject.trim() ? (
-          <span className="line-clamp-4 whitespace-pre-wrap">{fact.text}</span>
-        ) : undefined
-      }
-      control={
-        <div className="flex shrink-0 items-center gap-0.5">
-          {fact.status === "proposed" ? (
-            <>
+    <>
+      <SettingsListItem
+        title={fact.subject}
+        description={
+          fact.text.trim() !== fact.subject.trim() ? (
+            <span className="line-clamp-4 whitespace-pre-wrap">{fact.text}</span>
+          ) : undefined
+        }
+        status={
+          <SettingsListMeta>
+            {fact.status !== "confirmed" ? (
+              <Badge size="sm" variant={fact.status === "proposed" ? "warning" : "outline"}>
+                {FACT_STATUS_LABEL[fact.status]}
+              </Badge>
+            ) : null}
+            {principalLabel(fact.createdBy, context.agentName)}
+            {formatRelativeTimeLabel(fact.updatedAt)}
+            {fact.agentId && principalAgentId(fact.createdBy) !== fact.agentId
+              ? `For ${context.agentName(fact.agentId) ?? "an agent"}`
+              : null}
+            {fact.labelIds.length > 0 ? (
+              <ProjectLabelChips labels={context.labels} ids={fact.labelIds} />
+            ) : (
+              "Private"
+            )}
+            {refs.length > 0 ? (
+              <span className="flex flex-wrap items-center gap-x-1">
+                From
+                <FactSources
+                  refs={refs}
+                  onOpenThread={context.onOpenThread}
+                  onOpenExternal={context.onOpenExternal}
+                />
+              </span>
+            ) : null}
+          </SettingsListMeta>
+        }
+        control={
+          <div className="flex shrink-0 items-center gap-0.5">
+            {fact.status === "proposed" ? (
+              <>
+                <Button
+                  size="xs"
+                  disabled={disabled}
+                  title={actions.canWrite ? undefined : "This connection cannot change memory."}
+                  onClick={() => void run(() => actions.confirm(fact.id))}
+                >
+                  <CheckIcon />
+                  Confirm
+                </Button>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  disabled={disabled}
+                  onClick={() => void run(() => actions.forget(fact.id))}
+                >
+                  <XIcon />
+                  Reject
+                </Button>
+              </>
+            ) : fact.status === "retracted" ? (
               <Button
                 size="xs"
+                variant="ghost-muted"
                 disabled={disabled}
-                title={actions.canWrite ? undefined : "This connection cannot change memory."}
-                onClick={() => void run(() => actions.confirm(fact.id))}
+                onClick={() =>
+                  void run(() =>
+                    actions.create(correctedFact(fact, { ...fact, labelIds: fact.labelIds })),
+                  )
+                }
               >
-                <CheckIcon />
-                Confirm
+                <RotateCcwIcon />
+                Remember again
               </Button>
-              <Button
-                size="xs"
-                variant="ghost"
-                disabled={disabled}
-                onClick={() => void run(() => actions.forget(fact.id))}
-              >
-                <XIcon />
-                Reject
-              </Button>
-            </>
-          ) : null}
-          {active ? (
-            <>
+            ) : null}
+            {active ? (
               <Button
                 size="icon-xs"
                 variant="ghost-muted"
@@ -173,73 +220,34 @@ function FactRow({ fact, context }: { fact: Fact; context: FactListContext }) {
               >
                 <PencilIcon />
               </Button>
-              {fact.status === "confirmed" ? (
-                <Button
-                  size="icon-xs"
-                  variant="ghost-destructive"
-                  aria-label={`Forget ${fact.subject}`}
-                  title="Forget"
-                  disabled={disabled}
-                  onClick={() => void forget()}
-                >
-                  <Trash2Icon />
-                </Button>
-              ) : null}
-            </>
-          ) : fact.status === "retracted" ? (
+            ) : null}
             <Button
-              size="xs"
+              size="icon-xs"
               variant="ghost-muted"
-              disabled={disabled}
-              onClick={() =>
-                void run(() =>
-                  actions.create(correctedFact(fact, { ...fact, labelIds: fact.labelIds })),
-                )
-              }
+              aria-label={showHistory ? "Hide history" : "Show history"}
+              aria-expanded={showHistory}
+              title="History"
+              onClick={() => setShowHistory((open) => !open)}
             >
-              <RotateCcwIcon />
-              Remember again
+              <HistoryIcon />
             </Button>
-          ) : null}
-          <Button
-            size="icon-xs"
-            variant="ghost-muted"
-            aria-label={showHistory ? "Hide history" : "Show history"}
-            aria-expanded={showHistory}
-            title="History"
-            onClick={() => setShowHistory((open) => !open)}
-          >
-            <HistoryIcon />
-          </Button>
-        </div>
-      }
-    >
-      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 py-2 text-xs text-muted-foreground">
-        {fact.status !== "confirmed" ? (
-          <Badge size="sm" variant={fact.status === "proposed" ? "warning" : "outline"}>
-            {FACT_STATUS_LABEL[fact.status]}
-          </Badge>
-        ) : null}
-        <span>
-          {principalLabel(fact.createdBy, context.agentName)} ·{" "}
-          {formatRelativeTimeLabel(fact.updatedAt)}
-        </span>
-        {fact.agentId && principalAgentId(fact.createdBy) !== fact.agentId ? (
-          <span>· for {context.agentName(fact.agentId) ?? "an agent"}</span>
-        ) : null}
-        {fact.labelIds.length > 0 ? (
-          <ProjectLabelChips labels={context.labels} ids={fact.labelIds} />
-        ) : (
-          <span>· Private</span>
-        )}
-        {refs.length > 0 ? <span>· From</span> : null}
-        <FactSources
-          refs={refs}
-          onOpenThread={context.onOpenThread}
-          onOpenExternal={context.onOpenExternal}
-        />
-      </div>
-      {showHistory ? <FactHistory fact={fact} context={context} /> : null}
+            {fact.status === "confirmed" ? (
+              <Button
+                size="icon-xs"
+                variant="ghost-destructive"
+                aria-label={`Forget ${fact.subject}`}
+                title="Forget"
+                disabled={disabled}
+                onClick={() => void forget()}
+              >
+                <Trash2Icon />
+              </Button>
+            ) : null}
+          </div>
+        }
+      >
+        {showHistory ? <FactHistory fact={fact} context={context} /> : null}
+      </SettingsListItem>
       <OverlayPresence when={editing}>
         {() => (
           <FactEditorDialog
@@ -257,7 +265,7 @@ function FactRow({ fact, context }: { fact: Fact; context: FactListContext }) {
           />
         )}
       </OverlayPresence>
-    </SettingsListItem>
+    </>
   );
 }
 
@@ -287,7 +295,7 @@ function FactHistory({ fact, context }: { fact: Fact; context: FactListContext }
       </ol>
     );
   return (
-    <div className="reveal-motion ms-0.5 border-s border-border/70 ps-3 text-xs text-muted-foreground">
+    <div className="reveal-motion ms-0.5 mt-2 mb-2 border-s border-border/70 ps-3 text-xs text-muted-foreground">
       {body}
     </div>
   );
@@ -369,7 +377,7 @@ export function FactEditorDialog(props: {
                 />
               </div>
               <div className="space-y-1.5">
-                <div className="text-xs font-medium text-muted-foreground">Projects</div>
+                <Label render={<div />}>Projects</Label>
                 <div className="flex flex-wrap items-center gap-1.5">
                   <ProjectLabelChips labels={props.labels} ids={labelIds} />
                   <ProjectLabelPicker

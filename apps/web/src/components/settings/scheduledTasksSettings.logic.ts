@@ -16,6 +16,30 @@ import type { ProviderInstanceEntry } from "../../providerInstances";
 
 import type { ResolvedSettingsScope } from "./settingsScope";
 
+/**
+ * How a task's last run reads in its row. `ago` is the last run's relative
+ * time ("2h ago"), or null when unknown. A success is plain text; anything
+ * worth noticing carries a badge tone. Null when the task never ran.
+ */
+export function scheduledTaskLastRun(
+  status: ScheduledTask["lastRunStatus"],
+  ago: string | null,
+): { readonly text: string; readonly tone: "info" | "warning" | "error" | null } | null {
+  const when = ago ? ` ${ago}` : "";
+  switch (status) {
+    case "never":
+      return null;
+    case "running":
+      return { text: "Running", tone: "info" };
+    case "succeeded":
+      return { text: `Ran${when}`, tone: null };
+    case "failed":
+      return { text: `Failed${when}`, tone: "error" };
+    case "skipped_already_queued":
+      return { text: `Skipped${when}, the last run was still queued`, tone: "warning" };
+  }
+}
+
 /** Whether the settings scope shows a task or repository on `environmentId`. */
 export function matchesScheduledTaskScope(
   scope: ResolvedSettingsScope,

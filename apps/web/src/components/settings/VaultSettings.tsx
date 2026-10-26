@@ -2,6 +2,7 @@ import { matchesSettingsListQuery } from "./settingsList.logic";
 import {
   SettingsList,
   SettingsListItem,
+  SettingsListMeta,
   SettingsListToolbar,
   SettingsListSearch,
   SettingsListFilter,
@@ -112,6 +113,9 @@ export function VaultSettings() {
   const scopeName = (id: string | null) =>
     id === null ? null : (labels.find((label) => label.id === id)?.name ?? "A removed project");
 
+  const filtered = query !== "" || type !== "all";
+  // Search and filters only once there is something to narrow down.
+  const showToolbar = list.isLoaded && (list.items.length > 0 || filtered);
   const addButton = () => (
     <Button
       disabled={!actions.canWrite}
@@ -138,18 +142,20 @@ export function VaultSettings() {
           </SettingsSectionAction>
         }
       >
-        <SettingsListToolbar>
-          <SettingsListSearch label="Search vault" value={query} onValueChange={setQuery} />
-          <SettingsListFilter
-            label="Type"
-            value={type}
-            onValueChange={setType}
-            options={[
-              { value: "all", label: "All types" },
-              ...Object.entries(VAULT_TYPE_LABELS).map(([value, label]) => ({ value, label })),
-            ]}
-          />
-        </SettingsListToolbar>
+        {environmentId !== null && showToolbar ? (
+          <SettingsListToolbar>
+            <SettingsListSearch label="Search vault" value={query} onValueChange={setQuery} />
+            <SettingsListFilter
+              label="Type"
+              value={type}
+              onValueChange={setType}
+              options={[
+                { value: "all", label: "All types" },
+                ...Object.entries(VAULT_TYPE_LABELS).map(([value, label]) => ({ value, label })),
+              ]}
+            />
+          </SettingsListToolbar>
+        ) : null}
         {environmentId === null ? (
           <SettingsRow title="Choose a machine to see its vault." />
         ) : list.error !== null ? (
@@ -157,17 +163,31 @@ export function VaultSettings() {
         ) : !list.isLoaded ? (
           <SettingsRow title="Loading vault…" role="status" />
         ) : items.length === 0 ? (
-          <SettingsListEmpty
-            icon={<KeyRoundIcon />}
-            title={query || type !== "all" ? "Nothing matches" : "Nothing in the vault yet"}
-            description={
-              query || type !== "all"
-                ? "Try another search or type."
-                : "Store logins, API keys, cards and notes here so agents can use them without ever seeing them."
-            }
-          >
-            {query || type !== "all" ? null : addButton()}
-          </SettingsListEmpty>
+          filtered ? (
+            <SettingsListEmpty
+              icon={<KeyRoundIcon />}
+              title="Nothing matches"
+              description="Try another search or type."
+            >
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setQuery("");
+                  setType("all");
+                }}
+              >
+                Clear filters
+              </Button>
+            </SettingsListEmpty>
+          ) : (
+            <SettingsListEmpty
+              icon={<KeyRoundIcon />}
+              title="Nothing in the vault yet"
+              description="Store logins, API keys, cards and notes so agents can use them without ever seeing them."
+            >
+              {addButton()}
+            </SettingsListEmpty>
+          )
         ) : (
           <SettingsList>
             {items.map((item) => (
@@ -197,14 +217,11 @@ export function VaultSettings() {
       {environmentId !== null && paired ? (
         <VaultSharingSection sharing={sharing} syncPeers={syncPeers.peers} />
       ) : null}
-      {environmentId !== null && list.items.length > 0 ? (
-        <SettingsSection id="vault-activity" title="All activity">
+      {/* Each row already says "Never used", so an unused vault shows no activity card. */}
+      {environmentId !== null && (activity.error || activity.usage.length > 0) ? (
+        <SettingsSection id="vault-activity" title="Recent activity">
           {activity.error ? (
             <SettingsNote tone="destructive">{activity.error}</SettingsNote>
-          ) : !activity.isLoaded ? (
-            <SettingsNote role="status">Loading usage…</SettingsNote>
-          ) : activity.usage.length === 0 ? (
-            <SettingsNote>Not used yet.</SettingsNote>
           ) : (
             <div className="px-3 py-3 sm:px-4">
               <VaultUsageList
@@ -256,13 +273,14 @@ function VaultItemRow(props: {
   const [showUsage, setShowUsage] = useState(false);
   const [busy, setBusy] = useState(false);
   const disabled = busy || !props.canWrite;
-  const label = item.label ?? null;
   const cardLast4 = item.type === "card" && item.cardLast4 ? `•••• ${item.cardLast4}` : null;
+  const description = [item.label, cardLast4].filter(Boolean).join(" · ");
   return (
     <SettingsListItem
       title={item.name}
+      description={description || undefined}
       status={
-        <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <SettingsListMeta>
           <Badge size="sm" variant="outline">
             {VAULT_TYPE_LABELS[item.type]}
           </Badge>
@@ -276,11 +294,14 @@ function VaultItemRow(props: {
               </TooltipPopup>
             </Tooltip>
           ) : null}
-          {label ? <span className="truncate text-xs text-muted-foreground">{label}</span> : null}
-          {cardLast4 ? (
-            <span className="truncate text-xs text-muted-foreground">{cardLast4}</span>
-          ) : null}
-        </span>
+          {props.policy}
+          {/* Items work in every project unless limited to one; only the limit is news. */}
+          {props.scope ? `Only in ${props.scope}` : null}
+          {item.allowedDomains.length > 0 ? item.allowedDomains.join(", ") : null}
+          {props.lastUsedAt
+            ? `Last used ${formatRelativeTimeLabel(props.lastUsedAt)}`
+            : "Never used"}
+        </SettingsListMeta>
       }
       control={
         <div className="flex shrink-0 items-center gap-0.5">
@@ -296,6 +317,16 @@ function VaultItemRow(props: {
           </Button>
           <Button
             size="icon-xs"
+            variant="ghost-muted"
+            aria-label={showUsage ? "Hide usage" : "Show usage"}
+            aria-expanded={showUsage}
+            title="Usage"
+            onClick={() => setShowUsage((open) => !open)}
+          >
+            <HistoryIcon />
+          </Button>
+          <Button
+            size="icon-xs"
             variant="ghost-destructive"
             aria-label={`Delete ${item.name}`}
             title={props.canWrite ? "Delete" : NO_WRITE_TITLE}
@@ -307,30 +338,9 @@ function VaultItemRow(props: {
           >
             <Trash2Icon />
           </Button>
-          <Button
-            size="icon-xs"
-            variant="ghost-muted"
-            aria-label={showUsage ? "Hide usage" : "Show usage"}
-            aria-expanded={showUsage}
-            title="Usage"
-            onClick={() => setShowUsage((open) => !open)}
-          >
-            <HistoryIcon />
-          </Button>
         </div>
       }
     >
-      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 py-2 text-xs text-muted-foreground">
-        <span>{props.policy}</span>
-        <span>· {props.scope ?? "All projects"}</span>
-        {item.allowedDomains.length > 0 ? <span>· {item.allowedDomains.join(", ")}</span> : null}
-        <span>
-          ·{" "}
-          {props.lastUsedAt
-            ? `Last used ${formatRelativeTimeLabel(props.lastUsedAt)}`
-            : "Never used"}
-        </span>
-      </div>
       {showUsage ? (
         <ItemUsage environmentId={props.environmentId} item={item} agentName={props.agentName} />
       ) : null}
