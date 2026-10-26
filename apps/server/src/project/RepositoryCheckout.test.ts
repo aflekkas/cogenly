@@ -33,6 +33,7 @@ import * as SourceControlRepositoryService from "../sourceControl/SourceControlR
 import * as ProjectCloneTracker from "./ProjectCloneTracker.ts";
 import * as ProjectService from "./ProjectService.ts";
 import * as RepositoryCheckout from "./RepositoryCheckout.ts";
+import * as RepositoryIdentityResolver from "./RepositoryIdentityResolver.ts";
 
 const projectId = ProjectId.make("project:smile-express");
 
@@ -409,6 +410,35 @@ describe("RepositoryCheckout.ensureCheckout", () => {
     });
   });
 
+  it.effect("clears a clone the server stopped mid-way and clones it again", () => {
+    const bare = makeBareRemote();
+    const workspaceRoot = NodePath.join(tempRoot(), "smile-express");
+    NodeFS.mkdirSync(workspaceRoot);
+    // What git leaves when stopped before checkout: `.git` and nothing else.
+    git(workspaceRoot, ["init", "--initial-branch=main"]);
+    const box: Box = { workspaceRoot, remote: bare, cloneCalls: 0 };
+    return Effect.gen(function* () {
+      yield* run(box);
+      expect(box.cloneCalls).toBe(1);
+      expect(NodeFS.readFileSync(NodePath.join(workspaceRoot, "README.md"), "utf8")).toBe(
+        "hello\n",
+      );
+    });
+  });
+
+  it.effect("keeps a checkout someone worked in, even with no files checked out", () => {
+    const bare = makeBareRemote();
+    const workspaceRoot = NodePath.join(tempRoot(), "smile-express");
+    git(NodePath.dirname(workspaceRoot), ["clone", bare, workspaceRoot]);
+    git(workspaceRoot, ["rm", "-q", "README.md"]);
+    const box: Box = { workspaceRoot, remote: bare, cloneCalls: 0 };
+    return Effect.gen(function* () {
+      yield* run(box);
+      expect(box.cloneCalls).toBe(0);
+      expect(NodeFS.existsSync(NodePath.join(workspaceRoot, ".git", "index"))).toBe(true);
+    });
+  });
+
   it.effect("leaves a folder that already has files to launch as before, untouched", () => {
     const bare = makeBareRemote();
     const workspaceRoot = NodePath.join(tempRoot(), "smile-express");
@@ -422,6 +452,19 @@ describe("RepositoryCheckout.ensureCheckout", () => {
       expect(box.cloneCalls).toBe(0);
     });
   });
+});
+
+/** A checkout's identity from its `origin` remote; null for a folder with none. */
+const originIdentities = Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({
+  resolve: (cwd) =>
+    Effect.sync(() => {
+      try {
+        const remoteUrl = git(cwd, ["config", "--get", "remote.origin.url"]).toString().trim();
+        return { locator: { remoteUrl } } as never;
+      } catch {
+        return null;
+      }
+    }),
 });
 
 /**
@@ -441,6 +484,8 @@ function checkoutHarness(
     readonly realFolders?: boolean;
     /** Told about every workspace-root update, like the record's event. */
     readonly onMoved?: (projectId: ProjectId, workspaceRoot: string) => Effect.Effect<void>;
+    /** Resolves checkouts' identity from their `origin`, as the real resolver does. */
+    readonly identities?: boolean;
   },
 ) {
   const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
@@ -523,6 +568,7 @@ function checkoutHarness(
         Layer.mock(GitWorkflow.GitWorkflowService)({ isRepository }),
         gitDriver,
         folders,
+        options?.identities ? originIdentities : Layer.empty,
       ),
     ),
     Layer.provideMerge(ProjectCloneTracker.layer.pipe(Layer.provide(gitRepositories(box)))),
@@ -710,6 +756,52 @@ describe("RepositoryCheckout.checkoutRepository", () => {
       ]);
       expect(box.cloneCalls).toBe(1);
     }).pipe(Effect.provide(checkoutHarness(projectDir, box)));
+  });
+
+  it.effect("clears a clone stopped mid-way at the destination and clones it again", () => {
+    const bare = makeBareRemote();
+    const projectDir = NodePath.join(tempRoot(), "Spawn");
+    const destination = NodePath.join(projectDir, "repos", "smile-express");
+    NodeFS.mkdirSync(destination, { recursive: true });
+    git(destination, ["init", "--initial-branch=main"]);
+    const box = { cloneCalls: 0 };
+    return Effect.gen(function* () {
+      const label = yield* linkFromElsewhere(bare, "smile-express");
+      const checkouts = yield* RepositoryCheckout.RepositoryCheckout;
+      const { repositoryId } = yield* checkouts.checkoutRepository({
+        labelId: label.id,
+        remote: bare,
+      });
+      yield* waitForCloneToSettle(repositoryId);
+      expect(NodeFS.readFileSync(NodePath.join(destination, "README.md"), "utf8")).toBe("hello\n");
+      expect(box.cloneCalls).toBe(1);
+    }).pipe(Effect.provide(checkoutHarness(projectDir, box)));
+  });
+
+  it.effect("files this machine's own checkout of the remote instead of cloning a second", () => {
+    const remote = "github.com/acme/smile-express";
+    const projectDir = NodePath.join(tempRoot(), "Spawn");
+    // Cloned by hand before the project linked it, outside the project folder.
+    const elsewhere = NodePath.join(tempRoot(), "spawn-smile-express");
+    NodeFS.mkdirSync(elsewhere);
+    git(elsewhere, ["init", "--initial-branch=main"]);
+    git(elsewhere, ["remote", "add", "origin", "https://github.com/Acme/smile-express.git"]);
+    const box = { cloneCalls: 0 };
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const existing = ProjectId.make("existing-checkout");
+      yield* sql`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at) VALUES (${existing}, 'spawn-smile-express', ${elsewhere}, '[]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`;
+      const label = yield* linkFromElsewhere(remote, "smile-express");
+      const checkouts = yield* RepositoryCheckout.RepositoryCheckout;
+      expect(yield* checkouts.checkoutRepository({ labelId: label.id, remote })).toEqual({
+        repositoryId: existing,
+      });
+      expect(yield* sql`SELECT repository_id FROM label_repositories`).toEqual([
+        { repository_id: existing },
+      ]);
+      expect(box.cloneCalls).toBe(0);
+      expect(NodeFS.existsSync(NodePath.join(projectDir, "repos", "smile-express"))).toBe(false);
+    }).pipe(Effect.provide(checkoutHarness(projectDir, box, { identities: true })));
   });
 
   it.effect("refuses a remote the project does not link", () => {
@@ -1281,5 +1373,50 @@ describe("RepositoryCheckout relocation after a project folder rename", () => {
         NodeFS.realpathSync(worktree),
       );
     }).pipe(Effect.provide(checkoutHarness(projectDir, { cloneCalls: 0 })));
+  });
+});
+
+describe("RepositoryCheckout failure reasons", () => {
+  const repositoryId = ProjectId.make("remote:github.com/spawn-partners/platform");
+
+  it("names a missing GitHub login and where to sign in, for a refused clone", () => {
+    const error = RepositoryCheckout.cloneCheckoutError({
+      repositoryId,
+      repositoryName: "platform",
+      detail:
+        "The host asked for a login this machine does not have. Git said: fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+    });
+    expect(error.reason).toBe("sign_in_required");
+    expect(error.message).toContain("not signed in to GitHub");
+    expect(error.message).toContain("Settings → Source control → GitHub");
+  });
+
+  it("keeps any other clone failure a clone failure with git's words", () => {
+    const error = RepositoryCheckout.cloneCheckoutError({
+      repositoryId,
+      repositoryName: "platform",
+      detail: "fatal: early EOF",
+    });
+    expect(error.reason).toBe("clone_failed");
+    expect(error.message).toBe("platform could not be cloned: fatal: early EOF.");
+  });
+
+  it("says what could not be read instead of a bare 'could not be inspected'", () => {
+    const missing = new Error(
+      "Workspace root does not exist: /home/dev/.cogenly/projects/Spawn Partners/repos/platform",
+    );
+    const wrapped = new Error("Project operation 'normalize-workspace' failed.", {
+      cause: missing,
+    });
+    expect(RepositoryCheckout.rootCauseMessage(wrapped)).toBe(missing.message);
+    expect(RepositoryCheckout.rootCauseMessage("not an error")).toBeNull();
+    const error = new RepositoryCheckout.RepositoryCheckoutError({
+      repositoryId,
+      repositoryName: "platform",
+      reason: "storage",
+      detail: missing.message,
+    });
+    expect(error.message).not.toContain("could not be inspected");
+    expect(error.message).toContain("Workspace root does not exist");
   });
 });
