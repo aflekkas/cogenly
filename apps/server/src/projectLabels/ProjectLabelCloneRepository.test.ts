@@ -18,9 +18,12 @@ const harness = (homeOwner: string | null) =>
       labels: {
         readActive: (id) =>
           Effect.succeed({
-            label: { id, name: "Spawn Partners", sourceLinks: [] } as never,
+            label: {
+              id,
+              name: "Spawn Partners",
+              sourceLinks: homeOwner === null ? [] : [{ kind: "github-owner", owner: homeOwner }],
+            } as never,
           }),
-        ensureHomeOwner: () => Effect.succeed(homeOwner),
         linkRepository: (input) =>
           Effect.sync(() => {
             linked.push(input.repositoryId);
