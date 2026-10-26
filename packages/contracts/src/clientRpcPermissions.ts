@@ -94,6 +94,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.projectLabelsEnsureProjectChat]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsAdoptOrphanFolder]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsTrashOrphanFolder]: AuthOrchestrationOperateScope,
+  [WS_METHODS.projectLabelsRemoveOrphanFolder]: AuthOrchestrationOperateScope,
   [WS_METHODS.workStart]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentsRequestApproval]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentsApprove]: AuthOrchestrationOperateScope,

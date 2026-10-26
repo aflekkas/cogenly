@@ -77,3 +77,9 @@ it("removes obsolete project tag suggestion and review RPCs", () => {
   expect(methods).not.toContain("projectLabels.reviewSuggestion");
   expect(methods).toContain("projectLabels.moveThread");
 });
+
+it("keeps the deprecated removeOrphanFolder alias for 0.3.2 clients", () => {
+  const methods = [...WsRpcGroup.requests.keys()] as ReadonlyArray<string>;
+  expect(methods).toContain("projectLabels.removeOrphanFolder");
+  expect(methods).toContain("projectLabels.trashOrphanFolder");
+});

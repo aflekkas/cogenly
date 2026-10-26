@@ -1732,6 +1732,9 @@ const makeWsRpcHandlers = (
         projectLabels.adoptOrphanFolder(input),
       [WS_METHODS.projectLabelsTrashOrphanFolder]: (input) =>
         projectLabels.trashOrphanFolder(input),
+      // Deprecated 0.3.2 name for the same action.
+      [WS_METHODS.projectLabelsRemoveOrphanFolder]: (input) =>
+        projectLabels.trashOrphanFolder(input),
       [WS_METHODS.workStart]: (input) => workHandoff.start(input),
       [WS_METHODS.agentsApprovalsList]: (input) => agentWorkspace.listApprovals(input),
       [WS_METHODS.agentsRequestApproval]: (input) =>
