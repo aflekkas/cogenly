@@ -368,6 +368,27 @@ describe("Vault service", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("scrubs short passwords and filled one-time codes as whole tokens", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const { item } = yield* vault.create({
+        name: "Router",
+        type: "login",
+        secretFields: { password: "pw12", totpSecret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ" },
+      });
+      yield* TestClock.setTime(1_800_000_015_000);
+      const code = yield* vault.use({ itemId: item.id, field: "totp", caller: { kind: "human" } });
+      if (code.status !== "allowed") return expect.fail("the code should fill");
+      // Long after its window, the code that was typed is still scrubbed.
+      yield* TestClock.setTime(1_800_000_015_000 + 10 * 60_000);
+      expect(
+        yield* vault.scrubText(`pw ${"pw12"} not pw123, code ${code.value} not ${code.value}9`),
+      ).toBe(
+        `pw [redacted vault secret] not pw123, code [redacted vault secret] not ${code.value}9`,
+      );
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("withholds tool output when the secrets to scrub cannot be loaded", () =>
     Effect.gen(function* () {
       const vault = yield* Vault.Vault;

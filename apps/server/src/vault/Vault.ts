@@ -43,6 +43,7 @@ import * as VaultCrypto from "./VaultCrypto.ts";
 import { evaluateVaultPolicy, hostMatchesAnyDomain, type VaultUseCaller } from "./VaultPolicy.ts";
 import {
   VAULT_WITHHELD,
+  isWholeTokenSecret,
   redactShortSecrets,
   redactShortValue,
   redactText,
@@ -531,22 +532,28 @@ const make = Effect.gen(function* () {
   });
 
   /**
-   * The cached scrub set plus the TOTP codes valid now: a filled code can echo
-   * back in page text, and codes change every 30 seconds, so they are computed
-   * per scrub for the current window and its neighbours. Six digits is short
-   * enough to collide with ordinary numbers, so they take the whole-token pass.
+   * What to scrub: the cached item values, every value delivered by this
+   * process, and the TOTP codes valid now. A filled code can echo back in page
+   * text, and codes change every 30 seconds, so they are computed per scrub
+   * for the current window and its neighbours. Short and all-digit values take
+   * the whole-token pass; the rest are matched anywhere.
    */
   const scrubSets = Effect.gen(function* () {
-    const { secrets, shortSecrets, totpSecrets } = yield* ensureScrubSecrets;
-    if (totpSecrets.length === 0) return { secrets, shortSecrets };
-    const nowMs = yield* Clock.currentTimeMillis;
-    const withCodes = new Set(shortSecrets);
-    for (const secret of totpSecrets)
-      for (const offset of [-30_000, 0, 30_000]) {
-        const code = Option.liftThrowable(totp)(secret, { atMs: nowMs + offset });
-        if (Option.isSome(code)) withCodes.add(code.value);
-      }
-    return { secrets, shortSecrets: withCodes };
+    const cache = yield* ensureScrubSecrets;
+    const delivered = yield* Ref.get(deliveredSecrets);
+    const secrets = new Set<string>();
+    const shortSecrets = new Set(cache.shortSecrets);
+    for (const value of [...cache.secrets, ...delivered])
+      (isWholeTokenSecret(value) ? shortSecrets : secrets).add(value);
+    if (cache.totpSecrets.length > 0) {
+      const nowMs = yield* Clock.currentTimeMillis;
+      for (const secret of cache.totpSecrets)
+        for (const offset of [-30_000, 0, 30_000]) {
+          const code = Option.liftThrowable(totp)(secret, { atMs: nowMs + offset });
+          if (Option.isSome(code)) shortSecrets.add(code.value);
+        }
+    }
+    return { secrets, shortSecrets };
   });
 
   /** Unscrubbed text never leaves: a scrub set that cannot load withholds the result. */
@@ -842,9 +849,6 @@ const make = Effect.gen(function* () {
           redactShortSecrets(redactText(text, secrets), shortSecrets),
         ),
         withheldOnFailure(() => VAULT_WITHHELD),
-        Effect.flatMap((scrubbed) =>
-          Ref.get(deliveredSecrets).pipe(Effect.map((secrets) => redactText(scrubbed, secrets))),
-        ),
       ),
     scrubValue: (value) =>
       scrubSets.pipe(
@@ -852,9 +856,6 @@ const make = Effect.gen(function* () {
           redactShortValue(redactValue(value, secrets), shortSecrets),
         ),
         withheldOnFailure(() => withholdValue(value)),
-        Effect.flatMap((scrubbed) =>
-          Ref.get(deliveredSecrets).pipe(Effect.map((secrets) => redactValue(scrubbed, secrets))),
-        ),
       ),
   });
 });

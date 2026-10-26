@@ -82,7 +82,9 @@ provider-native credential files are neither imported nor cloned.
 
 ## Scrubbing and the preview_evaluate trap
 
-Exact stored secret values (length ≥ 6) are scrubbed from tool results.
+Exact stored and delivered secret values are scrubbed from tool results:
+values of 6 or more characters anywhere, shorter ones and short all-digit
+values such as one-time codes as whole tokens only.
 This is an output guard, not a boundary against an agent already authorized
 to read a process token. All vault field values are cached in memory only (loaded lazily,
 invalidated on writes) and `McpToolAccess` redacts every MCP tool result

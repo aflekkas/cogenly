@@ -4,6 +4,15 @@ const VAULT_REDACTION = "[redacted vault secret]";
 /** Shorter values are too likely to be ordinary words or numbers to scrub safely. */
 const MIN_SCRUB_LENGTH = 6;
 
+/**
+ * Values the substring pass cannot take safely: anything under the length
+ * floor, and short all-digit values such as one-time codes and PINs, which
+ * would otherwise blank part of a longer number. They are matched as whole
+ * tokens only.
+ */
+export const isWholeTokenSecret = (value: string): boolean =>
+  value.length < MIN_SCRUB_LENGTH || /^\d{1,8}$/.test(value);
+
 /** Longest first, so a value that contains another is removed whole. */
 const orderedSecrets = (secrets: Iterable<string>): Array<string> =>
   [...new Set([...secrets].filter((value) => value.length >= MIN_SCRUB_LENGTH))].sort(
@@ -72,24 +81,26 @@ const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/
  * every `1234` in unrelated output, while a page echoing the filled CVC on
  * its own is still caught.
  */
+/** One pattern for every short secret, longest first, so the pass runs once per string. */
+const wholeTokenPattern = (secrets: Iterable<string>): RegExp | undefined => {
+  const list = [...new Set(secrets)]
+    .filter((value) => value.length > 0)
+    .sort((a, b) => b.length - a.length);
+  return list.length === 0
+    ? undefined
+    : new RegExp(`(?<![A-Za-z0-9])(?:${list.map(escapeRegExp).join("|")})(?![A-Za-z0-9])`, "g");
+};
+
 export const redactShortSecrets = (text: string, secrets: Iterable<string>): string => {
-  let result = text;
-  for (const secret of [...new Set([...secrets].filter((value) => value.length > 0))].sort(
-    (a, b) => b.length - a.length,
-  )) {
-    result = result.replace(
-      new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(secret)}(?![A-Za-z0-9])`, "g"),
-      VAULT_REDACTION,
-    );
-  }
-  return result;
+  const pattern = wholeTokenPattern(secrets);
+  return pattern === undefined ? text : text.replace(pattern, VAULT_REDACTION);
 };
 
 /** `redactValue` for short secrets: same whole-token rule, applied per string. */
 export const redactShortValue = <A>(value: A, secrets: Iterable<string>): A => {
-  const list = [...secrets];
-  if (list.length === 0) return value;
-  return mapStrings(value, (text) => redactShortSecrets(text, list), { keys: true });
+  const pattern = wholeTokenPattern(secrets);
+  if (pattern === undefined) return value;
+  return mapStrings(value, (text) => text.replace(pattern, VAULT_REDACTION), { keys: true });
 };
 
 /** A PTY may split a token across data callbacks. Hold only a possible secret
