@@ -490,7 +490,7 @@ export class RepositoryCheckoutError extends Schema.TaggedError<RepositoryChecko
       case "destination_taken":
         return `${this.detail ?? "The destination folder"} already holds other files; move them away, then clone ${this.repositoryName} again.`;
       case "clone_failed":
-        return `${this.repositoryName} could not be cloned${this.detail ? `: ${this.detail}` : ""}.`;
+        return `${this.repositoryName} could not be cloned${this.detail ? `: ${this.detail.replace(/\.+$/, "")}` : ""}.`;
       case "sign_in_required":
         return `${this.repositoryName} could not be cloned: this machine is not signed in to GitHub with access to it. Sign in on this machine under Settings → Source control → GitHub (save a token, or run \`gh auth login\` there), then retry.${this.detail ? ` Git said: ${this.detail}` : ""}`;
       case "has_worktrees":
