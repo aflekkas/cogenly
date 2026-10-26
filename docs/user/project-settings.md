@@ -101,7 +101,7 @@ that still has a `t3.json` and no `cogenly.json` is read the same way; rename th
 convenient. Browser access and computer use changes apply when an agent session next starts.
 
 New worktrees initialize git submodules recursively. If that step is slow because the repository
-declares many nested submodules, set **Submodules** in **Settings → New threads** (with a project
+declares many nested submodules, set **Worktree submodules** in **Settings → New threads** (with a project
 selected to override it there) to **Top level only** to stop at the ones the repository declares
 itself, or **Skip** to leave them for a setup script. It resolves in the same order as the
 workspace default: a `"worktreeSubmodules"` value in the `cogenly.json` of the branch being checked out

@@ -215,11 +215,7 @@ export function ProjectDefaultsSettings({
       settingKeys={["defaultThreadEnvMode"]}
       mixed={mixedWorkspace}
       {...searchableSetting("new-threads")}
-      description={
-        isProjectScope
-          ? "Where new threads in this project start."
-          : "Where new threads start. Projects and a repository's cogenly.json can override it."
-      }
+      description="A new worktree gives each thread its own branch and folder. A repository's cogenly.json applies while this is unset."
       resetAction={
         !isProjectScope && settings.defaultThreadEnvMode !== null ? (
           <SettingResetButton
@@ -236,7 +232,7 @@ export function ProjectDefaultsSettings({
               updateSettings({ defaultThreadEnvMode: value });
           }}
         >
-          <SelectTrigger size="sm" aria-label="Default workspace">
+          <SelectTrigger size="sm" aria-label="Start new threads in">
             <SelectValue>
               {(value: string | null) =>
                 value === "local" || value === "worktree"
@@ -270,7 +266,7 @@ export function ProjectDefaultsSettings({
       }
       title={
         category === "new-threads"
-          ? "New threads"
+          ? "Workspace"
           : category === "integrations"
             ? "Agent access"
             : "Repositories"
@@ -281,14 +277,40 @@ export function ProjectDefaultsSettings({
           {workspaceRow}
           <SettingsRow
             serverScoped
+            settingKeys={["newWorktreesStartFromOrigin"]}
+            {...searchableSetting("start-from-origin")}
+            description="Branch new worktrees from the latest commit on origin instead of your local copy of the branch."
+            resetAction={
+              settings.newWorktreesStartFromOrigin !==
+              DEFAULT_SERVER_SETTINGS.newWorktreesStartFromOrigin ? (
+                <SettingResetButton
+                  label="new worktrees start from origin"
+                  onClick={() =>
+                    updateSettings({
+                      newWorktreesStartFromOrigin:
+                        DEFAULT_SERVER_SETTINGS.newWorktreesStartFromOrigin,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <ScopedSwitch
+                settingKeys={["newWorktreesStartFromOrigin"]}
+                checked={settings.newWorktreesStartFromOrigin}
+                onCheckedChange={(checked) =>
+                  updateSettings({ newWorktreesStartFromOrigin: Boolean(checked) })
+                }
+                aria-label="Start worktrees from origin"
+              />
+            }
+          />
+          <SettingsRow
+            serverScoped
             settingKeys={["worktreeSubmodules"]}
             mixed={mixedSubmodules}
             {...searchableSetting("worktree-submodules")}
-            description={
-              isProjectScope
-                ? "How new worktrees in this project populate git submodules."
-                : "How new worktrees populate git submodules. Projects and a repository's cogenly.json can override it."
-            }
+            description="Which git submodules a new worktree checks out. A repository's cogenly.json applies while this is unset."
             resetAction={
               !isProjectScope && settings.worktreeSubmodules !== null ? (
                 <SettingResetButton
@@ -323,36 +345,6 @@ export function ProjectDefaultsSettings({
                   ))}
                 </SelectPopup>
               </Select>
-            }
-          />
-          <SettingsRow
-            serverScoped
-            settingKeys={["newWorktreesStartFromOrigin"]}
-            {...searchableSetting("start-from-origin")}
-            description="Creates the worktree from the latest matching branch on origin instead of your local branch."
-            resetAction={
-              settings.newWorktreesStartFromOrigin !==
-              DEFAULT_SERVER_SETTINGS.newWorktreesStartFromOrigin ? (
-                <SettingResetButton
-                  label="new worktrees start from origin"
-                  onClick={() =>
-                    updateSettings({
-                      newWorktreesStartFromOrigin:
-                        DEFAULT_SERVER_SETTINGS.newWorktreesStartFromOrigin,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <ScopedSwitch
-                settingKeys={["newWorktreesStartFromOrigin"]}
-                checked={settings.newWorktreesStartFromOrigin}
-                onCheckedChange={(checked) =>
-                  updateSettings({ newWorktreesStartFromOrigin: Boolean(checked) })
-                }
-                aria-label="Start new worktrees from origin by default"
-              />
             }
           />
         </>

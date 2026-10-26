@@ -303,8 +303,8 @@ describe("searchSettings", () => {
   it.each([
     ["default model", "default-model", "/settings/models"],
     ["text generation model", "text-generation-model", "/settings/models"],
-    ["new threads", "project-defaults", "/settings/new-threads"],
-    ["workspace", "new-threads", "/settings/new-threads"],
+    ["new threads", "new-threads", "/settings/new-threads"],
+    ["workspace", "project-defaults", "/settings/new-threads"],
     ["projects folder", "projects-folder", "/settings/project-tags"],
     ["folder browser", "add-project-starts-in", "/settings/project-tags"],
     ["live processes", "diagnostics", "/settings/diagnostics"],

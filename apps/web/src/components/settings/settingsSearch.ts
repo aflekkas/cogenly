@@ -297,7 +297,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "project-defaults",
-    title: "New threads",
+    title: "Workspace",
     to: "/settings/new-threads",
     searchTerms: [
       "project defaults overrides workspace worktree submodules start from origin machines projects repositories inheritance all projects",
@@ -498,21 +498,21 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "new-threads",
-    title: "Workspace",
+    title: "Start new threads in",
     to: "/settings/new-threads",
-    searchTerms: ["new threads default workspace mode draft local worktree"],
+    searchTerms: ["new threads default workspace mode draft local current checkout worktree"],
   },
   {
     id: "worktree-submodules",
-    title: "Submodules",
+    title: "Worktree submodules",
     to: "/settings/new-threads",
     searchTerms: ["git submodule init recursive top-level none worktree cogenly.json"],
   },
   {
     id: "start-from-origin",
-    title: "Start from origin",
+    title: "Start worktrees from origin",
     to: "/settings/new-threads",
-    searchTerms: ["new worktrees latest matching remote branch local"],
+    searchTerms: ["new worktrees latest matching remote branch local fetch"],
   },
   {
     id: "add-project-starts-in",
