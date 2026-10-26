@@ -32,7 +32,8 @@ const REASON_TEXT: Readonly<Record<IntegrationError["reason"], string>> = {
 
 /** Plain text for a failed integrations RPC. */
 export function integrationErrorText(error: unknown): string {
-  if (isIntegrationError(error)) return REASON_TEXT[error.reason];
+  if (isIntegrationError(error))
+    return error.oauthFailure ? error.message : REASON_TEXT[error.reason];
   return error instanceof Error && error.message.trim() !== ""
     ? error.message
     : "The server rejected the change.";

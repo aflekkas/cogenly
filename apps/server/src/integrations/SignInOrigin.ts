@@ -29,7 +29,7 @@ export const selectCallbackOrigin = (from: SignInOrigin, known?: string) => {
           operation: "start sign-in",
           reason: "invalid_request",
           cause:
-            "Open Settings → Integrations on the VPS's reachable address and sign in there first, or pass callbackOrigin with that HTTPS origin. A loopback agent request cannot discover the browser's public address.",
+            "Use the inline integration card to sign in from the browser's reachable address, or pass callbackOrigin with that HTTPS origin. A loopback agent request cannot discover the browser's public address.",
         }),
       );
 };

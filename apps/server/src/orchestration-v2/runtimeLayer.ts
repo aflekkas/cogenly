@@ -1,4 +1,5 @@
 import * as StaleRunRecoveryWorker from "../health/StaleRunRecoveryWorker.ts";
+import * as IntegrationSetupRequests from "../integrations/IntegrationSetupRequests.ts";
 import * as WorktreeLifecycle from "../workspace/WorktreeLifecycle.ts";
 import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
 import * as GoogleTokenStore from "../integrations/local/GoogleTokenStore.ts";
@@ -518,6 +519,17 @@ const layerAgentWorkspaceProvided = AgentWorkspace.layer.pipe(
       layerScheduledTaskProvided,
       layerIntegrationsProvided,
       layerApprovalChanges,
+      layerThreadManagementProvided,
+    ),
+  ),
+);
+const layerIntegrationSetupRequestsProvided = IntegrationSetupRequests.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      layerThreadManagementProvided,
+      layerIntegrationsProvided,
+      layerAgentWorkspaceProvided,
+      layerApprovalChanges,
     ),
   ),
 );
@@ -527,6 +539,7 @@ const layerAgentMcpPolicyProvided = AgentMcpPolicy.layer.pipe(
       AgentStore.layer,
       layerProjectFilesProvided,
       layerAgentWorkspaceProvided,
+      layerIntegrationSetupRequestsProvided,
       layerThreadManagementProvided,
       layerIntegrationsProvided,
     ),
@@ -635,6 +648,7 @@ const layerProductionBase = Layer.mergeAll(
     ),
   ),
   layerAgentWorkspaceProvided,
+  layerIntegrationSetupRequestsProvided,
   layerAgentEventReactorProvided,
   layerAgentMcpPolicyProvided,
   AgentStore.layer,

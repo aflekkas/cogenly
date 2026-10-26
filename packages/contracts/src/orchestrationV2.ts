@@ -1,3 +1,4 @@
+import { IntegrationId, IntegrationSetupAction } from "./integration.ts";
 import { AgentId } from "./agent.ts";
 import { AgentBuilderProposal } from "./agentBuilder.ts";
 import { OrchestrationMessageContext } from "./composerContext.ts";
@@ -1664,6 +1665,13 @@ const OrchestrationV2SecretRequestFields = {
   label: TrimmedNonEmptyString,
   reason: Schema.String,
   placeholder: Schema.optional(Schema.String),
+  integrationSetup: Schema.optional(
+    Schema.Struct({
+      integrationId: Schema.optional(IntegrationId),
+      setup: Schema.optional(IntegrationSetupAction),
+      accountLabel: Schema.optional(Schema.String),
+    }),
+  ),
   secretStatus: OrchestrationV2SecretRequestStatus,
   login: Schema.optional(OrchestrationV2LoginRequest),
 } as const;
@@ -3639,6 +3647,13 @@ const OrchestrationV2InternalCommand = Schema.Union([
     label: TrimmedNonEmptyString,
     reason: Schema.String,
     placeholder: Schema.optional(Schema.String),
+    integrationSetup: Schema.optional(
+      Schema.Struct({
+        integrationId: Schema.optional(IntegrationId),
+        setup: Schema.optional(IntegrationSetupAction),
+        accountLabel: Schema.optional(Schema.String),
+      }),
+    ),
     secretStatus: OrchestrationV2SecretRequestStatus,
     login: Schema.optional(OrchestrationV2LoginRequest),
   }),

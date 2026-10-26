@@ -1,4 +1,4 @@
-import { isPublicIntegrationPath } from "./publicEndpoint.ts";
+import { isPublicIntegrationUrl } from "./publicEndpoint.ts";
 import {
   Integration,
   IntegrationError,
@@ -358,6 +358,7 @@ export interface SignInCallback {
   readonly state: string | undefined;
   readonly code: string | undefined;
   readonly error: string | undefined;
+  readonly errorDescription?: string | undefined;
   readonly iss: string | undefined;
 }
 
@@ -607,10 +608,11 @@ const CHECK_MESSAGES: Partial<Record<IntegrationError["reason"], string>> = {
 
 /** Status text owners and agents see; upstream messages are already bounded. */
 const checkMessage = (error: IntegrationError): string => {
+  if (error.oauthFailure) return error.message;
   const waiting = refreshWaitMessage(error);
   if (waiting !== undefined) return waiting;
   const { reason, cause } = error;
-  const base = CHECK_MESSAGES[reason] ?? "The request could not be completed.";
+  const base = CHECK_MESSAGES[reason] ?? error.message;
   return (reason === "upstream_error" || reason === "scope_missing") &&
     typeof cause === "string" &&
     cause.trim() !== ""
@@ -790,12 +792,17 @@ const make = (options: IntegrationsOptions = {}) =>
               ),
             );
 
-    /** Private paths are capabilities: keep the endpoint in the vault, even for direct creates. */
+    /**
+     * Private paths are capabilities: keep the endpoint in the vault, even for direct creates.
+     * An OAuth server's path is not one (its token is), and OAuth discovery and the
+     * `resource` parameter need the real URL, so those endpoints stay as they are.
+     */
     const protectEndpoint = (integration: StoredIntegration) =>
       Effect.gen(function* () {
-        if (integration.transport !== "http") return integration;
+        if (integration.transport !== "http" || integration.auth?.type === "oauth")
+          return integration;
         const url = new URL(integration.url);
-        if (isPublicIntegrationPath(url.pathname)) return integration;
+        if (isPublicIntegrationUrl(url)) return integration;
         const item = `integration-endpoint:${integration.id.replace(/^integration:/, "")}`;
         yield* saveSecret({
           item,
@@ -2470,10 +2477,14 @@ const make = (options: IntegrationsOptions = {}) =>
           });
           if (input.url !== undefined) yield* validateUrl(input.url);
           yield* validateAuth(auth, "update");
+          // An OAuth account with a vaulted endpoint (stored before OAuth paths stayed
+          // public) can never sign in; a new URL repairs it.
           const endpointRef =
-            input.endpointRef === undefined
-              ? current.endpointRef
-              : (input.endpointRef ?? undefined);
+            input.endpointRef !== undefined
+              ? (input.endpointRef ?? undefined)
+              : auth?.type === "oauth" && input.url !== undefined
+                ? undefined
+                : current.endpointRef;
           yield* validateTransport({
             transport: input.transport ?? current.transport,
             ...(endpointRef === undefined ? {} : { endpointRef }),
@@ -2815,15 +2826,20 @@ const make = (options: IntegrationsOptions = {}) =>
           )
             return yield* rejected;
           if (callback.error !== undefined || callback.code === undefined) {
-            yield* recordCheck(
-              integration,
-              new IntegrationError({
-                operation: "sign in",
-                reason: "upstream_error",
-                cause: `Sign-in did not finish (${(callback.error ?? "no code").slice(0, 64)}).`,
-              }),
-            );
-            return yield* rejected;
+            const error = new IntegrationError({
+              operation: "sign in",
+              reason: "upstream_error",
+              oauthFailure: {
+                stage: "authorize",
+                host: new URL(pending.server.authorizationEndpoint).host,
+                error: (callback.error ?? "no_code").slice(0, 64),
+                ...(callback.errorDescription
+                  ? { description: callback.errorDescription.slice(0, 500) }
+                  : {}),
+              },
+            });
+            yield* recordCheck(integration, error);
+            return yield* error;
           }
           const previous = integration.oauthState;
           // A reused registration's secret is the one stored with the earlier sign-in.
@@ -2855,9 +2871,11 @@ const make = (options: IntegrationsOptions = {}) =>
                   new IntegrationError({
                     operation: "complete sign in",
                     reason: "upstream_error",
+                    oauthFailure: error.oauthFailure,
                     cause: error.message,
                   }),
               ),
+              Effect.tapError((error) => recordCheck(integration, error)),
             );
           // A new sign-in anywhere replaces the shared item and picks its refresher afresh.
           const refreshOwner = yield* peers.defaultRefreshOwner;

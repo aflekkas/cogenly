@@ -231,7 +231,7 @@ it.effect("integration_add connects a catalog entry and relays its sign-in link"
   }),
 );
 
-it.effect("integration_add relays the setup step Settings shows, with a link to it", () =>
+it.effect("integration_add explains the inline setup step without a Settings link", () =>
   Effect.gen(function* () {
     const setup = catalogSetupFor({ entry: integrationCatalogEntry("github")!, mode: "api_key" })!;
     const { result } = yield* addFromCatalog({ catalogId: "github", accountLabel: "Work" }, () =>
@@ -239,9 +239,10 @@ it.effect("integration_add relays the setup step Settings shows, with a link to 
     );
     expect(result).toMatchObject({
       setup: { type: "api_key", catalogId: "github", label: "Personal access token" },
-      settingsUrl: "https://cogenly.example.com/settings/integrations?setup=github",
     });
+    expect(result).not.toHaveProperty("settingsUrl");
     const nextStep = (result as { nextStep: string }).nextStep;
+    expect(nextStep).toContain("inline integration card");
     expect(nextStep).toContain("https://github.com/settings/personal-access-tokens/new");
     expect(nextStep).toContain("integration_test");
     expect(nextStep).toContain("request_secret");

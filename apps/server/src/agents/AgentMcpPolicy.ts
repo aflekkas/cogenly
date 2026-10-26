@@ -1,3 +1,4 @@
+import * as SetupRequests from "../integrations/IntegrationSetupRequests.ts";
 import * as Access from "./AgentAccessScope.ts";
 import {
   AgentStartWorkInput,
@@ -66,6 +67,29 @@ const make = Effect.gen(function* () {
   const access = yield* Access.AgentAccessScope;
   const threads = yield* Threads.ThreadManagementService;
   const integrations = yield* Effect.serviceOption(Integrations.Integrations);
+  const setupRequests = yield* Effect.serviceOption(SetupRequests.IntegrationSetupRequests);
+  const completeApproval = (
+    scope: McpInvocationScope,
+    id: string,
+    integrationName: string,
+    integrationId?: string,
+  ) =>
+    Effect.gen(function* () {
+      if (Option.isNone(setupRequests) || Option.isNone(integrations))
+        return yield* denied(
+          `Integration proposal awaiting owner approval: ${id}`,
+          "agent_approval_required",
+        );
+      yield* setupRequests.value.waitForApproval(id);
+      const integration = (yield* integrations.value.list()).integrations.find((summary) =>
+        integrationId
+          ? summary.integration.id === integrationId
+          : summary.integration.name === integrationName,
+      )?.integration;
+      if (!integration)
+        return yield* denied("The approved integration no longer exists.", "invalid_request");
+      return { handled: true, result: yield* setupRequests.value.resume(scope, integration.id) };
+    });
   const actorFor = (scope: McpInvocationScope) =>
     scope.thread === undefined
       ? Effect.succeed(null)
@@ -152,9 +176,11 @@ const make = Effect.gen(function* () {
             scope.thread.threadId,
             action,
           );
-          return yield* denied(
-            `Executable integration proposal awaiting owner approval: ${approval.id}`,
-            "agent_approval_required",
+          return yield* completeApproval(
+            scope,
+            approval.id,
+            "name" in action.payload ? (action.payload.name ?? "") : "",
+            "id" in action.payload ? action.payload.id : undefined,
           );
         }
         const resolved = yield* access.resolve(actor.agent.id);
@@ -309,15 +335,12 @@ const make = Effect.gen(function* () {
           if (catalog?._tag === "needs") return yield* denied(catalog.message, "invalid_request");
           const payload =
             catalog === undefined ? yield* decodeIntegrationAdd(input) : catalog.input;
-          const action = yield* decodeAction({
-            actionKind: "integration_add",
-            payload,
-          });
-          const { approval } = yield* workspace.requestApproval(agent.id, action, actor);
-          return yield* denied(
-            `Integration proposal awaiting owner approval: ${approval.id}`,
-            "agent_approval_required",
+          const { approval } = yield* workspace.requestApproval(
+            agent.id,
+            { actionKind: "integration_add", payload, threadId: scope.thread?.threadId },
+            actor,
           );
+          return yield* completeApproval(scope, approval.id, payload.name ?? "google-workspace");
         }
         if (name === "integration_update") {
           const update = yield* decodeIntegrationUpdate(input);
@@ -360,12 +383,12 @@ const make = Effect.gen(function* () {
             Integrations.integrationDestinationChanged(current, payload) ||
             Integrations.integrationScopeWidened(current, payload)
           ) {
-            const action = yield* decodeAction({ actionKind: "integration_update", payload });
-            const { approval } = yield* workspace.requestApproval(agent.id, action, actor);
-            return yield* denied(
-              `Integration change awaiting owner approval: ${approval.id}`,
-              "agent_approval_required",
+            const { approval } = yield* workspace.requestApproval(
+              agent.id,
+              { actionKind: "integration_update", payload, threadId: scope.thread?.threadId },
+              actor,
             );
+            return yield* completeApproval(scope, approval.id, current.name);
           }
         }
         if (name === "schedule_task") {

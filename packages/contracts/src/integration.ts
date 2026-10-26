@@ -472,13 +472,12 @@ export type IntegrationSourcesResult = typeof IntegrationSourcesResult.Type;
 
 /**
  * `integration_add` and `integration_update` for agents: what the Settings
- * call returns, plus the next action in plain words and a Settings link the
- * user can open.
+ * call returns, plus the next action in plain words. The user acts on the
+ * inline card in the thread, never a Settings link.
  */
 export const IntegrationAgentResult = Schema.Struct({
   ...IntegrationConnectResult.fields,
   nextStep: Schema.optional(Schema.String),
-  settingsUrl: Schema.optional(Schema.String),
 });
 export type IntegrationAgentResult = typeof IntegrationAgentResult.Type;
 
@@ -487,7 +486,6 @@ export const IntegrationAgentListResult = Schema.Struct({
     Schema.Struct({
       ...IntegrationSummary.fields,
       nextStep: Schema.optional(Schema.String),
-      settingsUrl: Schema.optional(Schema.String),
     }),
   ),
 });
@@ -506,8 +504,22 @@ export const IntegrationTestResult = Schema.Struct({
 });
 export type IntegrationTestResult = typeof IntegrationTestResult.Type;
 
+/** Bounded OAuth diagnostics, without request URLs, codes or credentials. */
+export const IntegrationOAuthFailure = Schema.Struct({
+  stage: Schema.String,
+  host: Schema.String,
+  status: Schema.optional(Schema.Number),
+  error: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.String),
+});
+export type IntegrationOAuthFailure = typeof IntegrationOAuthFailure.Type;
+
+export const integrationOAuthFailureMessage = (failure: IntegrationOAuthFailure) =>
+  `OAuth ${failure.stage} failed at ${failure.host}${failure.status === undefined ? "" : ` (HTTP ${failure.status})`}${failure.error ? `: ${failure.error}` : ""}${failure.description ? ` — ${failure.description}` : ""}.`;
+
 export class IntegrationError extends Schema.TaggedError<IntegrationError>()("IntegrationError", {
   operation: Schema.String,
+  oauthFailure: Schema.optional(IntegrationOAuthFailure),
   reason: Schema.Literals([
     "storage",
     "not_found",
@@ -532,6 +544,7 @@ export class IntegrationError extends Schema.TaggedError<IntegrationError>()("In
   cause: Schema.optional(Schema.Defect()),
 }) {
   override get message(): string {
+    if (this.oauthFailure) return integrationOAuthFailureMessage(this.oauthFailure);
     return `Could not ${this.operation} integration (${this.reason}).`;
   }
 }

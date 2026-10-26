@@ -139,22 +139,26 @@ describe("integration definitions between paired machines", () => {
       Effect.gen(function* () {
         const { hub, spoke } = yield* paired;
         const privateUrl = "https://vendor.example/sse/bearer-PRIVATE-capability";
-        const direct = (yield* hub.integrations.create({
-          ...definition("integration:unused", "direct"),
+        const { auth: _auth, ...plain } = definition("integration:unused", "direct");
+        const direct = (yield* hub.integrations.create({ ...plain, url: privateUrl })).integration;
+        // OAuth needs its real URL for discovery and `resource`, so it stays local instead.
+        const oauth = (yield* hub.integrations.create({
+          ...definition("integration:unused", "oauth-path"),
           url: privateUrl,
         })).integration;
         const legacy = { ...definition("integration:legacy", "legacy"), url: privateUrl };
         yield* hub.store(legacy);
         yield* exchange(hub, spoke);
-        for (const id of [direct.id]) {
-          expect((yield* hub.read(id))?.endpointRef).toBeDefined();
-          expect((yield* spoke.read(id))?.url).toBe("https://vendor.example/");
-          expect(JSON.stringify(yield* hub.state.get("integration", id))).not.toContain(
-            "bearer-PRIVATE",
-          );
-        }
+        expect((yield* hub.read(direct.id))?.endpointRef).toBeDefined();
+        expect((yield* spoke.read(direct.id))?.url).toBe("https://vendor.example/");
+        expect((yield* hub.read(oauth.id))?.endpointRef).toBeUndefined();
+        expect(yield* spoke.read(oauth.id)).toBeUndefined();
+        expect(yield* hub.state.get("integration", oauth.id)).toBeUndefined();
+        expect(JSON.stringify(yield* hub.state.get("integration", direct.id))).not.toContain(
+          "bearer-PRIVATE",
+        );
         expect(yield* spoke.read(legacy.id)).toBeUndefined();
-        expect(JSON.stringify(yield* hub.state.get("integration", legacy.id))).not.toContain(
+        expect(JSON.stringify(yield* hub.state.get("integration", legacy.id)) ?? "").not.toContain(
           "bearer-PRIVATE",
         );
       }).pipe(Effect.scoped),
