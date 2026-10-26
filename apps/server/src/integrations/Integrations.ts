@@ -140,7 +140,8 @@ export const resolveHeaderTemplates = (
             reason: "credential_unresolved",
           });
         }
-        value = value.replaceAll(`{{credential:${ref}}}`, secret.value);
+        // A callback, so `$&` or `$$` in a secret is not read as a pattern.
+        value = value.replaceAll(`{{credential:${ref}}}`, () => secret.value);
       }
       resolved[name] = value;
     }

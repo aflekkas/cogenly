@@ -174,6 +174,13 @@ describe("resolveHeaderTemplates", () => {
       ).pipe(Effect.result);
       expect(malformed._tag).toBe("Failure");
 
+      // A replacement string would read `$&` and `$$` as patterns.
+      const dollars = yield* Integrations.resolveHeaderTemplates(
+        { authorization: "Bearer {{credential:gmail.apiKey}}" },
+        () => Effect.succeed(Option.some("a$&b$$c$'d")),
+      );
+      expect(dollars).toEqual({ authorization: "Bearer a$&b$$c$'d" });
+
       const unknownTemplate = yield* Integrations.resolveHeaderTemplates(
         { authorization: "Bearer {{env:TOKEN}}" },
         (ref) => Effect.succeed(secrets.has(ref) ? Option.some(secrets.get(ref)!) : Option.none()),
