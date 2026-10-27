@@ -620,3 +620,72 @@ it.effect("a bounded login wait leaves its card answerable for a late answer", (
     expect(fixture.recorded.some((card) => card.secretStatus === "cancelled")).toBe(false);
   }),
 );
+
+it.effect(
+  "thread list and read include all visible PR links and retain the legacy singular link",
+  () => {
+    const threadId = ThreadId.make("thread:all-prs");
+    const base = liveThreadShell(threadId);
+    const shell = {
+      ...base,
+      linkedPullRequest: {
+        projectId: base.projectId,
+        repository: "acme/app",
+        number: 41,
+        url: "https://github.com/acme/app/pull/41",
+      },
+      pullRequests: [41, 42, 43].map((number) => ({
+        host: "github.com",
+        repository: "acme/app",
+        number,
+        url: `https://github.com/acme/app/pull/${number}`,
+        source: number === 43 ? ("stack-dismissed" as const) : ("agent" as const),
+        linkedAt: "2026-01-01T00:00:00.000Z",
+        snapshot: null,
+        stack: null,
+      })),
+    };
+    const projection = idleThreadProjection(shell);
+    const dependencies = Layer.mergeAll(
+      NodeCrypto.layer,
+      Layer.mock(Threads.ThreadManagementService)({
+        getThreadRecords: () => Effect.succeed(projection),
+        getProjectThreadRecords: () => Effect.succeed(projection),
+        getThreadShell: () => Effect.succeed(shell),
+        listProjectThreads: () => Effect.succeed([shell]),
+        getTimelinePage: () => Effect.succeed({ items: [], totalItems: 0, hasMore: false }),
+      }),
+      Layer.mock(Launch.ThreadLaunchService)({}),
+      Layer.mock(Adapters.ProviderAdapterRegistryV2)({}),
+      Layer.mock(Providers.ProviderRegistry)({}),
+      Layer.mock(Schedules.ScheduledTaskService)({}),
+      Layer.mock(Projects.ProjectService)({}),
+      Layer.mock(Git.GitVcsDriver)({}),
+      Settings.layerTest(),
+      Layer.mock(Accounts.AccountConnections)({}),
+      Layer.mock(Secrets.SecretRequests)({}),
+      Layer.mock(Vault.Vault)({}),
+    );
+    return Effect.gen(function* () {
+      const service = yield* Orchestrator.OrchestratorMcpService;
+      const scope = {
+        environmentId: EnvironmentId.make("test"),
+        requestNamespace: "test",
+        issuedAt: 0,
+        capabilities: new Set(["orchestration" as const]),
+        client: undefined,
+        thread: undefined,
+      };
+      const listed = yield* service.listThreads(scope, { projectId: shell.projectId });
+      const read = yield* service.readThread(scope, { threadId });
+      for (const thread of [listed.threads[0]!, read.thread]) {
+        expect(thread.linkedPullRequest).toEqual(shell.linkedPullRequest);
+        expect(thread.pullRequests).toMatchObject([
+          { number: 41, state: null },
+          { number: 42, state: null },
+        ]);
+        expect(thread.pullRequests).toHaveLength(2);
+      }
+    }).pipe(Effect.provide(Orchestrator.layer.pipe(Layer.provide(dependencies))));
+  },
+);

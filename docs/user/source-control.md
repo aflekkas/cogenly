@@ -68,3 +68,5 @@ To create projects and clone repositories somewhere else, set **Projects folder*
 
 Ask Claude Code or Codex to commit, push, publish a repository without a remote, or open, inspect
 and manage a GitHub pull request. Agents can link pull requests to a thread and watch their checks and reviews. Pull request links open through your normal browser preference.
+
+A pull request created with `gh pr create` is linked automatically when the command prints one clear pull request URL. Agents can link it explicitly when the output is ambiguous, and should link every layer of a stack. Pull request links and watches persist across pushes; stop a watch when handing the work back.
