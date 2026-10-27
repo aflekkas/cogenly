@@ -93,7 +93,7 @@ v0.3.5 passed CI, then deadlocked at startup on the maintainer's real database a
 - **The maintainer's Mac runs it first.** Install the build and use it before approving. Nobody gets an update the maintainer has not run.
 - **Never wait on a service cache inside a writer transaction, and never let a cache load take the writer.** Startup reloads settings while other layers hold write transactions; a load queued behind a transaction that waits on it hangs the server with no error. Read on the reader (`NodeSqliteClient.readOnly`) or resolve the value before `withTransaction`.
 - **Check query plans when adding an index.** A broad index can outrank the partial indexes hot reads depend on. Run `EXPLAIN QUERY PLAN` for the queries on that table, and pin the important ones in a test.
-- **Migrations stay openable by the previous release.** Additive only (tables, columns, indexes), so rolling back to the previous build works on the migrated database.
+- **Migrations stay openable by the previous release,** so rolling back to the previous build works on the migrated database. Add tables, columns, and indexes freely, and drop an index when a query plan needs it: the previous build only loses speed. Never drop, rename, or retype a table or column the previous build reads.
 
 ## Documentation
 
