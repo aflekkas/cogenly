@@ -38,7 +38,7 @@ const DeviceToolFailure = Schema.Union([DeviceToolError, OrchestratorMcpFailure]
  */
 const DeviceListTool = Tool.make("device_list", {
   description:
-    "List iOS Simulators and Android Emulators on this environment's device hosts, which platforms each host can run, and which devices are already open in this thread's Device panel. Call this before device_open when you do not know a device id.",
+    "List host iOS/Android capabilities, devices and streams open in this thread. Use before device_open when ID is unknown.",
   // An empty struct serializes as `anyOf [object, array]`, which some
   // providers reject and then drop every tool on the server with it.
   parameters: Schema.Struct({
@@ -58,7 +58,7 @@ const DeviceListTool = Tool.make("device_list", {
 
 const DeviceSetupStatusTool = Tool.make("device_setup_status", {
   description:
-    "Check whether devices can work here without installing or starting anything: whether device support is on, what is installed on each host, which platforms (iOS, Android) are available and the reason when not, and the concrete next steps. Call this when device_list or device_open fails or comes back empty, and fix what it reports with device_setup or the terminal before telling the user devices do not work. Steps marked as needing the user (Xcode, Android Studio) are theirs to do; relay them.",
+    "Check device support, installed hosts/platforms and concrete repair steps without starting or installing anything. Relay steps requiring the user; fix other prerequisites with device_setup or terminal.",
   // An empty struct serializes as `anyOf [object, array]`, which some
   // providers reject and then drop every tool on the server with it.
   parameters: Schema.Struct({
@@ -78,7 +78,7 @@ const DeviceSetupStatusTool = Tool.make("device_setup_status", {
 
 const DeviceSetupTool = Tool.make("device_setup", {
   description:
-    "Set devices up: installs the device hub and agent tools where missing, retries a failed install, and re-checks which platforms work. Can take a few minutes the first time. Returns the same report as device_setup_status; read its nextSteps for anything it could not fix itself, such as installing Xcode or the Android SDK.",
+    "Install/repair device hub and agent tools, then recheck platforms; first install may take minutes. Returns device_setup_status report with user-only nextSteps (Xcode/Android SDK).",
   parameters: DeviceToolSetupInput,
   success: DeviceSetupStatus,
   failure: DeviceToolFailure,
@@ -92,7 +92,7 @@ const DeviceSetupTool = Tool.make("device_setup", {
 
 const DeviceOpenTool = Tool.make("device_open", {
   description:
-    "Open a simulator or emulator for this thread: boots it if needed, starts its live stream, and shows it in the user's Device panel so they can watch. Returns the agent-device CLI invocation pinned to the device; drive the device with that CLI afterwards.",
+    "Boot/open a device and stream it in the user's Device panel. Drive with the returned device-pinned agent-device invocation.",
   parameters: DeviceToolOpenInput,
   success: DeviceToolOpenResult,
   failure: DeviceToolFailure,

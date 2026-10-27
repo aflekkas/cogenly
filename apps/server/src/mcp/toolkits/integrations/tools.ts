@@ -48,7 +48,7 @@ export const IntegrationsToolkit = Toolkit.make(
     parameters: IntegrationSetupGuideInput,
     success: IntegrationSetupGuideResult,
     description:
-      "Read agent setup instructions for Gmail/Google Workspace, Wispr Flow, Slack, GitHub, Linear, Notion, Fathom or any MCP server by URL or command. Call this before connecting or repairing a service; it opens with the setup notes earlier agents left on that service's existing integrations, so reuse what they created. Do the setup yourself end to end in the collaborative browser, console work included, without asking first; the user only handles a password or 2FA you can't fill from the vault, and the final OAuth consent.",
+      "Read service-specific connection/repair instructions and existing setup notes first. Reuse prior setup; complete browser/console work yourself. The user handles unfillable credentials, 2FA and final OAuth consent. Supports catalog services and arbitrary MCP URLs/commands.",
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false),
@@ -66,7 +66,7 @@ export const IntegrationsToolkit = Toolkit.make(
     parameters: Schema.Struct({ detail: Schema.optional(Schema.Boolean) }),
     success: IntegrationAgentListResult,
     description:
-      "List Cogenly-managed integrations connected for this project as a compact summary: name, display name, account label, hint, status (connected, needs_sign_in, error with message) and tool count. An account that isn't usable carries nextStep (what to do next, and the part only the user can do); approval, sign-in and field fixes happen on an inline card in the thread, never a Settings URL. Pass detail:true only when repairing one, to also get setupNotes (what was created where during setup). One service can be connected several times, e.g. two Slack workspaces; the account label tells them apart. Credentials are never shown. When a service the user wants (e.g. Slack) is not listed at all, do not just report it as not connected: offer to connect it and start the flow with integration_add (catalogId for a default service) after reading integration_setup_guide.",
+      "List project integrations, account labels, status, nextStep and tool counts without credentials. detail:true adds setupNotes for repairs. Multiple accounts per service are supported. Fix via inline cards; for missing services read integration_setup_guide then integration_add.",
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false),
@@ -75,7 +75,7 @@ export const IntegrationsToolkit = Toolkit.make(
     parameters: IntegrationByNameInput,
     success: IntegrationToolsResult,
     description:
-      "List one integration's current upstream tools with descriptions and input schemas. Integrations added or updated during this chat, here or on a paired machine, are available immediately after sync, without restarting the session. Use integrations_list to discover them, then call this before integration_call for a tool you have not used.",
+      "Read an integration's current upstream descriptions/schemas before calling unfamiliar tools. Added/updated integrations work after sync without session restart; discover via integrations_list.",
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false)
@@ -85,7 +85,7 @@ export const IntegrationsToolkit = Toolkit.make(
     parameters: IntegrationCallInput,
     success: IntegrationCallResult,
     description:
-      "Call one tool on a connected integration by integration name and upstream tool name. Arguments must match the tool's input schema from integration_tools. Resolves the current integration on every call, including changes made mid-chat; disabled or removed integrations stop working immediately.",
+      "Call an integration tool using its integration_tools schema. Resolves current config each call; disabled/removed integrations stop immediately.",
   })
     .annotate(Tool.Destructive, false)
     .annotate(Tool.OpenWorld, true),
@@ -94,14 +94,14 @@ export const IntegrationsToolkit = Toolkit.make(
     parameters: IntegrationAddToolInput,
     success: IntegrationAgentResult,
     description:
-      'Connect an integration. For a default service pass catalogId: google-workspace (Gmail, Calendar, Drive, Docs; needs accountLabel), slack, github, linear, notion, wispr-flow or fathom, plus an accountLabel to tell accounts apart (e.g. "work"). When the result needs sign-in, an inline Sign in card appears in this thread and opens the user\'s browser; do not paste the link or a Settings URL. Cogenly tells this thread when it connects; after that it keeps working, including for scheduled runs. When something has to happen first (a key, the user\'s own app, Google\'s OAuth client, or installing uv), the result has nextStep and integration_setup_guide instructions: do that work yourself in the collaborative browser, naming what you create Cogenly and reusing an existing Cogenly project or client, then retry; ask only for user-only actions. A failed OAuth step reports the step, host, HTTP status and the server\'s error. Pass setupNotes recording what you created where (project ID, client ID, redirect URIs, owning account, date; never secrets). Secrets are always vault references {{credential:<item>.<field>}} collected with request_secret and saveToVault, never values in chat. On a VPS: set callbackOrigin to its reachable HTTPS origin for OAuth. For a command server omit catalogId, use transport "stdio", url "https://localhost", headers {}, and command {command, args, env} with vault references for secrets in env, never argv. For any other remote MCP server omit catalogId and pass name, displayName, transport "http", url, headers, scope and hint; set auth {type: "oauth"} for OAuth sign-in (servers without automatic client registration also need auth.clientId and auth.clientSecret). Catalog integrations always use their service logo. Custom HTTP integrations use their server favicon automatically; if it is missing, set icon (a catalog logo) or iconUrl (a public HTTPS image URL) on add or update. Always supply an icon for a command server. Persistent agents get an inline owner approval card first.',
+      "Connect a catalogId (google-workspace, slack, github, linear, notion, wispr-flow, fathom) with accountLabel, or a custom MCP server. Read integration_setup_guide first for configuration/repair recipes. Follow nextStep, reuse Cogenly projects/clients, record nonsecret setupNotes. Sign-in appears on an inline card and completion notifies this thread; never send Settings/sign-in URLs. Secrets use vault references {{credential:<item>.<field>}}, never argv/chat. VPS OAuth needs reachable HTTPS callbackOrigin. Catalog logos/server favicons are automatic; custom stdio needs icon/iconUrl. Persistent agents need owner approval.",
   }).annotate(Tool.Destructive, false),
   Tool.make("integration_update", {
     ...shared,
     parameters: IntegrationUpdateByNameInput,
     success: IntegrationAgentResult,
     description:
-      "Change a connected integration by name: display name, account label, transport, url, headers, auth, enabled, project scope, hint, icon, iconUrl, or setupNotes. If the automatic server favicon is unavailable, supply icon or iconUrl. Omitted fields are preserved. setupNotes replaces the notes (empty clears them); changing only the notes keeps the sign-in and running process as they are, so update them whenever you change the setup. When the integration needs a (new) sign-in, an inline Sign in card appears in this thread; call this with just the name to start a fresh one. A change that needs the owner's approval (URL, transport, headers or auth from a persistent agent, or widening access) shows an inline Approve card and this call waits for the answer, then proceeds. Never send a Settings URL. When something else blocks it, follow nextStep and integration_setup_guide.",
+      "Patch an integration by name; omissions stay. setupNotes replaces notes (empty clears) without disturbing sign-in/process. Call with just name to restart sign-in via an inline card. Sensitive agent changes or wider access wait on approval cards. Follow nextStep/setup guide for blockers; never send Settings URLs.",
   }).annotate(Tool.Destructive, false),
   Tool.make("integration_remove", {
     ...shared,

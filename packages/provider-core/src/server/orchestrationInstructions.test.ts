@@ -8,20 +8,23 @@ import {
 
 describe("T3 orchestration provider instructions", () => {
   it("distinguishes delegated subagents from ordinary top-level threads", () => {
-    assert.include(COGENLY_ORCHESTRATION_INSTRUCTIONS, "Use `delegate_task`");
-    assert.include(COGENLY_ORCHESTRATION_INSTRUCTIONS, "ordinary top-level Cogenly conversations");
-    assert.include(COGENLY_ORCHESTRATION_INSTRUCTIONS, "Never use them merely");
-    assert.include(COGENLY_ORCHESTRATION_INSTRUCTIONS, "cross-provider");
-    assert.include(COGENLY_ORCHESTRATION_INSTRUCTIONS, "call `delegate_task` again");
+    assert.include(COGENLY_ORCHESTRATION_INSTRUCTIONS, "use `delegate_task`");
     assert.include(
       COGENLY_ORCHESTRATION_INSTRUCTIONS,
-      "Do not use `thread_send` on `childThreadId`",
+      "create top-level conversations only when explicitly requested",
     );
+    assert.include(
+      COGENLY_ORCHESTRATION_INSTRUCTIONS,
+      "never for subagents or parallel delegated work",
+    );
+    assert.include(COGENLY_ORCHESTRATION_INSTRUCTIONS, "cross-provider");
+    assert.include(COGENLY_ORCHESTRATION_INSTRUCTIONS, "Each review round needs `delegate_task`");
+    assert.include(COGENLY_ORCHESTRATION_INSTRUCTIONS, "never thread_send to childThreadId");
   });
 
   it("documents structured schedules instead of JSON strings", () => {
-    assert.include(COGENLY_ORCHESTRATION_INSTRUCTIONS, "structured object, never as JSON text");
-    assert.include(COGENLY_ORCHESTRATION_INSTRUCTIONS, '"everyMs":3600000');
+    assert.include(COGENLY_ORCHESTRATION_INSTRUCTIONS, "structured schedule, never JSON text");
+    assert.include(COGENLY_ORCHESTRATION_INSTRUCTIONS, "everyMs:3600000");
     assert.include(COGENLY_ORCHESTRATION_INSTRUCTIONS, "bindToCurrentThread=false");
   });
 

@@ -36,7 +36,7 @@ const result = Schema.Struct({
 const run = Tool.make("terminal_run", {
   ...shared,
   description:
-    "Run a shell command in a visible PTY owned by this thread (full-access/default mode required). Use this for all shell commands. cwd defaults to the thread workspace; cwd outside it, including symlink escapes, is rejected. Foreground waits up to timeoutMs (default 120000, max 600000), then kills the process tree. A command that may take more than about a minute, or may prompt (logins, cloud CLIs, installs, builds, test suites), runs with background=true and is polled with terminal_read, so the user's messages aren't blocked while it runs. background=true returns immediately for servers/watchers. Output retains a bounded head and tail with omitted-character markers. A command and every process it starts, including ones that detach, are killed when the user stops the thread, the task is cancelled, the thread settles, is archived or deleted, or the thread sits idle for hours. keepRunning=true (background only) keeps a server the user asked to leave up past stop, settle and idle reaping; archive and delete still kill it.",
+    "Run a visible thread-owned PTY (full-access/default). cwd defaults to workspace; escapes/symlinks outside it are refused. Foreground timeout defaults 120000ms, max 600000, then kills children. Use background for long/prompting commands; read/write/kill manage it. Output retains bounded head/tail. Stop/cancel/settle/archive/delete/idle reaping kills descendants, even detached ones. keepRunning:true (background only, user-requested servers) survives Stop/settle/idle, never archive/delete.",
   parameters: Schema.Struct({
     command: TrimmedNonEmptyString.check(Schema.isMaxLength(65_536)),
     cwd: Schema.optional(TrimmedNonEmptyString),
@@ -51,7 +51,7 @@ const run = Tool.make("terminal_run", {
 const read = Tool.make("terminal_read", {
   ...shared,
   description:
-    "Read buffered output of this thread's running or finished agent terminal. sinceOffset is an absolute UTF-16 character offset returned as nextOffset. Dropped output is marked explicitly.",
+    "Read bounded buffered PTY output; sinceOffset/nextOffset are absolute UTF-16 offsets. Dropped output is marked.",
   parameters: Schema.Struct({ ...identity, sinceOffset: Schema.optional(NonNegativeInt) }),
   success: result,
 }).annotate(Tool.Readonly, true);
@@ -68,7 +68,7 @@ const write = Tool.make("terminal_write", {
 const kill = Tool.make("terminal_kill", {
   ...shared,
   description:
-    "Kill this thread's agent terminal and every process it started, including ones that left its process group. Works on kept and already-exited terminals whose children still run. Keeps its output available for terminal_read.",
+    "Kill a thread PTY and all descendants, including detached children of exited/kept terminals. Buffered output stays readable.",
   parameters: Schema.Struct(identity),
   success: Schema.Struct({}),
 }).annotate(Tool.Destructive, true);

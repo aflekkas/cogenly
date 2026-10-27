@@ -24,7 +24,7 @@ const shared = {
 const Propose = Tool.make("propose_agent", {
   ...shared,
   description:
-    "Replace this builder thread's agent proposal with the whole current one. Only builder threads may call it; the client renders the latest call as the proposal card.",
+    "Replace builder proposal with the complete current version. Builder threads only; client shows latest call as proposal card.",
   parameters: Schema.Struct({
     ...AgentBuilderProposal.fields,
     machine: Schema.optional(TrimmedNonEmptyString),

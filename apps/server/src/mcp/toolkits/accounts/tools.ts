@@ -21,7 +21,7 @@ const dependencies = [
 ];
 const list = Tool.make("accounts_list", {
   description:
-    "List account metadata and machine status available to this thread's project, plus supported token setup instructions. Never returns secret values or encrypted identity fields. Needs a Cogenly thread.",
+    "List project account metadata, machine status and token setup instructions. No secret/encrypted identity values. Requires a Cogenly thread.",
   parameters: Schema.Struct({ service: Schema.optional(TrimmedNonEmptyString) }),
   success: AccountsListResult,
   failure: OrchestratorMcpFailure,
@@ -33,7 +33,7 @@ const list = Tool.make("accounts_list", {
   .annotate(Tool.Idempotent, true);
 const connect = Tool.make("account_connect", {
   description:
-    "Start or resume a server-owned Cloudflare/GitHub token connection in this thread's project. Collect the token with request_secret(saveToAccount: { connectionId }); never ask for it in chat. Resume after saving to request process-exposure approval and verify using an isolated CLI. Successful authentication does not prove deployment permissions.",
+    "Start/resume a project Cloudflare/GitHub token connection. Collect with request_secret saveToAccount:{connectionId}, then resume for process-exposure approval and isolated CLI verification. Authentication does not prove deployment access.",
   parameters: AccountConnectInput,
   success: AccountConnectResult,
   failure: OrchestratorMcpFailure,
@@ -44,7 +44,7 @@ const connect = Tool.make("account_connect", {
   .annotate(Tool.Destructive, false);
 const use = Tool.make("account_use", {
   description:
-    "Attach or detach a credential for CLI use in this thread. First process exposure asks the owner for this thread or this agent in this project: the agent and its commands can read the token. No values are returned. A detached token stays in already-running processes; stop them or revoke upstream to end that access.",
+    "Attach/detach a CLI credential. First exposure asks the owner for this thread or agent/project; commands can read it, tools return no values. Detach affects future processes only; stop existing ones or revoke upstream.",
   parameters: Schema.Struct({ ...AccountUseInput.fields, use: Schema.Literal("cli") }),
   success: AccountUseResult,
   failure: OrchestratorMcpFailure,
@@ -55,7 +55,7 @@ const use = Tool.make("account_use", {
   .annotate(Tool.Destructive, false);
 const disconnect = Tool.make("account_disconnect", {
   description:
-    "Cancel a pending connection or disconnect a local account available to this project. Removes future process access and local bindings; it does not revoke the upstream token or remove copies already captured by processes.",
+    "Cancel/disconnect a local project account and future process bindings. Does not revoke upstream tokens or copies in existing processes.",
   parameters: AccountDisconnectTarget,
   success: AccountDisconnectResult,
   failure: OrchestratorMcpFailure,

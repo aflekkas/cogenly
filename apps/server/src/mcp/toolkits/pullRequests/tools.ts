@@ -23,9 +23,6 @@ const dependencies = [
   ProjectService.ProjectService,
 ];
 
-const REGISTER_EVERY_PR =
-  "Register every pull request you open for this thread, including each layer of a stack, right after creating it.";
-
 /**
  * Either the pull request's URL or its repository and number. Both forms
  * resolve to the same host-level identity, so the agent can pass whichever
@@ -248,7 +245,8 @@ export const ListThreadPullRequestsResult = Schema.Struct({
 export type ListThreadPullRequestsResult = typeof ListThreadPullRequestsResult.Type;
 
 const LinkPullRequestTool = Tool.make("link_pull_request", {
-  description: `${REGISTER_EVERY_PR} Links a GitHub pull request to this thread so Cogenly tracks it, shows its status beside the thread, and settles the thread when it merges. Pass the URL, or repository plus number. Linking an already-linked pull request succeeds with alreadyLinked=true.`,
+  description:
+    "Link a PR URL or repository+number to this thread for status/tracking and settlement on merge. Link every work PR/stack layer immediately; alreadyLinked:true is success.",
   parameters: PullRequestTargetInput,
   success: LinkPullRequestResult,
   failure: PullRequestToolError,
@@ -262,7 +260,7 @@ const LinkPullRequestTool = Tool.make("link_pull_request", {
 
 const UnlinkPullRequestTool = Tool.make("unlink_pull_request", {
   description:
-    "Remove a pull request link from this thread, for example after closing a pull request you opened by mistake. Pass the URL, or repository plus number. Unlinking a pull request that is not linked succeeds with wasLinked=false.",
+    "Remove this thread's PR link by URL or repository+number. wasLinked:false means it was already absent.",
   parameters: PullRequestTargetInput,
   success: UnlinkPullRequestResult,
   failure: PullRequestToolError,
@@ -275,7 +273,8 @@ const UnlinkPullRequestTool = Tool.make("unlink_pull_request", {
   .annotate(Tool.OpenWorld, false);
 
 const ListThreadPullRequestsTool = Tool.make("list_thread_pull_requests", {
-  description: `List the pull requests linked to a thread (omit threadId for this thread) with their last known host state, and how they chain into stacks (bottom to top). ${REGISTER_EVERY_PR}`,
+  description:
+    "List thread PR links, last known host state and stacks bottom-to-top. threadId defaults here; link every work PR/stack layer immediately.",
   parameters: Schema.Struct({
     threadId: Schema.optional(
       ThreadId.annotate({ description: "Thread to list. Omit for this thread." }),
@@ -293,7 +292,7 @@ const ListThreadPullRequestsTool = Tool.make("list_thread_pull_requests", {
 
 const WatchPullRequestTool = Tool.make("watch_pull_request", {
   description:
-    "Have Cogenly watch an open pull request for this thread, linking it first if needed. Cogenly checks it every two minutes and wakes you with a message when a check fails, the required checks pass, someone else comments or reviews, or the branch starts to conflict with its base. Use this to monitor or babysit a pull request instead of polling, sleeping, or running a watcher. Only comments posted after this call wake you, so handle the existing ones first, then end your turn. A wake is news, not a merge decision: check readiness yourself before merging. While Cogenly watches, the thread stays in the user's Working list, not their inbox. When you hand the work back to the user, call unwatch_pull_request first so the thread returns to their inbox. Watching ends when the pull request merges or closes, when its thread settles or is archived, when Cogenly fails to read it 8 times in a row (a host rate limit only delays it), when the user stops this thread, or when you call unwatch_pull_request. Unsettle the thread before starting a new watch. A subagent cannot watch: its parent thread owns the pull request.",
+    "Link/watch an open PR; handle existing comments first, then end the turn. Checks every two minutes; new check failures, required-check success, other comments/reviews or conflicts wake this thread. Verify readiness before merging. Watch ends on merge/close, settle/archive/Stop, unwatch, or eight read failures (rate limits only delay). Unsettle before watching; children must let the parent own the watch. Unwatch before handing back to the inbox.",
   parameters: PullRequestTargetInput,
   success: WatchPullRequestResult,
   failure: PullRequestToolError,

@@ -39,7 +39,14 @@ const codexTools = (computerUsePlatform: string | undefined, conversationMode = 
     modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
     hasT3Mcp: true,
     ...(computerUsePlatform === undefined ? {} : { computerUsePlatform }),
-  }).pipe(Effect.map((params) => params.additionalContext?.cogenly_tools?.value ?? ""));
+  }).pipe(
+    Effect.map((params) =>
+      Object.entries(params.additionalContext ?? {})
+        .filter(([key]) => key.startsWith("cogenly_tools"))
+        .map(([, entry]) => entry.value)
+        .join(""),
+    ),
+  );
 
 describe("computer use per provider", () => {
   it("tells Claude about the tools on a Mac, chats included", () => {
