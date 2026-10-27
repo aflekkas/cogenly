@@ -216,10 +216,10 @@ export class ServerBrowserContexts {
           ...options,
           // Load individually after startup: Chrome returns each extension's real error,
           // and a rejected manifest cannot abort the browser's launch.
-          args: [
-            ...options.args,
-            ...(withExtensions ? ["--enable-unsafe-extension-debugging"] : []),
-          ],
+          // Keep this on while extensions are off: otherwise Chrome persists an
+          // unsupported-developer disable reason that survives loadUnpacked.
+          // --disable-extensions still prevents execution in those launches.
+          args: [...options.args, "--enable-unsafe-extension-debugging"],
           ignoreDefaultArgs: [
             ...options.ignoreDefaultArgs,
             ...(withExtensions ? ["--disable-extensions"] : []),

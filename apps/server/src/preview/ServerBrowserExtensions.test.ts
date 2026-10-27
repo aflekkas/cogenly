@@ -309,8 +309,21 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
         const r = yield* extensionRig;
         yield* r.write("1.0.0");
         const first = yield* r.store.install({ source: r.folder });
+        const url = yield* r.store.pageUrl({ id: first.extension.id, page: "options" });
+        const initial = yield* Effect.promise(() =>
+          r.contexts.contextFor("default").then((context) => context.newPage()),
+        );
+        yield* Effect.promise(() => initial.goto(url));
+        yield* Effect.promise(() =>
+          initial.evaluate("chrome.storage.local.set({ greeting: 'retained' })"),
+        );
         yield* r.store.toggle({ id: first.extension.id, enabled: false });
         const context = yield* Effect.promise(() => r.contexts.contextFor("default"));
+        const disabledOptions = yield* Effect.promise(() => context.newPage());
+        yield* Effect.promise(() =>
+          expect(disabledOptions.goto(url)).rejects.toThrow("ERR_BLOCKED_BY_CLIENT"),
+        );
+        yield* Effect.promise(() => disabledOptions.close());
         const page = yield* Effect.promise(() => context.newPage());
         yield* Effect.promise(() => page.goto(siteUrl));
         yield* r.write("1.1.0");
@@ -327,13 +340,16 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
         expect(page.isClosed()).toBe(false);
         expect(yield* Effect.promise(() => page.title())).toBe("Site");
         // Turning it back on loads the rebuilt copy into a new profile context.
-        yield* r.store.toggle({ id: first.extension.id, enabled: true });
+        const enabled = yield* r.store.toggle({ id: first.extension.id, enabled: true });
+        expect(enabled.loadError).toBeUndefined();
         const enabledContext = yield* Effect.promise(() => r.contexts.contextFor("default"));
         expect(enabledContext).not.toBe(context);
         const options = yield* Effect.promise(() => enabledContext.newPage());
-        const url = yield* r.store.pageUrl({ id: first.extension.id, page: "options" });
         yield* Effect.promise(() => options.goto(url));
         expect(yield* Effect.promise(() => options.locator("p").textContent())).toBe("1.1.0");
+        expect(
+          yield* Effect.promise(() => options.evaluate("chrome.storage.local.get('greeting')")),
+        ).toEqual({ greeting: "retained" });
       }).pipe(
         Effect.scoped,
         Effect.provide(Layer.merge(NodeServices.layer, FetchHttpClient.layer)),
