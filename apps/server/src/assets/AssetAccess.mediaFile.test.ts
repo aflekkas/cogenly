@@ -76,7 +76,8 @@ describe("media-file asset URLs", () => {
       assert.equal(fileName, "Alex x Davin Agreement.docx");
       const asset = yield* resolveAsset(token, fileName);
       assert.equal(asset?.kind, "file");
-      if (asset?.kind !== "file") return;
+      if (asset?.kind !== "file" || !("download" in asset))
+        return assert.fail("expected a file download");
       assert.isTrue(asset.download);
       assert.equal(asset.fileName, "Alex x Davin Agreement.docx");
       // No preview type: the route answers with an octet-stream attachment.
@@ -91,10 +92,12 @@ describe("media-file asset URLs", () => {
       const { filePath } = yield* writeHostFile("report.pdf");
       const download = yield* mint(filePath, "attachment");
       const downloaded = yield* resolveAsset(download.token, download.fileName);
-      assert.isTrue(downloaded?.kind === "file" && downloaded.download === true);
+      assert.isTrue(
+        downloaded?.kind === "file" && "download" in downloaded && downloaded.download === true,
+      );
       const preview = yield* mint(filePath);
       const previewed = yield* resolveAsset(preview.token, preview.fileName);
-      assert.isTrue(previewed?.kind === "file" && previewed.download === undefined);
+      assert.isTrue(previewed?.kind === "file" && !("download" in previewed && previewed.download));
       assert.equal(previewed?.kind === "file" ? previewed.mimeType : null, "application/pdf");
     }).pipe(Effect.scoped, Effect.provide(layer)),
   );
