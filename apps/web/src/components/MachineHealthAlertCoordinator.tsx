@@ -11,14 +11,18 @@ import {
   healthAlertGroupView,
   healthAlertProblems,
   mergeHealthAlertSnapshots,
+  parseQuietHealthProblems,
   parseSeenHealthAlertIds,
   planHealthAlertNotifications,
   rememberSeenHealthAlertIds,
   type MergedHealthAlert,
+  type QuietHealthProblems,
 } from "../machines/machineHealthAlerts.logic";
 import { useMachineHealthAlertStore } from "../machines/machineHealthAlertsStore";
 import {
   healthFixAction,
+  healthTurnOffProviderAction,
+  labelSignIn,
   machineHealthLink,
   type MachineHealthAction,
 } from "../machines/machineHealthLinks.logic";
@@ -28,7 +32,10 @@ import {
 } from "../machines/useRunMachineHealthAction";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { machinesRpc } from "../rpc/machines";
-import { readEnvironmentSupportsHealthFix } from "../state/entities";
+import {
+  readEnvironmentSupportsHealthFix,
+  readEnvironmentSupportsTurnOffProvider,
+} from "../state/entities";
 import { useConnectedEnvironmentIds, useEnvironmentIds } from "../state/environments";
 import {
   hasNotificationSound,
@@ -38,6 +45,23 @@ import {
 import { toastManager } from "./ui/toast";
 
 const SEEN_STORAGE_KEY = "cogenly:machine-health:seen-alerts:v1";
+const QUIET_STORAGE_KEY = "cogenly:machine-health:quiet-problems:v1";
+
+function readQuietProblems(): Map<string, number> {
+  try {
+    return parseQuietHealthProblems(localStorage.getItem(QUIET_STORAGE_KEY));
+  } catch {
+    return new Map();
+  }
+}
+
+function writeQuietProblems(quiet: QuietHealthProblems) {
+  try {
+    localStorage.setItem(QUIET_STORAGE_KEY, JSON.stringify(Object.fromEntries(quiet)));
+  } catch {
+    /* Quiet problems still hold for this session. */
+  }
+}
 
 function readSeenAlertIds(): string[] {
   try {
@@ -67,7 +91,9 @@ interface ShownAlert {
  * deduped by alert id, one toast (and a desktop notification in the
  * background) per machine and problem kind with a count, and the Settings dot
  * while any is open. Ids this device toasted persist, so a reload or
- * reconnect stays quiet.
+ * reconnect stays quiet, and so do problems that wait for the owner (a
+ * sign-in): they pop up once, then stay in the machine's health until their
+ * status changes.
  */
 export function MachineHealthAlertCoordinator() {
   const environmentIds = useEnvironmentIds();
@@ -77,10 +103,15 @@ export function MachineHealthAlertCoordinator() {
   const setOpenAlerts = useMachineHealthAlertStore((store) => store.setOpenAlerts);
   const snapshots = useRef(new Map<EnvironmentId, MachineHealthAlertsSnapshot>());
   const seen = useRef<string[] | null>(null);
+  const quiet = useRef<QuietHealthProblems | null>(null);
   // Keyed by healthAlertGroupKey: one toast per machine and check, whichever server it came from.
   const shown = useRef(new Map<string, ShownAlert>());
 
-  /** The toast's content: one Fix, the X, and the title opening Settings → Machines health. */
+  /**
+   * The toast's content: one Fix (Sign in when that is all it does), Turn off
+   * for a provider that isn't signed in there, the X, and the title opening
+   * Settings → Machines health.
+   */
   const toastContent = (
     entry: MergedHealthAlert,
     connected: ReadonlySet<EnvironmentId>,
@@ -94,15 +125,20 @@ export function MachineHealthAlertCoordinator() {
       viaEnvironmentId: entry.via,
       isConnected: (id: EnvironmentId) => connected.has(id),
       supportsHealthFix: readEnvironmentSupportsHealthFix,
+      supportsTurnOffProvider: readEnvironmentSupportsTurnOffProvider,
     };
     const details: MachineHealthAction = {
       kind: "open",
       label: "Details",
       link: machineHealthLink(alert.originEnvironmentId, context),
     };
-    const fix = healthFixAction(healthAlertProblems(entry), context);
-    const primary =
-      fix !== null && appAtomRegistry.get(machineHealthActionPermissionAtom(fix)) ? fix : null;
+    const problems = healthAlertProblems(entry);
+    const permitted = (action: MachineHealthAction | null) =>
+      action !== null && appAtomRegistry.get(machineHealthActionPermissionAtom(action))
+        ? action
+        : null;
+    const primary = permitted(labelSignIn(healthFixAction(problems, context)));
+    const turnOff = permitted(healthTurnOffProviderAction(problems, context));
     const openDetails = () => {
       toastManager.close(toastId());
       void runAction(details);
@@ -123,7 +159,20 @@ export function MachineHealthAlertCoordinator() {
           </button>
         ),
         description: view.description,
-        data: { hideCopyButton: true },
+        data: {
+          hideCopyButton: true,
+          ...(turnOff === null
+            ? {}
+            : {
+                secondaryActionProps: {
+                  children: turnOff.label,
+                  onClick: () => {
+                    toastManager.close(toastId());
+                    void runAction(turnOff);
+                  },
+                },
+              }),
+        },
         ...(primary === null
           ? {}
           : {
@@ -175,8 +224,12 @@ export function MachineHealthAlertCoordinator() {
   ): ShownAlert => {
     const signature = JSON.stringify(healthAlertGroupView(entry));
     if (signature === current.signature) return current;
-    const { content } = toastContent(entry, connected, () => current.toastId);
-    toastManager.update(current.toastId, content);
+    const { view, content } = toastContent(entry, connected, () => current.toastId);
+    // A warning that escalates to a failure stays, like one that opened failing.
+    toastManager.update(current.toastId, {
+      ...content,
+      ...(view.status === "fail" ? { timeout: 0 } : {}),
+    });
     return { ...current, signature };
   };
 
@@ -184,11 +237,16 @@ export function MachineHealthAlertCoordinator() {
     const merged = mergeHealthAlertSnapshots(snapshots.current);
     setOpenAlerts(merged.open.map(({ alert }) => alert));
     seen.current ??= readSeenAlertIds();
+    quiet.current ??= readQuietProblems();
     const plan = planHealthAlertNotifications(
       merged,
       new Set(seen.current),
       new Set(shown.current.keys()),
+      quiet.current,
+      Date.now(),
     );
+    quiet.current = plan.quiet;
+    writeQuietProblems(plan.quiet);
     for (const { alert } of plan.retract) {
       const key = healthAlertGroupKey(alert);
       const entry = shown.current.get(key);
@@ -222,7 +280,7 @@ export function MachineHealthAlertCoordinator() {
     seen.current = rememberSeenHealthAlertIds(
       seen.current,
       plan.remember,
-      new Set(merged.open.flatMap(({ ids }) => ids)),
+      new Set(merged.open.flatMap(({ seenKeys }) => seenKeys)),
     );
     writeSeenAlertIds(seen.current);
   });

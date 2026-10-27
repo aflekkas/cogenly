@@ -1,5 +1,9 @@
 import { ComposerSelectControl } from "./chat/ComposerControl";
-import { COMPOSER_CONTEXT_TOOLTIP, ComposerContextLabel } from "./ComposerContextLabel";
+import {
+  COMPOSER_CONTEXT_TOOLTIP,
+  ComposerContextLabel,
+  ComposerContextStatic,
+} from "./ComposerContextLabel";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "./ui/tooltip";
 import type { EnvironmentId } from "@cogenly/contracts";
 import { ScaleIcon } from "lucide-react";
@@ -71,23 +75,15 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
     [availableEnvironments, autoEnvironmentLabel, onAutoEnvironment],
   );
 
-  // The static label carries the xs control's height (h-7 sm:h-6) as well as
-  // its padding: the composer context strip has no min-height of its own, and
-  // the glass seam joining it to the composer assumes a fixed strip height, so
-  // a shorter label would drag the seam out of line whenever this label is the
-  // only thing in the strip.
   if (envLocked || onEnvironmentChange === undefined) {
     const lockedRow = (
-      <span
-        className="inline-flex h-7 min-w-0 max-w-full items-center gap-1 border border-transparent px-1.75 font-normal text-muted-foreground/70 text-xs sm:h-6"
-        data-composer-context-control
-      >
+      <ComposerContextStatic>
         <EnvironmentMachineIcon
           kind={activeEnvironment?.machine ?? "server"}
           className="size-3 shrink-0"
         />
         <ComposerContextLabel>{activeEnvironment?.label ?? "Run on"}</ComposerContextLabel>
-      </span>
+      </ComposerContextStatic>
     );
     return (
       <Tooltip>

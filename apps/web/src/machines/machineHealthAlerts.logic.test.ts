@@ -14,6 +14,7 @@ import {
   mergeHealthAlertSnapshots,
   parseSeenHealthAlertIds,
   planHealthAlertNotifications,
+  QUIET_HEALTH_PROBLEM_TTL_MS,
   rememberSeenHealthAlertIds,
   worstHealthStatus,
 } from "./machineHealthAlerts.logic";
@@ -205,6 +206,23 @@ describe("planHealthAlertNotifications", () => {
     expect(next.retract).toEqual([]);
   });
 
+  it("toasts again when a dismissed warning escalates to a failure under the same id", () => {
+    const warn = mergeHealthAlertSnapshots([[HUB, snapshot([alert("a", { fix: "resume" })])]]);
+    const toasted = planHealthAlertNotifications(warn, new Set(), new Set());
+    expect(toasted.toast).toHaveLength(1);
+    // Ids from before seen keys existed are bare ids too, so they stay seen.
+    const seen = rememberSeenHealthAlertIds([], toasted.remember, new Set());
+    expect(seen).toEqual(["a"]);
+    // The server escalates in place: same id, worse status.
+    const failed = mergeHealthAlertSnapshots([
+      [HUB, snapshot([alert("a", { fix: "resume", status: "fail" })])],
+    ]);
+    const escalated = planHealthAlertNotifications(failed, new Set(seen), new Set());
+    expect(escalated.toast.map(({ alert }) => alert.status)).toEqual(["fail"]);
+    const after = rememberSeenHealthAlertIds(seen, escalated.remember, new Set());
+    expect(planHealthAlertNotifications(failed, new Set(after), new Set()).toast).toEqual([]);
+  });
+
   it("retracts only resolved alerts whose toast this session showed", () => {
     const merged = mergeHealthAlertSnapshots([
       [
@@ -264,5 +282,186 @@ describe("worstHealthStatus", () => {
     expect(worstHealthStatus([])).toBeNull();
     expect(worstHealthStatus(["unknown", "warn"])).toBe("warn");
     expect(worstHealthStatus(["warn", "fail", "unknown"])).toBe("fail");
+  });
+});
+
+describe("quiet problems that need the owner", () => {
+  const DAY = QUIET_HEALTH_PROBLEM_TTL_MS;
+  const signIn = (id: string, openedAtMs: number, overrides: Partial<MachineHealthAlert> = {}) =>
+    alert(id, {
+      itemKey: "providers:claude",
+      fix: "sign-in",
+      openedAt: DateTime.makeUnsafe(openedAtMs),
+      ...overrides,
+    });
+  const resolvedAt = (atMs: number) => ({
+    state: "resolved" as const,
+    resolvedAt: DateTime.makeUnsafe(atMs),
+  });
+  const plan = (
+    open: ReadonlyArray<MachineHealthAlert>,
+    quiet: ReadonlyMap<string, number>,
+    nowMs: number,
+    resolved: ReadonlyArray<MachineHealthAlert> = [],
+  ) =>
+    planHealthAlertNotifications(
+      mergeHealthAlertSnapshots([[HUB, snapshot(open, resolved)]]),
+      new Set(),
+      new Set(),
+      quiet,
+      nowMs,
+    );
+
+  it("pops up once, then stays quiet when a restart opens a new alert for it", () => {
+    const first = plan([signIn("a", 0)], new Map(), 0);
+    expect(first.toast).toHaveLength(1);
+    expect(plan([signIn("b", 60_000)], first.quiet, 60_000).toast).toEqual([]);
+  });
+
+  it("pops up again when the server escalates it in place", () => {
+    const first = plan([signIn("a", 0)], new Map(), 0);
+    const escalated = planHealthAlertNotifications(
+      mergeHealthAlertSnapshots([[HUB, snapshot([signIn("a", 0, { status: "fail" })])]]),
+      new Set(first.remember),
+      new Set(),
+      first.quiet,
+      60_000,
+    );
+    expect(escalated.toast.map(({ alert }) => [alert.id, alert.status])).toEqual([["a", "fail"]]);
+  });
+
+  it("stays quiet for a day after it clears, then may pop up again", () => {
+    const opened = plan([signIn("a", 0)], new Map(), 0);
+    const cleared = plan([], opened.quiet, 1_000, [signIn("a", 0, resolvedAt(1_000))]);
+    expect(plan([signIn("b", 2_000)], cleared.quiet, 2_000).toast).toEqual([]);
+    expect(plan([signIn("c", 1_000 + DAY)], cleared.quiet, 1_000 + DAY).toast).toHaveLength(1);
+  });
+
+  it("counts the day from when it resolved, even when this client saw that later", () => {
+    const opened = plan([signIn("a", 0)], new Map(), 0);
+    // Closed for a while: the resolution arrives with the next snapshot.
+    const back = plan([], opened.quiet, 1_000, [signIn("a", 0, resolvedAt(DAY / 2))]);
+    expect([...back.quiet.values()]).toEqual([DAY / 2]);
+    expect(plan([signIn("b", DAY)], back.quiet, DAY).toast).toEqual([]);
+    expect(plan([signIn("c", DAY * 1.5)], back.quiet, DAY * 1.5).toast).toHaveLength(1);
+    // Seen only after its day was up: nothing is left to keep it quiet.
+    const late = plan([], opened.quiet, 2 * DAY, [signIn("a", 0, resolvedAt(DAY / 2))]);
+    expect(late.quiet.size).toBe(0);
+  });
+
+  it("uses incoming resolutions before toasting a recurrence on reconnect", () => {
+    const hour = DAY / 24;
+    const opened = plan([signIn("a", 0)], new Map(), 0);
+    const reconnected = plan([signIn("b", 25 * hour)], opened.quiet, 25 * hour, [
+      signIn("a", 0, resolvedAt(24.5 * hour)),
+    ]);
+    expect(reconnected.toast).toEqual([]);
+    expect([...reconnected.quiet.values()]).toEqual([25 * hour]);
+    expect(
+      plan([signIn("c", 49 * hour)], opened.quiet, 49 * hour, [
+        signIn("a", 0, resolvedAt(24.5 * hour)),
+      ]).toast,
+    ).toHaveLength(1);
+  });
+
+  it("restores a recent resolution after another environment prunes the quiet entry on reconnect", () => {
+    const hour = DAY / 24;
+    const opened = plan([signIn("a", 0)], new Map(), 0);
+    const snapshots = new Map<EnvironmentId, MachineHealthAlertsSnapshot>([[LAPTOP, snapshot([])]]);
+    // The unaffected machine reconnects first, before the hub can report its resolution.
+    const otherEnvironment = planHealthAlertNotifications(
+      mergeHealthAlertSnapshots(snapshots),
+      new Set(opened.remember),
+      new Set(),
+      opened.quiet,
+      25 * hour,
+    );
+    expect(otherEnvironment.quiet.size).toBe(0);
+    snapshots.set(
+      HUB,
+      snapshot([signIn("b", 25 * hour)], [signIn("a", 0, resolvedAt(24.5 * hour))]),
+    );
+    const affectedEnvironment = planHealthAlertNotifications(
+      mergeHealthAlertSnapshots(snapshots),
+      new Set(opened.remember),
+      new Set(),
+      otherEnvironment.quiet,
+      25 * hour,
+    );
+    expect(affectedEnvironment.toast).toEqual([]);
+    expect([...affectedEnvironment.quiet.values()]).toEqual([25 * hour]);
+  });
+
+  it("expires a problem that vanished without a resolution a day after it was last seen", () => {
+    const opened = plan([signIn("a", 0)], new Map(), 0);
+    // Its machine disconnected: no snapshot, so no resolution either.
+    const gone = plan([], opened.quiet, 1_000);
+    expect(plan([signIn("b", 2_000)], gone.quiet, 2_000).toast).toEqual([]);
+    expect(plan([], gone.quiet, DAY).quiet.size).toBe(0);
+    expect(plan([signIn("c", DAY + 1)], gone.quiet, DAY + 1).toast).toHaveLength(1);
+  });
+
+  it("keeps toasting problems Fix can clear on its own", () => {
+    const stuck = (id: string) =>
+      alert(id, { checkId: "stuck-runs", itemKey: "stuck-runs:t", fix: "stop-runs" });
+    const first = plan([stuck("a")], new Map(), 0);
+    expect(plan([stuck("b")], first.quiet, 60_000).toast).toHaveLength(1);
+  });
+});
+
+describe("sync titles", () => {
+  const sync = (id: string, target: MachineHealthAlert["target"]) =>
+    alert(id, { checkId: "sync", itemKey: `sync:${id}`, target });
+
+  it("counts the machines sync problems name", () => {
+    const items = [
+      sync("a", { _tag: "machine", environmentId: HUB }),
+      sync("b", { _tag: "machine", environmentId: LAPTOP }),
+    ];
+    expect(healthAlertGroupView({ alert: items[0]!, items }).title).toBe(
+      "Sync problems with 2 machines",
+    );
+  });
+
+  it("does not count the origin of a quarantined thread as another machine", () => {
+    const items = [
+      sync("a", { _tag: "machine", environmentId: LAPTOP }),
+      sync("b", { _tag: "thread", threadId: "t1" as ThreadId }),
+    ];
+    expect(healthAlertGroupView({ alert: items[0]!, items }).title).toBe("2 sync problems");
+  });
+});
+
+describe("machine-links titles", () => {
+  const reachable = (id: string, origin: EnvironmentId, name: string) =>
+    alert(id, {
+      originEnvironmentId: origin,
+      originMachineName: name,
+      checkId: "machine-links",
+      itemKey: `machine-links:reachable:${origin}`,
+      target: { _tag: "machine", environmentId: origin },
+    });
+
+  it("counts one machine with two problems as one machine", () => {
+    const view = healthAlertGroupView({
+      alert: reachable("a", HUB, "Contabo VPS"),
+      items: [
+        reachable("a", HUB, "Contabo VPS"),
+        alert("b", {
+          checkId: "machine-links",
+          itemKey: `machine-version:${HUB}`,
+          target: { _tag: "machine", environmentId: HUB },
+        }),
+      ],
+    });
+    expect(view.title).toBe("2 problems with one machine");
+    expect(view.description.startsWith("Contabo VPS: ")).toBe(true);
+  });
+
+  it("counts distinct machines that can't be reached", () => {
+    const items = [reachable("a", HUB, "Hub"), reachable("b", LAPTOP, "Laptop")];
+    expect(healthAlertGroupView({ alert: items[0]!, items }).title).toBe(
+      "2 machines can't be reached",
+    );
   });
 });

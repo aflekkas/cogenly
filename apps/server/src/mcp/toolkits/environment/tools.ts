@@ -18,6 +18,7 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import {
   EnvironmentId,
   MACHINE_HEALTH_FIX_MAX_ITEMS,
+  MachineHealthFixAction,
   MachineHealthFixResult,
   MachineHealthReport,
   MachineSecurityStatus,
@@ -157,7 +158,7 @@ const MachineHealthTool = Tool.make("machine_health", {
   ...shared,
   dependencies: [...shared.dependencies, MachineHealth.MachineHealth],
   description:
-    "Health of a Cogenly machine: server, database, disk, provider sign-ins, links to paired machines, sync, integrations, scheduled tasks, stuck runs, boot service, Tailscale Serve and the canary. Each check has a status (ok, warn, fail, unknown when it could not run), a summary and the items worth attention, with a suggested fix where there is one. Items with a fix (stop-runs, run-now, retry-sync, setup-sandbox) are fixed with machine_health_fix, which runs on the machine that has them. Omit environmentId for this machine; give a paired machine's (from machines_list) to read its report over the peer link. reachable false means that machine did not answer and the report describes what this one saw.",
+    "Health of a Cogenly machine: server, database, disk, provider sign-ins, links to paired machines, sync, integrations, scheduled tasks, stuck runs, boot service, Tailscale Serve and the canary. Each check has a status (ok, warn, fail, unknown when it could not run), a summary and the items worth attention, with a suggested fix where there is one. Items with a fix (update-machine, stop-runs, run-now, retry-sync, setup-sandbox) are fixed with machine_health_fix, which runs on the machine that has them. With the machine's \"Fix problems automatically\" setting on (the default), it already applies retry-sync and stop-runs (sparing runs with a live session) on its own and only alerts when that fails. Omit environmentId for this machine; give a paired machine's (from machines_list) to read its report over the peer link. reachable false means that machine did not answer and the report describes what this one saw.",
   parameters: Schema.Struct({
     environmentId: Schema.optionalKey(
       EnvironmentId.annotate({
@@ -177,7 +178,7 @@ const MachineHealthFixTool = Tool.make("machine_health_fix", {
     MachineHealthFixes.MachineHealthFixes,
   ],
   description:
-    "Run the direct fix for machine_health items, on the machine they are on (a paired machine runs it over the peer link). Fixes by item `fix`: stop-runs (and legacy resume) stops the thread's stale turn and subagents and marks dead ones interrupted, even with no live provider session; run-now runs the scheduled task; discard-quarantined discards only held incoming changes for the named thread, preserving local data; retry-sync retries transient sync failures with the target machine; setup-sandbox installs bubblewrap with root or passwordless sudo, or returns the command to run. Items whose fix is sign-in or null come back `manual`: investigate those yourself with machine_health and the thread, integration or provider tools. Omit itemKeys to fix every item that has a direct fix except discard-quarantined, which requires the named item key. Run machine_health afterwards to see current health.",
+    "Run the direct fix for machine_health items, on the machine they are on (a paired machine runs it over the peer link). Fixes by item `fix`: update-machine starts a supported background service update to match the newest paired machine, only when you request it; stop-runs (and legacy resume) stops the thread's stale turn and subagents and marks dead ones interrupted, even with no live provider session; run-now runs the scheduled task; discard-quarantined discards only held incoming changes for the named thread, preserving local data; retry-sync retries transient sync failures with the target machine; setup-sandbox installs bubblewrap with root or passwordless sudo, or returns the command to run. Items whose fix is sign-in or null come back `manual` (a sign-in provider the owner doesn't want on that machine can be turned off with action turn-off-provider): investigate those yourself with machine_health and the thread, integration or provider tools. Omit itemKeys to fix every item that has a direct fix except discard-quarantined, which requires the named item key. Run machine_health afterwards to see current health.",
   parameters: Schema.Struct({
     environmentId: Schema.optionalKey(
       EnvironmentId.annotate({
@@ -188,6 +189,12 @@ const MachineHealthFixTool = Tool.make("machine_health_fix", {
       Schema.Array(TrimmedNonEmptyString)
         .check(Schema.isMinLength(1), Schema.isMaxLength(MACHINE_HEALTH_FIX_MAX_ITEMS))
         .annotate({ description: "Item `key`s from machine_health for that machine." }),
+    ),
+    action: Schema.optionalKey(
+      MachineHealthFixAction.annotate({
+        description:
+          "fix (default) runs each item's fix. turn-off-provider turns off the provider of each named sign-in item on that machine only, when the owner would rather not sign it in there; it stays on for their other machines. Requires itemKeys.",
+      }),
     ),
   }),
   success: MachineHealthFixResult,

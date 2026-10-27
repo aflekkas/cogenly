@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 
 import { cn } from "../lib/utils";
 import { THREAD_DETAILS_PANEL_LABEL_CLASS } from "./chat/threadDetailsPanelStyles";
@@ -33,6 +33,27 @@ export function ComposerContextLabel({
         {children}
       </span>
     </span>
+  );
+}
+
+/**
+ * A context strip choice that can no longer change (the machine or project
+ * once a chat has started): the `xs` composer control's box and text, without
+ * the button. It carries the control's height (h-7 sm:h-6) as well as its
+ * padding: the strip has no min-height of its own, and the glass seam joining
+ * it to the composer assumes a fixed strip height, so a shorter row would drag
+ * the seam out of line whenever it is the only thing in the strip.
+ */
+export function ComposerContextStatic({ className, ...props }: ComponentProps<"span">) {
+  return (
+    <span
+      data-composer-context-control
+      className={cn(
+        "inline-flex h-7 min-w-0 max-w-full items-center gap-1 border border-transparent px-1.75 font-normal text-muted-foreground/70 text-xs sm:h-6",
+        className,
+      )}
+      {...props}
+    />
   );
 }
 

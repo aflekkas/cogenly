@@ -9,6 +9,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   PROVIDER_SIGN_IN_LOCAL_INITIAL,
+  isProviderSignInActive,
   providerMachineSignIns,
   providerNeedsSignIn,
   providerSignInForMachine,
@@ -218,6 +219,7 @@ describe("providerSignInStep", () => {
     const elsewhere = step(state({ phase: "waiting", flowId: null }));
     expect(elsewhere).toEqual({ kind: "elsewhere" });
     expect(shouldAutoStartProviderSignIn(elsewhere)).toBe(false);
+    expect(isProviderSignInActive(elsewhere)).toBe(true);
   });
 
   it("asks which method when the provider offers several, and never for an external one", () => {

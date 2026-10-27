@@ -218,6 +218,9 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       clients fall back to machines.healthRetrySync, scheduled-task run-now and
       machines.sandboxSetup per item. */
   machineHealthFix: Schema.optionalKey(Schema.Boolean),
+  /** machines.healthFix takes `action: "turn-off-provider"`. Older servers ignore
+      the field and run the item's sign-in fix, so clients must not offer it. */
+  machineHealthTurnOffProvider: Schema.optionalKey(Schema.Boolean),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 

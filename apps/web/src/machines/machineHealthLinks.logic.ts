@@ -124,7 +124,21 @@ export type MachineHealthAction =
       readonly agentEnvironmentId: EnvironmentId | null;
       readonly details: MachineHealthLink;
     }
-  | { readonly kind: "agent"; readonly label: string; readonly request: MachineHealthAgentRequest };
+  | { readonly kind: "agent"; readonly label: string; readonly request: MachineHealthAgentRequest }
+  | {
+      /**
+       * Turns the item's provider off in the origin machine's own settings
+       * (`machines.healthFix` with `action: "turn-off-provider"`, sent to
+       * `environmentId`, which forwards it over the peer link when that is
+       * another machine). Other machines keep it on.
+       */
+      readonly kind: "disableProvider";
+      readonly label: string;
+      readonly environmentId: EnvironmentId;
+      readonly originEnvironmentId: EnvironmentId;
+      readonly machineName: string;
+      readonly itemKey: string;
+    };
 
 export type MachineHealthFixAction = Extract<MachineHealthAction, { readonly kind: "fix" }>;
 
@@ -138,6 +152,8 @@ export interface MachineHealthActionContext {
   readonly isConnected: (environmentId: EnvironmentId) => boolean;
   /** Whether a server advertises `machineHealthFix`; older ones get their per-item commands. */
   readonly supportsHealthFix: (environmentId: EnvironmentId) => boolean;
+  /** Whether a server advertises `machineHealthTurnOffProvider`; older ones aren't offered it. */
+  readonly supportsTurnOffProvider: (environmentId: EnvironmentId) => boolean;
 }
 
 /** Fixes the origin machine runs itself through `machines.healthFix`. */
@@ -482,18 +498,55 @@ export function healthFixFollowUp(
 }
 
 /**
+ * The other way out of a provider that isn't signed in on a machine: turn it
+ * off there. Offered for a problem, or a group, with exactly one such provider,
+ * when this client reaches the machine or a server paired with it.
+ */
+export function healthTurnOffProviderAction(
+  problems: ReadonlyArray<MachineHealthProblem>,
+  context: MachineHealthActionContext,
+): MachineHealthAction | null {
+  const providers = new Map<ProviderInstanceId, string>();
+  for (const problem of problems) {
+    if (problem.fix === "sign-in" && problem.target?._tag === "provider")
+      providers.set(problem.target.instanceId, problem.itemKey);
+  }
+  const [only, ...more] = providers.values();
+  if (only === undefined || more.length > 0) return null;
+  const environmentId = commandEnvironment(context);
+  if (environmentId === null || !context.supportsTurnOffProvider(environmentId)) return null;
+  return {
+    kind: "disableProvider",
+    label: `Turn off on ${context.originMachineName}`,
+    environmentId,
+    originEnvironmentId: context.originEnvironmentId,
+    machineName: context.originMachineName,
+    itemKey: only,
+  };
+}
+
+/** A Fix that only opens a sign-in reads Sign in. */
+export function labelSignIn(action: MachineHealthAction | null): MachineHealthAction | null {
+  return action?.kind === "open" ? { ...action, label: "Sign in" } : action;
+}
+
+/**
  * What a Settings → Machines item offers: its Fix, then a link to the thing it
- * points at unless Fix already opens it. A sign-in's Fix reads Sign in.
+ * points at unless Fix already opens it, and for a provider that isn't signed
+ * in, turning it off on that machine.
  */
 export function healthItemActions(
   problem: MachineHealthProblem,
   context: MachineHealthActionContext,
-): { readonly fix: MachineHealthAction | null; readonly open: MachineHealthAction | null } {
-  const action = healthFixAction([problem], context);
-  const fix = action?.kind === "open" ? { ...action, label: "Sign in" } : action;
+): {
+  readonly fix: MachineHealthAction | null;
+  readonly open: MachineHealthAction | null;
+  readonly turnOff: MachineHealthAction | null;
+} {
+  const fix = labelSignIn(healthFixAction([problem], context));
   const open =
     problem.target === null || fix?.kind === "open"
       ? null
       : healthTargetAction(problem.target, context);
-  return { fix, open };
+  return { fix, open, turnOff: healthTurnOffProviderAction([problem], context) };
 }
