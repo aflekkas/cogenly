@@ -185,6 +185,15 @@ it.effect("does not fold acknowledged failures into new batches after rebuilding
         effects: [],
       });
       yield* orchestrator.recoverDelegatedTasks;
+      // The terminal-run listener admits the queue on its own fiber; wait for it to leave queued.
+      const freshRunId = parent.runs.find((run) => run.userMessageId === freshNotice.id)!.id;
+      yield* awaitStored(
+        parentId,
+        (row) =>
+          row.event.type === "run.updated" &&
+          row.event.payload.id === freshRunId &&
+          row.event.payload.status !== "queued",
+      );
       yield* worker.drain();
       const resumed = yield* orchestrator.getThreadProjection(parentId);
       // Admission cancels the acknowledged legacy queue entry before provider work starts.
