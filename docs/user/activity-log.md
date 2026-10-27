@@ -1,18 +1,16 @@
 # Activity log
 
-On web and desktop, consecutive tool calls appear as an expandable summary. Open it to inspect
-commands, tool inputs, status, and exit codes. Expand a tool call to see its output. A running
-command's output updates live, and long output shows only its most recent part.
+On web and desktop, a run of consecutive tool calls and thinking appears as one card. While the
+agent works, the card stays open and lists each call as it runs, with its result and duration once
+it finishes. When the run is done the card collapses to one line, such as **Used 4 tools**, with
+the total time and how many calls failed. Click the card to open it again, and click a call to
+inspect its inputs, status, exit code, and output. A running command's output updates live, and
+long output shows only its most recent part.
 
-Cogenly Orchestrator summaries describe the actions taken, such as **Ran 2 commands and sent messages
-to 3 threads**. Repeated messages to the same destinations show both counts: **Sent 5 messages to
-2 threads**. Thread creation counts the threads returned by the tool, including batches.
+Thinking reads **Thinking** while it runs and **Thought for 4s** once it is done. Open it to read
+the reasoning. Thinking between tool calls sits in the same card as the calls and does not count
+as a tool.
 
-Groups with many kinds of activity show up to two specific action categories and a count of the
-remaining actions. Commands, file changes, and orchestration changes take priority over reads and
-status checks. Expand the group for the full list.
-
-Failed calls do not count as successful messages or creations. Waiting on a thread does not mean
-it finished, and an interrupt or cancellation request does not mean the thread stopped. When tool
-details are unavailable, summaries use a broader description instead of guessing how many threads
-were affected.
+When a call needs your approval, the card says **Waiting for approval** and the call offers Deny
+and Allow in place. The approval panel above the composer answers the same request. A failed call
+shows its error under its name.
