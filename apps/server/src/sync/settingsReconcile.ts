@@ -112,6 +112,21 @@ export interface SettingsReconcilePlan {
   readonly base: ReadonlyArray<SettingsBaseEntry>;
 }
 
+// `enabled` is machine-local now. Compare all three sides without it, including
+// bases written before the upgrade. Preserve the shared value on the wire for
+// older receivers, which rebuild the instance and would otherwise default it on.
+const portableProviderValue = (value: Schema.Json | undefined): Schema.Json | undefined => {
+  if (value === undefined || value === null || typeof value !== "object" || Array.isArray(value))
+    return value;
+  if (!("enabled" in value)) return value;
+  const { enabled: _enabled, ...portable } = value;
+  return portable;
+};
+const sharedEnabled = (value: Schema.Json | undefined) => {
+  const decoded = providerSettingsCodec.decode(value);
+  return Option.isSome(decoded) && decoded.value !== null ? decoded.value.enabled : undefined;
+};
+
 const DEFAULT_UNIVERSAL = encodeUniversalSettings(DEFAULT_SERVER_SETTINGS);
 
 const remoteField = (
@@ -230,14 +245,16 @@ export function planSettingsReconcile(input: SettingsReconcileInput): SettingsRe
       }
     }
     const key = providerSettingsKey(id);
+    const remote = remoteField(universal, key);
+    const previous = input.base.get(settingsBaseKey(UNIVERSAL_SETTINGS_DOCUMENT_ID, "", key));
     const outcome = reconcileSettingsField({
       local: encodeProviderSettings(
         instances[id],
         aligned.has(id) ? undefined : input.accounts?.get(id)?.identity,
         Object.keys(instances).indexOf(id),
       ),
-      remote: remoteField(universal, key),
-      base: input.base.get(settingsBaseKey(UNIVERSAL_SETTINGS_DOCUMENT_ID, "", key)),
+      remote: portableProviderValue(remote),
+      base: portableProviderValue(previous),
       unset: instances[id] === undefined,
     });
     if (outcome._tag === "none") continue;
@@ -248,8 +265,16 @@ export function planSettingsReconcile(input: SettingsReconcileInput): SettingsRe
       else instances[id] = instance;
       changed = true;
     }
-    if (outcome._tag === "publish") addPublish(UNIVERSAL_SETTINGS_DOCUMENT_ID, key, outcome.value);
-    base.push({ documentId: UNIVERSAL_SETTINGS_DOCUMENT_ID, scope: "", key, value: outcome.value });
+    const enabled = sharedEnabled(remote) ?? sharedEnabled(previous) ?? instances[id]?.enabled;
+    const value =
+      outcome.value !== null &&
+      typeof outcome.value === "object" &&
+      !Array.isArray(outcome.value) &&
+      enabled !== undefined
+        ? { ...outcome.value, enabled }
+        : outcome.value;
+    if (outcome._tag === "publish") addPublish(UNIVERSAL_SETTINGS_DOCUMENT_ID, key, value);
+    base.push({ documentId: UNIVERSAL_SETTINGS_DOCUMENT_ID, scope: "", key, value });
   }
   const positions = new Map<string, number>();
   for (const [key, value] of Object.entries({

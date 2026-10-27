@@ -48,6 +48,7 @@ const failureMessage = (cause: Cause.Cause<ProviderSetupError>) => {
 
 interface Flow {
   readonly id: string;
+  readonly epoch: string;
   readonly owner: string;
   readonly expiresAt: number;
   complete?: ((callbackUrl: string) => Effect.Effect<void, ProviderSetupError>) | undefined;
@@ -241,7 +242,10 @@ export const make = Effect.fn("ProviderAuthFlow.make")(function* (options: {
               operation: "start",
               detail: "Provider setup is already in progress.",
             });
-          const id = yield* crypto.randomUUIDv4().pipe(
+          const { id, epoch } = yield* Effect.all({
+            id: crypto.randomUUIDv4(),
+            epoch: crypto.randomUUIDv4(),
+          }).pipe(
             Effect.mapError(
               () =>
                 new ProviderSetupError({
@@ -253,6 +257,7 @@ export const make = Effect.fn("ProviderAuthFlow.make")(function* (options: {
           );
           const flow: Flow = {
             id,
+            epoch,
             owner,
             expiresAt: (yield* Clock.currentTimeMillis) + timeoutMs,
             respond: undefined,
@@ -264,6 +269,7 @@ export const make = Effect.fn("ProviderAuthFlow.make")(function* (options: {
             methods: snapshot.value.state.methods ?? [],
             phase: "starting",
             flowId: id,
+            flowEpoch: epoch,
             expiresAt: DateTime.formatIso(DateTime.makeUnsafe(flow.expiresAt)),
             message: "Starting sign-in.",
           };
@@ -431,11 +437,22 @@ export const make = Effect.fn("ProviderAuthFlow.make")(function* (options: {
           return snapshot.value.state;
         }),
       ),
-    cancel: (owner, id) =>
+    cancel: (owner, id, epoch) =>
       Effect.gen(function* () {
         const flow = yield* lock.withPermit(
           Effect.gen(function* () {
-            const flow = yield* requireFlow(owner, id);
+            if (epoch !== undefined && (operation !== "auth" || active?.epoch !== epoch))
+              return yield* new ProviderSetupError({
+                instanceId: options.instanceId,
+                operation: "cancel",
+                detail: "This sign-in is no longer active. Refresh and try again.",
+              });
+            // Auth-management permission is checked by every transport. A client without
+            // the private flow details may still stop the machine's active sign-in.
+            const flow =
+              id == null && operation === "auth" && active
+                ? active
+                : yield* requireFlow(owner, id ?? "");
             yield* publish(flow, {
               phase: "cancelled",
               interaction: null,
@@ -443,6 +460,8 @@ export const make = Effect.fn("ProviderAuthFlow.make")(function* (options: {
               expiresAt: null,
               message: "Sign-in cancelled.",
             });
+            // No private instructions remain; starter and canceller both need the result.
+            yield* SubscriptionRef.update(snapshot, (current) => ({ ...current, owner: null }));
             active = undefined;
             operation = "stopping";
             return flow;

@@ -609,6 +609,7 @@ import {
   beginPendingProjectFolderLaunch,
   readPendingProjectFolderId,
 } from "../projectLabels/pendingProjectFolders";
+import { useComposerProjectPickerState } from "../projectLabels/ComposerProjectPicker";
 import type { CodexArtifactTemplate } from "@cogenly/shared/codexArtifactTemplates";
 
 const EMPTY_PROVIDERS: ServerProvider[] = [];
@@ -3773,12 +3774,21 @@ export default function ChatView(props: ChatViewProps) {
           providerSubagentModels,
           reportedModelSelection,
         );
+  // The project sits in the strip beside the machine: both are picked before
+  // the chat starts and only named after.
+  const { namesProject: composerNamesProject } = useComposerProjectPickerState(
+    routeThreadRef.environmentId,
+    activeThreadId,
+    draftId,
+  );
+  const showComposerProject = activeThreadId !== null && composerNamesProject;
   const mountComposerContextStrip = shouldShowComposerContextStrip({
     isDraftHeroState,
     persistInActiveThreads: settings.persistComposerContextStrip,
     hasActiveProject: activeProject !== null,
     isGitRepo,
     showEnvironmentIndicator: showComposerEnvironmentIndicator,
+    showProject: showComposerProject,
     runsOnOtherMachine: threadRunsOnOtherMachine,
     hostsRestingComposerControls: routeKind === "server",
   });
@@ -3788,6 +3798,7 @@ export default function ChatView(props: ChatViewProps) {
     hasActiveProject: activeProject !== null,
     isGitRepo,
     showEnvironmentIndicator: showComposerEnvironmentIndicator,
+    showProject: showComposerProject,
     runsOnOtherMachine: threadRunsOnOtherMachine,
     hostsRestingComposerControls: routeKind === "server" && restingComposerControlsVisible,
   });
@@ -10132,7 +10143,7 @@ export default function ChatView(props: ChatViewProps) {
                             restingControlsHost={restingComposerControlsHost}
                             restingControlsHaveLeadingContext={
                               mountComposerContextStrip &&
-                              (isGitRepo || showComposerEnvironmentIndicator)
+                              (isGitRepo || showComposerEnvironmentIndicator || showComposerProject)
                             }
                             onRestingControlsVisibilityChange={setRestingComposerControlsVisible}
                             onComposerOverlayHeightChange={publishComposerOverlayHeightStable}
@@ -10239,6 +10250,16 @@ export default function ChatView(props: ChatViewProps) {
                                 {...(runOnEnvironmentId ? { runOnEnvironmentId } : {})}
                                 composerControlsHostRef={setRestingComposerControlsHost}
                                 contextStripVisible={showComposerContextStrip}
+                                showProject={showComposerProject}
+                                projectReadOnly={envLocked}
+                                // A draft's first send has already read its pick, so one made
+                                // mid-send would be dropped; it stays shut without dimming then.
+                                projectLocked={
+                                  routeKind === "draft" &&
+                                  (isSendBusy ||
+                                    (setupQueueSendThreadKey !== null &&
+                                      setupQueueSendThreadKey === activeThreadKey))
+                                }
                               />
                             </div>
                           </CollapsePresence>

@@ -10,6 +10,7 @@ import {
   healthFixAction,
   healthFixFollowUp,
   healthItemActions,
+  healthTurnOffProviderAction,
   machineHealthAgentPrompt,
   machineHealthLink,
   problemsLeftForAgent,
@@ -37,6 +38,7 @@ function context(
     viaEnvironmentId: HUB,
     isConnected: (id) => ids.has(id),
     supportsHealthFix: () => true,
+    supportsTurnOffProvider: () => true,
     ...overrides,
   };
 }
@@ -459,5 +461,50 @@ it("browser setup uses the machine's direct Fix command", () => {
   expect(healthFixAction([missing], context([HUB]))).toMatchObject({
     kind: "fix",
     direct: { kind: "healthFix", itemKeys: ["preview-browser:install"] },
+  });
+});
+
+describe("healthTurnOffProviderAction", () => {
+  const signedOut = problem({
+    itemKey: "providers:claude",
+    checkId: "providers",
+    fix: "sign-in",
+    target: { _tag: "provider", instanceId: provider },
+  });
+
+  it("turns a signed-out provider off on its own machine, beside Sign in", () => {
+    const actions = healthItemActions(signedOut, context([HUB]));
+    expect(actions.fix?.label).toBe("Sign in");
+    expect(actions.turnOff).toEqual({
+      kind: "disableProvider",
+      label: "Turn off on Cloud server",
+      environmentId: HUB,
+      originEnvironmentId: HUB,
+      machineName: "Cloud server",
+      itemKey: "providers:claude",
+    });
+  });
+
+  it("reaches a machine this client isn't connected to through its paired machine", () => {
+    expect(
+      healthTurnOffProviderAction([signedOut], context([LAPTOP], { viaEnvironmentId: LAPTOP })),
+    ).toMatchObject({ environmentId: LAPTOP, originEnvironmentId: HUB });
+  });
+
+  it("needs a server that turns it off, and exactly one provider to name", () => {
+    expect(healthTurnOffProviderAction([signedOut], context([]))).toBeNull();
+    expect(
+      healthTurnOffProviderAction(
+        [signedOut],
+        context([HUB], { supportsTurnOffProvider: () => false }),
+      ),
+    ).toBeNull();
+    const other = problem({
+      ...signedOut,
+      itemKey: "providers:codex",
+      target: { _tag: "provider", instanceId: "codex" as ProviderInstanceId },
+    });
+    expect(healthTurnOffProviderAction([signedOut, other], context([HUB]))).toBeNull();
+    expect(healthTurnOffProviderAction([problem()], context([HUB]))).toBeNull();
   });
 });

@@ -58,9 +58,9 @@ function ProviderSignInDialog({ request }: { readonly request: ProviderSignInReq
     autoStart: true,
     onSucceeded: () => finish(true),
   });
-  // Closing mid-flow cancels it on the machine, so nothing waits there for a code.
+  // Closing cancels the flow this dialog started; other clients require an explicit Cancel.
   const close = () => {
-    void flow.stop();
+    if (flow.step.kind !== "elsewhere") void flow.stop();
     finish(false);
   };
   return (

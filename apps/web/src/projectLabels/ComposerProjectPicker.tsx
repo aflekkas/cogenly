@@ -11,6 +11,11 @@ import {
   type ComposerControlSize,
 } from "../components/chat/ComposerControl";
 import {
+  COMPOSER_CONTEXT_TOOLTIP,
+  ComposerContextLabel,
+  ComposerContextStatic,
+} from "../components/ComposerContextLabel";
+import {
   Combobox,
   ComboboxEmpty,
   ComboboxItem,
@@ -59,9 +64,9 @@ type ProjectOption =
   | { readonly kind: "create"; readonly key: "create"; readonly name: string };
 
 /**
- * The composer's project chip, inside a collapsible `ComposerControl`: the project's
- * mark and name, or No project. Every composer with a project picker draws this, so
- * a narrow composer collapses each to its icon alike.
+ * A project chip for a composer toolbar, inside a collapsible `ComposerControl`: the
+ * project's mark and name, or No project, collapsing to its icon when narrow. The
+ * agent builder files its agent with it; a chat picks its project in the tray instead.
  */
 export function ComposerProjectChip({
   project,
@@ -90,6 +95,24 @@ export function ComposerProjectChip({
         </span>
       </span>
       <ComposerControlChevron size={size} />
+    </>
+  );
+}
+
+/**
+ * The project as the composer tray names it, beside the machine: its mark and
+ * a label that compacts to the mark with the machine's when the tray is narrow.
+ */
+function ComposerProjectTrayContent({ project }: { project: EnvironmentProjectLabel | null }) {
+  return (
+    <>
+      {/* A picked project fades in where the last one was. */}
+      <ProjectFolderIcon key={project?.key ?? "none"} project={project} className="swap-motion" />
+      <ComposerContextLabel>
+        <span key={project?.key ?? "none"} className="swap-motion">
+          {project ? project.label.name : "No project"}
+        </span>
+      </ComposerContextLabel>
     </>
   );
 }
@@ -132,20 +155,23 @@ export function useComposerProjectPickerState(
     thread?.source.agent === undefined &&
     !(thread !== null && isProjectChatThread(thread, directory.labels));
 
+  const namesProject = isChat || isWorkDraft;
   return {
     directory,
     thread,
     draftSurface,
     current,
     isWorkDraft,
-    canPickProject: canMove && (isChat || isWorkDraft),
+    /** The composer tray names this thread's project, picker or not. */
+    namesProject,
+    canPickProject: canMove && namesProject,
   };
 }
 
 /**
- * The composer toolbar's project control: which project this chat belongs to.
- * A draft keeps its pick until it is sent (PendingProjectFolderCoordinator
- * files the new thread); an existing chat moves right away, with Undo.
+ * Which project this chat belongs to, picked before it starts. A draft keeps
+ * its pick until it is sent (PendingProjectFolderCoordinator files the new
+ * thread); a started chat that was never written in moves right away, with Undo.
  *
  * A Work draft can be given a project too. Until one is picked it shows its
  * repository's project, which Work follows; the Work hero answers a pick by
@@ -156,24 +182,24 @@ export function ComposerProjectPicker(props: {
   readonly threadId: ThreadId;
   /** Set on the new-chat screen, where the draft says whether this is a chat. */
   readonly draftId: DraftId | null;
-  readonly size: ComposerControlSize;
   readonly disabled?: boolean;
   /** Looks as usual but does not open, for a moment too brief to dim it for. */
   readonly locked?: boolean;
   /**
+   * `tray` sits beside the machine picker under the composer, and names the
+   * project without a picker once `readOnly`, as the machine does.
    * `hero` is the new-chat greeting's " · in <project>" tail: the same picker,
    * opened from the project's name, and nothing to click without a project.
    * `headline` is the project half of the Work hero's "What should we build
    * in <project> / <repo>?", reading "No project" without one.
    */
-  readonly appearance?: "toolbar" | "hero" | "headline";
+  readonly appearance: "tray" | "hero" | "headline";
+  /** The chat has started, so its project no longer changes here. */
+  readonly readOnly?: boolean;
 }) {
   const { environmentId, threadId } = props;
-  const { directory, thread, isWorkDraft, current, canPickProject } = useComposerProjectPickerState(
-    environmentId,
-    threadId,
-    props.draftId,
-  );
+  const { directory, thread, isWorkDraft, current, namesProject, canPickProject } =
+    useComposerProjectPickerState(environmentId, threadId, props.draftId);
   const canCreate = useAtomValue(
     serverEnvironment.createProjectLabel.permissionAtom(environmentId),
   );
@@ -223,9 +249,22 @@ export function ComposerProjectPicker(props: {
   }, [canCreate, current, projects, query]);
 
   const isHeadline = props.appearance === "headline";
+  const isTray = props.appearance === "tray";
   const headlineIcon = (
     <ProjectFolderIcon project={current} className="inline-block" style={HERO_INLINE_ICON_STYLE} />
   );
+  const triggerLabel = current ? `Project: ${current.label.name}` : "No project";
+  if (isTray && (props.readOnly || !canPickProject)) {
+    if (!namesProject) return null;
+    return (
+      <Tooltip>
+        <TooltipTrigger render={<ComposerContextStatic />}>
+          <ComposerProjectTrayContent project={current} />
+        </TooltipTrigger>
+        <TooltipPopup {...COMPOSER_CONTEXT_TOOLTIP}>{triggerLabel}</TooltipPopup>
+      </Tooltip>
+    );
+  }
   if (!canPickProject) {
     // The Work hero still names its project when it cannot be changed here.
     return isHeadline ? (
@@ -303,7 +342,6 @@ export function ComposerProjectPicker(props: {
     }
   };
 
-  const triggerLabel = current ? `Project: ${current.label.name}` : "No project";
   const isHero = props.appearance === "hero";
   const inSentence = isHero || isHeadline;
   const isChosen = (option: ProjectOption) =>
@@ -348,7 +386,7 @@ export function ComposerProjectPicker(props: {
             <ComboboxTrigger
               disabled={props.disabled}
               aria-label={`In ${current.label.name}. Move to project`}
-              render={<HeroPickerButton weight="medium" />}
+              render={<HeroPickerButton />}
             >
               <HeroName text={current.label.name} icon={headlineIcon} chevron />
             </ComboboxTrigger>
@@ -361,14 +399,16 @@ export function ComposerProjectPicker(props: {
               <ComboboxTrigger
                 disabled={props.disabled}
                 aria-label={triggerLabel}
-                data-composer-project-picker=""
-                render={<ComposerControl size={props.size} collapsible />}
+                data-composer-context-control
+                // The machine picker's trigger, so the tray's two choices match.
+                render={<ComposerControl size="xs" className="min-w-0 max-w-full" />}
               />
             }
           >
-            <ComposerProjectChip project={current} size={props.size} />
+            <ComposerProjectTrayContent project={current} />
+            <ComposerControlChevron size="xs" />
           </TooltipTrigger>
-          <TooltipPopup side="top">
+          <TooltipPopup {...COMPOSER_CONTEXT_TOOLTIP}>
             {forks ? "Fork into project…" : "Move to project…"}
           </TooltipPopup>
         </Tooltip>

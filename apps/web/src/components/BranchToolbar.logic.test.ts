@@ -8,6 +8,7 @@ const activeThread = {
   hasActiveProject: true,
   isGitRepo: true,
   showEnvironmentIndicator: true,
+  showProject: false,
   runsOnOtherMachine: false,
   hostsRestingComposerControls: true,
 };
@@ -43,5 +44,18 @@ describe("shouldShowComposerContextStrip", () => {
         hostsRestingComposerControls: false,
       }),
     ).toBe(false);
+  });
+
+  it("shows a new chat's project even with one machine and no Git", () => {
+    expect(
+      shouldShowComposerContextStrip({
+        ...activeThread,
+        isDraftHeroState: true,
+        isGitRepo: false,
+        showEnvironmentIndicator: false,
+        showProject: true,
+        hostsRestingComposerControls: false,
+      }),
+    ).toBe(true);
   });
 });

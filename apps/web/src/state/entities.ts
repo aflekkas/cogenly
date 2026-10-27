@@ -282,6 +282,14 @@ export function readEnvironmentSupportsHealthFix(environmentId: EnvironmentId): 
   );
 }
 
+/** Whether the environment's server turns off a signed-out provider through machines.healthFix. */
+export function readEnvironmentSupportsTurnOffProvider(environmentId: EnvironmentId): boolean {
+  return (
+    appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities
+      .machineHealthTurnOffProvider === true
+  );
+}
+
 /** Whether the environment's server understands thread.snooze/unsnooze.
     Same version-skew contract as settlement. */
 export function readEnvironmentSupportsSnooze(environmentId: EnvironmentId): boolean {
