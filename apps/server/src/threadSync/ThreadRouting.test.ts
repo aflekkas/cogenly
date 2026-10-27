@@ -1,3 +1,4 @@
+import * as NodeSqlite from "node:sqlite";
 import { describe, expect, it } from "@effect/vitest";
 import {
   type ChatAttachment,
@@ -12,6 +13,11 @@ import {
   RunId,
 } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
+import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
+import * as PeerChannels from "../machines/PeerChannels.ts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -21,6 +27,10 @@ import { idleThreadProjection, liveThreadShell } from "../mcp/McpToolAccess.test
 import * as ServerConfig from "../config.ts";
 import { pair } from "../machines/testkit.ts";
 import { startThreadMachine, threadCreated, threadId, userMessage } from "./testkit.ts";
+
+const encodeForwardedCommand = Schema.encodeEffect(
+  Schema.toCodecJson(ThreadCommandForward.payload),
+);
 
 const attachment: ChatAttachment = {
   type: "file",
@@ -461,4 +471,73 @@ it.live(
       ).toEqual([]);
     }).pipe(Effect.scoped),
   30000,
+);
+
+it.live("forwarded commands overtake background SQL already queued on the owner", () =>
+  Effect.gen(function* () {
+    const finished: Array<string> = [];
+    const laptop = yield* startThreadMachine("priority-owner", "computer", () => {
+      finished.push("command");
+      return [];
+    });
+    yield* laptop.sink.write({ events: [threadCreated("priority:created", yield* DateTime.now)] });
+    const sql = yield* laptop.run(SqlClient.SqlClient);
+    const channels = yield* laptop.run(PeerChannels.PeerChannels);
+    const entered = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    const holder = yield* sql
+      .withTransaction(
+        Effect.gen(function* () {
+          yield* Deferred.succeed(entered, undefined);
+          yield* Deferred.await(release);
+        }),
+      )
+      .pipe(Effect.forkChild);
+    yield* Deferred.await(entered);
+    yield* Effect.acquireRelease(
+      Effect.sync(() => {
+        const original = NodeSqlite.StatementSync.prototype.all;
+        NodeSqlite.StatementSync.prototype.all = function (
+          this: NodeSqlite.StatementSync,
+          ...args: Array<never>
+        ) {
+          const rows = original.apply(this, args as never);
+          if (this.sourceSQL.includes("FROM thread_owners") && args.includes(threadId as never)) {
+            finished.push("owner-read");
+          }
+          return rows;
+        } as typeof original;
+        return original;
+      }),
+      (original) =>
+        Effect.sync(() => {
+          NodeSqlite.StatementSync.prototype.all = original;
+        }),
+    );
+    const backlog = yield* Effect.forEach(
+      Array.from({ length: 20 }, (_, i) => i),
+      (i) =>
+        sql`SELECT 1`.pipe(
+          Effect.tap(() => Effect.sync(() => finished.push(`background-${i}`))),
+          Effect.forkChild({ startImmediately: true }),
+        ),
+    );
+    const command = yield* channels
+      .dispatch({
+        channel: ThreadCommandForward.name,
+        payload: yield* encodeForwardedCommand({
+          command: send("priority"),
+          files: [],
+          priority: true,
+        }),
+        caller: { environmentId: laptop.environmentId, scopes: [ThreadCommandForward.scope] },
+      })
+      .pipe(Effect.forkChild({ startImmediately: true }));
+    yield* Deferred.succeed(release, undefined);
+    yield* Fiber.join(holder);
+    yield* Fiber.join(command);
+    yield* Fiber.joinAll(backlog);
+    expect(finished.indexOf("owner-read")).toBeGreaterThanOrEqual(0);
+    expect(finished.indexOf("owner-read")).toBeLessThan(20);
+  }).pipe(Effect.scoped),
 );

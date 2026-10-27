@@ -50,9 +50,9 @@ export interface SqliteClientConfig {
   readonly transformResultNames?: ((str: string) => string) | undefined;
   readonly transformQueryNames?: ((str: string) => string) | undefined;
   /**
-   * Run transactions marked with `readOnly` on a second connection in a worker
-   * thread, so long reads block neither the event loop nor writes. Ignored for
-   * in-memory databases, which a second connection cannot share.
+   * Run `readOnly` work on worker connections, with a separate reader for
+   * interactive requests so background scans cannot hold up acknowledgements.
+   * Ignored for in-memory databases, which a second connection cannot share.
    */
   readonly readerWorker?: boolean | undefined;
   /** Execute writer statements and bounded lock waits off the event loop. */
@@ -92,6 +92,10 @@ const Interactive = Context.Reference<boolean>("@cogenly/shared/nodeSqliteClient
 });
 export const interactive = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Effect.provideService(effect, Interactive, true);
+
+/** Background jobs retain their SQL priority even when started by an RPC. */
+export const background = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.provideService(effect, Interactive, false);
 
 const loadKey = Symbol.for("@cogenly/shared/nodeSqliteClient/load");
 interface Load {
@@ -312,6 +316,7 @@ try {
     allowExtension: workerData.allowExtension,
   });
   next.exec("PRAGMA busy_timeout = " + (workerData.writable ? 100 : 5000));
+  next.exec("PRAGMA cache_size = -" + workerData.cacheKiB);
   if (workerData.writable) {
     next.exec("PRAGMA wal_autocheckpoint = " + workerData.checkpointFrames);
     for (const pragma of workerData.connectionPragmas) next.exec(pragma);
@@ -445,7 +450,7 @@ const endsReadTransaction = (sql: string) => /^\s*ROLLBACK\b|^\s*COMMIT\b/i.test
  * mode, turns the reader off for the life of the client: reads use the writer.
  */
 const makeWorker = Effect.fnUntraced(function* (
-  options: SqliteClientConfig,
+  options: SqliteClientConfig & { readonly cacheKiB?: number },
   writable = false,
   onStatement?: (worker: NodeWorkerThreads.Worker) => void,
   onAvailability?: (available: boolean) => void,
@@ -474,6 +479,7 @@ const makeWorker = Effect.fnUntraced(function* (
         checkpointFrames: options.checkpointWorker ? WRITER_BACKSTOP_FRAMES : CHECKPOINT_FRAMES,
         allowExtension: options.allowExtension ?? false,
         prepareCacheSize: options.prepareCacheSize ?? 200,
+        cacheKiB: options.cacheKiB ?? 2000,
         connectionPragmas: options.connectionPragmas ?? [],
       },
     });
@@ -1043,31 +1049,53 @@ const make = Effect.fn("makeWithDatabase")(function* (
   const acquireReader =
     options.readerWorker && isFileDatabase ? yield* makeWorker(options) : undefined;
   const readerLock = makePriorityLock();
+  // Keep a bounded command working set in this reader's own page cache. The
+  // default 2 MiB is smaller than a long thread's control rows, so background
+  // scans evict them from the OS cache and every send becomes a cold read.
+  const acquireInteractiveReader =
+    options.readerWorker && isFileDatabase
+      ? yield* makeWorker({ ...options, cacheKiB: 32 * 1024 })
+      : undefined;
+  const interactiveReaderLock = makePriorityLock();
 
   const writer = {
     name: "writer" as const,
     lock: writerLock,
+    admit: Effect.void,
     acquire: Effect.suspend(() =>
       acquireWriter === undefined
         ? Effect.succeed(connection)
         : Effect.map(acquireWriter, (worker) => worker ?? connection),
     ),
   };
-  // Picks the reader only for `readOnly` work, and the writer whenever the
-  // reader is turned off.
-  const route = Effect.withFiber((fiber) =>
-    acquireReader !== undefined && Context.get(fiber.context, ReadOnly)
-      ? Effect.map(acquireReader, (readerConnection) =>
+  // Interactive reads must not queue behind an already-running background scan.
+  // Open transactions keep their original connection through SqlClient's context.
+  const route = Effect.withFiber((fiber) => {
+    const interactive = Context.get(fiber.context, Interactive);
+    const acquire = interactive ? acquireInteractiveReader : acquireReader;
+    return acquire !== undefined && Context.get(fiber.context, ReadOnly)
+      ? Effect.map(acquire, (readerConnection) =>
           readerConnection === undefined
             ? writer
             : {
                 name: "reader" as const,
-                lock: readerLock,
+                lock: interactive ? interactiveReaderLock : readerLock,
+                // A background transaction already running never blocks an
+                // interactive read. Admit its successor after current user reads
+                // finish, so parallel workers do not compete for disk throughout
+                // command planning. The priority lock keeps its fairness bound.
+                admit: interactive
+                  ? Effect.void
+                  : Effect.acquireUseRelease(
+                      interactiveReaderLock.take(false),
+                      () => Effect.void,
+                      () => interactiveReaderLock.release,
+                    ),
                 acquire: Effect.succeed(readerConnection),
               },
         )
-      : Effect.succeed(writer),
-  );
+      : Effect.succeed(writer);
+  });
 
   const observe = (
     fiber: Fiber.Fiber<unknown, unknown>,
@@ -1110,19 +1138,22 @@ const make = Effect.fn("makeWithDatabase")(function* (
         else afterIdle(target.lock.releaseUnsafe);
       });
       return Effect.flatMap(
-        Effect.tap(restore(target.lock.take(interactive)), () => {
-          const pending = fiber.getRef(TransactionAcquire);
-          const sample = acquired(target, clock, start);
-          observe(fiber, target.name, sample.lockWaitMs);
-          if (pending !== undefined) pending.acquired = sample;
-          else if (
-            fiber.getRef(References.TracerEnabled) &&
-            fiber.getRef(Statement.SpanPropagationEnabled)
-          )
-            annotateAcquired(fiber, sample);
-          return Scope.addFinalizer(scope, release);
-        }),
-        () => Effect.map(target.acquire, (connection) => (leased = connection)),
+        Effect.tap(restore(target.lock.take(interactive)), () =>
+          Scope.addFinalizer(scope, release),
+        ),
+        () =>
+          Effect.flatMap(restore(target.admit), () => {
+            const pending = fiber.getRef(TransactionAcquire);
+            const sample = acquired(target, clock, start);
+            observe(fiber, target.name, sample.lockWaitMs);
+            if (pending !== undefined) pending.acquired = sample;
+            else if (
+              fiber.getRef(References.TracerEnabled) &&
+              fiber.getRef(Statement.SpanPropagationEnabled)
+            )
+              annotateAcquired(fiber, sample);
+            return Effect.map(target.acquire, (connection) => (leased = connection));
+          }),
       );
     }),
   );

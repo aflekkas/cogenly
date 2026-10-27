@@ -242,15 +242,24 @@ const make = Effect.gen(function* () {
       Effect.orElseSucceed(() => null),
     );
 
-  // Archived owners protect shared checkouts too. Filtering before shell hydration
-  // avoids reading every chat's run and message history for a cleanup sweep.
+  // A cleanup inventory need not be one atomic shell snapshot: deletion always
+  // rechecks its owners below. Release the reader between owners so this scan
+  // cannot monopolize it or flood disk reads while a command needs its history.
   const readThreads = Effect.fn("StorageCleanup.readThreads")(function* () {
-    const { threads, archivedThreads } = yield* projections
-      .getShellSnapshot({ worktreesOnly: true })
-      .pipe(NodeSqliteClient.readOnly);
+    const owners = yield* sql<{ threadId: string }>`
+      SELECT thread_id AS "threadId" FROM orchestration_v2_projection_threads
+      WHERE deleted_at IS NULL AND json_extract(payload_json, '$.worktreePath') IS NOT NULL
+      ORDER BY thread_id
+    `.pipe(NodeSqliteClient.readOnly);
+    const threads: Array<OrchestrationV2ThreadShell> = [];
+    for (const owner of owners) {
+      const thread = yield* projections.getThreadShell(ThreadId.make(owner.threadId));
+      if (thread !== null && thread.worktreePath !== null) threads.push(thread);
+      yield* NodeSqliteClient.eventLoopTurn;
+    }
     const projects = yield* projectStore.listShells();
-    return { projects, threads: [...threads, ...archivedThreads] };
-  });
+    return { projects, threads };
+  }, NodeSqliteClient.background);
 
   // Local threads under another project need not have a worktreePath of their own.
   const containsProjectRoot = Effect.fn("StorageCleanup.containsProjectRoot")(function* (

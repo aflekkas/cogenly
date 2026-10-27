@@ -84,6 +84,82 @@ it.live("reader queries finish while a writer transaction owns its connection", 
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
+it.live("interactive reads finish while a background read transaction is still open", () =>
+  Effect.gen(function* () {
+    const { sql } = yield* database;
+    const entered = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    const scan = yield* sql
+      .withTransaction(
+        Effect.gen(function* () {
+          yield* sql`SELECT value FROM items`;
+          yield* Deferred.succeed(entered, undefined);
+          yield* Deferred.await(release);
+        }),
+      )
+      .pipe(NodeSqliteClient.readOnly, Effect.forkChild);
+    yield* Deferred.await(entered);
+    const rows = yield* sql
+      .withTransaction(sql<{ value: number }>`SELECT value FROM items`)
+      .pipe(NodeSqliteClient.readOnly, NodeSqliteClient.interactive);
+    expect(rows[0]?.value).toBe(0);
+    // The scan has not released its connection: this would deadlock on one reader.
+    yield* Deferred.succeed(release, undefined);
+    yield* Fiber.join(scan);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.live("a new background scan waits until the interactive reader finishes planning", () =>
+  Effect.gen(function* () {
+    const { sql } = yield* database;
+    const entered = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    const backgroundEntered = yield* Deferred.make<void>();
+    const user = yield* sql
+      .withTransaction(
+        Effect.gen(function* () {
+          yield* sql`SELECT value FROM items`;
+          yield* Deferred.succeed(entered, undefined);
+          yield* Deferred.await(release);
+        }),
+      )
+      .pipe(NodeSqliteClient.readOnly, NodeSqliteClient.interactive, Effect.forkChild);
+    yield* Deferred.await(entered);
+    const background = yield* sql
+      .withTransaction(Deferred.succeed(backgroundEntered, undefined))
+      .pipe(NodeSqliteClient.readOnly, Effect.forkChild({ startImmediately: true }));
+    expect(yield* Deferred.isDone(backgroundEntered)).toBe(false);
+    // Cancelling a scan waiting for admission must release its reader lease.
+    yield* Fiber.interrupt(background);
+    const retry = yield* sql
+      .withTransaction(Deferred.succeed(backgroundEntered, undefined))
+      .pipe(NodeSqliteClient.readOnly, Effect.forkChild({ startImmediately: true }));
+    yield* Deferred.succeed(release, undefined);
+    yield* Fiber.join(user);
+    yield* Fiber.join(retry);
+    expect(yield* Deferred.isDone(backgroundEntered)).toBe(true);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.live("changing read priority inside a transaction preserves its snapshot", () =>
+  Effect.gen(function* () {
+    const { sql, external } = yield* database;
+    yield* sql
+      .withTransaction(
+        Effect.gen(function* () {
+          expect((yield* sql<{ value: number }>`SELECT value FROM items`)[0]?.value).toBe(0);
+          external.exec("UPDATE items SET value = 7");
+          const nested = yield* sql
+            .withTransaction(sql<{ value: number }>`SELECT value FROM items`)
+            .pipe(NodeSqliteClient.background);
+          expect(nested[0]?.value).toBe(0);
+        }),
+      )
+      .pipe(NodeSqliteClient.readOnly, NodeSqliteClient.interactive);
+    expect((yield* sql<{ value: number }>`SELECT value FROM items`)[0]?.value).toBe(7);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
 it.live("an interactive write runs before a queued backlog of background writes", () =>
   Effect.gen(function* () {
     const { sql } = yield* database;
@@ -107,6 +183,9 @@ it.live("an interactive write runs before a queued backlog of background writes"
       (index) =>
         sql.withTransaction(sql`UPDATE items SET value = value + 1`).pipe(
           Effect.tap(() => Effect.sync(() => finished.push(`background-${index}`))),
+          // A scan requested by an interactive RPC still uses the background lane.
+          NodeSqliteClient.background,
+          NodeSqliteClient.interactive,
           Effect.forkChild({ startImmediately: true }),
         ),
     );
@@ -146,7 +225,7 @@ it.live("a steady stream of interactive work cannot starve background work", () 
   }),
 );
 
-it.live("an abandoned reader statement keeps the reader until the worker finishes it", () =>
+it.live("interactive reads finish while an abandoned background statement is still running", () =>
   Effect.gen(function* () {
     const { sql } = yield* database;
     // Start the reader worker so the slow statement below is sent at once.
@@ -172,8 +251,8 @@ it.live("an abandoned reader statement keeps the reader until the worker finishe
       Effect.forkChild({ startImmediately: true }),
     );
     yield* Fiber.joinAll([background, user]);
-    // Had the lock passed on at the interrupt, the background read would have
-    // reached the worker first and the user's read would queue behind it.
+    // Cancellation leaves the scan running on its worker. The interactive
+    // connection stays available while the next background read waits for it.
     expect(finished).toEqual(["interactive", "background"]);
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );

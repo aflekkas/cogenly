@@ -42,6 +42,60 @@ const seedLabel = (id: string, name: string) =>
 const labelRef = (id: string, name: string) => ({ id: ProjectLabelId.make(id), name });
 
 describe("project files", () => {
+  it.effect("recovers a partially committed index scan and leaves unchanged files alone", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const sql = yield* SqlClient.SqlClient;
+      const files = yield* Files.ProjectFiles;
+      const folders = yield* Folders.ProjectLabelFolders;
+      const label = labelRef("label:chunks", "Chunked index");
+      yield* seedLabel(label.id, label.name);
+      const { dir } = yield* folders.ensureForLabel(label);
+      yield* Effect.forEach(
+        Array.from({ length: 80 }, (_, index) => index),
+        (index) => fs.writeFileString(`${dir}/note-${index}.txt`, `searchable content ${index}`),
+        { concurrency: 8 },
+      );
+      yield* sql`CREATE TRIGGER fail_index_scan BEFORE INSERT ON project_resource_files
+        WHEN (SELECT COUNT(*) FROM project_resource_files WHERE label_id = NEW.label_id) >= 35
+        BEGIN SELECT RAISE(ABORT, 'fixture scan interruption'); END`;
+      yield* files.listResources(label.id).pipe(Effect.flip);
+      const partial = yield* sql<{ count: number }>`SELECT COUNT(*) AS count
+        FROM project_resource_files WHERE label_id = ${label.id}`;
+      expect(partial[0]!.count).toBeGreaterThan(0);
+      expect(partial[0]!.count).toBeLessThan(80);
+      expect(
+        yield* sql`SELECT * FROM project_resource_index_state WHERE label_id = ${label.id}`,
+      ).toEqual([]);
+      yield* sql`DROP TRIGGER fail_index_scan`;
+      const recovered = yield* files.listResources(label.id);
+      expect(recovered.resources.filter((entry) => entry.kind === "file")).toHaveLength(80);
+      expect(
+        (yield* files.searchResources({ labelId: label.id, query: "searchable" })).matches.length,
+      ).toBeGreaterThan(0);
+      // A no-change rescan must not rerun FTS triggers or rebuild existing rows.
+      yield* sql`CREATE TRIGGER reject_index_insert BEFORE INSERT ON project_resource_files
+        BEGIN SELECT RAISE(ABORT, 'unchanged file inserted'); END`;
+      yield* sql`CREATE TRIGGER reject_index_update BEFORE UPDATE ON project_resource_files
+        BEGIN SELECT RAISE(ABORT, 'unchanged file updated'); END`;
+      yield* sql`CREATE TRIGGER reject_index_delete BEFORE DELETE ON project_resource_files
+        BEGIN SELECT RAISE(ABORT, 'unchanged file deleted'); END`;
+      expect((yield* files.listResources(label.id)).resources).toEqual(recovered.resources);
+      yield* sql`DROP TRIGGER reject_index_insert`;
+      yield* sql`DROP TRIGGER reject_index_update`;
+      yield* sql`DROP TRIGGER reject_index_delete`;
+      yield* fs.remove(`${dir}/note-0.txt`);
+      yield* fs.writeFileString(`${dir}/note-1.txt`, "replacement uniquephrase");
+      const updated = yield* files.listResources(label.id);
+      expect(updated.resources.some((entry) => entry.relativePath === "note-0.txt")).toBe(false);
+      expect(
+        (yield* files.searchResources({ labelId: label.id, query: "uniquephrase" })).matches.map(
+          (entry) => entry.relativePath,
+        ),
+      ).toContain("note-1.txt");
+    }).pipe(Effect.provide(filesLayer("label-files-chunks"))),
+  );
+
   it.effect("lists resources and skips git trees and the id file", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

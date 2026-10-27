@@ -2925,6 +2925,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       filter?: ProjectionRecordFilter,
     ) =>
       Effect.gen(function* () {
+        const userMessagesOnly =
+          filter?.messageRoles?.length === 1 && filter.messageRoles[0] === "user";
         const threadRows = yield* sql<PayloadRow>`
           SELECT json_set(payload_json, '$.projectFolderId',
             (SELECT folder_id FROM effective_thread_project_folders WHERE thread_id = ${threadId}),
@@ -2949,9 +2951,15 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             : window === undefined
               ? yield* sql<PayloadRow>`
                 SELECT payload_json
-                FROM orchestration_v2_projection_turn_items
+                ${
+                  filter?.turnItemTypes === undefined
+                    ? sql`FROM orchestration_v2_projection_turn_items`
+                    : // Keep requested types outermost: select by thread/type before
+                      // fetching bodies, instead of scanning historical tool output.
+                      sql`FROM (SELECT DISTINCT value FROM json_each(${encodeIdList(filter.turnItemTypes)})) AS requested
+                      CROSS JOIN orchestration_v2_projection_turn_items ON type = requested.value`
+                }
                 WHERE thread_id = ${threadId}
-                  ${filter?.turnItemTypes === undefined ? sql`` : sql`AND type IN (SELECT value FROM json_each(${encodeIdList(filter.turnItemTypes)}))`}
                   ${filter?.turnItemStatuses === undefined ? sql`` : sql`AND status IN (SELECT value FROM json_each(${encodeIdList(filter.turnItemStatuses)}))`}
                   ${filter?.turnItemRunId === undefined ? sql`` : sql`AND run_id = ${filter.turnItemRunId}`}
                   ${filter?.turnItemRunIds === undefined ? sql`` : sql`AND (run_id IN (SELECT value FROM json_each(${encodeIdList(filter.turnItemRunIds.filter((id): id is RunId => id !== null))})) OR (${filter.turnItemRunIds.includes(null) ? 1 : 0} = 1 AND run_id IS NULL))`}
@@ -3266,7 +3274,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             ? Effect.succeed([])
             : window === undefined
               ? sql<PayloadRow>`
-            SELECT node.payload_json
+            ${
+              filter?.omitSettledLeafNodes === true
+                ? sql`WITH retained AS MATERIALIZED (
+                  SELECT node.rowid AS node_rowid, node.started_at, node.node_id`
+                : sql`SELECT node.payload_json`
+            }
             ${
               filter?.nodeIds === undefined
                 ? sql`FROM orchestration_v2_projection_nodes AS node`
@@ -3290,7 +3303,14 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                     )`
                   : sql``
               }
-            ORDER BY COALESCE(node.started_at, ''), node.node_id ASC
+            ${
+              filter?.omitSettledLeafNodes === true
+                ? sql`)
+                  SELECT node.payload_json FROM retained
+                  CROSS JOIN orchestration_v2_projection_nodes AS node ON node.rowid = retained.node_rowid
+                  ORDER BY COALESCE(retained.started_at, ''), retained.node_id ASC`
+                : sql`ORDER BY COALESCE(node.started_at, ''), node.node_id ASC`
+            }
               `
               : sql<PayloadRow & { readonly position: number }>`
             -- Keep retained IDs outermost so SQLite looks up each node by its
@@ -3412,9 +3432,22 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             : window === undefined
               ? sql<PayloadRow>`
                 SELECT payload_json FROM orchestration_v2_projection_messages
+                ${
+                  userMessagesOnly
+                    ? // The sort-free created-at plan scans large assistant bodies to reject them.
+                      sql`INDEXED BY orchestration_v2_projection_messages_latest_user_idx`
+                    : sql``
+                }
                 WHERE thread_id = ${threadId}
                   ${filter?.messageIds === undefined ? sql`` : sql`AND message_id IN (SELECT value FROM json_each(${encodeIdList(filter.messageIds)}))`}
-                  ${filter?.messageRoles === undefined ? sql`` : sql`AND role IN (SELECT value FROM json_each(${encodeIdList(filter.messageRoles)}))`}
+                  ${
+                    filter?.messageRoles === undefined
+                      ? sql``
+                      : // Match the existing user-message partial index during intake.
+                        userMessagesOnly
+                        ? sql`AND role = 'user'`
+                        : sql`AND role IN (SELECT value FROM json_each(${encodeIdList(filter.messageRoles)}))`
+                  }
                   ${filter?.messageRunIds === undefined ? sql`` : sql`AND run_id IN (SELECT value FROM json_each(${encodeIdList(filter.messageRunIds)}))`}
                 ORDER BY created_at ASC, message_id ASC
               `

@@ -342,17 +342,11 @@ const makeStorage = (box: ReturnType<typeof fixture>) =>
         list: () => Effect.succeed([{ ...project, projectId: project.id, deletedAt: null }]),
       }),
       Layer.mock(Projections.ProjectionStoreV2)({
-        getShellSnapshot: (options) => {
+        // A cleanup inventory must use bounded per-owner reads, including archived owners.
+        getThreadShell: (id) => {
           if (state.historyUnavailable) return Effect.die("history unavailable");
-          expect(options).toEqual({ worktreesOnly: true });
-          return Effect.succeed({
-            schemaVersion: 2,
-            snapshotSequence: 0,
-            threads: [parent, state.thread].filter((thread) => thread.archivedAt === null),
-            archivedThreads: [parent, state.thread].filter((thread) => thread.archivedAt !== null),
-          });
+          return Effect.succeed(id === state.thread.id ? state.thread : parent);
         },
-        getThreadShell: (id) => Effect.succeed(id === state.thread.id ? state.thread : parent),
       }),
       Layer.mock(Orchestrator.OrchestratorV2)({ streamDomainEvents: Stream.fromPubSub(events) }),
       Layer.mock(Sessions.ProviderSessionManagerV2)({

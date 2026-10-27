@@ -273,3 +273,54 @@ it.effect("orders a thread's messages through the message item index", () => {
     ).toBe(true);
   }).pipe(Effect.provide(runtime(provider)));
 });
+
+it.effect("command reads preserve filtered item ordering and settled-node semantics", () => {
+  const provider = makeControllableProvider(CodexProviderCapabilitiesV2);
+  return Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const sql = yield* SqlClient.SqlClient;
+    yield* longThreadWithQueuedMessage;
+    const before = yield* orchestrator.getThreadRecords(threadId, ["runs", "nodes", "turnItems"]);
+    const busy = before.runs.find((run) => run.status === "running")!;
+    yield* sql`INSERT INTO orchestration_v2_projection_runs
+      SELECT 'run:finished', thread_id, ordinal + 10000, provider, provider_thread_id, 'completed', requested_at, completed_at,
+        json_set(payload_json, '$.id', 'run:finished', '$.status', 'completed', '$.ordinal', ordinal + 10000), provider_instance_id
+      FROM orchestration_v2_projection_runs WHERE run_id = ${busy.id}`;
+    for (const [id, runId, kind, status] of [
+      ["node:old-leaf", "run:finished", "tool_call", "completed"],
+      ["node:old-live", "run:finished", "tool_call", "running"],
+      ["node:old-control", "run:finished", "subagent", "completed"],
+      ["node:active-leaf", busy.id, "tool_call", "completed"],
+      ["node:runless", null, "tool_call", "completed"],
+    ] as const) {
+      yield* sql`INSERT INTO orchestration_v2_projection_nodes
+        SELECT ${id}, thread_id, ${runId}, parent_node_id, root_node_id, ${kind}, ${status},
+          provider_thread_id, provider_turn_id, runtime_request_id, checkpoint_scope_id,
+          started_at, completed_at,
+          json_set(payload_json, '$.id', ${id}, '$.runId', ${runId}, '$.kind', ${kind}, '$.status', ${status})
+        FROM orchestration_v2_projection_nodes WHERE node_id = ${busy.rootNodeId}`;
+    }
+    const full = yield* orchestrator.getThreadRecords(threadId, ["nodes", "turnItems"]);
+    const filtered = yield* orchestrator.getThreadRecords(threadId, ["nodes", "turnItems"], {
+      // Duplicate requested types retain IN semantics and must not duplicate items.
+      turnItemTypes: ["error", "user_message", "user_message"],
+      omitSettledLeafNodes: true,
+    });
+    expect(filtered.turnItems).toEqual(
+      full.turnItems.filter((item) => item.type === "error" || item.type === "user_message"),
+    );
+    expect(filtered.nodes).toEqual(full.nodes.filter((node) => node.id !== "node:old-leaf"));
+    expect(
+      (yield* orchestrator.getThreadRecords(threadId, ["turnItems"], {
+        turnItemTypes: [],
+      })).turnItems,
+    ).toEqual([]);
+    const onlyBusy = yield* orchestrator.getThreadRecords(threadId, ["turnItems"], {
+      turnItemTypes: ["user_message"],
+      turnItemRunId: busy.id,
+    });
+    expect(onlyBusy.turnItems).toEqual(
+      full.turnItems.filter((item) => item.type === "user_message" && item.runId === busy.id),
+    );
+  }).pipe(Effect.provide(runtime(provider)));
+});

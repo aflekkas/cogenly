@@ -20,6 +20,8 @@ import {
   ProjectResource,
   ThreadId,
 } from "@cogenly/contracts";
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -353,17 +355,21 @@ const make = Effect.gen(function* () {
 
   const decodeResource = Schema.decodeUnknownEffect(ProjectResource);
 
-  // Unchanged files (same size and mtime) keep their indexed hash and text,
-  // so a rescan only reads what changed.
+  // Unchanged files keep their indexed hash and text in SQLite. Read only
+  // metadata here: transferring every cached text body stalls the event loop.
   const scanDirectory = Effect.fn("ProjectFiles.scan")(function* (
     labelId: ProjectLabelId,
     dir: string,
   ) {
-    const known = new Map<string, IndexedRow>();
-    const rows = yield* sql<IndexedRow>`
-      SELECT relative_path, kind, mime_type, size_bytes, sha256, modified_at, content_text
+    const known = new Map<string, Omit<IndexedRow, "content_text">>();
+    const rows = yield* sql<Omit<IndexedRow, "content_text">>`
+      SELECT relative_path, kind, mime_type, size_bytes, sha256, modified_at
       FROM project_resource_files WHERE label_id = ${labelId}
-    `.pipe(Effect.mapError(storage("scan")));
+    `.pipe(
+      NodeSqliteClient.readOnly,
+      NodeSqliteClient.background,
+      Effect.mapError(storage("scan")),
+    );
     for (const row of rows) known.set(row.relative_path, row);
     const realRoot = (yield* realPathOrNull(dir)) ?? path.resolve(dir);
     const entries: Array<ScannedEntry> = [];
@@ -440,7 +446,8 @@ const make = Effect.gen(function* () {
           sizeBytes,
           sha256: cached.sha256 ?? undefined,
           modifiedAt,
-          content: cached.content_text,
+          // writeIndex leaves an unchanged file's text and FTS rows in place.
+          content: null,
         });
         continue;
       }
@@ -488,21 +495,60 @@ const make = Effect.gen(function* () {
     labelId: ProjectLabelId,
     scanned: { readonly entries: ReadonlyArray<ScannedEntry>; readonly truncated: boolean },
   ) {
-    yield* sql
-      .withTransaction(
-        Effect.gen(function* () {
-          yield* sql`DELETE FROM project_resource_files WHERE label_id = ${labelId}`;
-          for (const entry of scanned.entries) {
-            yield* sql`INSERT INTO project_resource_files(label_id, relative_path, kind, mime_type, size_bytes, sha256, modified_at, content_text)
-            VALUES (${labelId}, ${entry.relativePath}, ${entry.kind}, ${entry.mimeType}, ${entry.sizeBytes}, ${entry.sha256 ?? null}, ${entry.modifiedAt}, ${entry.content})`;
-          }
-          yield* sql`INSERT INTO project_resource_index_state(label_id, truncated, scanned_at)
-          VALUES (${labelId}, ${scanned.truncated ? 1 : 0}, ${DateTime.formatIso(yield* DateTime.now)})
-          ON CONFLICT(label_id) DO UPDATE SET truncated = excluded.truncated, scanned_at = excluded.scanned_at`;
-        }),
-      )
-      .pipe(Effect.mapError(storage("scan")));
-  });
+    // The index is a rebuildable cache. Commit small groups of whole files so
+    // its FTS triggers stay atomic without monopolizing the command writer.
+    // Metadata marks completion only after every group; a failed scan is retried.
+    const existing = yield* sql<Omit<IndexedRow, "content_text">>`
+      SELECT relative_path, kind, mime_type, size_bytes, sha256, modified_at
+      FROM project_resource_files WHERE label_id = ${labelId}
+    `.pipe(NodeSqliteClient.readOnly, Effect.mapError(storage("scan")));
+    const previous = new Map(existing.map((entry) => [entry.relative_path, entry]));
+    const changed = scanned.entries.filter((entry) => {
+      const old = previous.get(entry.relativePath);
+      previous.delete(entry.relativePath);
+      return (
+        old === undefined ||
+        old.kind !== entry.kind ||
+        old.mime_type !== entry.mimeType ||
+        old.size_bytes !== entry.sizeBytes ||
+        old.sha256 !== (entry.sha256 ?? null) ||
+        old.modified_at !== entry.modifiedAt
+      );
+    });
+    const removed = [...previous.keys()];
+    let removeIndex = 0;
+    let changeIndex = 0;
+    while (removeIndex < removed.length || changeIndex < changed.length) {
+      yield* sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const started = yield* Clock.currentTimeMillis;
+            for (let count = 0; count < 16; count++) {
+              if (removeIndex < removed.length) {
+                yield* sql`DELETE FROM project_resource_files
+              WHERE label_id = ${labelId} AND relative_path = ${removed[removeIndex++]!}`;
+              } else if (changeIndex < changed.length) {
+                const entry = changed[changeIndex++]!;
+                yield* sql`INSERT INTO project_resource_files(label_id, relative_path, kind, mime_type, size_bytes, sha256, modified_at, content_text)
+              VALUES (${labelId}, ${entry.relativePath}, ${entry.kind}, ${entry.mimeType}, ${entry.sizeBytes}, ${entry.sha256 ?? null}, ${entry.modifiedAt}, ${entry.content})
+              ON CONFLICT(label_id, relative_path) DO UPDATE SET
+                kind = excluded.kind, mime_type = excluded.mime_type, size_bytes = excluded.size_bytes,
+                sha256 = excluded.sha256, modified_at = excluded.modified_at, content_text = excluded.content_text`;
+              } else break;
+              if ((yield* Clock.currentTimeMillis) - started >= 25) break;
+            }
+          }),
+        )
+        .pipe(Effect.mapError(storage("scan")));
+      // Let queued requests reach the priority lock before the next batch.
+      yield* NodeSqliteClient.eventLoopTurn;
+    }
+    yield* sql`INSERT INTO project_resource_index_state(label_id, truncated, scanned_at)
+      VALUES (${labelId}, ${scanned.truncated ? 1 : 0}, ${DateTime.formatIso(yield* DateTime.now)})
+      ON CONFLICT(label_id) DO UPDATE SET truncated = excluded.truncated, scanned_at = excluded.scanned_at`.pipe(
+      Effect.mapError(storage("scan")),
+    );
+  }, NodeSqliteClient.background);
 
   const rescanLabel = Effect.fn("ProjectFiles.rescan")(function* (label: {
     readonly id: ProjectLabelId;
@@ -512,11 +558,11 @@ const make = Effect.gen(function* () {
     const scanned = yield* scanDirectory(label.id, dir);
     yield* writeIndex(label.id, scanned);
     return scanned;
-  });
+  }, NodeSqliteClient.background);
 
   const readIndex = Effect.fn("ProjectFiles.readIndex")(function* (labelId: ProjectLabelId) {
-    const rows = yield* sql<IndexedRow>`
-      SELECT relative_path, kind, mime_type, size_bytes, sha256, modified_at, content_text
+    const rows = yield* sql<Omit<IndexedRow, "content_text">>`
+      SELECT relative_path, kind, mime_type, size_bytes, sha256, modified_at
       FROM project_resource_files WHERE label_id = ${labelId} ORDER BY relative_path
     `.pipe(Effect.mapError(storage("read")));
     const state = yield* sql<{ truncated: number }>`

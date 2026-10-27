@@ -25,6 +25,7 @@ import {
   type ThreadId,
   ThreadRemoteError,
 } from "@cogenly/contracts";
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as Context from "effect/Context";
@@ -463,7 +464,8 @@ const make = Effect.gen(function* () {
           detail: `${command.type} is not portable across machines with these inputs.`,
         });
       const threadId = commandThreadId(command);
-      const owner = yield* replication.owner(threadId);
+      // Forwarded commands arrive outside the WebSocket/MCP request middleware.
+      const owner = yield* replication.owner(threadId).pipe(NodeSqliteClient.interactive);
       if (owner === undefined || (owner.local && owner.handoff === null)) {
         // Only the files the command names, so a peer cannot plant others here.
         const named = new Set(
@@ -478,6 +480,7 @@ const make = Effect.gen(function* () {
             ? launch.retryPreparation(command)
             : threads.dispatch(command)
         ).pipe(
+          NodeSqliteClient.interactive,
           Effect.mapError(
             (error) => new ThreadRemoteError({ reason: "rejected", detail: error.message }),
           ),
