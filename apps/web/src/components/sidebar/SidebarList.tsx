@@ -5,10 +5,10 @@ import type {
   ReactNode,
 } from "react";
 
-import { useSidebarLayout } from "~/appearancePreferences";
 import { cn } from "~/lib/utils";
 import { DisclosureChevron, DisclosurePanel } from "../ui/disclosure";
 import type { SidebarListEdge } from "./sidebarListAnchor.logic";
+import { useSidebarListEdge } from "./useSidebarListAnchor";
 
 /**
  * The sidebar's shared list pieces. Every tab (Chats, Work, Agents, Projects,
@@ -45,9 +45,9 @@ import type { SidebarListEdge } from "./sidebarListAnchor.logic";
 
 /**
  * A sidebar column that fills the rest of the scroll area: its items read
- * down from the top, or stack up against the dock below for a list anchored
- * to the bottom edge (`sidebarListEdge`). A list that reads from the top must
- * not sit at the bottom, or a short one opens with a gap above it.
+ * down from the dock above, or stack up against the dock below in the bottom
+ * layout (`useSidebarListEdge`), so a short list never opens with a gap
+ * between it and the dock.
  */
 export function sidebarFillClassName(edge: SidebarListEdge): string {
   return cn("flex-1", edge === "bottom" && "justify-end");
@@ -56,7 +56,6 @@ export function sidebarFillClassName(edge: SidebarListEdge): string {
 export function SidebarList({
   density = "rows",
   grow = false,
-  edge,
   className,
   ...props
 }: ComponentProps<"ul"> & {
@@ -64,17 +63,15 @@ export function SidebarList({
   density?: "rows" | "cards";
   /** Fill the rest of the column, so an empty state centres in it. */
   grow?: boolean;
-  /** The edge a growing list's items sit against; the sidebar layout's by default. */
-  edge?: SidebarListEdge | undefined;
 }) {
-  const layout = useSidebarLayout();
+  const edge = useSidebarListEdge();
   return (
     <ul
       {...props}
       className={cn(
         "relative flex min-w-0 flex-col",
         density === "rows" && "gap-(--sidebar-row-gap)",
-        grow && sidebarFillClassName(edge ?? layout),
+        grow && sidebarFillClassName(edge),
         className,
       )}
     />

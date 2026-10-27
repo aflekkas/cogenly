@@ -1,26 +1,26 @@
 import { type ComponentProps, useRef } from "react";
 
 import { SidebarGroup } from "../ui/sidebar";
-import type { SidebarListEdge } from "./sidebarListAnchor.logic";
-import { useSidebarListAnchor } from "./useSidebarListAnchor";
+import { useSidebarListAnchor, useSidebarListEdge } from "./useSidebarListAnchor";
 
 /**
  * The scrolling column under (or over) the search dock that every sidebar
- * list sits in: the main sidebar's modes and search, and Settings' sections
- * and search. It fills the scroll area and aligns its rows against `edge`.
- * It holds the list's scroll against that edge (`useSidebarListAnchor`): a "bottom" list opens
- * on the items nearest the dock. `listKey` names the list, so each keeps its
- * own place.
+ * list sits in: the main sidebar's modes, shelves and search, and Settings'
+ * sections and search. It fills the scroll area and aligns its rows against
+ * the dock's edge (`useSidebarListEdge`), the same for every list, so none
+ * can sit apart. It holds the list's scroll against that edge
+ * (`useSidebarListAnchor`): a "bottom" list opens on the items nearest the
+ * dock. `listKey` names the list, so each keeps its own place. Callers draw
+ * their rows from the dock outward (`drawFromDock`).
  */
 export function SidebarListColumn({
   listKey,
-  edge,
   ...props
 }: Omit<ComponentProps<typeof SidebarGroup>, "ref" | "className"> & {
   listKey: string;
-  edge: SidebarListEdge;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const edge = useSidebarListEdge();
   useSidebarListAnchor(ref, listKey, edge);
   return (
     <SidebarGroup

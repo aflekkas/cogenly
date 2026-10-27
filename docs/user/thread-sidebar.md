@@ -184,10 +184,11 @@ place. The server saves the order, so it survives a refresh and appears on your 
 lists its tasks in the same order; **Snoozed** lists them by when they come back and
 **Settled** by when they settled, so cards don't move there.
 
-Search is docked at the bottom of the sidebar by default: lists stack up toward it, and Work's
-cards are drawn the other way up, so new Work arrives at the bottom of its project, nearest
-search. To put search at the top and read lists down from it, with new Work at the top of its
-project, set **Settings → Appearance → Sidebar layout** to **Top**. Your saved order is the same in both layouts; each device keeps
+Search is docked at the bottom of the sidebar by default: every list stacks up toward it, drawn
+the other way up so what matters most sits nearest search. New Work arrives at the bottom of its
+project, the next snoozed task to wake and the latest settled one sit at the bottom of their
+filters, the newest chats sit at the bottom of Chats, and the best search match sits right above
+the search field. To put search at the top and read lists down from it, set **Settings → Appearance → Sidebar layout** to **Top**. Your saved order is the same in both layouts; each device keeps
 its own choice.
 
 On web and desktop, the list also animates section changes made with thread actions such as

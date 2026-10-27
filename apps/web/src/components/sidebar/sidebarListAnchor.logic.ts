@@ -1,34 +1,36 @@
 import type { SidebarLayout } from "~/appearancePreferences";
 
 /**
- * The edge a sidebar list is anchored to. A "top" list reads down from its
- * first rows; a "bottom" list stacks up against the dock: it opens on its last
- * rows and remembers how far it sits from them.
+ * The edge a sidebar list is anchored to: the edge the dock sits on, which is
+ * the sidebar layout's. Every list (each mode, filter, shelf and search)
+ * anchors to it, so none sits apart from the rest. A "top" list reads down
+ * from its first rows; a "bottom" list stacks up against the dock: it opens on
+ * its last rows and remembers how far it sits from them.
  */
-export type SidebarListEdge = "top" | "bottom";
+export type SidebarListEdge = SidebarLayout;
 
 /**
- * Which edge the open sidebar list anchors to. In the top layout every list
- * reads down from the dock above it. In the bottom layout the lists that stack
- * up toward the dock (Work's active lists, Agents, Settings' sections and
- * search) anchor to it, while Chats, thread search and Work's put-away shelves
- * (Settled newest first, Snoozed soonest wake first) still run from the top
- * and page downward. Settings search is short and unpaged, so it stacks up
- * from its input like a command palette.
+ * Items ranked from the dock outward (the most relevant first: newest, soonest
+ * to wake, best match), in the order they draw top to bottom, so the first
+ * always sits next to the dock.
  */
-export function sidebarListEdge(input: {
-  readonly layout: SidebarLayout;
-  readonly searching: boolean;
-  readonly mode: string;
-  readonly shelf: string | null;
-}): SidebarListEdge {
-  if (input.layout === "top") return "top";
-  if (input.mode === "settings") return "bottom";
-  if (input.searching || input.mode === "chats") return "top";
-  if (input.mode === "tasks" && (input.shelf === "settled" || input.shelf === "snoozed")) {
-    return "top";
-  }
-  return "bottom";
+export function drawFromDock<T>(ranked: readonly T[], edge: SidebarListEdge): readonly T[] {
+  return edge === "bottom" ? ranked.toReversed() : ranked;
+}
+
+/**
+ * Grouped items ranked from the dock outward (Chats' Pinned, Today, Yesterday,
+ * each newest first), drawn top to bottom. Groups and their rows run away from
+ * the dock as `drawFromDock` does, while each heading stays above its rows.
+ */
+export function drawGroupsFromDock<T>(
+  groups: readonly { readonly header: T | null; readonly rows: readonly T[] }[],
+  edge: SidebarListEdge,
+): T[] {
+  return drawFromDock(groups, edge).flatMap((group) => [
+    ...(group.header === null ? [] : [group.header]),
+    ...drawFromDock(group.rows, edge),
+  ]);
 }
 
 /**

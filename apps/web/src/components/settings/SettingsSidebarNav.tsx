@@ -46,7 +46,8 @@ import {
 } from "../sidebar/SidebarList";
 import { SidebarListColumn } from "../sidebar/SidebarListColumn";
 import { SidebarSearchDock, type SidebarDockAction } from "../sidebar/SidebarSearchDock";
-import { sidebarListEdge, stepSearchResultIndex } from "../sidebar/sidebarListAnchor.logic";
+import { drawFromDock, stepSearchResultIndex } from "../sidebar/sidebarListAnchor.logic";
+import { useSidebarListEdge } from "../sidebar/useSidebarListAnchor";
 import { BadgeDot } from "../ui/badge-dot";
 import { useSettingsAttentionByPage } from "../../machines/machineHealthAlertsStore";
 import { SETTINGS_PAGE_NEEDS_ATTENTION_LABEL } from "./settingsAttention.logic";
@@ -112,18 +113,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const legacySidebarEnabled = useLegacySidebarEnabled();
   const navRailVisible = !isMobile && !legacySidebarEnabled;
   const sidebarLayout = useSidebarLayout();
-  const searchEdge = sidebarListEdge({
-    layout: sidebarLayout,
-    searching: true,
-    mode: "settings",
-    shelf: null,
-  });
-  const sectionsEdge = sidebarListEdge({
-    layout: sidebarLayout,
-    searching: false,
-    mode: "settings",
-    shelf: null,
-  });
+  const searchEdge = useSidebarListEdge();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [activeResultIndex, setActiveResultIndex] = useState(0);
@@ -292,14 +282,14 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
           // Results sit by the dock with the best match nearest the input:
           // reading down from it, or in the bottom layout stacked up against
           // it like a command palette, so the rows render in reverse rank.
-          <SidebarListColumn listKey="settings:search" edge={searchEdge}>
+          <SidebarListColumn listKey="settings:search">
             {hasResults ? (
               <SidebarList
                 id="settings-search-results"
                 role="listbox"
                 aria-label="Settings search results"
               >
-                {(searchEdge === "bottom" ? results.toReversed() : results).map((item, row) => {
+                {drawFromDock(results, searchEdge).map((item, row) => {
                   const index = searchEdge === "bottom" ? results.length - 1 - row : row;
                   const Icon = SETTINGS_SECTION_ICONS[item.to];
                   return (
@@ -354,7 +344,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
           // headings, or in the bottom layout stack up against it in the same
           // reading order. Each is a plain sidebar row that carries its own
           // selected fill, as a chat row does.
-          <SidebarListColumn listKey="settings:sections" edge={sectionsEdge}>
+          <SidebarListColumn listKey="settings:sections">
             <SidebarList aria-label="Settings sections">
               {SETTINGS_NAV_GROUPS.flatMap((group) => [
                 ...(group.label === null

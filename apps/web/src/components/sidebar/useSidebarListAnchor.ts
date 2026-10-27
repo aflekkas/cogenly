@@ -1,5 +1,6 @@
 import { type RefObject, useEffect, useLayoutEffect, useRef } from "react";
 
+import { useSidebarLayout } from "~/appearancePreferences";
 import { observeResize } from "~/lib/observeResize";
 
 import {
@@ -7,6 +8,9 @@ import {
   scrollTopForOffset,
   type SidebarListEdge,
 } from "./sidebarListAnchor.logic";
+
+/** The edge every sidebar list anchors to (`SidebarListEdge`): the dock's. */
+export const useSidebarListEdge = (): SidebarListEdge => useSidebarLayout();
 
 /** Each list's distance from its anchored edge, kept while the sidebar unmounts on Settings. */
 const offsetByList = new Map<string, number>();
@@ -41,7 +45,7 @@ function holdOffset(viewport: HTMLElement, listKey: string, edge: SidebarListEdg
 }
 
 /**
- * Anchors a sidebar list's scroll to one edge (`sidebarListEdge`). A "top"
+ * Anchors a sidebar list's scroll to one edge (`useSidebarListEdge`). A "top"
  * list reads down from the dock: it opens on its first rows. A "bottom" list
  * fills from the bottom like a log: it opens on its last rows (by the dock),
  * remembers its place as a distance from them, and holds that distance while

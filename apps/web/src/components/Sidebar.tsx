@@ -353,7 +353,12 @@ import {
 import { SidebarListRevealSentinel, useSidebarListReveal } from "./sidebar/SidebarListReveal";
 import { SidebarListColumn } from "./sidebar/SidebarListColumn";
 import { SidebarShortcutSlot } from "./sidebar/SidebarShortcutSlot";
-import { sidebarListEdge } from "./sidebar/sidebarListAnchor.logic";
+import {
+  drawFromDock,
+  drawGroupsFromDock,
+  stepSearchResultIndex,
+} from "./sidebar/sidebarListAnchor.logic";
+import { useSidebarListEdge } from "./sidebar/useSidebarListAnchor";
 import { useSidebarLayout } from "../appearancePreferences";
 import { useAgentListFilter } from "../agents/agentListFilter";
 import { AgentsShelfBar } from "../agents/AgentsShelfBar";
@@ -2495,6 +2500,8 @@ export default function Sidebar() {
   // Top docks search under the titlebar; bottom docks it at the column's foot
   // and stacks the lists up toward it (Settings → Appearance).
   const sidebarLayout = useSidebarLayout();
+  // Every list draws its items from the dock outward (drawFromDock).
+  const listEdge = useSidebarListEdge();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
@@ -3484,15 +3491,11 @@ export default function Sidebar() {
         return;
       }
       if (threadSearchResults.length === 0) return;
-      if (event.key === "ArrowDown") {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
-        setActiveSearchResultIndex((index) => (index + 1) % threadSearchResults.length);
-        return;
-      }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setActiveSearchResultIndex(
-          (index) => (index - 1 + threadSearchResults.length) % threadSearchResults.length,
+        const key = event.key;
+        setActiveSearchResultIndex((index) =>
+          stepSearchResultIndex(key, index, threadSearchResults.length, listEdge),
         );
         return;
       }
@@ -3506,6 +3509,7 @@ export default function Sidebar() {
       activeSearchResultIndex,
       clearThreadSearch,
       isSearchingThreads,
+      listEdge,
       selectThreadSearchResult,
       threadSearchResults,
     ],
@@ -3957,6 +3961,8 @@ export default function Sidebar() {
       // once at the start, against the list, so the preview's own motion and
       // scrolling never feed back into the drop slot.
       const pinOrder = pinnedReorderOrder(key);
+      // Rows are measured as drawn, which the bottom layout reverses.
+      const drawnPinOrder = pinOrder === null ? null : drawFromDock(pinOrder, listEdge);
       let pinStart: { pointerY: number; center: number; midpoints: number[] } | null = null;
       let pinPreview: readonly string[] | null = null;
       const listY = (y: number) => y - (threadListRef.current?.getBoundingClientRect().top ?? 0);
@@ -3978,7 +3984,7 @@ export default function Sidebar() {
         onStart: ({ y }) => {
           contextDragKeyRef.current = key;
           const list = threadListRef.current;
-          if (pinOrder === null || list === null) return;
+          if (drawnPinOrder === null || list === null) return;
           const layout = new Map<string, { top: number; height: number }>();
           // Rows sit in their fold slots; offsets still measure from the list.
           for (const row of list.querySelectorAll<HTMLElement>("[data-thread-item]")) {
@@ -3989,19 +3995,22 @@ export default function Sidebar() {
           pinStart = {
             pointerY: listY(y),
             center: moved.top + moved.height / 2,
-            midpoints: pinOrder.flatMap((candidate) => {
+            midpoints: drawnPinOrder.flatMap((candidate) => {
               const row = candidate === key ? undefined : layout.get(candidate);
               return row ? [row.top + row.height / 2] : [];
             }),
           };
         },
         onMove: ({ y }) => {
-          if (pinOrder === null || pinStart === null) return;
-          const next = pinnedDragOrder(
-            pinOrder,
-            key,
-            pinStart.midpoints,
-            pinStart.center + listY(y) - pinStart.pointerY,
+          if (drawnPinOrder === null || pinStart === null) return;
+          const next = drawFromDock(
+            pinnedDragOrder(
+              drawnPinOrder,
+              key,
+              pinStart.midpoints,
+              pinStart.center + listY(y) - pinStart.pointerY,
+            ),
+            listEdge,
           );
           if (pinPreview !== null && next.join("\0") === pinPreview.join("\0")) return;
           pinPreview = next;
@@ -4249,11 +4258,12 @@ export default function Sidebar() {
     return () => window.clearTimeout(timer);
   }, [workDrag, workDropLanded]);
   // Rows as they read on screen, for range selection and action sweeps: in
-  // Work that is project by project. Settle-and-advance keeps the list order.
+  // Work that is project by project, elsewhere the list drawn from the dock.
+  // Settle-and-advance keeps the list order.
   const drawnThreadKeysRef = useRef<readonly string[]>(orderedThreadKeys);
   drawnThreadKeysRef.current =
     workRows === null
-      ? orderedThreadKeys
+      ? drawFromDock(orderedThreadKeys, listEdge)
       : workRows.groups.flatMap((group) =>
           group.cards.flatMap((card) => (card.kind === "thread" ? [card.key] : [])),
         );
@@ -4336,11 +4346,11 @@ export default function Sidebar() {
     [sidebarListItems],
   );
   const sidebarListHasRows = sidebarListItems.length + visibleDraftSessionCount > 0;
-  // Each list (a mode and its filter, or search) keeps its own place against
-  // its edge: read down from the dock in the top layout, while in the bottom
-  // layout Work's active lists and Agents open on their last rows by the dock.
-  // The column (SidebarListColumn) anchors it in a child layout effect, so the
-  // scroll settles before the list motion below measures rows.
+  // Each list (a mode and its filter or shelf, or search) keeps its own place
+  // against the dock's edge: read down from the dock in the top layout, or in
+  // the bottom layout open on their last rows by the dock. The column
+  // (SidebarListColumn) anchors it in a child layout effect, so the scroll
+  // settles before the list motion below measures rows.
   const agentListFilter = useAgentListFilter();
   const sidebarModeListKey = `${
     isSearchingThreads
@@ -4351,12 +4361,6 @@ export default function Sidebar() {
           ? `agents:${agentListFilter}`
           : sidebarMode
   }${projectFilter === null ? "" : `|${projectFilter}`}`;
-  const sidebarModeListEdge = sidebarListEdge({
-    layout: sidebarLayout,
-    searching: isSearchingThreads,
-    mode: sidebarMode,
-    shelf: openShelf ?? null,
-  });
   const listMotionModeRef = useRef(sidebarMode);
   const listMotionShelfRef = useRef(openShelf);
   const listMotionProjectFilterRef = useRef(projectFilter);
@@ -4378,8 +4382,8 @@ export default function Sidebar() {
     // mode; AppSidebarLayout plays the switch's one enter motion on the column.
     const modeChanged = listMotionModeRef.current !== sidebarMode;
     listMotionModeRef.current = sidebarMode;
-    // Switching the Work count bar's filter swaps the list the same way:
-    // instantly, with no fade.
+    // Switching the Work count bar's filter swaps the list the same way: the
+    // rows snap to the new filter's, which fades in as one (opacity only).
     const shelfChanged = listMotionShelfRef.current !== openShelf;
     listMotionShelfRef.current = openShelf;
     // A project filter swaps most of the list too: the rows snap to the
@@ -4400,7 +4404,9 @@ export default function Sidebar() {
         !sortDropped,
       { inPlace: revealed },
     );
-    if (projectFilterChanged && !modeChanged) listMotionRef.current?.fadeInList();
+    if ((projectFilterChanged || shelfChanged) && !modeChanged) {
+      listMotionRef.current?.fadeInList();
+    }
   }, [
     chatVisibleCount,
     openShelf,
@@ -5497,7 +5503,7 @@ export default function Sidebar() {
           ) : null
         }
       >
-        <SidebarListColumn listKey={sidebarModeListKey} edge={sidebarModeListEdge}>
+        <SidebarListColumn listKey={sidebarModeListKey}>
           {isSearchingThreads ? (
             threadSearchResults.length > 0 ? (
               <TooltipProvider
@@ -5511,7 +5517,10 @@ export default function Sidebar() {
                   role="listbox"
                   aria-label="Thread search results"
                 >
-                  {threadSearchResults.map((thread, index) => {
+                  {/* The best match sits next to the input, as in Settings search. */}
+                  {drawFromDock(threadSearchResults, listEdge).map((thread, row) => {
+                    const index =
+                      listEdge === "bottom" ? threadSearchResults.length - 1 - row : row;
                     const threadKey = scopedThreadKey(
                       scopeThreadRef(thread.environmentId, thread.id),
                     );
@@ -5608,7 +5617,6 @@ export default function Sidebar() {
                 density={sidebarMode === "tasks" ? "cards" : "rows"}
                 onKeyDown={sidebarMode === "tasks" ? handleWorkListKeyDown : undefined}
                 grow={sidebarListItems.length > 0}
-                edge={sidebarModeListEdge}
                 className={cn(
                   // An action sweep owns the pointer: rows it passes over
                   // neither show hover actions nor open tooltips, even
@@ -5851,8 +5859,17 @@ export default function Sidebar() {
                     }
                     return items;
                   }
+                  // The rest (Chats' date groups, Work's Snoozed and Settled
+                  // shelves) are ranked from the dock outward: the drafts,
+                  // then newest chats first, Snoozed soonest wake first,
+                  // Settled newest settled first. drawGroupsFromDock lays them
+                  // out so the first sits by the dock, headings above their rows.
+                  const groups: { header: ReactNode | null; rows: ReactNode[] }[] = [
+                    { header: null, rows: [] },
+                  ];
+                  const push = (node: ReactNode) => groups[groups.length - 1]!.rows.push(node);
                   if (shownSection === null)
-                    items.push(
+                    push(
                       <SidebarDraftBlock
                         key="draft-sessions"
                         projectByKey={projectByKey}
@@ -5866,32 +5883,29 @@ export default function Sidebar() {
                     );
                   const chatDateGroupOf =
                     sidebarMode === "chats" ? createChatDateGrouper(new Date()) : null;
-                  // Settled is one flat list, newest settled at the top.
-                  const flatShelfRows: ReactNode[] | null = shownSection === "settled" ? [] : null;
                   for (const item of sidebarListItems) {
                     if (item.kind === "thread") {
                       if (shownSection !== null && item.section !== shownSection) continue;
                       const thread = threadByKey.get(item.key)!;
-                      if (flatShelfRows) {
-                        flatShelfRows.push(renderThreadRow(thread, item.section));
-                        continue;
-                      }
                       const dateGroup =
                         item.section === "active" ? chatDateGroupOf?.(thread) : null;
                       if (dateGroup) {
                         const collapsed = collapsedInSpace.includes(dateGroup);
-                        items.push(
-                          <SidebarGroupHeader
-                            key={`chat-date:${dateGroup}`}
-                            label={CHAT_DATE_GROUP_LABELS[dateGroup]}
-                            count={chatDateGroupCounts.get(dateGroup) ?? 0}
-                            collapse={{
-                              open: !collapsed,
-                              onToggle: () => toggleSection(dateGroup),
-                              ariaLabel: `${CHAT_DATE_GROUP_LABELS[dateGroup]}, ${collapsed ? "expand" : "collapse"}`,
-                            }}
-                          />,
-                        );
+                        groups.push({
+                          rows: [],
+                          header: (
+                            <SidebarGroupHeader
+                              key={`chat-date:${dateGroup}`}
+                              label={CHAT_DATE_GROUP_LABELS[dateGroup]}
+                              count={chatDateGroupCounts.get(dateGroup) ?? 0}
+                              collapse={{
+                                open: !collapsed,
+                                onToggle: () => toggleSection(dateGroup),
+                                ariaLabel: `${CHAT_DATE_GROUP_LABELS[dateGroup]}, ${collapsed ? "expand" : "collapse"}`,
+                              }}
+                            />
+                          ),
+                        });
                       }
                       // A folded date group keeps only the open chat; the
                       // rest fold shut under the heading.
@@ -5900,7 +5914,7 @@ export default function Sidebar() {
                           ? chatDateGroupByKey.get(item.key)
                           : undefined;
                       if (chatGroup !== undefined) {
-                        items.push(
+                        push(
                           <SidebarFoldRow
                             key={item.key}
                             // A fold hides every row; the open one stays selected.
@@ -5911,14 +5925,14 @@ export default function Sidebar() {
                         );
                         continue;
                       }
-                      items.push(renderThreadRow(thread, item.section));
+                      push(renderThreadRow(thread, item.section));
                       continue;
                     }
                     switch (item.marker) {
                       case "working-header":
                         // In Work the count bar labels the lists, so shelves have no header.
                         if (shownSection !== null) break;
-                        items.push(
+                        push(
                           <SidebarSectionHeader
                             key="working-shelf-header"
                             marker="working-header"
@@ -5934,7 +5948,7 @@ export default function Sidebar() {
                       case "snoozed-header":
                         // In Work the count bar labels the lists, so shelves have no header.
                         if (shownSection !== null) break;
-                        items.push(
+                        push(
                           <SidebarSectionHeader
                             key="snoozed-shelf-header"
                             marker="snoozed-header"
@@ -5950,7 +5964,7 @@ export default function Sidebar() {
                       case "settled-header":
                         // In Work the count bar labels the lists, so shelves have no header.
                         if (shownSection !== null) break;
-                        items.push(
+                        push(
                           <SidebarSectionHeader
                             key="settled-shelf-header"
                             marker="settled-header"
@@ -5965,23 +5979,26 @@ export default function Sidebar() {
                         break;
                     }
                   }
-                  if (flatShelfRows) items.push(...flatShelfRows);
-                  return items;
+                  // Older pages land at the far end from the dock: below the
+                  // last row in the top layout, above the first in the bottom
+                  // one, where the anchor keeps the rows on screen still.
+                  const pageSentinel =
+                    sidebarMode === "tasks" && settledShelfExpanded && hiddenSettledCount > 0 ? (
+                      <SidebarListRevealSentinel
+                        key={`settled:${settledVisibleCount}`}
+                        onReveal={revealMoreSettled}
+                      />
+                    ) : chatWindow !== null && chatWindow.hiddenCount > 0 ? (
+                      <SidebarListRevealSentinel
+                        key={`chats:${chatVisibleCount}`}
+                        onReveal={revealMoreChats}
+                      />
+                    ) : null;
+                  const drawn = drawGroupsFromDock(groups, listEdge);
+                  return listEdge === "bottom"
+                    ? [pageSentinel, ...drawn]
+                    : [...drawn, pageSentinel];
                 })()}
-                {sidebarMode === "tasks" && settledShelfExpanded && hiddenSettledCount > 0 ? (
-                  // Settled runs newest first from the top, so older pages
-                  // land below the last row.
-                  <SidebarListRevealSentinel
-                    key={`settled:${settledVisibleCount}`}
-                    onReveal={revealMoreSettled}
-                  />
-                ) : null}
-                {chatWindow !== null && chatWindow.hiddenCount > 0 ? (
-                  <SidebarListRevealSentinel
-                    key={`chats:${chatVisibleCount}`}
-                    onReveal={revealMoreChats}
-                  />
-                ) : null}
               </SidebarList>
             </SidebarThreadListProviders>
           ) : null}

@@ -1,54 +1,60 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  drawFromDock,
+  drawGroupsFromDock,
   offsetFromEdge,
   scrollTopForOffset,
-  sidebarListEdge,
   stepSearchResultIndex,
 } from "./sidebarListAnchor.logic";
 
 // 1000px of rows in a 400px viewport: scrollTop runs 0..600.
 const box = { scrollHeight: 1000, clientHeight: 400 };
 
-describe("sidebarListEdge", () => {
-  it("reads every list down from the dock in the top layout", () => {
-    for (const mode of ["tasks", "agents", "chats"]) {
-      expect(sidebarListEdge({ layout: "top", searching: false, mode, shelf: null })).toBe("top");
-    }
-    expect(sidebarListEdge({ layout: "top", searching: true, mode: "tasks", shelf: null })).toBe(
-      "top",
-    );
+describe("drawFromDock", () => {
+  // Snoozed, soonest wake first.
+  const snoozed = ["in 1h", "tomorrow", "next week"];
+
+  it("draws the most relevant item first, under the dock, in the top layout", () => {
+    expect(drawFromDock(snoozed, "top")).toEqual(["in 1h", "tomorrow", "next week"]);
   });
 
-  it("anchors Work's active lists and Agents to the dock in the bottom layout", () => {
-    const bottom = (mode: string, shelf: string | null) =>
-      sidebarListEdge({ layout: "bottom", searching: false, mode, shelf });
-    expect(bottom("tasks", null)).toBe("bottom");
-    expect(bottom("tasks", "attention")).toBe("bottom");
-    expect(bottom("agents", null)).toBe("bottom");
+  it("draws the most relevant item last, over the dock, in the bottom layout", () => {
+    expect(drawFromDock(snoozed, "bottom")).toEqual(["next week", "tomorrow", "in 1h"]);
+    expect(snoozed).toEqual(["in 1h", "tomorrow", "next week"]);
+  });
+});
+
+describe("drawGroupsFromDock", () => {
+  // Chats, ranked from the dock: the drafts, then Pinned, then Today, newest first.
+  const groups = [
+    { header: null, rows: ["draft"] },
+    { header: "Pinned", rows: ["pin a", "pin b"] },
+    { header: "Today", rows: ["newest", "older"] },
+  ];
+
+  it("reads groups and rows down from the dock in the top layout", () => {
+    expect(drawGroupsFromDock(groups, "top")).toEqual([
+      "draft",
+      "Pinned",
+      "pin a",
+      "pin b",
+      "Today",
+      "newest",
+      "older",
+    ]);
   });
 
-  it("opens Settings' sections on the ones by the dock, in the bottom layout only", () => {
-    const settings = (layout: "top" | "bottom") =>
-      sidebarListEdge({ layout, searching: false, mode: "settings", shelf: null });
-    expect(settings("bottom")).toBe("bottom");
-    expect(settings("top")).toBe("top");
-  });
-
-  it("runs Settled, Snoozed, Chats and search from the top in the bottom layout", () => {
-    const bottom = (mode: string, shelf: string | null, searching = false) =>
-      sidebarListEdge({ layout: "bottom", searching, mode, shelf });
-    expect(bottom("tasks", "settled")).toBe("top");
-    expect(bottom("tasks", "snoozed")).toBe("top");
-    expect(bottom("chats", null)).toBe("top");
-    expect(bottom("tasks", null, true)).toBe("top");
-  });
-
-  it("stacks Settings search up from its input in the bottom layout only", () => {
-    const search = (layout: "top" | "bottom") =>
-      sidebarListEdge({ layout, searching: true, mode: "settings", shelf: null });
-    expect(search("bottom")).toBe("bottom");
-    expect(search("top")).toBe("top");
+  it("stacks them up to the dock in the bottom layout, each heading above its rows", () => {
+    expect(drawGroupsFromDock(groups, "bottom")).toEqual([
+      "Today",
+      "older",
+      "newest",
+      "Pinned",
+      "pin b",
+      "pin a",
+      "draft",
+    ]);
   });
 });
 
