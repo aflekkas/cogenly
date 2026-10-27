@@ -146,7 +146,7 @@ export function browserExtensionStatus(
     case "installing":
       return { tone: "info", label: "Loading", detail: null };
     case "pending":
-      return { tone: "muted", label: "Starts with its first tab", detail: null };
+      return { tone: "muted", label: "Loads when a tab opens", detail: null };
     case "failed":
       return {
         tone: "destructive",

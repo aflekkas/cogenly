@@ -164,7 +164,7 @@ describe("browserExtensionStatus", () => {
     expect(browserExtensionStatus(extensionFixture("a", { enabled: false }))?.label).toBe("Off");
     expect(browserExtensionStatus(extensionFixture("a", { state: "pending" }))).toEqual({
       tone: "muted",
-      label: "Starts with its first tab",
+      label: "Loads when a tab opens",
       detail: null,
     });
   });
