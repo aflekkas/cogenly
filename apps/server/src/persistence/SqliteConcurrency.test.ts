@@ -146,6 +146,38 @@ it.live("a steady stream of interactive work cannot starve background work", () 
   }),
 );
 
+it.live("an abandoned reader statement keeps the reader until the worker finishes it", () =>
+  Effect.gen(function* () {
+    const { sql } = yield* database;
+    // Start the reader worker so the slow statement below is sent at once.
+    yield* sql`SELECT 1`.pipe(NodeSqliteClient.readOnly);
+    const slow = yield* sql`
+      WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 3000000)
+      SELECT COUNT(*) AS count FROM n`.pipe(
+      NodeSqliteClient.readOnly,
+      Effect.forkChild({ startImmediately: true }),
+    );
+    yield* NodeSqliteClient.eventLoopTurn;
+    // A timed-out probe stops waiting, but the worker is still running its statement.
+    yield* Fiber.interrupt(slow);
+    const finished: Array<string> = [];
+    const read = (name: string) =>
+      sql`SELECT value FROM items`.pipe(
+        NodeSqliteClient.readOnly,
+        Effect.tap(() => Effect.sync(() => finished.push(name))),
+      );
+    const background = yield* read("background").pipe(Effect.forkChild({ startImmediately: true }));
+    const user = yield* read("interactive").pipe(
+      NodeSqliteClient.interactive,
+      Effect.forkChild({ startImmediately: true }),
+    );
+    yield* Fiber.joinAll([background, user]);
+    // Had the lock passed on at the interrupt, the background read would have
+    // reached the worker first and the user's read would queue behind it.
+    expect(finished).toEqual(["interactive", "background"]);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
 it.live("a waiter interrupted while queued leaves the writer usable", () =>
   Effect.gen(function* () {
     const { sql } = yield* database;

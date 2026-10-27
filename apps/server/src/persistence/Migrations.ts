@@ -1,3 +1,4 @@
+import Migration0114 from "./Migrations/114_TurnItemTypeIndex.ts";
 import Migration0113 from "./Migrations/113_ProjectFileSync.ts";
 import Migration0112 from "./Migrations/112_VaultLogins.ts";
 import Migration0111 from "./Migrations/111_AgentContinuity.ts";
@@ -254,6 +255,7 @@ export const migrationEntries = [
   [111, "AgentContinuity", Migration0111],
   [112, "VaultLogins", Migration0112],
   [113, "ProjectFileSync", Migration0113],
+  [114, "TurnItemTypeIndex", Migration0114],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

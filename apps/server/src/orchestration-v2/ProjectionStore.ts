@@ -4023,13 +4023,14 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   ON subagents.provider_thread_id = pending_provider_threads.provider_thread_id
                 UNION
                 SELECT subagents.child_thread_id FROM orchestration_v2_projection_subagents AS subagents
-                WHERE subagents.child_thread_id IS NOT NULL
-                  AND EXISTS (
-                    SELECT 1 FROM orchestration_v2_projection_nodes AS node
-                    WHERE node.thread_id = subagents.child_thread_id
+                WHERE subagents.child_thread_id IN (
+                    SELECT node.thread_id FROM orchestration_v2_projection_nodes AS node
+                    -- The live index's own condition, so this reads only live
+                    -- nodes instead of probing every child's whole node list.
+                    WHERE node.status IN ('pending', 'starting', 'running', 'waiting')
+                      AND node.status <> 'starting'
                       AND node.run_id IS NULL
                       AND node.kind = 'root_turn'
-                      AND node.status IN ('pending', 'running', 'waiting')
                   )
                 UNION
                 -- No native subagent outlives the provider process that ran it.

@@ -303,30 +303,40 @@ describe("ThreadLaunchService project filing", () => {
     }).pipe(Effect.provide(layer));
   });
 
-  it.effect("creates the thread immediately and checks out in background preparation", () => {
-    const { steps, layer } = harness({ filedRepository: true, runPreparing: true });
-    return Effect.gen(function* () {
-      const launches = yield* ThreadLaunch.ThreadLaunchService;
-      yield* launches.launch(launchInput({ surface: "work" }));
-      // The launch itself never waits for a clone.
-      expect(steps).not.toContainEqual({ kind: "checkout", repositoryId: projectId });
-      expect(steps).toContainEqual({ kind: "dispatch", type: "thread.create" });
-      // Background preparation ensures the checkout, then releases the run.
-      for (let i = 0; i < 50 && !steps.some((step) => step.kind === "checkout"); i++) {
-        yield* Effect.yieldNow;
-      }
-      expect(steps).toContainEqual({ kind: "checkout", repositoryId: projectId });
-      for (
-        let i = 0;
-        i < 50 &&
-        !steps.some((step) => step.kind === "dispatch" && step.type === "prepared-run.release");
-        i++
-      ) {
-        yield* Effect.yieldNow;
-      }
-      expect(steps).toContainEqual({ kind: "dispatch", type: "prepared-run.release" });
-    }).pipe(Effect.provide(layer));
-  });
+  it.effect("creates the thread immediately and checks out in background preparation", () =>
+    Effect.gen(function* () {
+      // Background preparation may start the checkout before the launch
+      // returns; the gate holds it so the test sees the launch finish first.
+      const gate = yield* Deferred.make<void>();
+      const { steps, layer } = harness({
+        filedRepository: true,
+        runPreparing: true,
+        checkoutGate: gate,
+      });
+      yield* Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        yield* launches.launch(launchInput({ surface: "work" }));
+        // The launch itself never waits for a clone, and the run stays held.
+        expect(steps).toContainEqual({ kind: "dispatch", type: "thread.create" });
+        expect(steps).not.toContainEqual({ kind: "dispatch", type: "prepared-run.release" });
+        yield* Deferred.succeed(gate, undefined);
+        // Background preparation ensures the checkout, then releases the run.
+        for (let i = 0; i < 50 && !steps.some((step) => step.kind === "checkout"); i++) {
+          yield* Effect.yieldNow;
+        }
+        expect(steps).toContainEqual({ kind: "checkout", repositoryId: projectId });
+        for (
+          let i = 0;
+          i < 50 &&
+          !steps.some((step) => step.kind === "dispatch" && step.type === "prepared-run.release");
+          i++
+        ) {
+          yield* Effect.yieldNow;
+        }
+        expect(steps).toContainEqual({ kind: "dispatch", type: "prepared-run.release" });
+      }).pipe(Effect.provide(layer));
+    }),
+  );
 
   it.effect("does not block the launch while a clone is still running", () => {
     return Effect.gen(function* () {
