@@ -74,6 +74,26 @@ it.effect("refuses a surface whose host was already closed", () =>
   }).pipe(Effect.provide(Manager.layer.pipe(Layer.provide(NodeCrypto.layer)))),
 );
 
+it.effect("surface sessions always stream and cannot be claimed as native", () =>
+  Effect.gen(function* () {
+    const manager = yield* Manager.PreviewManager;
+    const host = yield* manager.open({ threadId, runtime: "server" });
+    const surface = yield* manager.open({
+      threadId,
+      runtime: "desktop",
+      serverRendering: "native",
+      extensionSurface: { kind: "popup", extensionId: "a".repeat(32), hostTabId: host.tabId },
+    });
+    expect(surface.runtime).toBe("server");
+    expect(surface.serverRendering).toBe("stream");
+    yield* manager.reportServerRendering({ ...surface, serverRendering: "native" });
+    const saved = (yield* manager.list({ threadId })).sessions.find(
+      (tab) => tab.tabId === surface.tabId,
+    )!;
+    expect(saved.serverRendering).toBe("stream");
+  }).pipe(Effect.provide(Manager.layer.pipe(Layer.provide(NodeCrypto.layer)))),
+);
+
 const rig = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -109,7 +129,7 @@ const rig = Effect.gen(function* () {
   ]) {
     yield* fs.writeFileString(
       path.join(folder, `${file}.html`),
-      `<!doctype html><h1>${title}</h1><button>Test content script</button><output>idle</output><script src="ui.js"></script>`,
+      `<!doctype html>${file === "popup" ? "<style>body{display:flow-root;margin:0;width:320px;height:180px}</style>" : ""}<h1>${title}</h1><button>Test content script</button><output>idle</output><script src="ui.js"></script>`,
     );
   }
   yield* fs.writeFileString(
@@ -175,7 +195,7 @@ const rig = Effect.gen(function* () {
         Effect.asVoid,
       ),
   };
-  yield* Layer.build(
+  const browserContext = yield* Layer.build(
     ServerBrowser.layer.pipe(
       Layer.provide(
         Layer.succeedContext(Context.add(dependencies, Broker.PreviewAutomationBroker, reporting)),
@@ -232,6 +252,20 @@ const rig = Effect.gen(function* () {
         Stream.runDrain,
       );
     }).pipe(Effect.scoped);
+  const awaitPreferredSize = (tabId: string, width: number, height: number) =>
+    Effect.gen(function* () {
+      const subscription = yield* manager.subscribeEvents;
+      const matches = (snapshot: import("@cogenly/contracts").PreviewSessionSnapshot) =>
+        snapshot.tabId === tabId &&
+        snapshot.extensionSurface?.preferredSize?.width === width &&
+        snapshot.extensionSurface.preferredSize.height === height;
+      if ((yield* manager.list({ threadId })).sessions.some(matches)) return;
+      yield* Stream.fromSubscription(subscription).pipe(
+        Stream.filter((event) => event.type === "navigated" && matches(event.snapshot)),
+        Stream.take(1),
+        Stream.runDrain,
+      );
+    }).pipe(Effect.scoped);
   const installed = yield* extensions.install({ source: folder });
   yield* extensions.subscribe({}).pipe(
     Stream.filter((list) =>
@@ -252,12 +286,14 @@ const rig = Effect.gen(function* () {
     extensions.openSurface({ id: installed.extension.id, kind, hostTabId: host.tabId!, threadId });
   return {
     extensions,
+    browser: Context.get(browserContext, ServerBrowser.ServerBrowser),
     manager,
     invoke,
     host,
     openSurface,
     awaitTab,
     awaitPage,
+    awaitPreferredSize,
     liveTabs,
     root,
     folder,
@@ -282,15 +318,21 @@ const provide = <A, E>(
 
 describe.skipIf(!chrome)("real Chrome extension surfaces", () => {
   it.live(
-    "adopts native popup and module-worker side panel, drives their elements, and closes them with the host",
+    "keeps an agent popup alive across blur, drives the native module-worker panel, and closes both with the host",
     () =>
       provide(
         Effect.gen(function* () {
           const r = yield* rig;
           const popup = yield* r.openSurface("popup");
-          expect(popup.notice).toBeUndefined();
+          expect(popup.notice).toContain("persistent extension surface");
           expect(popup.hostTabId).toBe(r.host.tabId);
           expect(popup.surfaceTabId).toBeDefined();
+          expect(
+            yield* r.invoke("evaluate", popup.surfaceTabId, {
+              expression:
+                "chrome.tabs.query({active:true,lastFocusedWindow:true}).then(([tab])=>tab.index)",
+            }),
+          ).toBe(0);
           const snap = yield* r.invoke<{ text: string }>("snapshot", popup.surfaceTabId, {
             output: "full",
           });
@@ -301,7 +343,7 @@ describe.skipIf(!chrome)("real Chrome extension surfaces", () => {
             "status",
             popup.surfaceTabId,
           );
-          expect(popupStatus.extensionSurface).toEqual({
+          expect(popupStatus.extensionSurface).toMatchObject({
             kind: "popup",
             extensionId: r.id,
             hostTabId: r.host.tabId,
@@ -311,7 +353,14 @@ describe.skipIf(!chrome)("real Chrome extension surfaces", () => {
           });
           const panel = yield* r.openSurface("sidePanel");
           expect(panel.notice).toBeUndefined();
+          expect(
+            (yield* r.invoke<PreviewAutomationStatus>("status", panel.surfaceTabId))
+              .extensionSurface?.preferredSize,
+          ).toBeUndefined();
           expect(panel.surfaceTabId).not.toBe(popup.surfaceTabId);
+          expect(
+            JSON.stringify(yield* r.invoke("snapshot", popup.surfaceTabId, { output: "full" })),
+          ).toContain("content script reached");
           expect(
             JSON.stringify(yield* r.invoke("snapshot", panel.surfaceTabId, { output: "full" })),
           ).toContain("Panel");
@@ -326,6 +375,92 @@ describe.skipIf(!chrome)("real Chrome extension surfaces", () => {
           expect((yield* r.manager.list({ threadId })).sessions).toHaveLength(0);
         }),
       ),
+  );
+
+  it.live("adopts a user's native popup on the correct host when URLs repeat", () =>
+    provide(
+      Effect.gen(function* () {
+        const r = yield* rig;
+        const host = yield* r.manager.open({
+          threadId,
+          runtime: "server",
+          profileId: "default",
+          url: r.url,
+        });
+        yield* r.awaitTab(() => r.liveTabs.size === 2);
+        const popup = yield* r.extensions.openSurface({
+          id: r.id,
+          kind: "popup",
+          hostTabId: host.tabId,
+          threadId,
+        });
+        expect(popup.notice).toBeUndefined();
+        yield* r.awaitPreferredSize(popup.surfaceTabId!, 320, 180);
+        expect(
+          yield* r.invoke("evaluate", popup.surfaceTabId, {
+            expression:
+              "chrome.tabs.query({active:true,lastFocusedWindow:true}).then(([tab])=>tab.index)",
+          }),
+        ).toBe(1);
+        expect(
+          JSON.stringify(yield* r.invoke("snapshot", popup.surfaceTabId, { output: "full" })),
+        ).toContain("Test content script");
+        yield* r.invoke("click", popup.surfaceTabId, { selector: "button", output: "none" });
+        yield* r.invoke("waitFor", popup.surfaceTabId, { text: "content script reached" });
+        yield* r.manager.close({ threadId, tabId: host.tabId });
+        yield* r.awaitTab(() => !r.liveTabs.has(popup.surfaceTabId!));
+      }),
+    ),
+  );
+
+  it.live("measures popup content changes, clamps them, and ignores stream resize", () =>
+    provide(
+      Effect.gen(function* () {
+        const r = yield* rig;
+        const popup = yield* r.openSurface("popup");
+        yield* r.awaitPreferredSize(popup.surfaceTabId!, 320, 180);
+        const viewer = yield* r.browser.attachViewer({
+          threadId,
+          tabId: popup.surfaceTabId!,
+          maxWidth: 800,
+          maxHeight: 600,
+          quality: 70,
+          canOperate: true,
+        });
+        yield* viewer.input({ type: "takeControl" });
+        yield* viewer.input({ type: "resize", width: 740, height: 540 });
+        const streamed = yield* r.invoke<PreviewAutomationStatus>("status", popup.surfaceTabId);
+        expect(streamed.viewport).toEqual({ width: 320, height: 180 });
+        expect(streamed.extensionSurface?.preferredSize).toEqual({ width: 320, height: 180 });
+        const viewport = yield* r.invoke<{ viewport: { width: number; height: number } }>(
+          "resize",
+          popup.surfaceTabId,
+          { mode: "freeform", width: 740, height: 540 },
+        );
+        expect(viewport.viewport).toEqual({ width: 320, height: 180 });
+        yield* r.invoke("evaluate", popup.surfaceTabId, {
+          expression:
+            "document.body.style.width='420px'; document.body.style.height='260px'; undefined",
+        });
+        yield* r.awaitPreferredSize(popup.surfaceTabId!, 420, 260);
+        yield* r.invoke("evaluate", popup.surfaceTabId, {
+          expression:
+            "document.body.style.width='1200px'; document.body.style.height='900px'; undefined",
+        });
+        yield* r.awaitPreferredSize(popup.surfaceTabId!, 800, 600);
+        yield* r.invoke("evaluate", popup.surfaceTabId, {
+          expression:
+            "document.body.style.width='320px'; document.body.style.height='180px'; undefined",
+        });
+        yield* r.awaitPreferredSize(popup.surfaceTabId!, 320, 180);
+        const status = yield* r.invoke<PreviewAutomationStatus>("status", popup.surfaceTabId);
+        expect(status.viewport).toEqual({ width: 320, height: 180 });
+        const saved = (yield* r.manager.list({ threadId })).sessions.find(
+          (tab) => tab.tabId === popup.surfaceTabId,
+        )!;
+        expect(saved.serverRendering).toBe("stream");
+      }),
+    ),
   );
 
   it.live(

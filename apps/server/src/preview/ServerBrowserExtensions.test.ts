@@ -21,6 +21,7 @@ import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import { FetchHttpClient } from "effect/http";
 import type { Page } from "playwright-core";
 import { makeBrowserExtensions } from "./BrowserExtensions.ts";
@@ -91,6 +92,7 @@ const extensionRig = Effect.gen(function* () {
   const store = yield* makeBrowserExtensions({ rootDir: path.join(root, "store") });
   let extensions: ReadonlyArray<{ readonly id: string; readonly path: string }> = [];
   const results = new Map<string, string | undefined>();
+  const loads = yield* Queue.unbounded<void>();
   const contexts = new ServerBrowserContexts({
     profilesDir: path.join(root, "profiles"),
     executable: async () => chromium!,
@@ -114,6 +116,7 @@ const extensionRig = Effect.gen(function* () {
       if (extensions.length > 0) yield* Effect.promise(() => contexts.contextFor(profileId));
       for (const [directory, error] of results)
         yield* store.reportLoad(profileId, directory, error);
+      yield* Queue.offer(loads, undefined);
     }),
   );
   const folder = path.join(root, "source");
@@ -144,7 +147,7 @@ const extensionRig = Effect.gen(function* () {
         `<title>Options</title><p>${pageText}</p>`,
       );
     });
-  return { root, fs, path, store, contexts, folder, write };
+  return { root, fs, path, store, contexts, folder, write, awaitLoad: Queue.take(loads) };
 });
 
 describe.skipIf(chromium === undefined)("server browser extensions", () => {
@@ -324,7 +327,9 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
         const r = yield* extensionRig;
         yield* r.write("1.0.0");
         const first = yield* r.store.install({ source: r.folder });
+        yield* r.awaitLoad;
         yield* r.store.toggle({ id: first.extension.id, enabled: false });
+        yield* r.awaitLoad;
         const context = yield* Effect.promise(() => r.contexts.contextFor("default"));
         const page = yield* Effect.promise(() => context.newPage());
         yield* Effect.promise(() => page.goto(siteUrl));
@@ -343,6 +348,7 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
         expect(yield* Effect.promise(() => page.title())).toBe("Site");
         // Turning it back on loads the rebuilt copy into a new profile context.
         yield* r.store.toggle({ id: first.extension.id, enabled: true });
+        yield* r.awaitLoad;
         const enabledContext = yield* Effect.promise(() => r.contexts.contextFor("default"));
         expect(enabledContext).not.toBe(context);
         const options = yield* Effect.promise(() => enabledContext.newPage());

@@ -114,6 +114,7 @@ import {
 import { BrowserControlInterrupted, SessionControl } from "./SessionControl.ts";
 import * as Targeting from "./serverBrowserTargeting.ts";
 import { openExtensionSurface } from "./ServerBrowserExtensionSurfaces.ts";
+import { popupPreferredSize, watchPopupPreferredSize } from "./ServerBrowserPopupSize.ts";
 
 const SERVER_HOST_CLIENT_ID = SERVER_BROWSER_AUTOMATION_CLIENT_ID;
 const RENDER_SCALE = 2;
@@ -383,7 +384,8 @@ interface Recording {
 }
 
 interface ServerTab {
-  readonly extensionSurface: PreviewExtensionSurface | undefined;
+  extensionSurface: PreviewExtensionSurface | undefined;
+  stopPopupSize: (() => Promise<void>) | null;
   readonly releaseSurface?: () => Promise<void>;
   readonly threadId: ThreadId;
   readonly tabId: string;
@@ -816,7 +818,7 @@ const make = Effect.gen(function* () {
    * zooms the pages it renders itself.
    */
   const applyZoom = async (tab: ServerTab) => {
-    if (tab.desktop) return;
+    if (tab.desktop || tab.extensionSurface?.kind === "popup") return;
     const size = tab.page.viewportSize();
     if (!size) return;
     if (tab.zoomFactor === 1) {
@@ -841,8 +843,8 @@ const make = Effect.gen(function* () {
 
   const applySetting = async (tab: ServerTab, setting: PreviewViewportSetting) => {
     tab.setting = setting;
-    // The desktop lays its webview out at the published setting itself.
-    if (tab.desktop) return;
+    // Popup dimensions come from document content, never the viewer's layout.
+    if (tab.desktop || tab.extensionSurface?.kind === "popup") return;
     const size =
       fixedViewportSize(setting) ??
       [...tab.viewers]
@@ -885,6 +887,7 @@ const make = Effect.gen(function* () {
     }
     if (closeSession) revealRequestedAt.delete(key);
     tab.closing = true;
+    void tab.stopPopupSize?.().catch(constVoid);
     for (const complete of tab.panelWaiters) complete(false);
     clearAbortedNavigation(tab);
     // A desktop page outlives the connection unless its session closed with it.
@@ -969,6 +972,7 @@ const make = Effect.gen(function* () {
   };
 
   const createTab = async (snapshot: PreviewSessionSnapshot): Promise<ServerTab> => {
+    if (snapshot.extensionSurface) snapshot = { ...snapshot, serverRendering: "stream" };
     const profileId = snapshot.profileId ?? DEFAULT_BROWSER_PROFILE_ID;
     const adopted = adoptedPages.get(tabKey(snapshot.threadId, snapshot.tabId));
     adoptedPages.delete(tabKey(snapshot.threadId, snapshot.tabId));
@@ -1051,6 +1055,7 @@ const make = Effect.gen(function* () {
     });
     const tab: ServerTab = {
       extensionSurface: snapshot.extensionSurface,
+      stopPopupSize: null,
       ...(adopted?.releaseSurface ? { releaseSurface: adopted.releaseSurface } : {}),
       threadId: ThreadId.make(snapshot.threadId),
       tabId: snapshot.tabId,
@@ -1089,11 +1094,14 @@ const make = Effect.gen(function* () {
     if (!desktop) {
       // Native extension UI has its own Chrome dimensions. The second CDP
       // connection's default viewport otherwise misreports it as 1280x800.
-      const size = snapshot.extensionSurface
-        ? await page.evaluate<{ width: number; height: number }>(
-            "({width:innerWidth,height:innerHeight})",
-          )
-        : (fixedViewportSize(tab.setting) ?? UNATTACHED_FILL_VIEWPORT);
+      const size =
+        snapshot.extensionSurface?.kind === "popup" && snapshot.extensionSurface.preferredSize
+          ? snapshot.extensionSurface.preferredSize
+          : snapshot.extensionSurface
+            ? await page.evaluate<{ width: number; height: number }>(
+                "({width:innerWidth,height:innerHeight})",
+              )
+            : (fixedViewportSize(tab.setting) ?? UNATTACHED_FILL_VIEWPORT);
       await page.setViewportSize(size);
     }
     await applyRendering(tab, snapshot);
@@ -1197,6 +1205,33 @@ const make = Effect.gen(function* () {
     page.on("crash", () => dropTab(tab, true));
     tabs.set(key, tab);
     reportLiveTabs();
+    if (tab.extensionSurface?.kind === "popup") {
+      let sizing = Promise.resolve();
+      tab.stopPopupSize = await watchPopupPreferredSize(page, (preferredSize) => {
+        sizing = sizing.catch(constVoid).then(async () => {
+          const surface = tab.extensionSurface;
+          if (
+            tab.closing ||
+            surface?.kind !== "popup" ||
+            (surface.preferredSize?.width === preferredSize.width &&
+              surface.preferredSize.height === preferredSize.height)
+          )
+            return;
+          await page.setViewportSize(preferredSize);
+          if (tab.closing) return;
+          tab.extensionSurface = { ...surface, preferredSize };
+          await Effect.runPromise(
+            manager.reportPopupPreferredSize({
+              threadId: tab.threadId,
+              tabId: tab.tabId,
+              ...preferredSize,
+            }),
+          ).catch(constVoid);
+          broadcastViewport(tab);
+        });
+        return sizing;
+      });
+    }
     // An agent's own tab is the agent's from the start; the panel says so.
     if (control.agentDrives) broadcastControl(tab);
     // Adoption may finish after the page's load event, especially for extension
@@ -3060,6 +3095,7 @@ const make = Effect.gen(function* () {
         const height = Math.min(Math.round(num(message.height)), 2160);
         if (width < 100 || height < 100) return;
         viewer.requestedSize = { width, height, order: ++viewerResizeOrder };
+        if (tab.extensionSurface?.kind === "popup") return;
         if (tab.setting._tag !== "fill" || tab.desktop) return;
         const current = tab.page.viewportSize();
         if (current?.width === width && current.height === height) return;
@@ -3519,7 +3555,9 @@ const make = Effect.gen(function* () {
               tab.extensionSurface.kind === input.kind,
           );
           if (existing && !existing.page.isClosed()) {
-            await existing.page.bringToFront();
+            if (existing.extensionSurface?.kind === "popup" && surfaceNotices.has(existing.page))
+              await hostTab.page.bringToFront();
+            else await existing.page.bringToFront();
             const notice = surfaceNotices.get(existing.page);
             return {
               surfaceTabId: existing.tabId,
@@ -3528,11 +3566,48 @@ const make = Effect.gen(function* () {
             };
           }
           const context = hostTab.page.context();
-          const surface = await openExtensionSurface(hostTab.page, extension, input.kind, () =>
+          let surface = await openExtensionSurface(hostTab.page, extension, input.kind, () =>
             newOwnedPage(context),
           );
           hostTab.usedAt = Date.now();
           if (!surface) return { hostTabId: hostTab.tabId };
+          if (surface.kind === "popup" && hostTab.control.agentId !== null && !surface.notice) {
+            // Native action popups close on Chrome focus changes. Agent-owned
+            // popups keep one ordinary extension page alive from the start, so
+            // subsequent host/panel actions preserve the popup's DOM and inputs.
+            const native = surface;
+            const url = native.page.url();
+            const page = await newOwnedPage(context);
+            try {
+              // Load its UI while the original host is active, so common
+              // tabs.query({active:true}) calls still select the host page.
+              await hostTab.page.bringToFront();
+              await page.goto(url, { waitUntil: "domcontentloaded" });
+              await native.page.close().catch(constVoid);
+              await native.close();
+            } catch (cause) {
+              await page.close().catch(constVoid);
+              await native.close();
+              throw cause;
+            }
+            surface = {
+              page,
+              kind: "popup",
+              close: async () => {},
+              notice:
+                "The agent's popup stays open as a persistent extension surface page until explicitly closed. Active-tab queries can differ from a native toolbar popup.",
+            };
+          }
+          let preferredSize: PreviewExtensionSurface["preferredSize"];
+          try {
+            preferredSize =
+              surface.kind === "popup" ? await popupPreferredSize(surface.page) : undefined;
+            if (preferredSize) await surface.page.setViewportSize(preferredSize);
+          } catch (cause) {
+            await surface.page.close().catch(constVoid);
+            await surface.close();
+            throw cause;
+          }
           claimedPages.add(surface.page);
           if (surface.notice) surfaceNotices.set(surface.page, surface.notice);
           if (hostTab.closing) {
@@ -3563,6 +3638,7 @@ const make = Effect.gen(function* () {
                 kind: surface.kind,
                 extensionId: input.id,
                 hostTabId: hostTab.tabId,
+                ...(preferredSize ? { preferredSize } : {}),
               },
               beforePublish: (snapshot) =>
                 adoptedPages.set(tabKey(snapshot.threadId, snapshot.tabId), {

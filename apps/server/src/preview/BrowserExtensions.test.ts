@@ -74,14 +74,19 @@ describe("BrowserExtensions", () => {
       Effect.gen(function* () {
         const { extensions, folder, writeExtension } = yield* setup;
         let loads = 0;
+        const installedLoad = yield* Deferred.make<void>();
+        const disabledLoad = yield* Deferred.make<void>();
         yield* extensions.registerLoader(() =>
-          Effect.sync(() => {
+          Effect.gen(function* () {
             loads++;
+            yield* Deferred.succeed(loads === 1 ? installedLoad : disabledLoad, undefined);
           }),
         );
         yield* writeExtension("1.0.0");
         const first = yield* extensions.install({ source: folder });
+        yield* Deferred.await(installedLoad);
         yield* extensions.toggle({ id: first.extension.id, enabled: false });
+        yield* Deferred.await(disabledLoad);
         const before = loads;
         yield* TestClock.adjust("1 day");
         yield* writeExtension("1.1.0");
@@ -115,8 +120,14 @@ describe("BrowserExtensions", () => {
         // A registered adapter may defer loading until a browser tab opens.
         yield* restarted.registerLoader(() => Effect.void);
         expect((yield* restarted.reload({ id: first.extension.id })).extension.state).toBe(
-          "pending",
+          "installing",
         );
+        yield* restarted.subscribe({}).pipe(
+          Stream.filter((list) => list.extensions[0]?.state === "pending"),
+          Stream.take(1),
+          Stream.runDrain,
+        );
+        expect((yield* restarted.list({})).extensions[0]?.state).toBe("pending");
       }),
     ),
   );
@@ -496,6 +507,36 @@ describe("BrowserExtensions", () => {
         );
         expect(manifest.key).not.toBe("changed-source-key");
         expect((yield* extensions.list({})).extensions).toHaveLength(1);
+      }),
+    ),
+  );
+
+  it.effect("validates missing and disabled extensions before invoking the surface adapter", () =>
+    run(
+      Effect.gen(function* () {
+        const { extensions, folder, writeExtension } = yield* setup;
+        const opened: string[] = [];
+        yield* extensions.registerSurfaceOpener((input, extension) =>
+          Effect.sync(() => {
+            opened.push(extension.id);
+            return { hostTabId: input.hostTabId };
+          }),
+        );
+        const missing = yield* Effect.flip(
+          extensions.openSurface({ id: "a".repeat(32), kind: "popup", hostTabId: "host" }),
+        );
+        expect(missing.message).toContain("not installed");
+        yield* writeExtension("1.0.0");
+        const { extension } = yield* extensions.install({ source: folder });
+        yield* extensions.toggle({ id: extension.id, enabled: false });
+        const disabled = yield* Effect.flip(
+          extensions.openSurface({ id: extension.id, kind: "popup", hostTabId: "host" }),
+        );
+        expect(disabled.message).toContain("turned off");
+        expect(opened).toEqual([]);
+        yield* extensions.toggle({ id: extension.id, enabled: true });
+        yield* extensions.openSurface({ id: extension.id, kind: "popup", hostTabId: "host" });
+        expect(opened).toEqual([extension.id]);
       }),
     ),
   );
