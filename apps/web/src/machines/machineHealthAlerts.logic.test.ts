@@ -349,6 +349,21 @@ describe("quiet problems that need the owner", () => {
     expect(late.quiet.size).toBe(0);
   });
 
+  it("uses incoming resolutions before toasting a recurrence on reconnect", () => {
+    const hour = DAY / 24;
+    const opened = plan([signIn("a", 0)], new Map(), 0);
+    const reconnected = plan([signIn("b", 25 * hour)], opened.quiet, 25 * hour, [
+      signIn("a", 0, resolvedAt(24.5 * hour)),
+    ]);
+    expect(reconnected.toast).toEqual([]);
+    expect([...reconnected.quiet.values()]).toEqual([25 * hour]);
+    expect(
+      plan([signIn("c", 49 * hour)], opened.quiet, 49 * hour, [
+        signIn("a", 0, resolvedAt(24.5 * hour)),
+      ]).toast,
+    ).toHaveLength(1);
+  });
+
   it("expires a problem that vanished without a resolution a day after it was last seen", () => {
     const opened = plan([signIn("a", 0)], new Map(), 0);
     // Its machine disconnected: no snapshot, so no resolution either.

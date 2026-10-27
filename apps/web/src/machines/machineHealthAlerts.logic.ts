@@ -288,10 +288,20 @@ export function planHealthAlertNotifications(
     const key = healthAlertGroupKey(entry.alert);
     if (shown.has(key) && !openKeys.has(key) && !retract.has(key)) retract.set(key, entry);
   }
+  // Apply resolutions before suppression: reconnect can deliver a recent
+  // resolution and a recurrence together after our old sighting expired.
+  const lastSeen = new Map(quiet);
+  for (const { items } of merged.resolved)
+    for (const item of items) {
+      const key = quietProblemKey(item);
+      const lastSeenMs = lastSeen.get(key);
+      if (lastSeenMs === undefined || item.resolvedAt === null) continue;
+      lastSeen.set(key, Math.max(lastSeenMs, DateTime.toEpochMillis(item.resolvedAt)));
+    }
   // Quiet when this alert opened within a day of the problem's last sighting:
   // a restart's new id, or a return soon after it cleared.
   const isQuiet = (item: MachineHealthAlert) => {
-    const lastSeenMs = quiet.get(quietProblemKey(item));
+    const lastSeenMs = lastSeen.get(quietProblemKey(item));
     return (
       needsOwner(item) &&
       lastSeenMs !== undefined &&
@@ -309,14 +319,6 @@ export function planHealthAlertNotifications(
   // A problem gone without a resolution (its machine disconnected, or this
   // client was closed) keeps its last sighting; a resolution moves it to when
   // the problem cleared.
-  const lastSeen = new Map(quiet);
-  for (const { items } of merged.resolved)
-    for (const item of items) {
-      const key = quietProblemKey(item);
-      const lastSeenMs = quiet.get(key);
-      if (lastSeenMs === undefined || item.resolvedAt === null) continue;
-      lastSeen.set(key, Math.max(lastSeenMs, DateTime.toEpochMillis(item.resolvedAt)));
-    }
   const nextQuiet = new Map<string, number>();
   for (const [key, lastSeenMs] of lastSeen)
     if (nowMs - lastSeenMs < QUIET_HEALTH_PROBLEM_TTL_MS) nextQuiet.set(key, lastSeenMs);
