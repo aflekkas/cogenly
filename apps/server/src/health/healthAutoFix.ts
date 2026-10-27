@@ -54,18 +54,30 @@ export function planHealthAutoFix(
   items: ReadonlyArray<MachineHealthItem>,
   self: EnvironmentId,
   nowMs: number,
+  updateTargetVersion?: string,
 ): { readonly due: ReadonlyArray<MachineHealthItem>; readonly state: HealthAutoFixState } {
   // Keep exhausted items even while absent: a disappearing item is not a new budget.
   const next = new Map(state);
   const due: Array<MachineHealthItem> = [];
   for (const item of items) {
     if (!isAutoFixable(item, self)) continue;
-    const revision = JSON.stringify([item.fix, item.detail, item.target]);
+    const revision = JSON.stringify([
+      item.key,
+      item.fix,
+      item.target,
+      item.fix === "update-machine" ? updateTargetVersion : null,
+    ]);
     const stored = state.get(item.key);
-    const previous = stored?.revision === revision ? stored : undefined;
+    let previous = stored?.revision === revision ? stored : undefined;
     const delay =
       Duration.toMillis(AUTO_FIX_RECHECK_AFTER) * 2 ** Math.max(0, (previous?.attempts ?? 0) - 1);
     if (previous !== undefined && nowMs - previous.lastAttemptAtMs < delay) continue;
+    if (previous !== undefined && previous.attempts > 0 && previous.failure === null) {
+      previous = {
+        ...previous,
+        failure: "The automatic fix ran, but this problem is still present.",
+      };
+    }
     if (previous !== undefined && previous.attempts >= AUTO_FIX_MAX_ATTEMPTS) {
       next.set(item.key, {
         ...previous,

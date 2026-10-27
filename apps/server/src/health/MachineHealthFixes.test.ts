@@ -117,6 +117,7 @@ const harness = (
     readonly retried?: Deferred.Deferred<void>;
     readonly withAlerts?: boolean;
     readonly staging?: Effect.Effect<void>;
+    readonly afterRetry?: () => void;
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -226,6 +227,7 @@ const harness = (
                   ? Effect.fail(new MachineHealthError({ reason: "unavailable" }))
                   : Effect.gen(function* () {
                       retried.push(environmentId);
+                      auto.afterRetry?.();
                       if (auto.retried) yield* Deferred.succeed(auto.retried, undefined);
                     }),
             }),
@@ -592,7 +594,7 @@ describe("automatic fixes", () => {
       });
       const outcomes = yield* h.fixes.autoFix;
       expect(outcomes.map((outcome) => [outcome.itemKey, outcome.status])).toEqual([
-        [`sync:stuck:${vps}`, "fixed"],
+        [`sync:stuck:${vps}`, "failed"],
         [`machine-version:${vps}`, "fixed"],
       ]);
       expect(h.retried).toEqual([vps]);
@@ -602,8 +604,8 @@ describe("automatic fixes", () => {
       ]);
       expect(h.ran).toEqual([]);
       const view = yield* h.alertsState.autoFix;
-      expect([...view.holds]).toEqual([`sync:stuck:${vps}`, `machine-version:${vps}`]);
-      expect(view.failures.size).toBe(0);
+      expect([...view.holds]).toEqual([`machine-version:${vps}`]);
+      expect(view.failures.get(`sync:stuck:${vps}`)).toContain("still present");
       // Fixed and settling: not run again on the next round.
       expect(yield* h.fixes.autoFix).toEqual([]);
     }).pipe(Effect.scoped),
@@ -634,6 +636,29 @@ describe("automatic fixes", () => {
       expect(yield* h.fixes.autoFix).toEqual([]);
       expect(h.retried).toEqual([]);
       expect((yield* h.alertsState.autoFix).holds.size).toBe(0);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("keeps a successful retry when the recheck clears the problem", () =>
+    Effect.gen(function* () {
+      const check = {
+        id: "sync" as const,
+        status: "fail" as const,
+        summary: "",
+        items: [
+          item("clears", "retry-sync", machineTarget(vps)),
+        ] as ReadonlyArray<MachineHealthItem>,
+      };
+      const h = yield* harness(false, "boot-service", false, {
+        report: { ...report, checks: [check] },
+        afterRetry: () => {
+          check.items = [];
+        },
+      });
+      expect(yield* h.fixes.autoFix).toMatchObject([{ itemKey: "clears", status: "fixed" }]);
+      expect((yield* h.alertsState.autoFix).failures.size).toBe(0);
+      expect(yield* h.fixes.autoFix).toEqual([]);
+      expect(h.retried).toEqual([vps]);
     }).pipe(Effect.scoped),
   );
 });
@@ -727,7 +752,7 @@ it.effect("retained retry budgets do not hold recovered health items", () =>
       report: { ...report, checks: [check] },
     });
     yield* h.fixes.autoFix;
-    expect((yield* h.alertsState.autoFix).holds.has(problem.key)).toBe(true);
+    expect((yield* h.alertsState.autoFix).failures.has(problem.key)).toBe(true);
     check.items = [{ ...problem, status: "ok", fix: null }];
     expect(yield* h.fixes.autoFix).toEqual([]);
     expect((yield* h.alertsState.autoFix).holds.size).toBe(0);
@@ -774,8 +799,19 @@ it.effect("the live scheduler fires health-auto-fix and publishes to its shared 
   Effect.gen(function* () {
     const scheduler = yield* Scheduler.Scheduler;
     const retried = yield* Deferred.make<void>();
+    const finished = yield* Deferred.make<void>();
     const h = yield* harness(false, "boot-service", false, {
-      scheduler,
+      scheduler: {
+        register: (name, work) =>
+          scheduler.register(
+            name,
+            work.pipe(
+              Effect.ensuring(
+                name === "health-auto-fix" ? Deferred.succeed(finished, undefined) : Effect.void,
+              ),
+            ),
+          ),
+      },
       retried,
       withAlerts: true,
       report: {
@@ -791,11 +827,15 @@ it.effect("the live scheduler fires health-auto-fix and publishes to its shared 
       },
     });
     yield* Deferred.await(retried);
+    yield* Deferred.await(finished);
     expect(h.retried).toEqual([vps]);
-    expect((yield* h.alertsState.autoFix).holds.has("scheduled-auto")).toBe(true);
+    expect((yield* h.alertsState.autoFix).failures.has("scheduled-auto")).toBe(true);
     yield* TestClock.adjust("3 minutes");
     expect(h.retried).toEqual([vps]);
     expect(Option.isSome(h.alerts)).toBe(true);
-    if (Option.isSome(h.alerts)) expect((yield* h.alerts.value.snapshot).open).toEqual([]);
+    if (Option.isSome(h.alerts))
+      expect((yield* h.alerts.value.snapshot).open).toMatchObject([
+        { itemKey: "scheduled-auto", status: "fail" },
+      ]);
   }).pipe(Effect.provide(Scheduler.layer), Effect.scoped),
 );

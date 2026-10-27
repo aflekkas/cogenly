@@ -47,15 +47,51 @@ describe("automatic health retry policy", () => {
         state = plan.state;
       }
       expect(
-        planHealthAutoFix(
-          state,
-          [{ ...item, detail: "New target version" }],
-          self,
-          100_001 * minute,
-        ).due,
-      ).toHaveLength(1);
+        planHealthAutoFix(state, [{ ...item, detail: "New backlog count" }], self, 100_001 * minute)
+          .due,
+      ).toEqual([]);
     },
   );
+
+  it("keeps one budget while elapsed time, backlog, titles and status change", () => {
+    let state = initialHealthAutoFixState;
+    const attempts: number[] = [];
+    for (let sample = 0; sample < 1_000; sample++) {
+      const changing = {
+        ...item,
+        detail: `${sample} minutes; ${sample + 1} queued`,
+        title: `Sync ${sample}`,
+        status: sample % 2 ? ("warn" as const) : ("fail" as const),
+      };
+      const plan = planHealthAutoFix(state, [changing], self, sample * minute);
+      state = plan.state;
+      if (plan.due.length > 0) {
+        attempts.push(sample);
+        state = recordHealthAutoFix(state, item.key, { status: "fixed", message: "Sync ran" });
+      }
+    }
+    expect(attempts).toEqual([0, 10, 30]);
+    expect(state.get(item.key)?.attempts).toBe(3);
+    expect(healthAutoFixView(state).holds.has(item.key)).toBe(false);
+    expect(healthAutoFixView(state).failures.get(item.key)).toContain("still present");
+  });
+
+  it("renews an update budget only when its target version changes", () => {
+    const update = { ...item, fix: "update-machine" as const };
+    let state = initialHealthAutoFixState;
+    for (const now of [0, 10, 30])
+      state = planHealthAutoFix(state, [update], self, now * minute, "0.3.4").state;
+    expect(
+      planHealthAutoFix(
+        state,
+        [{ ...update, detail: "Renamed machine" }],
+        self,
+        100 * minute,
+        "0.3.4",
+      ).due,
+    ).toEqual([]);
+    expect(planHealthAutoFix(state, [update], self, 101 * minute, "0.3.5").due).toEqual([update]);
+  });
 
   it("backs off exponentially across failures and successful but lingering fixes", () => {
     let plan = planHealthAutoFix(initialHealthAutoFixState, [item], self, 0);

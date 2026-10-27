@@ -684,11 +684,15 @@ const make = Effect.gen(function* () {
     // Retain lifetime budgets for absent items, but publish only current problems.
     const viewOf = (state: HealthAutoFixState) =>
       healthAutoFixView(new Map([...state].filter(([key]) => activeKeys.has(key))));
+    const updateTargetVersion = items.some((item) => item.fix === "update-machine")
+      ? newestMachineVersion((yield* machines.list).machines)
+      : undefined;
     const plan = planHealthAutoFix(
       yield* readAutoFixState,
       items,
       report.environmentId,
       DateTime.toEpochMillis(yield* DateTime.now),
+      updateTargetVersion,
     );
     yield* saveAutoFixState(plan.state);
     // Held before the fixes run, so a slow one (an update) never alerts meanwhile.
@@ -697,11 +701,10 @@ const make = Effect.gen(function* () {
     const outcomes: Array<MachineHealthFixOutcome> = [];
     for (const item of plan.due) {
       const target = item.target;
-      const outcome =
+      let outcome =
         item.fix === "update-machine" && target?._tag === "machine"
           ? yield* Effect.gen(function* () {
-              const view = yield* machines.list;
-              const targetVersion = newestMachineVersion(view.machines);
+              const targetVersion = updateTargetVersion;
               if (targetVersion === undefined)
                 return {
                   itemKey: item.key,
@@ -732,6 +735,22 @@ const make = Effect.gen(function* () {
               ),
             )
           : yield* runFix(item, true);
+      if (item.fix === "retry-sync" && outcome.status === "fixed") {
+        const after = yield* health.report;
+        if (
+          after.checks.some((check) =>
+            check.items.some(
+              (entry) => entry.key === item.key && isAutoFixable(entry, report.environmentId),
+            ),
+          )
+        ) {
+          outcome = {
+            itemKey: item.key,
+            status: "failed",
+            message: "Sync ran again, but this problem is still present.",
+          };
+        }
+      }
       if (outcome.status !== "deferred") outcomes.push(outcome);
       state = recordHealthAutoFix(state, item.key, outcome);
       if (outcome.status === "fixed" || outcome.status === "resolved")
