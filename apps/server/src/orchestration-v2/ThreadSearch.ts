@@ -72,7 +72,7 @@ function foldSearchText(value: string): string {
 }
 
 function messageMatchQuality(text: string, tokens: readonly string[]): number {
-  const words = foldSearchText(text).match(/[\p{L}\p{N}]+/gu) ?? [];
+  const words = Array.from(foldSearchText(text).matchAll(/[\p{L}\p{N}]+/gu), (match) => match[0]);
   if (tokens.every((token) => words.includes(token))) return 2;
   return tokens.every((token) => words.some((word) => word.startsWith(token))) ? 1 : 0;
 }
