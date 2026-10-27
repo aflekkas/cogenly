@@ -5,6 +5,7 @@ import {
   PREVIEW_VIEWPORT_MAX_AREA,
   PreviewRenderedViewportSize,
   PreviewTabId,
+  PreviewExtensionSurface,
   PreviewViewportPresetId,
   PreviewViewportSetting,
   PreviewViewportSize,
@@ -122,6 +123,7 @@ export type PreviewAutomationTabRendering = typeof PreviewAutomationTabRendering
 
 /** The tab an action ran on, returned with action results so agent and user agree on it. */
 export const PreviewAutomationTabSummary = Schema.Struct({
+  extensionSurface: Schema.optional(PreviewExtensionSurface),
   tabId: PreviewTabId,
   url: Schema.NullOr(Schema.String),
   profileId: Schema.optional(BrowserProfileId),

@@ -243,7 +243,7 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
   );
 
   it.live(
-    "reinstalls rebuilt files and bumped versions from the same folder while keeping the ID and storage",
+    "reloads rebuilt files and bumped versions while keeping the ID, storage and refreshed worker",
     () =>
       Effect.gen(function* () {
         const r = yield* extensionRig;
@@ -261,7 +261,7 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
           yield* Effect.promise(() => firstPage.evaluate("chrome.runtime.sendMessage({})")),
         ).toBe("1.0.0");
         yield* r.write("1.1.0");
-        const second = yield* r.store.install({ source: r.folder });
+        const second = yield* r.store.reload({ id: first.extension.id });
         expect(second).toMatchObject({
           updated: true,
           previousVersion: "1.0.0",
@@ -280,7 +280,7 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
           yield* Effect.promise(() => page.evaluate("chrome.storage.local.get('greeting')")),
         ).toEqual({ greeting: "retained" });
         yield* r.write("1.1.0", "rebuilt without a version bump");
-        const third = yield* r.store.install({ source: r.folder });
+        const third = yield* r.store.reload({ id: first.extension.id });
         expect(third.extension.loadError).toBeUndefined();
         expect((yield* r.store.list({})).extensions[0]?.version).toBe("1.1.0");
         const rebuilt = yield* Effect.promise(() =>
@@ -296,6 +296,60 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
         expect(yield* Effect.promise(() => rebuilt.locator("p").textContent())).toBe(
           "rebuilt without a version bump",
         );
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(Layer.merge(NodeServices.layer, FetchHttpClient.layer)),
+      ),
+  );
+
+  it.live(
+    "reloads disabled files without restarting an open profile or enabling the extension",
+    () =>
+      Effect.gen(function* () {
+        const r = yield* extensionRig;
+        yield* r.write("1.0.0");
+        const first = yield* r.store.install({ source: r.folder });
+        const url = yield* r.store.pageUrl({ id: first.extension.id, page: "options" });
+        const initial = yield* Effect.promise(() =>
+          r.contexts.contextFor("default").then((context) => context.newPage()),
+        );
+        yield* Effect.promise(() => initial.goto(url));
+        yield* Effect.promise(() =>
+          initial.evaluate("chrome.storage.local.set({ greeting: 'retained' })"),
+        );
+        yield* r.store.toggle({ id: first.extension.id, enabled: false });
+        const context = yield* Effect.promise(() => r.contexts.contextFor("default"));
+        const disabledOptions = yield* Effect.promise(() => context.newPage());
+        yield* Effect.promise(() =>
+          expect(disabledOptions.goto(url)).rejects.toThrow("ERR_BLOCKED_BY_CLIENT"),
+        );
+        yield* Effect.promise(() => disabledOptions.close());
+        const page = yield* Effect.promise(() => context.newPage());
+        yield* Effect.promise(() => page.goto(siteUrl));
+        yield* r.write("1.1.0");
+        const reloaded = yield* r.store.reload({ id: first.extension.id });
+        expect(reloaded.extension).toMatchObject({
+          id: first.extension.id,
+          version: "1.1.0",
+          enabled: false,
+          state: "disabled",
+          installedAt: first.extension.installedAt,
+        });
+        expect(yield* r.store.loadable("default")).toEqual([]);
+        expect(yield* Effect.promise(() => r.contexts.contextFor("default"))).toBe(context);
+        expect(page.isClosed()).toBe(false);
+        expect(yield* Effect.promise(() => page.title())).toBe("Site");
+        // Turning it back on loads the rebuilt copy into a new profile context.
+        const enabled = yield* r.store.toggle({ id: first.extension.id, enabled: true });
+        expect(enabled.loadError).toBeUndefined();
+        const enabledContext = yield* Effect.promise(() => r.contexts.contextFor("default"));
+        expect(enabledContext).not.toBe(context);
+        const options = yield* Effect.promise(() => enabledContext.newPage());
+        yield* Effect.promise(() => options.goto(url));
+        expect(yield* Effect.promise(() => options.locator("p").textContent())).toBe("1.1.0");
+        expect(
+          yield* Effect.promise(() => options.evaluate("chrome.storage.local.get('greeting')")),
+        ).toEqual({ greeting: "retained" });
       }).pipe(
         Effect.scoped,
         Effect.provide(Layer.merge(NodeServices.layer, FetchHttpClient.layer)),

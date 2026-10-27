@@ -1,12 +1,14 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { BrowserProfileId } from "./browserProfile.ts";
+import { PreviewTabId } from "./preview.ts";
 
 /**
  * Chromium extensions installed into a browser profile. Each environment keeps
  * its own list per profile and unpacks the files under its Cogenly home; the
- * desktop panel and the server browser both load them where they can.
+ * server runs them in full Chrome, streamed to web and desktop clients.
  */
 
 /** Chrome's extension ID: 32 letters a to p. */
@@ -20,6 +22,19 @@ export const BrowserExtensionSource = Schema.Union([
 ]);
 export type BrowserExtensionSource = typeof BrowserExtensionSource.Type;
 
+/**
+ * Pending waits for a profile tab to open; installing is an active load attempt.
+ * Loaded and failed record that attempt's result; disabled is explicitly turned off.
+ */
+export const BrowserExtensionLoadState = Schema.Literals([
+  "loaded",
+  "failed",
+  "installing",
+  "pending",
+  "disabled",
+]);
+export type BrowserExtensionLoadState = typeof BrowserExtensionLoadState.Type;
+
 export const BrowserExtension = Schema.Struct({
   id: BrowserExtensionId,
   name: Schema.String,
@@ -32,9 +47,15 @@ export const BrowserExtension = Schema.Struct({
   permissions: Schema.Array(Schema.String),
   /** Sites it can read and change: host permissions and content script matches. */
   hostPermissions: Schema.Array(Schema.String),
+  /** Toolbar or manifest icon as a data URL, capped at 16KB including its prefix. */
+  icon: Schema.optional(Schema.String.check(Schema.isMaxLength(16_384))),
+  hasAction: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  sidePanelPage: Schema.optional(Schema.String),
   /** The toolbar popup, relative to the extension root, when it has one. */
   popupPage: Schema.optional(Schema.String),
   optionsPage: Schema.optional(Schema.String),
+  state: BrowserExtensionLoadState.pipe(Schema.withDecodingDefault(Effect.succeed("pending"))),
+  error: Schema.optional(Schema.String),
   /** Why this enabled extension could not load in the server browser. */
   loadError: Schema.optional(Schema.String),
   installedAt: Schema.String,
@@ -92,7 +113,7 @@ export class BrowserExtensionError extends Schema.TaggedError<BrowserExtensionEr
 
 /** The page of an installed extension a tab opens: its popup, options, or any path inside it. */
 export const BrowserExtensionPage = Schema.Union([
-  Schema.Literals(["popup", "options"]),
+  Schema.Literals(["popup", "options", "sidePanel", "action"]),
   TrimmedNonEmptyString,
 ]);
 export type BrowserExtensionPage = typeof BrowserExtensionPage.Type;
@@ -100,3 +121,33 @@ export type BrowserExtensionPage = typeof BrowserExtensionPage.Type;
 /** `chrome-extension://<id>/<path>` for a page inside an extension. */
 export const browserExtensionPageUrl = (id: string, path: string) =>
   `chrome-extension://${id}/${path.replace(/^\/+/, "")}`;
+
+/** Reload an unpacked extension from its original folder on this environment. */
+export const BrowserExtensionReloadInput = Schema.Struct({
+  profileId: Schema.optional(BrowserProfileId),
+  id: BrowserExtensionId,
+});
+export type BrowserExtensionReloadInput = typeof BrowserExtensionReloadInput.Type;
+
+export const BrowserExtensionOpenSurfaceInput = Schema.Struct({
+  profileId: Schema.optional(BrowserProfileId),
+  id: BrowserExtensionId,
+  kind: Schema.Literals(["popup", "sidePanel", "action"]),
+  hostTabId: PreviewTabId,
+  threadId: Schema.optional(ThreadId),
+});
+export type BrowserExtensionOpenSurfaceInput = typeof BrowserExtensionOpenSurfaceInput.Type;
+
+export const BrowserExtensionOpenSurfaceResult = Schema.Struct({
+  surfaceTabId: Schema.optional(PreviewTabId),
+});
+export type BrowserExtensionOpenSurfaceResult = typeof BrowserExtensionOpenSurfaceResult.Type;
+
+export class BrowserExtensionSurfaceNotImplementedError extends Schema.TaggedError<BrowserExtensionSurfaceNotImplementedError>()(
+  "BrowserExtensionSurfaceNotImplementedError",
+  {},
+) {
+  override get message(): string {
+    return "Extension surfaces are not available yet. Open the extension's options page or a page path instead.";
+  }
+}

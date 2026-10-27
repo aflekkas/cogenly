@@ -34,6 +34,8 @@ const extension: BrowserExtension = {
   version: "1.0.0",
   description: "",
   manifestVersion: 3,
+  hasAction: true,
+  state: "loaded",
   enabled: true,
   source: { type: "webStore" },
   permissions: [],
@@ -77,6 +79,7 @@ const mcpClient = McpSchema.McpServerClient.of({
 });
 
 const installs: string[] = [];
+const reloads: string[] = [];
 const opened: unknown[] = [];
 const server = McpHttpServer.toolkitRegistration(
   PreviewStandardToolkit,
@@ -94,6 +97,11 @@ const server = McpHttpServer.toolkitRegistration(
           Effect.sync(() => {
             installs.push(input.source);
             return { profileId: "default", extension, updated: false };
+          }),
+        reload: (input) =>
+          Effect.sync(() => {
+            reloads.push(input.id);
+            return { profileId: "default", extension, updated: true };
           }),
         pageUrl: (input) => Effect.succeed(`chrome-extension://${input.id}/popup.html`),
       }),
@@ -166,5 +174,17 @@ it.effect("opens an extension's popup as a new tab through the preview broker", 
     expect(opened).toEqual([
       { url: `chrome-extension://${id}/popup.html`, reuseExistingTab: false, profileId: "default" },
     ]);
+  }),
+);
+
+it.effect("reloads through the registry only in a live agent turn", () =>
+  Effect.gen(function* () {
+    reloads.length = 0;
+    const result = yield* call("browser_extension_reload", thread(live), { id });
+    expect(result.text).toContain('"updated":true');
+    expect(reloads).toEqual([id]);
+    const late = yield* call("browser_extension_reload", thread(ended), { id });
+    expect(late.text).toContain("no longer owns an active thread run");
+    expect(reloads).toEqual([id]);
   }),
 );
