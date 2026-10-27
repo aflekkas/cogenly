@@ -483,7 +483,12 @@ export const probeClaudeWorkspaceSnapshot = Effect.fn("probeClaudeWorkspaceSnaps
 ): Effect.fn.Return<ProviderWorkspaceSnapshot, never, FileSystem.FileSystem | Path.Path> {
   if (!claudeSettings.enabled) return machineSnapshot;
   const skills = yield* discoverClaudeSkills(claudeSettings, cwd, environment);
-  const capabilities = yield* probeClaudeCapabilities(claudeSettings, environment, cwd, false);
+  const fileSystem = yield* FileSystem.FileSystem;
+  // A removed worktree cannot finish a probe; pending would keep retrying it.
+  const cwdExists = yield* fileSystem.exists(cwd).pipe(Effect.orElseSucceed(() => true));
+  const capabilities = cwdExists
+    ? yield* probeClaudeCapabilities(claudeSettings, environment, cwd, false)
+    : undefined;
   return {
     ...machineSnapshot,
     skills,
@@ -491,7 +496,7 @@ export const probeClaudeWorkspaceSnapshot = Effect.fn("probeClaudeWorkspaceSnaps
       COMPACT_SLASH_COMMAND,
       ...(capabilities?.slashCommands ?? []),
     ]),
-    slashCommandsPending: !capabilities,
+    slashCommandsPending: cwdExists && !capabilities,
   };
 });
 

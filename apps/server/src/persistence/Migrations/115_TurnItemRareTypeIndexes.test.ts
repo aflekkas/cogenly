@@ -43,6 +43,21 @@ it.effect("runtime recovery and shell pending reads use their partial indexes", 
       "orchestration_v2_projection_turn_items_shell_pending_idx",
     );
 
+    const stopRequest = yield* sql<{ detail: string }>`
+      EXPLAIN QUERY PLAN SELECT 1 FROM orchestration_v2_projection_turn_items request
+      WHERE request.thread_id = 't' AND request.run_id = 'r' AND request.type = 'run_interrupt_request'
+    `;
+    expect(plan(stopRequest)).toContain("orchestration_v2_projection_turn_items_stop_request_idx");
+    const counts = yield* sql<{ detail: string }>`
+      EXPLAIN QUERY PLAN
+      SELECT thread_id, run_id, count(*) FROM orchestration_v2_projection_turn_items
+      WHERE thread_id IN ('one', 'two') GROUP BY thread_id, run_id
+    `;
+    expect(plan(counts)).toContain(
+      "COVERING INDEX orchestration_v2_projection_turn_items_thread_run_idx",
+    );
+    expect(plan(counts)).not.toContain("SCAN orchestration_v2_projection_turn_items");
+
     const errors = yield* sql<{ detail: string }>`
       EXPLAIN QUERY PLAN
       SELECT COUNT(*) FROM orchestration_v2_projection_turn_items

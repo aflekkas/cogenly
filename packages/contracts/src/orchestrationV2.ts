@@ -839,6 +839,9 @@ export const OrchestrationV2SubagentWorkflow = Schema.Struct({
 });
 export type OrchestrationV2SubagentWorkflow = typeof OrchestrationV2SubagentWorkflow.Type;
 
+/** Wire-only: restore marked bodies from already-delivered records before use or caching. */
+const DedupedBodyMarker = Schema.optionalKey(Schema.Literal(true));
+
 export const OrchestrationV2Subagent = Schema.Struct({
   id: NodeId,
   threadId: ThreadId,
@@ -885,6 +888,8 @@ export const OrchestrationV2Subagent = Schema.Struct({
   startedAt: Schema.NullOr(Schema.DateTimeUtc),
   completedAt: Schema.NullOr(Schema.DateTimeUtc),
   updatedAt: Schema.DateTimeUtc,
+  promptOmitted: DedupedBodyMarker,
+  resultOmitted: DedupedBodyMarker,
 });
 export type OrchestrationV2Subagent = typeof OrchestrationV2Subagent.Type;
 
@@ -1737,6 +1742,7 @@ export const OrchestrationV2TurnItem = Schema.Union([
     senderThreadId: Schema.optional(ThreadId),
     inputIntent: OrchestrationV2UserMessageInputIntent,
     text: Schema.String,
+    textOmitted: DedupedBodyMarker,
     context: Schema.optional(OrchestrationMessageContext),
     attachments: Schema.Array(ChatAttachment),
   }),
@@ -1745,6 +1751,7 @@ export const OrchestrationV2TurnItem = Schema.Union([
     type: Schema.Literal("assistant_message"),
     messageId: MessageId,
     text: Schema.String,
+    textOmitted: DedupedBodyMarker,
     attachments: Schema.optional(Schema.Array(ChatAttachment)),
     streaming: Schema.Boolean,
   }),
@@ -1826,6 +1833,7 @@ export const OrchestrationV2TurnItem = Schema.Union([
     checkpointId: CheckpointId,
     scopeId: CheckpointScopeId,
     files: Schema.Array(OrchestrationV2CheckpointFileSummary),
+    filesOmitted: DedupedBodyMarker,
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -1914,6 +1922,8 @@ export const OrchestrationV2TurnItem = Schema.Union([
     providerInstanceId: ProviderInstanceId,
     childThreadId: Schema.NullOr(ThreadId),
     prompt: Schema.String,
+    promptOmitted: DedupedBodyMarker,
+    resultOmitted: DedupedBodyMarker,
     progress: Schema.optional(Schema.String),
     result: Schema.NullOr(Schema.String),
   }),
@@ -2548,6 +2558,7 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     senderThreadId: Schema.optional(ThreadId),
     inputIntent: OrchestrationV2UserMessageInputIntent,
     text: Schema.String,
+    textOmitted: DedupedBodyMarker,
     context: Schema.optional(OrchestrationMessageContext),
     attachments: Schema.Array(ChatAttachment),
   }),
@@ -2556,6 +2567,7 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     type: Schema.Literal("assistant_message"),
     messageId: MessageId,
     text: Schema.String,
+    textOmitted: DedupedBodyMarker,
     attachments: Schema.optional(Schema.Array(ChatAttachment)),
     streaming: Schema.Boolean,
   }),
@@ -2637,6 +2649,7 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     checkpointId: CheckpointId,
     scopeId: CheckpointScopeId,
     files: Schema.Array(OrchestrationV2CheckpointFileSummary),
+    filesOmitted: DedupedBodyMarker,
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemJsonBaseFields,
@@ -2722,6 +2735,8 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     providerInstanceId: ProviderInstanceId,
     childThreadId: Schema.NullOr(ThreadId),
     prompt: Schema.String,
+    promptOmitted: DedupedBodyMarker,
+    resultOmitted: DedupedBodyMarker,
     progress: Schema.optional(Schema.String),
     result: Schema.NullOr(Schema.String),
   }),
@@ -3876,6 +3891,8 @@ export const OrchestrationV2SubscribeThreadInput = Schema.Struct({
    * that repeat local visible rows. See `turnItemsOmitLocalVisible`.
    */
   acceptCompactTurnItems: Schema.optionalKey(Schema.Boolean),
+  /** Restore *Omitted bodies from records already held by this client. */
+  acceptDedupedBodies: Schema.optionalKey(Schema.Boolean),
 });
 export type OrchestrationV2SubscribeThreadInput = typeof OrchestrationV2SubscribeThreadInput.Type;
 

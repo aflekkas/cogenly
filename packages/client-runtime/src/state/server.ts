@@ -43,6 +43,7 @@ import { runCachePersistence } from "./cachePersistence.ts";
 import {
   isRpcClientError,
   request,
+  requestGuarded,
   runStream,
   subscribe,
   subscribeDynamicWithSession,
@@ -54,6 +55,12 @@ import {
   applyServerConfigProjection,
   type ServerConfigProjection,
 } from "./serverConfigProjection.ts";
+
+import {
+  recordFetchedWorkspaceSnapshot,
+  withFetchedWorkspaceSnapshots,
+  type FetchedWorkspaceSnapshot,
+} from "./providerWorkspaceSnapshots.ts";
 
 // Exported server state includes this type in its inferred public return type.
 export type { ServerConfigProjection } from "./serverConfigProjection.ts";
@@ -675,6 +682,12 @@ export function createServerEnvironmentAtoms<R, E>(
     readonly environmentId: EnvironmentId;
     readonly input: EnvironmentRpcInput<typeof WS_METHODS.subscribeServerConfig>;
   }) => configProjectionFamily(target.environmentId);
+  const fetchedWorkspaceSnapshotsAtom = Atom.family((environmentId: EnvironmentId) =>
+    Atom.make<ReadonlyArray<FetchedWorkspaceSnapshot>>([]).pipe(
+      Atom.keepAlive,
+      Atom.withLabel(`environment-data:server:fetched-workspace-snapshots:${environmentId}`),
+    ),
+  );
   const emptyConfigAtom = Atom.make<ServerConfig | null>(null).pipe(
     Atom.withLabel("environment-data:server:config:empty"),
   );
@@ -686,10 +699,13 @@ export function createServerEnvironmentAtoms<R, E>(
       const projection = Option.getOrNull(
         AsyncResult.value(get(configProjection({ environmentId, input: {} }))),
       );
-      return resolveServerConfigValue(
+      const config = resolveServerConfigValue(
         projection,
         get(options.initialConfigValueAtom(environmentId)),
       );
+      return config === null
+        ? null
+        : withFetchedWorkspaceSnapshots(config, get(fetchedWorkspaceSnapshotsAtom(environmentId)));
     }).pipe(Atom.withLabel(`environment-data:server:config:${environmentId}`));
   });
   const updateStateValueAtom = Atom.family((environmentId: EnvironmentId) =>
@@ -1371,6 +1387,27 @@ export function createServerEnvironmentAtoms<R, E>(
     refreshProviders: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:refresh-providers",
       tag: WS_METHODS.serverRefreshProviders,
+      execute: (input) =>
+        requestGuarded(WS_METHODS.serverRefreshProviders, {
+          ...input,
+          workspaceSnapshotsOnDemand: true,
+          ...(options.usageLimitsCommand === true ? { usageLimitsCommand: true } : {}),
+        }),
+      onSuccess: ({ environmentId, input }, registry, result) =>
+        Effect.sync(() => {
+          const { instanceId, cwd } = input;
+          if (instanceId === undefined || cwd === undefined) return;
+          registry.update(fetchedWorkspaceSnapshotsAtom(environmentId), (current) =>
+            recordFetchedWorkspaceSnapshot(
+              current,
+              { instanceId, cwd, fresh: input.fresh === true },
+              result.providers,
+              registry
+                .get(configValueAtom(environmentId))
+                ?.providers.find((provider) => provider.instanceId === instanceId),
+            ),
+          );
+        }),
       concurrency: {
         mode: "singleFlight",
         key: ({ environmentId, input }) =>

@@ -27,7 +27,11 @@ export class ThreadSearchError extends Schema.TaggedError<ThreadSearchError>()(
   }
 }
 
-const SearchRequest = Schema.Struct({ pattern: Schema.String, limit: Schema.Int });
+const SearchRequest = Schema.Struct({
+  match: Schema.String,
+  pattern: Schema.String,
+  fts: Schema.Boolean,
+});
 const SearchRow = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
@@ -35,14 +39,11 @@ const SearchRow = Schema.Struct({
   source: OrchestrationThreadSearchSource,
   matchText: Schema.String,
   messageCreatedAt: Schema.NullOr(IsoDateTime),
+  threadUpdatedAt: IsoDateTime,
 });
 
 function escapeLikePattern(value: string): string {
   return value.replaceAll("!", "!!").replaceAll("%", "!%").replaceAll("_", "!_");
-}
-
-function foldAsciiCase(value: string): string {
-  return value.replace(/[A-Z]/g, (character) => character.toLowerCase());
 }
 
 /** At most 240 characters, centred near the first match. */
@@ -51,15 +52,31 @@ function buildSearchSnippet(text: string, query: string): string {
   if (normalizedText.length <= 240) {
     return normalizedText;
   }
-  const normalizedQuery = foldAsciiCase(query.replace(/\s+/g, " ").trim());
-  const matchIndex = foldAsciiCase(normalizedText).indexOf(normalizedQuery);
+  const foldedText = foldSearchText(normalizedText);
+  const tokens = foldSearchText(query).match(/[\p{L}\p{N}]+/gu) ?? [];
+  const offsets = tokens.map((token) => foldedText.indexOf(token)).filter((offset) => offset >= 0);
+  const matchIndex = offsets.length > 0 ? Math.min(...offsets) : 0;
   const bodyLength = 236;
   const idealStart = Math.max(0, matchIndex - 72);
-  const start = Math.min(idealStart, normalizedText.length - bodyLength);
-  const end = Math.min(normalizedText.length, start + bodyLength);
+  let start = Math.min(idealStart, normalizedText.length - bodyLength);
+  if (isLowSurrogate(normalizedText.charCodeAt(start))) start--;
+  let end = Math.min(normalizedText.length, start + bodyLength);
+  if (isLowSurrogate(normalizedText.charCodeAt(end))) end--;
   return `${start > 0 ? "…" : ""}${normalizedText.slice(start, end)}${
     end < normalizedText.length ? "…" : ""
   }`;
+}
+
+const isLowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff;
+
+function foldSearchText(value: string): string {
+  return value.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+}
+
+function messageMatchQuality(text: string, tokens: readonly string[]): number {
+  const words = Array.from(foldSearchText(text).matchAll(/[\p{L}\p{N}]+/gu), (match) => match[0]);
+  if (tokens.every((token) => words.includes(token))) return 2;
+  return tokens.every((token) => words.some((word) => word.startsWith(token))) ? 1 : 0;
 }
 
 /**
@@ -80,76 +97,57 @@ export class ThreadSearch extends Context.Service<
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
-  // One best match per thread: user messages outrank assistant ones, then the
-  // newest message wins. Threads order by match kind, then recency.
   const searchRows = SqlSchema.findAll({
     Request: SearchRequest,
     Result: SearchRow,
-    execute: ({ pattern, limit }) => sql`
-      WITH candidate AS (
-        SELECT
-          threads.thread_id,
-          threads.project_id,
-          threads.title AS thread_title,
-          messages.role,
-          json_extract(messages.payload_json, '$.text') AS match_text,
-          messages.created_at AS message_created_at,
-          messages.message_id,
-          threads.updated_at AS thread_updated_at
-        FROM orchestration_v2_projection_messages AS messages
-        INNER JOIN orchestration_v2_projection_threads AS threads
-          ON threads.thread_id = messages.thread_id
-        INNER JOIN projection_projects AS projects
-          ON projects.project_id = threads.project_id
-        WHERE threads.deleted_at IS NULL
-          AND threads.archived_at IS NULL
-          AND projects.deleted_at IS NULL
-          AND messages.streaming = 0
-          AND messages.role IN ('user', 'assistant')
-          AND json_extract(messages.payload_json, '$.text') LIKE ${pattern} ESCAPE '!'
-      ),
-      ranked AS (
-        SELECT
-          thread_id,
-          project_id,
-          thread_title,
-          role AS source,
-          match_text,
-          message_created_at,
-          CASE role WHEN 'user' THEN 0 ELSE 1 END AS match_rank,
-          thread_updated_at,
-          ROW_NUMBER() OVER (
-            PARTITION BY thread_id
-            ORDER BY
-              CASE role WHEN 'user' THEN 0 ELSE 1 END ASC,
-              message_created_at DESC,
-              message_id ASC
-          ) AS thread_match_rank
-        FROM candidate
+    execute: ({ match, pattern, fts }) => sql`
+      WITH hits AS MATERIALIZED (
+        ${
+          fts
+            ? sql`
+          SELECT d.rowid AS document_rowid, d.key, d.thread_id, d.matched_at
+          FROM search_fts JOIN search_documents d ON d.rowid = search_fts.rowid
+          WHERE search_fts MATCH ${match} AND d.key LIKE 'message:%'
+          ORDER BY search_fts.rowid DESC LIMIT 10000
+        `
+            : sql`
+          SELECT rowid AS document_rowid, key, thread_id, matched_at FROM search_documents
+          WHERE body LIKE ${pattern} ESCAPE '!' AND key LIKE 'message:%'
+          ORDER BY rowid DESC LIMIT 10000
+        `
+        }
       )
-      SELECT
-        thread_id AS "threadId",
-        project_id AS "projectId",
-        thread_title AS "title",
-        source,
-        match_text AS "matchText",
-        message_created_at AS "messageCreatedAt"
-      FROM ranked
-      WHERE thread_match_rank = 1
-      ORDER BY match_rank ASC, thread_updated_at DESC, thread_id ASC
-      LIMIT ${limit}
+      SELECT threads.thread_id AS "threadId", threads.project_id AS "projectId",
+        threads.title, messages.role AS source, documents.body AS "matchText",
+        hits.matched_at AS "messageCreatedAt", threads.updated_at AS "threadUpdatedAt"
+      FROM hits
+      JOIN search_documents documents ON documents.rowid = hits.document_rowid
+      JOIN orchestration_v2_projection_messages messages
+        ON messages.message_id = substr(hits.key, 9)
+      JOIN orchestration_v2_projection_threads threads ON threads.thread_id = hits.thread_id
+      JOIN projection_projects projects ON projects.project_id = threads.project_id
+      WHERE hits.key LIKE 'message:%' AND threads.deleted_at IS NULL AND threads.archived_at IS NULL
+        AND projects.deleted_at IS NULL
+        AND json_extract(threads.payload_json, '$.lineage.relationshipToParent') IS NOT 'subagent'
+        AND messages.message_id NOT LIKE 'async-answer:%'
+        AND messages.streaming = 0 AND messages.role IN ('user', 'assistant')
+      ORDER BY hits.document_rowid DESC LIMIT 2000
     `,
   });
 
   const search: ThreadSearch["Service"]["search"] = Effect.fn("ThreadSearch.search")(
     function* (input) {
-      // The scan reads every message, so run it on the reader worker rather
-      // than the event loop.
+      const tokens = input.query.match(/[\p{L}\p{N}]+/gu)?.slice(0, 32) ?? [];
+      if (tokens.length === 0) return { matches: [] };
       const rows = yield* sql
         .withTransaction(
-          searchRows({
-            pattern: `%${escapeLikePattern(input.query)}%`,
-            limit: input.limit ?? 50,
+          Effect.gen(function* () {
+            const settings = yield* sql<{ engine: string }>`SELECT engine FROM search_config`;
+            return yield* searchRows({
+              match: `body : (${tokens.map((token) => `"${token}"*`).join(" AND ")})`,
+              pattern: `${escapeLikePattern(input.query)}%`,
+              fts: settings[0]?.engine === "fts5",
+            });
           }),
         )
         .pipe(
@@ -162,8 +160,25 @@ export const make = Effect.gen(function* () {
               }),
           ),
         );
+      // Prefer whole words, then word starts, then mid-word matches. At the
+      // same quality, what the user wrote wins, followed by thread recency.
+      const foldedTokens = tokens.map(foldSearchText);
+      const ranked = rows
+        .map((row) => ({ row, quality: messageMatchQuality(row.matchText, foldedTokens) }))
+        .sort(
+          (a, b) =>
+            b.quality - a.quality ||
+            Number(a.row.source !== "user") - Number(b.row.source !== "user") ||
+            b.row.threadUpdatedAt.localeCompare(a.row.threadUpdatedAt) ||
+            (b.row.messageCreatedAt ?? "").localeCompare(a.row.messageCreatedAt ?? "") ||
+            a.row.threadId.localeCompare(b.row.threadId),
+        );
+      const best = new Map<ThreadId, typeof SearchRow.Type>();
+      for (const { row } of ranked) {
+        if (!best.has(row.threadId)) best.set(row.threadId, row);
+      }
       return {
-        matches: rows.map((row) => ({
+        matches: [...best.values()].slice(0, input.limit ?? 50).map((row) => ({
           threadId: row.threadId,
           projectId: row.projectId,
           title: row.title,
