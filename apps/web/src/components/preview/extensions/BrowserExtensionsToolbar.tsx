@@ -10,10 +10,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { BrowserExtensionInstallDialog } from "~/browser/BrowserExtensionInstall";
 import {
+  browserExtensionIconAction,
+  type BrowserExtensionPopupRequest,
   browserExtensionSidePanelTarget,
   browserExtensionToolbarLayout,
   canOpenBrowserExtensionSidePanel,
   isBrowserExtensionUsable,
+  isUserOpenedBrowserExtensionPopup,
 } from "~/browser/browserExtensions.logic";
 import { useBrowserExtensions } from "~/browser/useBrowserExtensions";
 import { useStableCallback } from "~/hooks/useStableCallback";
@@ -94,39 +97,54 @@ export function BrowserExtensionsToolbar(props: Props) {
   const details = list.find((extension) => extension.id === detailsId) ?? null;
   const [addOpen, setAddOpen] = useState(false);
 
-  const openSurface = (extension: BrowserExtension, kind: "popup" | "sidePanel") => {
+  // The popup the user asked for here; any other popup on the host is an agent's.
+  const [popupRequest, setPopupRequest] = useState<BrowserExtensionPopupRequest | null>(null);
+  const popupUserOpened =
+    surfaces.popup !== null && isUserOpenedBrowserExtensionPopup(surfaces.popup, popupRequest);
+
+  const openSurface = async (extension: BrowserExtension, kind: "popup" | "sidePanel") => {
     if (gap || !hostTabId) return;
-    void surfaceActions.open(extension, kind, hostTabId);
+    if (kind === "sidePanel") {
+      void surfaceActions.open(extension, kind, hostTabId);
+      return;
+    }
+    const request = { hostTabId, extensionId: extension.id, surfaceTabId: null };
+    setPopupRequest(request);
+    const surfaceTabId = await surfaceActions.open(extension, kind, hostTabId);
+    setPopupRequest((current) =>
+      current !== request ? current : surfaceTabId ? { ...request, surfaceTabId } : null,
+    );
   };
-  const toggleSidePanel = (extension: BrowserExtension) => {
-    if (surfaces.sidePanel && sidePanelExtensionId === extension.id) {
+  /** From the menu, which says "Open" or "Close" for what is showing. */
+  const openPageFromMenu = (extension: BrowserExtension, kind: BrowserExtensionPageKind) => {
+    if (kind === "sidePanel" && surfaces.sidePanel && sidePanelExtensionId === extension.id) {
       void surfaceActions.close(surfaces.sidePanel);
+    } else if (kind === "popup" && surfaces.popup && popupExtensionId === extension.id) {
+      void surfaceActions.close(surfaces.popup);
     } else {
-      openSurface(extension, "sidePanel");
+      openPage(extension, kind);
     }
   };
+  /** From the details dialog, whose "Open" only opens, leaving a page already showing. */
   const openPage = (extension: BrowserExtension, kind: BrowserExtensionPageKind) => {
     if (kind === "options") {
       if (extension.optionsPage) {
         props.openPage(browserExtensionPageUrl(extension.id, extension.optionsPage));
       }
-    } else if (kind === "sidePanel") {
-      toggleSidePanel(extension);
-    } else {
-      openSurface(extension, "popup");
+      return;
     }
+    const showing = kind === "sidePanel" ? sidePanelExtensionId : popupExtensionId;
+    if (showing !== extension.id) void openSurface(extension, kind);
   };
 
   const clickIcon = (extension: BrowserExtension) => {
-    if (extension.state === "failed") {
-      setDetailsId(extension.id);
-      return;
-    }
-    if (surfaces.popup && popupExtensionId === extension.id) {
-      void surfaceActions.close(surfaces.popup);
-      return;
-    }
-    openSurface(extension, "popup");
+    const { action } = browserExtensionIconAction(extension, {
+      gap,
+      popupOpen: popupExtensionId === extension.id,
+    });
+    if (action === "details") setDetailsId(extension.id);
+    else if (action === "close" && surfaces.popup) void surfaceActions.close(surfaces.popup);
+    else if (action === "open") void openSurface(extension, "popup");
   };
 
   // The keybinding toggles the side panel of the extension that opened one last.
@@ -135,7 +153,10 @@ export function BrowserExtensionsToolbar(props: Props) {
       void surfaceActions.close(surfaces.sidePanel);
       return;
     }
-    const target = browserExtensionSidePanelTarget(list, recentSidePanelExtensionId(profileId));
+    const target = browserExtensionSidePanelTarget(
+      list,
+      recentSidePanelExtensionId(threadRef.environmentId, profileId),
+    );
     if (gap || !target) {
       toastManager.add({
         type: "info",
@@ -144,7 +165,7 @@ export function BrowserExtensionsToolbar(props: Props) {
       });
       return;
     }
-    openSurface(target, "sidePanel");
+    void openSurface(target, "sidePanel");
   });
   const { visible } = props;
   useEffect(() => {
@@ -178,7 +199,10 @@ export function BrowserExtensionsToolbar(props: Props) {
               extension.state === "failed" ? `${extension.name} failed to load` : extension.name
             }
             unavailableReason={
-              gap ?? (extension.state === "installing" ? `${extension.name} is loading` : null)
+              browserExtensionIconAction(extension, {
+                gap,
+                popupOpen: popupExtensionId === extension.id,
+              }).unavailableReason
             }
             pressed={popupExtensionId === extension.id}
             onClick={() => clickIcon(extension)}
@@ -241,7 +265,7 @@ export function BrowserExtensionsToolbar(props: Props) {
                   popupOpen={popupExtensionId === extension.id}
                   sidePanelOpen={sidePanelExtensionId === extension.id}
                   onSetEnabled={(enabled) => void extensions.setEnabled(extension.id, enabled)}
-                  onOpenPage={(kind) => openPage(extension, kind)}
+                  onOpenPage={(kind) => openPageFromMenu(extension, kind)}
                   onDetails={() => setDetailsId(extension.id)}
                   onReload={() => void extensions.reloadFromFolder(extension)}
                   onRemove={() => void extensions.remove(extension)}
@@ -256,6 +280,7 @@ export function BrowserExtensionsToolbar(props: Props) {
       <ExtensionPopupPopover
         threadRef={threadRef}
         snapshot={surfaces.popup}
+        userOpened={popupUserOpened}
         extensionName={popupExtension?.name ?? "Extension"}
         anchor={() =>
           (popupExtensionId ? iconRefs.current.get(popupExtensionId) : undefined) ??

@@ -10,6 +10,8 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import {
   applyPreviewServerEvent,
   beginPreviewSessionClose,
+  previewRevealTabId,
+  previewTabSessions,
   readThreadPreviewState,
   reconcilePreviewServerSessions,
   resetPreviewStateForTests,
@@ -128,5 +130,25 @@ describe("extension surfaces in the preview state", () => {
     const state = readThreadPreviewState(threadRef);
     expect(state.sessions).toEqual({});
     expect(state.activeTabId).toBeNull();
+  });
+
+  it("leaves surfaces out of the tabs the panel and desktop webviews show", () => {
+    opened(host);
+    opened(popup);
+    opened(sidePanel);
+    expect(
+      previewTabSessions(readThreadPreviewState(threadRef).sessions).map((s) => s.tabId),
+    ).toEqual(["host"]);
+  });
+
+  it("reveals the host tab for an agent's popup or side panel", () => {
+    opened(host);
+    opened(popup);
+    opened(sidePanel);
+    const { sessions } = readThreadPreviewState(threadRef);
+    expect(previewRevealTabId(sessions, host)).toBe("host");
+    expect(previewRevealTabId(sessions, popup)).toBe("host");
+    expect(previewRevealTabId(sessions, sidePanel)).toBe("host");
+    expect(previewRevealTabId({}, popup)).toBeNull();
   });
 });

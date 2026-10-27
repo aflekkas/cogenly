@@ -997,7 +997,8 @@ export function PreviewView({
         }
       />
 
-      <div className="flex min-h-0 flex-1">
+      {/* ExtensionSidePanel sizes itself against this row. */}
+      <div className="@container/browser-page relative flex min-h-0 flex-1">
         <div ref={serverBodyRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
           {runtimeTabId && snapshot && isServerTab ? (
             <>

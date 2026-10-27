@@ -145,6 +145,27 @@ const rememberSnapshotUrl = (
 export const isExtensionSurface = (snapshot: PreviewSessionSnapshot | undefined | null): boolean =>
   snapshot?.extensionSurface !== undefined;
 
+/** The sessions that are tabs, the ones the tab strip, panel and desktop webviews show. */
+export const previewTabSessions = (
+  sessions: Record<string, PreviewSessionSnapshot>,
+): PreviewSessionSnapshot[] =>
+  Object.values(sessions).filter((snapshot) => !isExtensionSurface(snapshot));
+
+/**
+ * The tab a session's reveal brings into view: the tab itself, or for an
+ * extension's popup or side panel, the host tab it draws beside. Null for a
+ * surface whose host isn't here.
+ */
+export function previewRevealTabId(
+  sessions: Record<string, PreviewSessionSnapshot>,
+  snapshot: PreviewSessionSnapshot,
+): string | null {
+  const hostTabId = snapshot.extensionSurface?.hostTabId;
+  if (hostTabId === undefined) return snapshot.tabId;
+  const host = sessions[hostTabId];
+  return host && !isExtensionSurface(host) ? hostTabId : null;
+}
+
 /** The newest popup and side panel open on a host tab. */
 export function selectExtensionSurfaces(
   sessions: Record<string, PreviewSessionSnapshot>,
@@ -214,6 +235,13 @@ const removeSession = (current: ThreadPreviewState, tabId: string): ThreadPrevie
 export function useThreadPreviewState(ref: ScopedThreadRef | null | undefined): ThreadPreviewState {
   const atom = ref ? previewStateAtom(scopedThreadKey(ref)) : emptyPreviewStateAtom;
   return useAtomValue(atom);
+}
+
+/** Whether a tab is an extension's popup or side panel; renders only when that answer changes. */
+export function useIsExtensionSurfaceTab(ref: ScopedThreadRef, tabId: string): boolean {
+  return useAtomValue(previewStateAtom(scopedThreadKey(ref)), (state) =>
+    isExtensionSurface(state.sessions[tabId]),
+  );
 }
 
 export function useActivePreviewSessions(): Record<string, ThreadPreviewState> {

@@ -13,7 +13,10 @@ const SIDE_PANEL_WIDTH = { default: 360, min: 260, max: 640 } as const;
 
 /**
  * An extension's side panel: a column beside the page with the extension's
- * name and a close button, resized from its left edge. One per tab.
+ * name and a close button, resized from its left edge. One per tab. It never
+ * squeezes the page below 15rem; where the page area (the `browser-page`
+ * container) is too narrow for both, as on a phone, it covers the page
+ * instead, so its close button stays in reach.
  */
 export function ExtensionSidePanel(props: {
   readonly threadRef: ScopedThreadRef;
@@ -34,10 +37,15 @@ export function ExtensionSidePanel(props: {
   return (
     <section
       aria-label={`${name} side panel`}
-      className="relative flex w-(--resizable-width) min-w-0 shrink-0 flex-col border-l border-border/60 bg-background"
+      className="relative flex w-(--resizable-width) max-w-[calc(100%-15rem)] min-w-0 shrink-0 flex-col border-l border-border/60 bg-background @max-[31.25rem]/browser-page:absolute @max-[31.25rem]/browser-page:inset-0 @max-[31.25rem]/browser-page:z-20 @max-[31.25rem]/browser-page:w-auto @max-[31.25rem]/browser-page:max-w-none @max-[31.25rem]/browser-page:border-l-0"
       style={{ [RESIZABLE_WIDTH_PROPERTY]: `${width}px` } as CSSProperties}
     >
-      <EdgeResizeHandle edge="left" handlers={handlers} aria-label={`Resize ${name} side panel`} />
+      <EdgeResizeHandle
+        edge="left"
+        handlers={handlers}
+        aria-label={`Resize ${name} side panel`}
+        className="@max-[31.25rem]/browser-page:hidden"
+      />
       <header className="flex h-9 shrink-0 items-center gap-2 border-b border-border/60 ps-3 pe-1">
         {props.extension ? <BrowserExtensionIcon extension={props.extension} /> : null}
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>

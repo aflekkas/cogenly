@@ -267,6 +267,8 @@ import {
 import {
   isExtensionSurface,
   isPreviewSupportedInRuntime,
+  previewRevealTabId,
+  previewTabSessions,
   setActivePreviewTab,
   useThreadPreviewState,
 } from "../previewStateStore";
@@ -1880,9 +1882,7 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(() => {
     if (!activeThreadRef || !previewSessionsReady) return;
     // Extension popups and side panels draw beside their host tab, never as tabs.
-    const tabs = Object.values(activePreviewState.sessions).filter(
-      (session) => !isExtensionSurface(session),
-    );
+    const tabs = previewTabSessions(activePreviewState.sessions);
     const hiddenTabIds = new Set(
       tabs
         .filter((session) => session.runtime === "server" && session.reveal === false)
@@ -4421,7 +4421,7 @@ export default function ChatView(props: ChatViewProps) {
       return;
     const threadKey = scopedThreadKey(activeThreadRef);
     const serverSessions = Object.values(activePreviewState.sessions).filter(
-      (session) => session.runtime === "server" && !isExtensionSurface(session),
+      (session) => session.runtime === "server",
     );
     const previous = previousServerPreviewTabs.current.get(threadKey);
     previousServerPreviewTabs.current.set(
@@ -4429,25 +4429,37 @@ export default function ChatView(props: ChatViewProps) {
       new Map(serverSessions.map((session) => [session.tabId, session.revealRequest?.id])),
     );
     if (!previous) return;
+    const revealed = new Set<string>();
     for (const session of serverSessions) {
       const requested = session.revealRequest;
       const fresh = requested
         ? previous.get(session.tabId) !== requested.id
         : !previous.has(session.tabId);
       if (!fresh || session.reveal !== true) continue;
+      // An extension's popup or side panel shows beside its host, so revealing
+      // one reveals the host tab.
+      const tabId = previewRevealTabId(activePreviewState.sessions, session);
+      if (tabId === null || revealed.has(tabId)) continue;
+      revealed.add(tabId);
       const surface = rightPanelState.surfaces.find(
-        (surface) => surface.kind === "preview" && surface.resourceId === session.tabId,
+        (surface) => surface.kind === "preview" && surface.resourceId === tabId,
       );
       if (requested?.force === true) {
         if (surface) useRightPanelStore.getState().activateSurface(activeThreadRef, surface.id);
-        else useRightPanelStore.getState().openBrowser(activeThreadRef, session.tabId);
+        else useRightPanelStore.getState().openBrowser(activeThreadRef, tabId);
+      } else if (surface && isExtensionSurface(session)) {
+        // The host is already a panel tab, perhaps behind another; bring it
+        // forward in an open panel so the agent's popup or side panel shows.
+        if (rightPanelState.isOpen) {
+          useRightPanelStore.getState().activateSurface(activeThreadRef, surface.id);
+        }
       } else if (!surface && !shouldUsePlanSidebarSheet) {
         // A new tab the agent revealed without forcing it joins the panel's tabs,
         // but a panel the user closed stays closed (the floating preview shows
         // the tab instead); the phone sheet waits to be asked.
         useRightPanelStore
           .getState()
-          .openBrowser(activeThreadRef, session.tabId, { reveal: rightPanelState.isOpen });
+          .openBrowser(activeThreadRef, tabId, { reveal: rightPanelState.isOpen });
       }
     }
   }, [

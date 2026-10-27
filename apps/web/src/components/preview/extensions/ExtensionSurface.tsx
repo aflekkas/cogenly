@@ -1,17 +1,16 @@
 import type { PreviewSessionSnapshot, ScopedThreadRef } from "@cogenly/contracts";
 
-import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
-import { useRendersServerTabNatively } from "~/browser/previewRuntime";
 import { ServerBrowserSurface } from "~/browser/ServerBrowserSurface";
 import { useThreadPreviewState } from "~/previewStateStore";
 
 import { showPreviewPopup } from "../showPreviewPopup";
 
 /**
- * The page of an extension's popup or side panel: its server tab, streamed, or
- * drawn by the desktop app's own webview when the server renders it natively.
- * Fills its parent, which sets the size.
+ * The page of an extension's popup or side panel: its server tab, streamed.
+ * Surfaces always stream, even in the desktop app, which never draws them
+ * with a webview of its own (ElectronBrowserHost skips them). Fills its
+ * parent, which sets the size.
  */
 export function ExtensionSurface(props: {
   readonly threadRef: ScopedThreadRef;
@@ -20,18 +19,9 @@ export function ExtensionSurface(props: {
 }) {
   const { threadRef, snapshot } = props;
   const serverEpoch = useThreadPreviewState(threadRef).serverEpoch;
-  const native = useRendersServerTabNatively(threadRef.environmentId, snapshot);
-  const runtimeTabId = previewRuntimeTabId(threadRef, serverEpoch, snapshot.tabId);
-  return native ? (
-    <BrowserSurfaceSlot
-      key={runtimeTabId}
-      tabId={runtimeTabId}
-      visible={props.visible}
-      className="absolute inset-0"
-    />
-  ) : (
+  return (
     <ServerBrowserSurface
-      key={runtimeTabId}
+      key={previewRuntimeTabId(threadRef, serverEpoch, snapshot.tabId)}
       environmentId={threadRef.environmentId}
       threadId={threadRef.threadId}
       tabId={snapshot.tabId}

@@ -2,7 +2,12 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@cogenly/client-runtime/state/runtime";
-import type { BrowserExtension, PreviewSessionSnapshot, ScopedThreadRef } from "@cogenly/contracts";
+import type {
+  BrowserExtension,
+  EnvironmentId,
+  PreviewSessionSnapshot,
+  ScopedThreadRef,
+} from "@cogenly/contracts";
 import { useCallback } from "react";
 
 import { browserExtensionErrorMessage } from "~/browser/browserExtensions.logic";
@@ -16,16 +21,23 @@ import {
 import { previewEnvironment } from "~/state/preview";
 import { useAtomCommand } from "~/state/use-atom-command";
 
-/** Per profile, the extension whose side panel opened last: the one the keybinding toggles. */
+/**
+ * Per environment and profile, the extension whose side panel opened last:
+ * the one the keybinding toggles. Each machine has its own extensions.
+ */
 const recentSidePanelByProfile = new Map<string, string>();
 
-export const recentSidePanelExtensionId = (profileId: string) =>
-  recentSidePanelByProfile.get(profileId) ?? null;
+const profileKey = (environmentId: EnvironmentId, profileId: string) =>
+  `${environmentId}\u0000${profileId}`;
+
+export const recentSidePanelExtensionId = (environmentId: EnvironmentId, profileId: string) =>
+  recentSidePanelByProfile.get(profileKey(environmentId, profileId)) ?? null;
 
 /**
  * Opens and closes an extension's popup and side panel on a host tab. Both are
  * server tabs the panel draws beside the host; a host holds at most one of
- * each, so opening another closes the one before.
+ * each, so opening another closes the one before. `open` resolves to the
+ * surface's tab, or null when it opened none.
  */
 export function useExtensionSurfaceActions(threadRef: ScopedThreadRef, profileId: string) {
   const runOpen = useAtomCommand(previewEnvironment.extensionOpenSurface, { reportFailure: false });
@@ -51,7 +63,9 @@ export function useExtensionSurfaceActions(threadRef: ScopedThreadRef, profileId
         hostTabId,
       )[kind];
       if (existing) void close(existing);
-      if (kind === "sidePanel") recentSidePanelByProfile.set(profileId, extension.id);
+      if (kind === "sidePanel") {
+        recentSidePanelByProfile.set(profileKey(threadRef.environmentId, profileId), extension.id);
+      }
       const result = await runOpen({
         environmentId: threadRef.environmentId,
         input: {
@@ -63,7 +77,8 @@ export function useExtensionSurfaceActions(threadRef: ScopedThreadRef, profileId
           threadId: threadRef.threadId,
         },
       });
-      if (result._tag === "Success" || isAtomCommandInterrupted(result)) return;
+      if (result._tag === "Success") return result.value.surfaceTabId ?? null;
+      if (isAtomCommandInterrupted(result)) return null;
       toastManager.add({
         type: "error",
         title:
@@ -75,6 +90,7 @@ export function useExtensionSurfaceActions(threadRef: ScopedThreadRef, profileId
           "An error occurred.",
         ),
       });
+      return null;
     },
     [close, profileId, runOpen, threadRef],
   );
