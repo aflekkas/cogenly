@@ -1,6 +1,7 @@
 import type {
   BrowserExtension,
   BrowserExtensionInstallResult,
+  PreviewExtensionSurface,
   PreviewSessionSnapshot,
 } from "@cogenly/contracts";
 
@@ -186,15 +187,58 @@ const POPUP_DEFAULT = { width: 360, height: 480 } as const;
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, Math.round(value)));
 
-/** A popup's size from its surface tab's viewport, clamped to Chrome's popup bounds. */
-export function browserExtensionPopupSize(viewport: PreviewSessionSnapshot["viewport"]): {
+/**
+ * A popup's size: the size the server measured its page wanting, clamped to
+ * Chrome's popup bounds. The panel caps it again to the space on screen, and
+ * the stream follows the box it is drawn in, so the box never sets its own size.
+ */
+export function browserExtensionPopupSize(surface: PreviewExtensionSurface | undefined): {
   readonly width: number;
   readonly height: number;
 } {
-  const size = viewport && viewport._tag !== "fill" ? viewport : POPUP_DEFAULT;
+  const size = surface?.preferredSize ?? POPUP_DEFAULT;
   return {
     width: clamp(size.width, POPUP_MIN.width, POPUP_MAX.width),
     height: clamp(size.height, POPUP_MIN.height, POPUP_MAX.height),
+  };
+}
+
+/** A popup the user asked for from the toolbar; its tab is null until the server names it. */
+export interface BrowserExtensionPopupRequest {
+  readonly hostTabId: string;
+  readonly extensionId: string;
+  readonly surfaceTabId: string | null;
+}
+
+/**
+ * Whether the user opened this popup. Only theirs take focus and close on a
+ * click outside or Esc; one an agent opened stays until the agent closes it
+ * or the user presses its close button, and never pulls focus from the chat.
+ */
+export function isUserOpenedBrowserExtensionPopup(
+  popup: Pick<PreviewSessionSnapshot, "tabId" | "extensionSurface">,
+  request: BrowserExtensionPopupRequest | null,
+): boolean {
+  const surface = popup.extensionSurface;
+  if (!request || surface?.kind !== "popup") return false;
+  if (request.surfaceTabId !== null) return request.surfaceTabId === popup.tabId;
+  return surface.hostTabId === request.hostTabId && surface.extensionId === request.extensionId;
+}
+
+/**
+ * What clicking an extension's toolbar icon does. One that failed to load
+ * shows its details, which explain why, even in a tab that can't run it.
+ */
+export function browserExtensionIconAction(
+  extension: Pick<BrowserExtension, "name" | "state">,
+  context: { readonly gap: string | null; readonly popupOpen: boolean },
+): { readonly action: "details" | "close" | "open"; readonly unavailableReason: string | null } {
+  if (extension.state === "failed") return { action: "details", unavailableReason: null };
+  if (context.popupOpen) return { action: "close", unavailableReason: null };
+  return {
+    action: "open",
+    unavailableReason:
+      context.gap ?? (extension.state === "installing" ? `${extension.name} is loading` : null),
   };
 }
 

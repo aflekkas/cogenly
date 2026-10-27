@@ -1,8 +1,9 @@
-import type { BrowserExtension } from "@cogenly/contracts";
+import type { BrowserExtension, PreviewExtensionSurface } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   browserExtensionErrorMessage,
+  browserExtensionIconAction,
   browserExtensionInstalledMessage,
   browserExtensionPermissionLines,
   browserExtensionPermissionSummary,
@@ -13,6 +14,7 @@ import {
   browserExtensionTabGap,
   browserExtensionToolbarLayout,
   isFolderInstallSource,
+  isUserOpenedBrowserExtensionPopup,
 } from "./browserExtensions.logic";
 
 const summary = (permissions: string[], hostPermissions: string[]) =>
@@ -205,25 +207,86 @@ describe("browserExtensionTabGap", () => {
   });
 });
 
+const popupSurface = (
+  overrides: Partial<PreviewExtensionSurface> = {},
+): PreviewExtensionSurface => ({
+  kind: "popup",
+  extensionId: "a".repeat(32),
+  hostTabId: "host",
+  ...overrides,
+});
+
 describe("browserExtensionPopupSize", () => {
-  it("takes the surface's size within Chrome's popup bounds", () => {
-    expect(browserExtensionPopupSize({ _tag: "freeform", width: 320, height: 180 })).toEqual({
-      width: 320,
-      height: 180,
-    });
-    expect(browserExtensionPopupSize({ _tag: "freeform", width: 10, height: 2000 })).toEqual({
-      width: 25,
-      height: 600,
-    });
-    expect(browserExtensionPopupSize({ _tag: "freeform", width: 1200, height: 12 })).toEqual({
-      width: 800,
-      height: 25,
-    });
+  const sized = (width: number, height: number) =>
+    browserExtensionPopupSize(popupSurface({ preferredSize: { width, height } }));
+
+  it("takes the size the server measured, within Chrome's popup bounds", () => {
+    expect(sized(320, 180)).toEqual({ width: 320, height: 180 });
+    expect(sized(10, 2000)).toEqual({ width: 25, height: 600 });
+    expect(sized(1200, 12)).toEqual({ width: 800, height: 25 });
   });
 
-  it("starts at a default size until the page reports one", () => {
+  it("starts at a default size until the server measures the page", () => {
     expect(browserExtensionPopupSize(undefined)).toEqual({ width: 360, height: 480 });
-    expect(browserExtensionPopupSize({ _tag: "fill" })).toEqual({ width: 360, height: 480 });
+    expect(browserExtensionPopupSize(popupSurface())).toEqual({ width: 360, height: 480 });
+  });
+});
+
+describe("isUserOpenedBrowserExtensionPopup", () => {
+  const popup = { tabId: "surface-1", extensionSurface: popupSurface() };
+  const request = { hostTabId: "host", extensionId: "a".repeat(32), surfaceTabId: null };
+
+  it("claims the popup the user asked for, before and after the server names its tab", () => {
+    expect(isUserOpenedBrowserExtensionPopup(popup, request)).toBe(true);
+    expect(
+      isUserOpenedBrowserExtensionPopup(popup, { ...request, surfaceTabId: "surface-1" }),
+    ).toBe(true);
+  });
+
+  it("leaves every other popup to the agent", () => {
+    expect(isUserOpenedBrowserExtensionPopup(popup, null)).toBe(false);
+    expect(
+      isUserOpenedBrowserExtensionPopup(popup, { ...request, surfaceTabId: "surface-0" }),
+    ).toBe(false);
+    expect(isUserOpenedBrowserExtensionPopup(popup, { ...request, hostTabId: "other" })).toBe(
+      false,
+    );
+    expect(
+      isUserOpenedBrowserExtensionPopup(popup, { ...request, extensionId: "b".repeat(32) }),
+    ).toBe(false);
+  });
+});
+
+describe("browserExtensionIconAction", () => {
+  const gap = "Incognito tabs run without extensions.";
+
+  it("shows a failed extension's details, even in a tab that can't run it", () => {
+    expect(
+      browserExtensionIconAction(extensionFixture("a", { state: "failed" }), {
+        gap,
+        popupOpen: false,
+      }),
+    ).toEqual({ action: "details", unavailableReason: null });
+  });
+
+  it("toggles the popup, and explains why it can't open", () => {
+    const extension = extensionFixture("a");
+    expect(browserExtensionIconAction(extension, { gap: null, popupOpen: true }).action).toBe(
+      "close",
+    );
+    expect(browserExtensionIconAction(extension, { gap: null, popupOpen: false })).toEqual({
+      action: "open",
+      unavailableReason: null,
+    });
+    expect(browserExtensionIconAction(extension, { gap, popupOpen: false }).unavailableReason).toBe(
+      gap,
+    );
+    expect(
+      browserExtensionIconAction(extensionFixture("a", { state: "installing" }), {
+        gap: null,
+        popupOpen: false,
+      }).unavailableReason,
+    ).toBe("a is loading");
   });
 });
 

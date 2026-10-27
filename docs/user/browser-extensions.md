@@ -17,7 +17,7 @@ Each extension lists the sites it can read and change. Install only extensions y
 Extensions with a toolbar button show their icon beside the address bar; the first three sit there and the rest are in the extensions menu.
 
 - Click an icon to open its popup under it, as in Chrome. Click outside it or press Esc to close it. A popup acts on the tab it opened from.
-- Extensions with a side panel open it from the extensions menu. It sits beside the page, and you can drag its edge to resize it. `Cmd+Option+E` on macOS or `Ctrl+Alt+E` on Windows and Linux opens or closes the side panel of the extension you used last.
+- Extensions with a side panel open it from the extensions menu. It sits beside the page, and you can drag its edge to resize it. In a narrow panel it covers the page until you close it. While the browser panel has focus, `Cmd+Option+E` on macOS or `Ctrl+Alt+E` on Windows and Linux opens or closes the side panel of the extension you used last.
 - The extensions menu also turns each extension on or off, opens its options page in a tab, and shows **Details**: its version, ID, source, access, pages and whether it loaded.
 
 ## When one fails to load
@@ -26,7 +26,7 @@ An extension that fails to load is skipped so browsing can continue. Its icon an
 
 ## Agents
 
-Agents can install, list, reload, turn off and remove extensions, and open an extension's popup, side panel or options page to click through. A popup or side panel an agent opens shows in your panel too, beside the tab it belongs to. Ask in plain words, for example "install uBlock Origin Lite in my Work profile".
+Agents can install, list, reload, turn off and remove extensions, and open an extension's popup, side panel or options page to click through. A popup or side panel an agent opens shows in your panel too, beside the tab it belongs to. A popup an agent opened doesn't take your keyboard focus and stays open until the agent closes it or you press its close button. Ask in plain words, for example "install uBlock Origin Lite in my Work profile".
 
 ## Where extensions run
 
