@@ -29,7 +29,7 @@ import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
 import { faviconUrlForOrigin } from "~/lib/favicon";
 import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
-import { useThreadPreviewState } from "~/previewStateStore";
+import { isExtensionSurface, useThreadPreviewState } from "~/previewStateStore";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { refreshPreviewStreamAccess, usePreviewStreamAccess } from "~/state/previewStream";
 import { useEnvironmentScope } from "~/state/session";
@@ -177,7 +177,11 @@ function FloatingBrowserPreviewGate(props: {
   const environmentId = props.target.threadRef.environmentId;
   const canOperate = useEnvironmentScope(environmentId, AuthPreviewOperateScope);
   const available = usePreviewAvailable(environmentId);
-  if (!canOperate || !available) return null;
+  // An extension's popup or side panel shows only beside its host tab.
+  const surface = isExtensionSurface(
+    useThreadPreviewState(props.target.threadRef).sessions[props.target.tabId],
+  );
+  if (!canOperate || !available || surface) return null;
   return <FloatingBrowserPreviewCard {...props} />;
 }
 

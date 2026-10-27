@@ -265,6 +265,7 @@ import {
   useRightPanelStore,
 } from "../rightPanelStore";
 import {
+  isExtensionSurface,
   isPreviewSupportedInRuntime,
   setActivePreviewTab,
   useThreadPreviewState,
@@ -1878,18 +1879,20 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     if (!activeThreadRef || !previewSessionsReady) return;
+    // Extension popups and side panels draw beside their host tab, never as tabs.
+    const tabs = Object.values(activePreviewState.sessions).filter(
+      (session) => !isExtensionSurface(session),
+    );
     const hiddenTabIds = new Set(
-      Object.values(activePreviewState.sessions)
+      tabs
         .filter((session) => session.runtime === "server" && session.reveal === false)
         .map((session) => session.tabId),
     );
-    useRightPanelStore
-      .getState()
-      .reconcileBrowserSurfaces(
-        activeThreadRef,
-        Object.keys(activePreviewState.sessions),
-        hiddenTabIds,
-      );
+    useRightPanelStore.getState().reconcileBrowserSurfaces(
+      activeThreadRef,
+      tabs.map((session) => session.tabId),
+      hiddenTabIds,
+    );
   }, [activePreviewState.sessions, activeThreadRef, previewSessionsReady]);
 
   const latestRunSettled = isLatestRunSettled(activeLatestRun, activeRuntime);
@@ -4418,7 +4421,7 @@ export default function ChatView(props: ChatViewProps) {
       return;
     const threadKey = scopedThreadKey(activeThreadRef);
     const serverSessions = Object.values(activePreviewState.sessions).filter(
-      (session) => session.runtime === "server",
+      (session) => session.runtime === "server" && !isExtensionSurface(session),
     );
     const previous = previousServerPreviewTabs.current.get(threadKey);
     previousServerPreviewTabs.current.set(
