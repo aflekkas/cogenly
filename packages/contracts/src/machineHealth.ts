@@ -160,10 +160,20 @@ const MachineHealthFixItemKeys = Schema.Array(TrimmedNonEmptyString).check(
   Schema.isMaxLength(MACHINE_HEALTH_FIX_MAX_ITEMS),
 );
 
+/**
+ * What to do with the items. `fix` (the default) runs each item's own fix.
+ * `turn-off-provider` is the other way out of a `sign-in` item for a provider:
+ * it turns that provider off in the item machine's own settings, so the
+ * provider stays on for every other machine. It needs `providers:manage`.
+ */
+export const MachineHealthFixAction = Schema.Literals(["fix", "turn-off-provider"]);
+export type MachineHealthFixAction = typeof MachineHealthFixAction.Type;
+
 export const MachineHealthFixInput = Schema.Struct({
   /** The machine the items are on. Omit for this machine; a paired one runs it over the peer link. */
   environmentId: Schema.optionalKey(EnvironmentId),
   itemKeys: MachineHealthFixItemKeys,
+  action: Schema.optionalKey(MachineHealthFixAction),
 });
 export type MachineHealthFixInput = typeof MachineHealthFixInput.Type;
 
@@ -273,6 +283,19 @@ export const MachineHealthFixRun = makePeerChannel({
     /** The original caller's scopes, forwarded so the peer checks them, not its peer credential. */
     callerScopes: Schema.optionalKey(Schema.Array(AuthEnvironmentScope)),
   }),
+  success: MachineHealthFixResult,
+  error: MachineHealthError,
+});
+
+/**
+ * Turns off the providers of `sign-in` items on the machine they are on, from
+ * a paired machine. Its own channel, so a peer from before it fails instead of
+ * running the items' sign-in fix.
+ */
+export const MachineHealthTurnOffProviderRun = makePeerChannel({
+  name: "health.turn-off-provider.v1",
+  scope: AuthPeerDelegateScope,
+  payload: MachineHealthFixRun.payload,
   success: MachineHealthFixResult,
   error: MachineHealthError,
 });

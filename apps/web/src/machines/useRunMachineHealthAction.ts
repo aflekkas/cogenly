@@ -5,6 +5,8 @@ import {
 import { Atom } from "effect/reactivity";
 import { useCallback } from "react";
 
+import type { EnvironmentId } from "@cogenly/contracts";
+
 import { toastManager } from "../components/ui/toast";
 import { useStartAgentChat } from "../hooks/useStartAgentChat";
 import { machinesRpc } from "../rpc/machines";
@@ -38,7 +40,64 @@ export function machineHealthActionPermissionAtom(action: MachineHealthAction): 
     // Starting a chat is an operate grant on the server it opens on, as Fix is.
     case "agent":
       return machinesRpc.healthFix.permissionAtom(action.request.environmentId);
+    // The origin checks providers:manage per item against the forwarded scopes.
+    case "disableProvider":
+      return turnOffPermissionAtom(action.environmentId);
   }
+}
+
+const turnOffPermissionAtom = Atom.family((environmentId: EnvironmentId) =>
+  Atom.make(
+    (get) =>
+      get(machinesRpc.healthFix.permissionAtom(environmentId)) &&
+      get(serverEnvironment.mutateProviderInstance.permissionAtom(environmentId)),
+  ).pipe(Atom.withLabel(`machine-health:turn-off-permitted:${environmentId}`)),
+);
+
+/**
+ * Turns a provider off on the machine with the problem, through the health fix
+ * service; a paired machine runs it over the peer link. `enabled` stays on
+ * that machine (see providerSettingsDocument.ts), so other machines keep it.
+ */
+function useTurnOffProvider(): (
+  action: Extract<MachineHealthAction, { readonly kind: "disableProvider" }>,
+) => Promise<boolean> {
+  const healthFix = useAtomCommand(machinesRpc.healthFix, { reportFailure: false });
+  return useCallback(
+    async (action) => {
+      const { environmentId, originEnvironmentId, machineName, itemKey } = action;
+      const outcome = await healthFix({
+        environmentId,
+        input: {
+          ...(environmentId === originEnvironmentId ? {} : { environmentId: originEnvironmentId }),
+          itemKeys: [itemKey],
+          action: "turn-off-provider",
+        },
+      });
+      if (outcome._tag !== "Success") {
+        if (!isAtomCommandInterrupted(outcome))
+          toastManager.add({
+            type: "error",
+            title: `Couldn't turn it off on ${machineName}`,
+            description: failureMessage(squashAtomCommandFailure(outcome)),
+          });
+        return false;
+      }
+      const result = outcome.value;
+      const ok = result.outcomes.every(
+        (entry) => entry.status === "fixed" || entry.status === "resolved",
+      );
+      toastManager.add({
+        type: ok ? "success" : "error",
+        title: ok
+          ? `Turned off on ${result.machineName}`
+          : `Couldn't turn it off on ${result.machineName}`,
+        description: result.summary,
+      });
+      return ok;
+    },
+    [healthFix],
+  );
 }
 
 function legacyCommandPermissionAtom(command: MachineHealthLegacyCommand): Atom.Atom<boolean> {
@@ -122,12 +181,15 @@ export function useRunMachineHealthAction(): (action: MachineHealthAction) => Pr
   const startAgentChat = useStartAgentChat();
   const healthFix = useAtomCommand(machinesRpc.healthFix, { reportFailure: false });
   const runLegacy = useRunLegacyHealthCommand();
+  const turnOffProvider = useTurnOffProvider();
   return useCallback(
     async (action: MachineHealthAction) => {
       switch (action.kind) {
         case "open":
           open(action.link);
           return true;
+        case "disableProvider":
+          return turnOffProvider(action);
         case "agent":
           return startAgentChat(action.request.environmentId, { prompt: action.request.prompt });
         case "fix": {
@@ -199,6 +261,6 @@ export function useRunMachineHealthAction(): (action: MachineHealthAction) => Pr
         }
       }
     },
-    [healthFix, open, runLegacy, startAgentChat],
+    [healthFix, open, runLegacy, startAgentChat, turnOffProvider],
   );
 }

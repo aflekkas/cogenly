@@ -702,7 +702,12 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   layerMachineSetup,
   layerMachineHealth,
   // Fix stops runs and runs tasks, so it sits with the orchestration services below.
-  MachineHealthFixes.layer.pipe(Layer.provide(layerMachineHealth)),
+  // Its automatic round shares the alerts' state and scheduler instances.
+  MachineHealthFixes.layer.pipe(
+    Layer.provide(layerMachineHealth),
+    Layer.provide(HealthAlertsState.layer),
+    Layer.provide(Scheduler.layer),
+  ),
   // Universal settings follow the user to paired machines.
   SettingsSync.layer.pipe(
     Layer.provide(SharedState.layer),

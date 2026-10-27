@@ -51,10 +51,16 @@ export type MachineHealthAlertChannels = typeof MachineHealthAlertChannels.Type;
 export const MachineHealthSettings = Schema.Struct({
   canary: MachineHealthCanarySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   alertChannels: MachineHealthAlertChannels.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  /**
+   * Run the safe direct fixes (update a paired machine, retry sync, stop
+   * stale runs) without asking; alerts only when one fails.
+   */
+  autoFix: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
 });
 export type MachineHealthSettings = typeof MachineHealthSettings.Type;
 
 export const MachineHealthSettingsPatch = Schema.Struct({
+  autoFix: Schema.optionalKey(Schema.Boolean),
   canary: Schema.optionalKey(
     Schema.Struct({
       enabled: Schema.optionalKey(Schema.Boolean),

@@ -165,6 +165,9 @@ export function MachineHealthSections({
             supportsHealthFix={(id) =>
               serverConfigs.get(id)?.environment.capabilities.machineHealthFix === true
             }
+            supportsTurnOffProvider={(id) =>
+              serverConfigs.get(id)?.environment.capabilities.machineHealthTurnOffProvider === true
+            }
           />
         ))}
     </SettingsSearchTarget>
@@ -195,6 +198,7 @@ function MachineHealthSection({
   runsCanary,
   isConnected,
   supportsHealthFix,
+  supportsTurnOffProvider,
 }: {
   readonly viewed: EnvironmentPresentation;
   readonly machine: MachineInfo;
@@ -202,6 +206,7 @@ function MachineHealthSection({
   readonly runsCanary: boolean;
   readonly isConnected: (environmentId: EnvironmentId) => boolean;
   readonly supportsHealthFix: (environmentId: EnvironmentId) => boolean;
+  readonly supportsTurnOffProvider: (environmentId: EnvironmentId) => boolean;
 }) {
   const isThis = machine.relation === "this";
   const query = useEnvironmentQuery(
@@ -239,6 +244,7 @@ function MachineHealthSection({
     viaEnvironmentId: viewed.environmentId,
     isConnected,
     supportsHealthFix,
+    supportsTurnOffProvider,
   };
 
   return (
@@ -274,6 +280,7 @@ function MachineHealthSection({
           context={context}
         />
       )}
+      <AutoFixRow machine={machine} searchTarget={isThis} />
       {runsCanary ? <CanaryRow machine={machine} list={list} /> : null}
       {isThis ? <AlertChannelRows environment={viewed} /> : null}
     </SettingsSection>
@@ -495,11 +502,12 @@ function HealthItemRow({
   readonly context: MachineHealthActionContext;
 }) {
   // A passing line ("Canary passed") needs no Fix, only its link.
-  const { fix, open } =
+  const { fix, open, turnOff } =
     item.status === "ok"
       ? {
           fix: null,
           open: item.target === null ? null : healthTargetAction(item.target, context),
+          turnOff: null,
         }
       : healthItemActions(
           {
@@ -521,11 +529,14 @@ function HealthItemRow({
         title={item.title}
         detail={[item.detail, since].filter(Boolean).join(" · ")}
       >
-        {fix !== null || open !== null ? (
+        {fix !== null || open !== null || turnOff !== null ? (
           <div className="flex flex-wrap gap-1.5">
             {fix !== null ? <HealthActionButton action={fix} primary subject={item.title} /> : null}
             {open !== null ? (
               <HealthActionButton action={open} primary={fix === null} subject={item.title} />
+            ) : null}
+            {turnOff !== null ? (
+              <HealthActionButton action={turnOff} primary={false} subject={item.title} />
             ) : null}
           </div>
         ) : null}
@@ -564,6 +575,45 @@ function HealthActionButton({
       {busy ? <Spinner /> : null}
       {action.label}
     </Button>
+  );
+}
+
+/** Whether a machine runs its safe fixes itself, written to that machine's own settings. */
+function AutoFixRow({
+  machine,
+  searchTarget,
+}: {
+  readonly machine: MachineInfo;
+  /** Every machine has the row; search lands on this machine's. */
+  readonly searchTarget: boolean;
+}) {
+  const environment = useEnvironment(machine.environmentId);
+  const reachable = environment?.connection.phase === "connected";
+  const settings = useAtomValue(serverEnvironment.settingsValueAtom(machine.environmentId));
+  const canWrite = useEnvironmentScope(machine.environmentId, AuthSettingsWriteScope);
+  const update = useUpdateEnvironmentSettings(reachable ? machine.environmentId : null);
+  const autoFix = settings?.health.autoFix ?? null;
+  const description = `${machine.name} retries stuck sync and stops runs that lost their provider session on its own. You hear about these only when a fix fails.`;
+  const blocked = !reachable
+    ? `Connect to ${machine.name} in Settings → Connections to change this.`
+    : !canWrite
+      ? `This connection can't change settings on ${machine.name}.`
+      : null;
+  return (
+    <SettingsRow
+      {...(searchTarget
+        ? searchableSetting("health-auto-fix")
+        : { title: searchableSetting("health-auto-fix").title })}
+      description={blocked === null ? description : `${description} ${blocked}`}
+      control={
+        <Switch
+          checked={autoFix ?? false}
+          disabled={!reachable || !canWrite || autoFix === null}
+          aria-label={`Fix problems automatically on ${machine.name}`}
+          onCheckedChange={(enabled) => update({ health: { autoFix: enabled } })}
+        />
+      }
+    />
   );
 }
 
