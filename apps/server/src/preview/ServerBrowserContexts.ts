@@ -23,11 +23,30 @@ interface Options {
   readonly env?: NodeJS.ProcessEnv;
   readonly onContextClose?: (context: BrowserContext) => void;
   /** Unpacked extension directories a human profile loads; none keeps the headless shell. */
-  readonly extensionsFor?: (profileId: string) => Promise<ReadonlyArray<string>>;
+  readonly extensionsFor?: (
+    profileId: string,
+  ) => Promise<ReadonlyArray<{ readonly id: string; readonly path: string }>>;
   /** A browser that can load extensions, installing it on first use. */
   readonly extensionsExecutable?: () => Promise<string>;
   readonly onExtensionLoad?: (profileId: string, path: string, error?: string) => Promise<void>;
 }
+
+/** Keep browser errors useful in tool output without Playwright's launch transcript. */
+export const browserErrorMessage = (cause: unknown) => {
+  if (
+    typeof cause === "object" &&
+    cause !== null &&
+    "_tag" in cause &&
+    cause._tag === "PreviewBrowserInstallingError"
+  ) {
+    return "The extension browser is still installing. Extensions will load when installation finishes.";
+  }
+  const message = cause instanceof Error ? cause.message : String(cause);
+  return (message.split("\n").find((line) => line.trim()) ?? "Unknown browser error.")
+    .replace(/^.*?Protocol error \(Extensions\.loadUnpacked\):\s*/, "")
+    .replace(/^browserType\.[^:]+:\s*/, "")
+    .trim();
+};
 
 const UA_PLATFORMS: Partial<Record<NodeJS.Platform, string>> = {
   darwin: "macOS",
@@ -92,6 +111,7 @@ export class ServerBrowserContexts {
   private readonly clearing = new Map<string, Promise<void>>();
   /** The extension directories each running human profile launched with. */
   private readonly launchedExtensions = new Map<string, string>();
+  private readonly extensionFallbacks = new Set<string>();
   private browser: Promise<Browser> | undefined;
   private closing: Promise<void> | undefined;
 
@@ -186,7 +206,7 @@ export class ServerBrowserContexts {
     const extensions = (await this.options.extensionsFor?.(profileId)) ?? [];
     const { chromium } = loadPlaywright();
     await NodeFSP.mkdir(directory, { recursive: true });
-    this.launchedExtensions.set(JSON.stringify([profileId, null]), extensions.join("\n"));
+    const key = JSON.stringify([profileId, null]);
     const start = async (withExtensions: boolean) => {
       const options = await this.launchOptions(
         withExtensions ? this.options.extensionsExecutable : this.options.executable,
@@ -208,40 +228,64 @@ export class ServerBrowserContexts {
         }),
       );
     };
-    if (extensions.length === 0) return start(false);
+    const fallback = async (error?: string) => {
+      this.launchedExtensions.set(key, "");
+      if (extensions.length > 0) this.extensionFallbacks.add(profileId);
+      for (const { path } of extensions) {
+        if (error) await this.options.onExtensionLoad?.(profileId, path, error);
+      }
+      return start(false);
+    };
+    if (extensions.length === 0) {
+      this.extensionFallbacks.delete(profileId);
+      return fallback();
+    }
     let context: BrowserContext;
     try {
       context = await start(true);
     } catch (cause) {
-      for (const path of extensions) {
-        await this.options.onExtensionLoad?.(profileId, path, String(cause));
-      }
       // A missing or broken full Chrome install must not take down ordinary browsing.
-      return start(false);
+      return fallback(browserErrorMessage(cause));
     }
     let session: CDPSession | undefined;
+    let storageSession: CDPSession | undefined;
     try {
       session = await context.browser()!.newBrowserCDPSession();
-      for (const path of extensions) {
+      storageSession = await context.newCDPSession(context.pages()[0] ?? (await context.newPage()));
+      for (const { id, path } of extensions) {
         try {
+          // A persisted worker can keep running old scripts after files change.
+          // Keep local/extension storage, including chrome.storage, intact.
+          await storageSession.send("Storage.clearDataForOrigin", {
+            origin: `chrome-extension://${id}`,
+            storageTypes: "service_workers,cache_storage",
+          });
           await session.send("Extensions.loadUnpacked", { path });
           await this.options.onExtensionLoad?.(profileId, path);
         } catch (cause) {
-          await this.options.onExtensionLoad?.(profileId, path, String(cause));
+          await this.options.onExtensionLoad?.(profileId, path, browserErrorMessage(cause));
         }
       }
     } catch (cause) {
-      for (const path of extensions) {
-        await this.options.onExtensionLoad?.(profileId, path, String(cause));
+      for (const { path } of extensions) {
+        await this.options.onExtensionLoad?.(profileId, path, browserErrorMessage(cause));
       }
     } finally {
+      await storageSession?.detach().catch(constVoid);
       await session?.detach().catch(constVoid);
     }
     if (!context.browser()?.isConnected()) {
       await context.close().catch(constVoid);
-      return start(false);
+      return fallback("The extension browser disconnected; extensions are not running.");
     }
+    this.extensionFallbacks.delete(profileId);
+    this.launchedExtensions.set(key, extensions.map(({ path }) => path).join("\n"));
     return context;
+  }
+
+  /** Profiles currently browsing without their requested extensions. */
+  extensionFallbackProfiles() {
+    return [...this.extensionFallbacks];
   }
 
   /**

@@ -12,6 +12,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
@@ -207,6 +208,13 @@ export class PreviewBrowser extends Context.Service<
       string,
       PreviewBrowserInstallError | PreviewBrowserInstallingError | PreviewBrowserUnsupportedError
     >;
+    /** Install the browser flavor currently reported as broken or installing. */
+    readonly setup: Effect.Effect<
+      string,
+      PreviewBrowserInstallError | PreviewBrowserInstallingError | PreviewBrowserUnsupportedError
+    >;
+    /** Full Chrome finished installing; retry profiles that temporarily fell back to the shell. */
+    readonly extensionsReady: Stream.Stream<void>;
     /** The installed headless shell, if any. Never starts or waits on an install. */
     readonly installed: Effect.Effect<Option.Option<string>>;
     /** Installation state without starting a download, for machine health. */
@@ -228,6 +236,7 @@ export interface PreviewBrowserOptions {
   readonly release?: PreviewBrowserRelease | null;
   /** How long a caller waits on an install in progress. Provider tool calls time out near 60s. */
   readonly wait?: Duration.Input;
+  readonly onInstalled?: Effect.Effect<void>;
 }
 
 const DOWNLOAD_TIMEOUT = "15 minutes";
@@ -491,6 +500,7 @@ export const makePreviewBrowserInstaller = Effect.fn("PreviewBrowser.makeInstall
         const installed = yield* installedExecutable(release);
         if (Option.isSome(installed)) {
           state = { _tag: "installed", executable: installed.value };
+          lastFailure = undefined;
           return state;
         }
         const done = yield* Deferred.make<string, PreviewBrowserInstallError>();
@@ -516,7 +526,12 @@ export const makePreviewBrowserInstaller = Effect.fn("PreviewBrowser.makeInstall
                   lastFailure = state._tag === "failed" ? state.error : undefined;
                 }),
               )
-              .pipe(Effect.andThen(Deferred.done(done, exit))),
+              .pipe(
+                Effect.andThen(Deferred.done(done, exit)),
+                Effect.andThen(
+                  Exit.isSuccess(exit) ? (options.onInstalled ?? Effect.void) : Effect.void,
+                ),
+              ),
           ),
           Effect.ignoreCause,
           // Server shutdown closes the service scope and stops an install in progress.
@@ -589,13 +604,25 @@ export const makePreviewBrowserInstaller = Effect.fn("PreviewBrowser.makeInstall
 });
 
 export const makePreviewBrowser = Effect.fn("PreviewBrowser.make")(function* (
-  options: Omit<PreviewBrowserOptions, "flavor" | "release">,
+  options: Omit<PreviewBrowserOptions, "flavor" | "release" | "onInstalled">,
 ) {
   const shell = yield* makePreviewBrowserInstaller({ ...options, flavor: "headless-shell" });
-  const chrome = yield* makePreviewBrowserInstaller({ ...options, flavor: "chrome" });
+  const ready = yield* PubSub.unbounded<void>();
+  const chrome = yield* makePreviewBrowserInstaller({
+    ...options,
+    flavor: "chrome",
+    onInstalled: PubSub.publish(ready, undefined).pipe(Effect.asVoid),
+  });
   return PreviewBrowser.of({
     ...shell,
     extensionsExecutable: chrome.executable,
+    extensionsReady: Stream.fromPubSub(ready),
+    setup: Effect.gen(function* () {
+      const status = yield* chrome.status;
+      return yield* status.state === "failed" || status.state === "installing"
+        ? chrome.executable
+        : shell.executable;
+    }),
     status: Effect.gen(function* () {
       const extensions = yield* chrome.status;
       if (extensions.state === "failed" || extensions.state === "installing") {

@@ -633,5 +633,5 @@ const make = Effect.gen(function* () {
 
 export const layer = Layer.effect(MachineHealth, make).pipe(
   Layer.provide(ReadOnlySandbox.layer),
-  Layer.provide(PreviewBrowser.layer),
+  Layer.provideMerge(PreviewBrowser.layer),
 );

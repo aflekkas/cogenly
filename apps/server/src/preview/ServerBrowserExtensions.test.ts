@@ -79,7 +79,7 @@ const extensionRig = Effect.gen(function* () {
     profilesDir: path.join(root, "profiles"),
     executable: async () => chromium!,
     extensionsExecutable: async () => chromium!,
-    extensionsFor: async () => extensions.map((extension) => extension.path),
+    extensionsFor: async () => extensions,
     onExtensionLoad: async (_profileId, directory, error) => {
       results.set(directory, error);
     },
@@ -121,7 +121,7 @@ const extensionRig = Effect.gen(function* () {
       );
       yield* fs.writeFileString(
         path.join(folder, "worker.js"),
-        "chrome.runtime.onInstalled.addListener(() => {});",
+        `chrome.runtime.onMessage.addListener((_message, _sender, respond) => { respond(${JSON.stringify(pageText)}); });`,
       );
       yield* fs.writeFileString(
         path.join(folder, "options.html"),
@@ -173,7 +173,8 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
       profilesDir: NodePath.join(root, "profiles"),
       executable: async () => chromium!,
       extensionsExecutable: async () => chromium!,
-      extensionsFor: async (profileId) => (profileId === "default" ? [extension] : []),
+      extensionsFor: async (profileId) =>
+        profileId === "default" ? [{ id: extensionId, path: extension }] : [],
       // CI runners block Chromium's user-namespace sandbox; this covers extensions, not sandboxing.
       env: { ...process.env, COGENLY_SERVER_BROWSER_SANDBOX: "0" },
     });
@@ -256,6 +257,9 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
         yield* Effect.promise(() =>
           firstPage.evaluate("chrome.storage.local.set({ greeting: 'retained' })"),
         );
+        expect(
+          yield* Effect.promise(() => firstPage.evaluate("chrome.runtime.sendMessage({})")),
+        ).toBe("1.0.0");
         yield* r.write("1.1.0");
         const second = yield* r.store.install({ source: r.folder });
         expect(second).toMatchObject({
@@ -269,6 +273,9 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
         const page = yield* Effect.promise(() => secondContext.newPage());
         yield* Effect.promise(() => page.goto(url));
         expect(yield* Effect.promise(() => page.locator("p").textContent())).toBe("1.1.0");
+        expect(yield* Effect.promise(() => page.evaluate("chrome.runtime.sendMessage({})"))).toBe(
+          "1.1.0",
+        );
         expect(
           yield* Effect.promise(() => page.evaluate("chrome.storage.local.get('greeting')")),
         ).toEqual({ greeting: "retained" });
@@ -280,6 +287,12 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
           r.contexts.contextFor("default").then((context) => context.newPage()),
         );
         yield* Effect.promise(() => rebuilt.goto(url));
+        expect(
+          yield* Effect.promise(() => rebuilt.evaluate("chrome.runtime.sendMessage({})")),
+        ).toBe("rebuilt without a version bump");
+        expect(
+          yield* Effect.promise(() => rebuilt.evaluate("chrome.storage.local.get('greeting')")),
+        ).toEqual({ greeting: "retained" });
         expect(yield* Effect.promise(() => rebuilt.locator("p").textContent())).toBe(
           "rebuilt without a version bump",
         );
@@ -289,17 +302,19 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
       ),
   );
 
-  it("keeps browsing available when full Chrome cannot launch", async () => {
-    const failures: string[] = [];
+  it("keeps browsing available while installing, then loads extensions when Chrome is ready", async () => {
+    const failures: (string | undefined)[] = [];
+    let installing = true;
     const fallback = new ServerBrowserContexts({
       profilesDir: NodePath.join(root, "fallback-profiles"),
       executable: async () => chromium!,
       extensionsExecutable: async () => {
-        throw new Error("full Chrome is unavailable");
+        if (installing) throw { _tag: "PreviewBrowserInstallingError" };
+        return chromium!;
       },
-      extensionsFor: async () => [NodePath.join(root, "extension")],
+      extensionsFor: async () => [{ id: extensionId, path: NodePath.join(root, "extension") }],
       onExtensionLoad: async (_profileId, _path, error) => {
-        if (error) failures.push(error);
+        failures.push(error);
       },
       env: { ...process.env, COGENLY_SERVER_BROWSER_SANDBOX: "0" },
     });
@@ -308,7 +323,19 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
       const page = await context.newPage();
       await page.goto(siteUrl);
       expect(await page.title()).toBe("Site");
-      expect(failures).toEqual(["Error: full Chrome is unavailable"]);
+      expect(failures[0]).toContain("still installing");
+      expect(fallback.extensionFallbackProfiles()).toEqual(["default"]);
+      installing = false;
+      expect(await fallback.restartProfile("default", [NodePath.join(root, "extension")])).toBe(
+        true,
+      );
+      const loaded = await fallback.contextFor("default");
+      expect(loaded).not.toBe(context);
+      const popup = await loaded.newPage();
+      await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+      expect(await popup.locator("button").textContent()).toBe("Save greeting");
+      expect(failures.at(-1)).toBeUndefined();
+      expect(fallback.extensionFallbackProfiles()).toEqual([]);
     } finally {
       await fallback.close();
     }

@@ -32,11 +32,10 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
-import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import type * as Scope from "effect/Scope";
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import * as EffectNodeStream from "@effect/platform-node/NodeStream";
 import * as NodeCrypto from "node:crypto";
@@ -135,10 +134,6 @@ export class BrowserExtensions extends Context.Service<
       directory: string,
       error?: string,
     ) => Effect.Effect<void>;
-    /** Every profile that has an extension installed, enabled or not. */
-    readonly profiles: Effect.Effect<ReadonlyArray<string>>;
-    /** Profile IDs as their extensions change. */
-    readonly changes: Stream.Stream<string>;
     /** The URL of an installed extension's popup, options, or another page inside it. */
     readonly pageUrl: (input: {
       readonly profileId?: string | undefined;
@@ -162,7 +157,6 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const http = yield* HttpClient.HttpClient;
-  const changes = yield* PubSub.unbounded<string>();
   // One change at a time per environment: installs are rare and touch shared registry files.
   const gate = yield* Semaphore.make(1);
   let loader: ((profileId: string) => Effect.Effect<void>) | undefined;
@@ -483,7 +477,7 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       ...extensions.filter((extension) => extension.id !== id),
       stored,
     ]);
-    yield* PubSub.publish(changes, profileId);
+
     if (loader) yield* loader(profileId);
     yield* removeOldVersions(profileId, id, directory);
     return {
@@ -525,7 +519,7 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       profileId,
       extensions.filter((extension) => extension.id !== input.id),
     );
-    yield* PubSub.publish(changes, profileId);
+
     if (loader) yield* loader(profileId);
     yield* removeOldVersions(profileId, input.id, null);
     return yield* listOf(profileId);
@@ -544,7 +538,6 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
         profileId,
         extensions.map((extension) => (extension.id === input.id ? next : extension)),
       );
-      yield* PubSub.publish(changes, profileId);
     }
     if (loader) yield* loader(profileId);
     return withLoadError(profileId, next);
@@ -596,16 +589,6 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       ),
     );
 
-  const profiles = fs.readDirectory(options.rootDir).pipe(
-    Effect.map((names) =>
-      names.filter((name) => !name.startsWith(".")).map((name) => decodeURIComponent(name)),
-    ),
-    Effect.flatMap((ids) =>
-      Effect.filter(ids, (id) => readRegistry(id).pipe(Effect.map((list) => list.length > 0))),
-    ),
-    Effect.orElseSucceed((): ReadonlyArray<string> => []),
-  );
-
   const serialized = <A, E>(effect: Effect.Effect<A, E>) => gate.withPermit(effect);
 
   return BrowserExtensions.of({
@@ -613,7 +596,6 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       serialized(
         Effect.gen(function* () {
           const profileId = yield* resolveProfile(input.profileId);
-          if (loader) yield* loader(profileId);
           return yield* listOf(profileId);
         }),
       ),
@@ -636,8 +618,6 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
         if (error) loadErrors.set(directory, error);
         else loadErrors.delete(directory);
       }),
-    profiles,
-    changes: Stream.fromPubSub(changes),
     pageUrl,
   });
 });

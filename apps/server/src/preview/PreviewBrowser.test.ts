@@ -67,6 +67,8 @@ it.effect("a fresh home reports install failure and the next attempt retries it"
     expect((yield* browser.status).state).toBe("ready");
     expect(yield* browser.executable).toBe(executable);
     expect(requests).toBe(2);
+    yield* fs.remove(executable);
+    expect((yield* browser.status).state).toBe("missing");
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
@@ -110,13 +112,15 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const baseDir = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
+      const requested: string[] = [];
       const browser = yield* Browser.makePreviewBrowser({ baseDir }).pipe(
         Effect.provideService(
           HttpClient.HttpClient,
           HttpClient.make((request) =>
-            Effect.succeed(
-              HttpClientResponse.fromWeb(request, new Response(null, { status: 503 })),
-            ),
+            Effect.sync(() => {
+              requested.push(request.url);
+              return HttpClientResponse.fromWeb(request, new Response(null, { status: 503 }));
+            }),
           ),
         ),
       );
@@ -126,5 +130,8 @@ it.effect(
       expect(status.detail).toContain("Extension browser:");
       expect(status.detail).toContain("network access");
       expect(previewBrowserCheck(status).status).toBe("fail");
+      yield* Effect.flip(browser.setup);
+      expect(requested).toHaveLength(2);
+      expect(requested.every((url) => /\/chrome-[^/]+\.zip$/.test(url))).toBe(true);
     }).pipe(Effect.provide(NodeServices.layer)),
 );
