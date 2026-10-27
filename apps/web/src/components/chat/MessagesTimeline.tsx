@@ -4,6 +4,7 @@ import { MarkdownFindContext, useFindRevealRef } from "./markdownFindContext";
 import { useChatCanvas } from "./ChatCanvasContext";
 import { useTimelineMinimapClearance } from "./useTimelineMinimapClearance";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
+import { useSecondTick } from "~/hooks/useNowSecond";
 import { DisclosureChevron } from "../ui/disclosure";
 import {
   WorkLogBlock,
@@ -4164,16 +4165,17 @@ function WorkingTimer({ createdAt }: { createdAt: string }) {
   const textRef = useRef<HTMLSpanElement>(null);
   const initialText = formatWorkingTimerNow(createdAt);
 
+  const updateText = () => {
+    if (textRef.current) {
+      textRef.current.textContent = formatWorkingTimerNow(createdAt);
+    }
+  };
   useEffect(() => {
-    const updateText = () => {
-      if (textRef.current) {
-        textRef.current.textContent = formatWorkingTimerNow(createdAt);
-      }
-    };
-    updateText();
-    const id = setInterval(updateText, 1000);
-    return () => clearInterval(id);
+    if (textRef.current) {
+      textRef.current.textContent = formatWorkingTimerNow(createdAt);
+    }
   }, [createdAt]);
+  useSecondTick(true, updateText);
 
   return (
     <span ref={textRef} className="tabular-nums">

@@ -5,6 +5,8 @@ import {
 import { isOrchestrationV2WorkActive } from "@cogenly/contracts";
 import { useLayoutEffect, useRef } from "react";
 
+import { useSecondTick } from "~/hooks/useNowSecond";
+
 /**
  * Title of the composer notice on a provider-native subagent thread: which
  * model works on it, at what effort, and for how long.
@@ -29,17 +31,13 @@ export function SubagentBannerTitle(props: {
 
   // The label is written from an effect, and live notices tick through DOM
   // writes, so a running timer never re-renders the chat view.
-  useLayoutEffect(() => {
-    const update = () => {
-      if (statusRef.current) {
-        statusRef.current.textContent = formatProviderSubagentStatus(status, Date.now());
-      }
-    };
-    update();
-    if (!live) return;
-    const id = setInterval(update, 1_000);
-    return () => clearInterval(id);
-  }, [live, status]);
+  const update = () => {
+    if (statusRef.current) {
+      statusRef.current.textContent = formatProviderSubagentStatus(status, Date.now());
+    }
+  };
+  useLayoutEffect(update, [status]);
+  useSecondTick(live, update);
 
   return (
     <span className="flex min-w-0 items-baseline gap-1.5">

@@ -14,11 +14,12 @@ import {
   XIcon,
 } from "lucide-react";
 import { ChevronDown, ChevronRight } from "lucide";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { Button } from "~/components/ui/button";
 import { MorphIcon } from "~/components/MorphIcon";
 import { Spinner } from "~/components/ui/spinner";
+import { useNowSecond } from "~/hooks/useNowSecond";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import { cn } from "~/lib/utils";
 import { WorkLogRow, WorkLogShimmer } from "./WorkLog";
@@ -39,20 +40,6 @@ function stageElapsedMs(stage: WorktreeSetupStage, nowMs: number): number | null
   const end = stage.endedAt ? Date.parse(stage.endedAt) : nowMs;
   if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
   return Math.max(0, end - start);
-}
-
-/**
- * Ticks once a second while any stage runs so elapsed labels stay live
- * without pushing a React commit through the timeline for every second.
- */
-function useNowWhile(active: boolean): number {
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    const id = setInterval(() => setNowMs(Date.now()), 1_000);
-    return () => clearInterval(id);
-  }, [active]);
-  return nowMs;
 }
 
 function StageIcon({ status }: { status: WorktreeSetupStage["status"] }) {
@@ -323,7 +310,9 @@ export function WorktreeSetupCard({
   embedded?: boolean;
 }) {
   const running = snapshot.phase === "running";
-  const nowMs = useNowWhile(running);
+  // Ticks only while a stage runs, so elapsed labels stay live without
+  // pushing a React commit through the timeline every second.
+  const nowMs = useNowSecond(running);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const totalElapsed = (() => {
     const start = Date.parse(snapshot.startedAt);
