@@ -159,17 +159,14 @@ function Row({
   layout = "inline",
   ...props
 }: useRender.ComponentProps<"div"> & {
-  layout?: "inline" | "wrap-actions" | "approval";
+  layout?: "inline" | "approval";
 }) {
   const rowProps = {
     className: cn(
+      // One line: the content truncates and the actions keep their place at the end.
       "group/banner-row grid min-h-(--composer-banner-icon-column) w-full min-w-0 grid-cols-[var(--composer-banner-icon-column)_minmax(0,1fr)_auto] items-center gap-x-1 text-start",
       "not-has-[>[data-slot=composer-banner-actions]]:grid-cols-[var(--composer-banner-icon-column)_minmax(0,1fr)]",
       "[&:is(button)]:cursor-pointer [&:is(button)]:rounded-md [&:is(button)]:focus-visible:outline-2 [&:is(button)]:focus-visible:-outline-offset-2 [&:is(button)]:focus-visible:outline-ring",
-      // Actions share the title row while the title fits and move below it otherwise.
-      // The content's max width keeps it beside the icon, so a long title truncates instead of wrapping.
-      layout === "wrap-actions" &&
-        "flex flex-wrap *:data-[slot=composer-banner-content]:max-w-[calc(100%-var(--composer-banner-icon-column)-var(--spacing))] *:data-[slot=composer-banner-content]:grow",
       layout === "approval" && "items-start gap-x-2 gap-y-3",
       className,
     ),
@@ -231,13 +228,23 @@ function Actions({ className, ...props }: ComponentProps<"span">) {
     <span
       data-slot="composer-banner-actions"
       className={cn(
-        "col-start-3 row-start-1 flex flex-wrap items-center justify-end gap-1",
-        "group-data-[composer-banner-layout=approval]/banner-row:self-center group-data-[composer-banner-layout=approval]/banner-row:gap-1.5 @max-[560px]:group-data-[composer-banner-layout=approval]/banner-row:col-start-2 @max-[560px]:group-data-[composer-banner-layout=approval]/banner-row:col-end-4 @max-[560px]:group-data-[composer-banner-layout=approval]/banner-row:row-start-2",
-        "group-data-[composer-banner-layout=wrap-actions]/banner-row:ms-auto",
+        // Never wraps, so a row stays one line; approval rows move their buttons below instead.
+        "col-start-3 row-start-1 flex flex-nowrap items-center justify-end gap-1 whitespace-nowrap",
+        "group-data-[composer-banner-layout=approval]/banner-row:flex-wrap group-data-[composer-banner-layout=approval]/banner-row:self-center group-data-[composer-banner-layout=approval]/banner-row:gap-1.5 @max-[560px]:group-data-[composer-banner-layout=approval]/banner-row:col-start-2 @max-[560px]:group-data-[composer-banner-layout=approval]/banner-row:col-end-4 @max-[560px]:group-data-[composer-banner-layout=approval]/banner-row:row-start-2",
         className,
       )}
       {...props}
     />
+  );
+}
+
+/**
+ * An action button's text beside its icon. Narrow banners show the icon only,
+ * leaving the room to the title; the text stays for screen readers.
+ */
+function ActionLabel(props: ComponentProps<"span">) {
+  return (
+    <span data-slot="composer-banner-action-label" className="@max-[400px]:sr-only" {...props} />
   );
 }
 
@@ -340,6 +347,7 @@ export const ComposerBanner = {
   Content,
   Separator,
   Actions,
+  ActionLabel,
   Children,
   Scroll,
   Count,

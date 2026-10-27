@@ -58,7 +58,7 @@ export function BackgroundWorkBanner(props: {
 
   return (
     <>
-      <ComposerBanner.Row layout="wrap-actions">
+      <ComposerBanner.Row>
         <ComposerBanner.Icon className="h-(--composer-banner-icon-column) self-start">
           {/* A dev server can run for hours after the agent is done, so only
               work that will wake the agent pulses. */}
@@ -107,7 +107,9 @@ export function BackgroundWorkBanner(props: {
             onClick={props.onStop}
           >
             <StopGlyph className="text-destructive" />
-            {props.stopping ? "Stopping..." : "Stop"}
+            <ComposerBanner.ActionLabel>
+              {props.stopping ? "Stopping..." : "Stop"}
+            </ComposerBanner.ActionLabel>
           </Button>
         </ComposerBanner.Actions>
       </ComposerBanner.Row>
