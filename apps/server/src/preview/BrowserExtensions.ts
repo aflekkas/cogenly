@@ -20,7 +20,6 @@ import {
   type BrowserExtensionReloadInput,
   type BrowserExtensionOpenSurfaceInput,
   type BrowserExtensionOpenSurfaceResult,
-  BrowserExtensionSurfaceNotImplementedError,
   type BrowserExtensionsListInput,
   type BrowserExtensionsListResult,
   type BrowserExtensionSource,
@@ -130,10 +129,13 @@ export class BrowserExtensions extends Context.Service<
     ) => Effect.Effect<BrowserExtensionInstallResult, BrowserExtensionError>;
     readonly openSurface: (
       input: BrowserExtensionOpenSurfaceInput,
-    ) => Effect.Effect<
-      BrowserExtensionOpenSurfaceResult,
-      BrowserExtensionSurfaceNotImplementedError | BrowserExtensionError
-    >;
+    ) => Effect.Effect<BrowserExtensionOpenSurfaceResult, BrowserExtensionError>;
+    readonly registerSurfaceOpener: (
+      open: (
+        input: BrowserExtensionOpenSurfaceInput & { readonly profileId: string },
+        extension: BrowserExtension,
+      ) => Effect.Effect<BrowserExtensionOpenSurfaceResult, BrowserExtensionError>,
+    ) => Effect.Effect<void, never, Scope.Scope>;
     readonly changes: Stream.Stream<string>;
     readonly subscribe: (
       input: BrowserExtensionsListInput,
@@ -146,7 +148,7 @@ export class BrowserExtensions extends Context.Service<
     ) => Effect.Effect<BrowserExtension, BrowserExtensionError>;
     /** The enabled extensions a profile's browser loads. */
     readonly loadable: (profileId: string) => Effect.Effect<ReadonlyArray<LoadableExtension>>;
-    /** Registers the browser adapter so installs finish after their load attempt. */
+    /** Registers the browser adapter; the application scope owns background load attempts. */
     readonly registerLoader: (
       load: (profileId: string) => Effect.Effect<void>,
     ) => Effect.Effect<void, never, Scope.Scope>;
@@ -184,6 +186,11 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
   // One change at a time per environment: installs are rare and touch shared registry files.
   const gate = yield* Semaphore.make(1);
   let loader: ((profileId: string) => Effect.Effect<void>) | undefined;
+  let loaderScope: Scope.Scope | undefined;
+  let surfaceOpener:
+    | Parameters<BrowserExtensions["Service"]["registerSurfaceOpener"]>[0]
+    | undefined;
+  const loadGate = yield* Semaphore.make(1);
   const changes = yield* PubSub.unbounded<string>();
   const loadResults = new Map<string, string | undefined>();
   const loading = new Set<string>();
@@ -579,8 +586,7 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       stored,
     ]);
 
-    yield* publishAndLoad(profileId, stored.enabled);
-    yield* removeOldVersions(profileId, id, directory);
+    yield* publishAndLoad(profileId, stored.enabled, id);
     return {
       profileId,
       extension: withLoadError(profileId, stored),
@@ -641,8 +647,7 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       extensions.filter((extension) => extension.id !== input.id),
     );
 
-    yield* publishAndLoad(profileId);
-    yield* removeOldVersions(profileId, input.id, null);
+    yield* publishAndLoad(profileId, true, input.id);
     return yield* listOf(profileId);
   });
 
@@ -670,7 +675,7 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
   }) {
     if (input.page === "sidePanel" || input.page === "action") {
       return yield* fail(
-        "Extension side panels and actions are not available yet. Open an options page or a page path instead.",
+        "Use openSurface to click the toolbar action or open a side panel on a host tab.",
       );
     }
     const profileId = yield* resolveProfile(input.profileId);
@@ -687,7 +692,7 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
     }
     if (input.page === "popup" && !extension.popupPage) {
       return yield* fail(
-        `${extension.name} has no popup: its toolbar button runs code instead of opening a page, and Cogenly's browser has no extension toolbar to click.${extension.optionsPage ? " Open its options page instead." : ""}`,
+        `${extension.name} has no popup page. Use browser_extension_open with page action to click its toolbar button.${extension.optionsPage ? " Open its options page instead." : ""}`,
       );
     }
     if (input.page === "options" && !extension.optionsPage) {
@@ -714,16 +719,24 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       ),
     );
 
-  /** Publish registry changes once; load reports publish their own state transitions. */
-  const publishAndLoad = Effect.fnUntraced(function* (profileId: string, shouldLoad = true) {
+  /** Publish once, then load outside the mutation permit so Chrome's download cannot block the registry. */
+  const publishAndLoad = Effect.fnUntraced(function* (
+    profileId: string,
+    shouldLoad = true,
+    cleanId?: string,
+  ) {
     const load = shouldLoad ? loader : undefined;
     const pending = load
       ? (yield* loadable(profileId)).filter((extension) => !loadResults.has(extension.path))
       : [];
     for (const extension of pending) loading.add(extension.path);
-    yield* Effect.gen(function* () {
-      yield* PubSub.publish(changes, profileId);
+    const attempt = Effect.gen(function* () {
       if (load) yield* load(profileId);
+      if (cleanId) {
+        // Another mutation may have committed while Chrome was starting.
+        const current = (yield* readRegistry(profileId)).find((entry) => entry.id === cleanId);
+        yield* removeOldVersions(profileId, cleanId, current?.directory ?? null);
+      }
     }).pipe(
       Effect.ensuring(
         Effect.gen(function* () {
@@ -735,22 +748,54 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
           if (changed) yield* PubSub.publish(changes, profileId);
         }),
       ),
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Extension background load failed.", { profileId, cause }),
+      ),
     );
+    yield* PubSub.publish(changes, profileId);
+    if (load && loaderScope) yield* Effect.forkIn(loadGate.withPermit(attempt), loaderScope);
+    else yield* attempt;
   });
 
   const serialized = <A, E>(effect: Effect.Effect<A, E>) => gate.withPermit(effect);
 
   return BrowserExtensions.of({
     list: (input) =>
-      serialized(
-        Effect.gen(function* () {
-          const profileId = yield* resolveProfile(input.profileId);
-          return yield* listOf(profileId);
-        }),
-      ),
+      Effect.gen(function* () {
+        const profileId = yield* resolveProfile(input.profileId);
+        return yield* listOf(profileId);
+      }),
     install: (input) => serialized(install(input)),
     reload: (input) => serialized(reload(input)),
-    openSurface: () => Effect.fail(new BrowserExtensionSurfaceNotImplementedError({})),
+    openSurface: (input) =>
+      Effect.gen(function* () {
+        const profileId = yield* resolveProfile(input.profileId);
+        const extension = (yield* listOf(profileId)).extensions.find(
+          (entry) => entry.id === input.id,
+        );
+        if (!extension)
+          return yield* fail(`Extension ${input.id} is not installed in profile ${profileId}.`);
+        if (!extension.enabled)
+          return yield* fail(
+            `${extension.name} is turned off. Turn it on with browser_extension_toggle first.`,
+          );
+        if (extension.loadError) return yield* fail(extension.loadError);
+        if (!surfaceOpener)
+          return yield* fail(
+            "Extension surfaces require the server Chrome runtime. Open a server browser tab in this profile first.",
+          );
+        return yield* surfaceOpener({ ...input, profileId }, extension);
+      }),
+    registerSurfaceOpener: (open) =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          surfaceOpener = open;
+        }),
+        () =>
+          Effect.sync(() => {
+            if (surfaceOpener === open) surfaceOpener = undefined;
+          }),
+      ),
     changes: Stream.fromPubSub(changes),
     subscribe: (input) =>
       Stream.unwrap(
@@ -774,12 +819,16 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
     loadable,
     registerLoader: (load) =>
       Effect.acquireRelease(
-        Effect.sync(() => {
+        Effect.gen(function* () {
+          loaderScope = yield* Effect.scope;
           loader = load;
         }),
         () =>
           Effect.sync(() => {
-            if (loader === load) loader = undefined;
+            if (loader === load) {
+              loader = undefined;
+              loaderScope = undefined;
+            }
           }),
       ),
     reportLoad: (profileId, directory, error) =>
