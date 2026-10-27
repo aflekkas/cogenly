@@ -1214,11 +1214,16 @@ describe("authenticated revision continuity", () => {
         const document = yield* documentOf(hub, item.id);
         // This ciphertext is genuine and names the right revision, but opens
         // only for the hub. Shape and digest checks would count it for the spoke.
-        yield* hub.state.write("vault", item.id, {
-          [`wrap:${spoke.environmentId}:${hub.environmentId}`]:
-            document.fields[`wrap:${hub.environmentId}:${hub.environmentId}`]!,
-        });
-        expect((yield* hub.sync.sharingStatus).peers[0]?.itemsShared).toBe(0);
+        // One transaction holds the hub's connection, so the background
+        // reconcile every change wakes cannot repair the wrap before status counts.
+        const copied = yield* Effect.gen(function* () {
+          yield* hub.state.write("vault", item.id, {
+            [`wrap:${spoke.environmentId}:${hub.environmentId}`]:
+              document.fields[`wrap:${hub.environmentId}:${hub.environmentId}`]!,
+          });
+          return (yield* hub.sync.sharingStatus).peers[0]?.itemsShared;
+        }).pipe(hub.sql.withTransaction);
+        expect(copied).toBe(0);
         yield* settle(hub, [spoke]);
         expect(yield* reveal(spoke, item.id)).toBe("mail-next");
         expect((yield* hub.sync.sharingStatus).peers[0]?.itemsShared).toBe(1);
