@@ -10,6 +10,8 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { probeClaudeWorkspaceSnapshot } from "./ClaudeProvider.ts";
 
+const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
+
 it.effect("finishes a deleted worktree scan instead of leaving its commands pending", () =>
   Effect.gen(function* () {
     const machine: ServerProvider = {
@@ -26,7 +28,7 @@ it.effect("finishes a deleted worktree scan instead of leaving its commands pend
       skills: [],
     };
     const snapshot = yield* probeClaudeWorkspaceSnapshot(
-      Schema.decodeUnknownSync(ClaudeSettings)({}),
+      decodeClaudeSettings({}),
       machine,
       "/nonexistent/cogenly-deleted-worktree",
       { HOME: "/nonexistent/cogenly-provider-home" },

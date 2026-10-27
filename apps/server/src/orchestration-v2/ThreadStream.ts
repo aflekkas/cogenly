@@ -1,3 +1,4 @@
+import { dedupeSnapshotBodies } from "@cogenly/shared/orchestrationV2DedupedBodies";
 import type {
   OrchestrationV2ThreadProjection,
   OrchestrationV2ThreadStreamItem,
@@ -52,13 +53,15 @@ type ThreadSnapshotStreamItem = Extract<
 export function boundedSnapshotResponseFields(input: {
   readonly bounded: BoundedProjectionResult;
   readonly compactTurnItems: boolean;
+  readonly dedupeBodies?: boolean;
 }) {
   const { bounded } = input;
-  const compactProjection = input.compactTurnItems
-    ? omitLocalVisibleTurnItems(bounded.projection)
-    : null;
+  const projection = input.dedupeBodies
+    ? dedupeSnapshotBodies(bounded.projection)
+    : bounded.projection;
+  const compactProjection = input.compactTurnItems ? omitLocalVisibleTurnItems(projection) : null;
   return {
-    projection: compactProjection ?? bounded.projection,
+    projection: compactProjection ?? projection,
     historyCursor: bounded.historyCursor,
     hasMoreHistory: bounded.hasMoreHistory,
     latestLocalTurnOrdinal: bounded.latestLocalTurnOrdinal,
@@ -72,6 +75,7 @@ export function buildBoundedThreadStreamSnapshot(input: {
   readonly snapshotSequence: number;
   readonly projection: OrchestrationV2ThreadProjection;
   readonly compactTurnItems?: boolean;
+  readonly dedupeBodies?: boolean;
 }): ThreadSnapshotStreamItem {
   const bounded = buildBoundedThreadProjection({
     snapshotSequence: input.snapshotSequence,
@@ -83,6 +87,7 @@ export function buildBoundedThreadStreamSnapshot(input: {
     ...boundedSnapshotResponseFields({
       bounded,
       compactTurnItems: input.compactTurnItems === true,
+      dedupeBodies: input.dedupeBodies === true,
     }),
   };
 }

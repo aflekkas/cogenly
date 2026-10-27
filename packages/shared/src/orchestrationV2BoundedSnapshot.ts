@@ -1,3 +1,4 @@
+import { restoreSnapshotBodies } from "./orchestrationV2DedupedBodies.ts";
 import type {
   OrchestrationV2ProjectedTurnItem,
   OrchestrationV2ThreadProjection,
@@ -52,7 +53,9 @@ export function boundedSnapshotProjection(snapshot: {
   readonly projection: OrchestrationV2ThreadProjection;
   readonly turnItemsOmitLocalVisible?: true | undefined;
 }): OrchestrationV2ThreadProjection {
-  return snapshot.turnItemsOmitLocalVisible === true
-    ? restoreLocalVisibleTurnItems(snapshot.projection)
-    : snapshot.projection;
+  return restoreSnapshotBodies(
+    snapshot.turnItemsOmitLocalVisible === true
+      ? restoreLocalVisibleTurnItems(snapshot.projection)
+      : snapshot.projection,
+  );
 }
