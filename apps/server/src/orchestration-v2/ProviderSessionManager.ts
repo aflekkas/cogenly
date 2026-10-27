@@ -172,8 +172,15 @@ export interface ProviderSessionManagerV2Shape {
     Option.Option<ProviderAdapter.ProviderAdapterV2SessionRuntime>,
     ProviderSessionManagerV2Error
   >;
-  /** Whether the session's runtime is running. Unlike `get`, not activity. */
-  readonly isLive: (providerSessionId: ProviderSessionId) => Effect.Effect<boolean>;
+  /**
+   * Whether the session's runtime is running. Unlike `get`, not activity.
+   * With `turnStartedAtMs`, also whether that runtime can still own the turn:
+   * a turn that started before this server did belonged to a runtime that died with the previous one.
+   */
+  readonly isLive: (
+    providerSessionId: ProviderSessionId,
+    options?: { readonly turnStartedAtMs?: number },
+  ) => Effect.Effect<boolean>;
   readonly close: (
     providerSessionId: ProviderSessionId,
   ) => Effect.Effect<void, ProviderSessionManagerV2Error>;
@@ -351,6 +358,10 @@ export const layerWithOptions = (
       const fileSystem = yield* FileSystem.FileSystem;
       const mcpSessionRegistry = yield* McpSessionRegistry.McpSessionRegistry;
       const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+      // Provider runtimes die with the server, so no runtime in this process can
+      // own a turn that started before it. Sessions open lazily, after their
+      // turn is recorded, so the session's own open time cannot serve here.
+      const startedAtMs = yield* Clock.currentTimeMillis;
       /**
        * Optional so the many focused tests that assemble this layer by hand do
        * not each need a settings stub; the production composition always
@@ -2393,9 +2404,16 @@ export const layerWithOptions = (
               return exposedRuntime;
             }),
           ),
-        isLive: (providerSessionId) =>
+        isLive: (providerSessionId, options) =>
           Ref.get(sessions).pipe(
-            Effect.map((current) => current.has(sessionKey(providerSessionId))),
+            Effect.map((current) => {
+              const entry = current.get(sessionKey(providerSessionId));
+              if (entry === undefined) return false;
+              // A session id reopened after a restart is a new runtime that
+              // never ran the earlier turn and will never report its end.
+              const turnStartedAtMs = options?.turnStartedAtMs;
+              return turnStartedAtMs === undefined || turnStartedAtMs >= startedAtMs;
+            }),
           ),
         get: (providerSessionId) =>
           Effect.gen(function* () {

@@ -10820,10 +10820,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         });
       }
       // A dead session cannot report a terminal event for either a running
-      // turn or a settled turn's background work. Stop ends both locally.
+      // turn or a settled turn's background work. Stop ends both locally. A
+      // session id reopened after a restart counts as dead for a turn from before it.
       const sessionIsLive =
         providerThread.providerSessionId !== null &&
-        (yield* providerSessions.isLive(providerThread.providerSessionId));
+        (yield* providerSessions.isLive(
+          providerThread.providerSessionId,
+          providerTurn.startedAt === null
+            ? undefined
+            : { turnStartedAtMs: DateTime.toEpochMillis(providerTurn.startedAt) },
+        ));
       if (!sessionIsLive) {
         yield* emitEvent({
           type: "turn-item.updated",

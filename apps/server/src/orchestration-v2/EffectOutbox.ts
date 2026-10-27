@@ -351,7 +351,15 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
     // cannot start while a failed rollback is about to restore files. A claim
     // that skips restart continuations is not blocked by them either.
     // Title generation is correlated metadata work, so it has its own
-    // per-thread lane and cannot delay provider lifecycle effects.
+    // per-thread lane and cannot delay provider lifecycle effects. Interrupts
+    // skip ahead: a Stop must not wait behind the thread's checkpoint,
+    // rollback or session work, and an interrupt targets one turn, so it can
+    // run beside them. Later lifecycle effects still wait for it.
+    const effectLane = (table: "candidate" | "active") =>
+      sql.unsafe(`(CASE ${table}.effect_type
+        WHEN 'thread-title.generate' THEN 1
+        WHEN 'provider-turn.interrupt' THEN 2
+        ELSE 0 END)`);
     const claimableCandidatePredicate = (
       availableBefore?: string,
       excludeRestartContinuations = false,
@@ -380,14 +388,11 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
               )
             )
             AND (
-              (
-                candidate.effect_type = 'thread-title.generate'
-                AND active.effect_type = 'thread-title.generate'
-              )
-              OR
-              (
-                candidate.effect_type != 'thread-title.generate'
-                AND active.effect_type != 'thread-title.generate'
+              ${effectLane("candidate")} = ${effectLane("active")}
+              -- Lifecycle work still waits for an earlier interrupt to finish.
+              OR (
+                ${effectLane("candidate")} = 0
+                AND active.effect_type = 'provider-turn.interrupt'
               )
             )
         )
@@ -593,7 +598,8 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
               FROM orchestration_v2_effect_outbox AS candidate
               WHERE ${claimableCandidatePredicate(nowIso, excludeRestartContinuations)}
                 AND ${excludeRestartContinuations ? sql`candidate.effect_type != 'provider-runtime.continue'` : sql`1 = 1`}
-              ORDER BY candidate.available_at ASC, candidate.created_at ASC, candidate.effect_id ASC
+              ORDER BY (candidate.effect_type = 'provider-turn.interrupt') DESC,
+                candidate.available_at ASC, candidate.created_at ASC, candidate.effect_id ASC
               LIMIT 1
             )
             RETURNING *
