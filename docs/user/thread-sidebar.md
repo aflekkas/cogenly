@@ -204,6 +204,8 @@ If dragging is unavailable for one environment, update the Cogenly server runnin
 environment. Pinned and active reordering require server support. Threads from older servers keep
 their default order until the server is updated.
 
+In **Settings → New threads → Thread title instructions**, add guidance such as a preferred language for generated titles. It applies to automatic titles and title regeneration. A repository can override it with `threadTitleInstructions` in `cogenly.json`; set that field to an empty string to use the default title rules.
+
 To generate a fresh title from the conversation, choose **Rename…** in a thread's menu
 and press the regenerate button at the end of the title field. To regenerate several at
 once, select them and choose **Regenerate titles** from the selection's menu. The button

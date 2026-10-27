@@ -112,7 +112,7 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
-import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { resolveAttachmentPath, resolveAttachmentTextPath } from "../../attachmentStore.ts";
 import { resolveClaudeSdkExecutablePath } from "../../provider/Drivers/ClaudeExecutable.ts";
 import { planClaudeSkillDispatch } from "../../provider/Drivers/ClaudeSkillDispatch.ts";
 import { discoverClaudeSkills } from "../../provider/Drivers/ClaudeSkills.ts";
@@ -1859,6 +1859,8 @@ const makeClaudeUserMessageWithAttachments = Effect.fnUntraced(function* (input:
     attachments: input.attachments,
     resolveAttachmentPath: (attachment) =>
       resolveAttachmentPath({ attachmentsDir: input.attachmentsDir, attachment }),
+    resolveAttachmentTextPath: (attachment) =>
+      resolveAttachmentTextPath({ attachmentsDir: input.attachmentsDir, attachment }),
   });
 
   const dispatch =

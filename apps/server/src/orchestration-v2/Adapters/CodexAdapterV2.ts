@@ -101,7 +101,11 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
-import { resolveAttachmentPath, resolveAttachmentPathById } from "../../attachmentStore.ts";
+import {
+  resolveAttachmentPath,
+  resolveAttachmentPathById,
+  resolveAttachmentTextPath,
+} from "../../attachmentStore.ts";
 import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
 import { ServerConfig } from "../../config.ts";
 import { expandHomePath } from "@cogenly/provider-core/server/pathExpansion";
@@ -3574,6 +3578,11 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               attachments: turnInput.message.attachments,
               resolveAttachmentPath: (attachment) =>
                 resolveAttachmentPath({ attachmentsDir: serverConfig.attachmentsDir, attachment }),
+              resolveAttachmentTextPath: (attachment) =>
+                resolveAttachmentTextPath({
+                  attachmentsDir: serverConfig.attachmentsDir,
+                  attachment,
+                }),
             });
             if (text.length > 0) {
               inputItems.push({

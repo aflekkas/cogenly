@@ -67,6 +67,7 @@ export class ProviderHost extends Context.Service<
      * resolve inside the attachments directory.
      */
     readonly resolveAttachmentPath: (attachment: ChatAttachment) => string | null;
+    readonly resolveAttachmentTextPath?: (attachment: ChatAttachment) => string | null;
     /** The credentials stored for `bindingId`, usually an instance id, under a provider-chosen namespace. */
     readonly credentials: (
       namespace: string,

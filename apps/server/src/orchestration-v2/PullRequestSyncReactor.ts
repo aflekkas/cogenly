@@ -1,8 +1,9 @@
 import { siblingPullRequestUrl } from "@cogenly/shared/changeRequestUrl";
 import {
   CommandId,
+  isOrchestrationV2WorkActive,
+  ThreadId,
   type PullRequestSummary,
-  type ThreadId,
   type ThreadPullRequestKey,
   type ThreadPullRequestLink,
   type ThreadPullRequestSnapshot,
@@ -28,6 +29,8 @@ import type * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
+import * as TerminalManager from "../terminal/Manager.ts";
+import * as ThreadPullRequestLinks from "../pullRequest/ThreadPullRequestLinks.ts";
 import * as GitManager from "../git/GitManager.ts";
 import { PullRequestProviderError } from "@cogenly/source-control-core/server/PullRequestProvider";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
@@ -156,6 +159,8 @@ export class PullRequestSyncReactor extends Context.Service<
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const engine = yield* Orchestrator.OrchestratorV2;
+  const links = yield* ThreadPullRequestLinks.ThreadPullRequestLinks;
+  const terminals = yield* TerminalManager.TerminalManager;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const pullRequests = yield* PullRequestService.PullRequestService;
   const git = yield* GitManager.GitManager;
@@ -188,8 +193,8 @@ export const make = Effect.gen(function* () {
 
   const logSkipped =
     (message: string, fields: Record<string, unknown>) =>
-    <E>(cause: Cause.Cause<E>): Effect.Effect<void, E> =>
-      Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.logWarning(message, fields);
+    <E>(cause: Cause.Cause<E>): Effect.Effect<void> =>
+      Cause.hasInterruptsOnly(cause) ? Effect.interrupt : Effect.logWarning(message, fields);
 
   /** `requested` reads only keys asked for through `requestSync`; `all` is the periodic pass. */
   const sweep = Effect.fn("PullRequestSyncReactor.sweep")(function* (scope: "all" | "requested") {
@@ -424,10 +429,43 @@ export const make = Effect.gen(function* () {
       Effect.catchCause(logSkipped("pull request refresh after run skipped", { threadId })),
     );
 
+  const createdWorker = yield* makeDrainableWorker(
+    (input: Parameters<typeof links.linkCreated>[0]) =>
+      links
+        .linkCreated(input)
+        .pipe(
+          Effect.catchCause(
+            logSkipped("linking shell-created pull request failed", { threadId: input.threadId }),
+          ),
+        ),
+  );
+
   const start: PullRequestSyncReactor["Service"]["start"] = Effect.fn(
     "PullRequestSyncReactor.start",
   )(function* () {
     const events = engine.streamDomainEvents;
+    const unsubscribe = yield* terminals.subscribe((event) => {
+      if (event.type !== "exited" || !event.terminalId.startsWith("agent-")) return Effect.void;
+      return Effect.gen(function* () {
+        const metadata = (yield* terminals.listAgents(event.threadId)).find(
+          (terminal) => terminal.terminalId === event.terminalId,
+        );
+        if (!metadata?.command || !/\bgh\s+pr\s+create\b/.test(metadata.command)) return;
+        const result = yield* terminals.readAgent(event);
+        if (result.truncated || result.timedOut) return;
+        yield* createdWorker.enqueue({
+          threadId: ThreadId.make(event.threadId),
+          commandId: event.terminalId,
+          command: metadata.command,
+          output: result.output,
+        });
+      }).pipe(
+        Effect.catchCause(
+          logSkipped("reading shell-created pull request failed", { threadId: event.threadId }),
+        ),
+      );
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
     // A client reading a pull request, or its branch status, can see it merge or close before
     // the next sweep does.
     const stateChanges = Stream.merge(
@@ -463,7 +501,15 @@ export const make = Effect.gen(function* () {
             ) {
               closeCommandThreads.add(event.threadId);
             }
-            return Effect.void;
+            return event.payload.type === "command_execution" &&
+              !isOrchestrationV2WorkActive(event.payload.status)
+              ? createdWorker.enqueue({
+                  threadId: event.threadId,
+                  commandId: event.payload.id,
+                  command: event.payload.input,
+                  output: event.payload.output ?? "",
+                })
+              : Effect.void;
           case "run.updated":
             return isTerminalRunStatus(event.payload.status) &&
               closeCommandThreads.delete(event.threadId)
@@ -490,7 +536,13 @@ export const make = Effect.gen(function* () {
       return worker.enqueue("requested");
     });
 
-  return { start, drain: worker.drain, requestSync } satisfies PullRequestSyncReactor["Service"];
+  return {
+    start,
+    drain: Effect.andThen(createdWorker.drain, worker.drain),
+    requestSync,
+  } satisfies PullRequestSyncReactor["Service"];
 });
 
-export const layer = Layer.effect(PullRequestSyncReactor, make);
+export const layer = Layer.effect(PullRequestSyncReactor, make).pipe(
+  Layer.provide(ThreadPullRequestLinks.layer),
+);

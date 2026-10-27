@@ -47,6 +47,8 @@ receives them on the environment's machine. Provider and model limits still
 apply, including images already in the conversation. A video attachment gives
 the agent a file path; it does not enable native video input.
 
+DOCX, XLSX, PPTX, ODT, EPUB, and Jupyter notebook attachments up to 16 MiB also give the agent an extracted text copy, capped at 1 MiB. The original file remains available.
+
 Uploads begin when you add an attachment. All uploads must finish before the
 message can send. Retry or remove a failed upload. On web and desktop, reloading
 before an upload finishes requires you to attach that file again.

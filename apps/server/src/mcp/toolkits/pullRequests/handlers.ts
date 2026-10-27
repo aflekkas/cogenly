@@ -23,6 +23,7 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
+import * as ThreadPullRequestLinks from "../../../pullRequest/ThreadPullRequestLinks.ts";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -183,6 +184,7 @@ export function listThreadPullRequests(
 
 const make = Effect.gen(function* () {
   const engine = yield* Orchestrator.OrchestratorV2;
+  const links = yield* ThreadPullRequestLinks.ThreadPullRequestLinks;
 
   const projects = yield* ProjectService.ProjectService;
   const crypto = yield* Crypto.Crypto;
@@ -302,29 +304,14 @@ const make = Effect.gen(function* () {
         const thread = yield* requireThread(PullRequestLinkFailedError, input.threadId);
         const project = yield* projectOf(thread, PullRequestLinkFailedError);
         const target = yield* resolveTarget(input, project);
-        const existing = threadPullRequestsOf(thread).find((link) =>
-          threadPullRequestKeysEqual(link, target),
-        );
-        if (existing && existing.source !== "stack-dismissed")
-          return { ...target, alreadyLinked: true };
-        const alreadyLinked = yield* engine
-          .dispatch({
-            type: "thread.pull-request.link",
-            commandId: yield* commandId("mcp-pr-link", thread.id),
+        const alreadyLinked = yield* links
+          .link({
             threadId: thread.id,
-            host: target.host,
-            repository: target.repository,
-            number: target.number,
-            url: target.url,
+            commandId: yield* commandId("mcp-pr-link", thread.id),
+            target,
             source: "agent",
           })
-          .pipe(
-            Effect.as(false),
-            // The decider rejects a second link of the same PR; for the agent that is
-            // the outcome it asked for, not an error.
-
-            Effect.catchCause(dispatchFailure(PullRequestLinkFailedError)),
-          );
+          .pipe(Effect.catchCause(dispatchFailure(PullRequestLinkFailedError)));
         return { ...target, alreadyLinked };
       }),
     ),
@@ -372,4 +359,7 @@ const make = Effect.gen(function* () {
   } satisfies McpToolAccess.Handlers<typeof PullRequestsToolkit.tools>;
 });
 
-export const layer = McpToolAccess.toLayer(PullRequestsToolkit, make);
+export const layer = McpToolAccess.toLayer(
+  PullRequestsToolkit,
+  make.pipe(Effect.provide(ThreadPullRequestLinks.layer)),
+);
