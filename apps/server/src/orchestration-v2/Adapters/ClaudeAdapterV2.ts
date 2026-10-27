@@ -1,3 +1,4 @@
+import { resolveClaudeToolSearchOverride } from "../../provider/Drivers/ClaudeToolSearch.ts";
 import * as RepoMcpTrust from "../../integrations/RepoMcpTrust.ts";
 import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
 import { claudeTaskOutputRoot, tailClaudeTaskOutput } from "./ClaudeTaskOutputTail.ts";
@@ -1195,6 +1196,8 @@ export function makeClaudeQueryOptions(input: {
    */
   readonly repoMcpServers?: Readonly<Record<string, ClaudeRepoMcpServer>>;
   readonly repoMcpWaiting?: ReadonlyArray<string>;
+  /** SDK settings.env beats user settings.json env; process env alone does not. */
+  readonly toolSearchOverride?: "true";
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection);
   const {
@@ -1242,7 +1245,7 @@ export function makeClaudeQueryOptions(input: {
           ...(typeof querySettings === "object" && querySettings !== null ? querySettings : {}),
           autoCompactWindow: Number(input.settings.autoCompactWindow),
         } as ClaudeSdkSettings);
-  const effectiveQuerySettings =
+  const mcpQuerySettings =
     input.repoMcpWaiting === undefined
       ? compactedQuerySettings
       : {
@@ -1252,6 +1255,13 @@ export function makeClaudeQueryOptions(input: {
           enableAllProjectMcpServers: false,
           enabledMcpjsonServers: Object.keys(input.repoMcpServers ?? {}),
           disabledMcpjsonServers: [...input.repoMcpWaiting],
+        };
+  const effectiveQuerySettings =
+    input.toolSearchOverride === undefined || typeof mcpQuerySettings === "string"
+      ? mcpQuerySettings
+      : {
+          ...mcpQuerySettings,
+          env: { ...mcpQuerySettings?.env, ENABLE_TOOL_SEARCH: input.toolSearchOverride },
         };
   const repoMcpServers = input.repoMcpServers ?? {};
   const sessionMcpServers =
@@ -1324,7 +1334,7 @@ export function makeClaudeQueryOptions(input: {
           : "") +
         (!terminalTools
           ? ""
-          : "\nUse mcp__cogenly__terminal_run for every shell command so the owner sees it live. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. A command that may take more than about a minute, or may prompt (logins, cloud CLIs, installs, builds, test suites), runs with background=true and is polled with terminal_read, so the user's messages aren't blocked while it runs. Terminals and their children are killed when this thread settles."),
+          : "\nRun every shell command with mcp__cogenly__terminal_run so the owner sees it. Use background=true for servers or commands over about a minute or that may prompt (logins, installs, builds, tests); poll with terminal_read so messages stay unblocked. terminal_write sends stdin, terminal_kill stops. Settlement kills terminals and children."),
     },
     ...(Object.keys(extraArgs).length === 0 ? {} : { extraArgs }),
   };
@@ -8772,7 +8782,16 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           );
           // Read when the process opens: worktrees and other machines get the
           // servers of whatever checkout they run in.
+          const toolSearchOverride = yield* resolveClaudeToolSearchOverride({
+            cwd: turnInput.runtimePolicy.cwd,
+            settings: adapterOptions.settings,
+            environment: adapterOptions.environment,
+          }).pipe(
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+            Effect.provideService(Path.Path, path),
+          );
           const queryOptions = makeClaudeQueryOptions({
+            ...(toolSearchOverride === undefined ? {} : { toolSearchOverride }),
             modelSelection: turnInput.modelSelection,
             nativeThreadId,
             resume: shouldResume,
