@@ -10,6 +10,7 @@ import {
   PROJECT_INSTRUCTIONS_MAX_LENGTH,
   ProjectLabel,
   ProjectLabelId,
+  ProjectFileSha256,
   ProjectSourceLink,
   ScheduledTaskFields,
   TrimmedNonEmptyString,
@@ -41,6 +42,9 @@ export const ProjectFields = Schema.Struct({
   mergedInto: Schema.optionalKey(ProjectLabelId),
   mergeSourceName: Schema.optionalKey(ProjectLabel.fields.name),
   dismissedDuplicateIds: Schema.optionalKey(Schema.Array(ProjectLabelId)),
+  dismissedHomeOwnerSuggestion: Schema.optionalKey(
+    Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
+  ),
   name: ProjectLabel.fields.name,
   color: Schema.NullOr(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100))),
   description: Schema.NullOr(Schema.String.check(Schema.isMaxLength(4000))),
@@ -106,6 +110,28 @@ export const ScheduleFields = Schema.Struct({
   ownerMachine: PortableId,
   createdAt: Agent.fields.createdAt,
 });
+/**
+ * One file or folder in a project folder (see ProjectFileSync). `entry`
+ * changes as one field, so content, kind and deletion never mix between two
+ * writers. `baseSha256` is the content the author replaced: a receiver whose
+ * file is neither that nor the new content keeps its own as a conflict copy.
+ * A delete is `deleted`, not a tombstone, so the path can be created again.
+ */
+export const ProjectFileFields = Schema.Struct({
+  projectId: ProjectLabelId,
+  path: RelativePath.check(Schema.isMaxLength(1024)),
+  entry: Schema.Struct({
+    kind: Schema.Literals(["file", "folder"]),
+    sha256: Schema.NullOr(ProjectFileSha256),
+    sizeBytes: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+    baseSha256: Schema.NullOr(ProjectFileSha256),
+    deleted: Schema.Boolean,
+  }),
+});
+export type ProjectFileFields = typeof ProjectFileFields.Type;
+/** One document per project and path, on every machine. */
+export const projectFileDocumentId = (projectId: string, relativePath: string) =>
+  `project-file:${NodeCrypto.createHash("sha256").update(`${projectId}\n${relativePath}`).digest("hex").slice(0, 40)}`;
 const LegacyNoteText = Schema.String.check(Schema.isMaxLength(4000));
 /**
  * A fact's status is not a field. Each transition sets its own marker, and
@@ -262,6 +288,7 @@ const FIELD_CODECS: Readonly<Record<SharedDocumentKind, FieldCodecs>> = {
   integration: codecs(IntegrationFields.fields),
   settings: UNIVERSAL_SETTINGS_CODECS,
   "project-settings": PROJECT_SETTINGS_CODECS,
+  "project-file": codecs(ProjectFileFields.fields),
 };
 const isKnownKind = Schema.is(SharedDocumentKind);
 const invalid = (cause?: unknown) => new SharedStateError({ reason: "invalid-document", cause });
@@ -280,6 +307,15 @@ export const checkIntegrity = (change: SharedDocumentChangeWire) =>
       Object.hasOwn(change.fields, "factId") &&
       (typeof change.fields.factId !== "string" ||
         factDocumentId(change.fields.factId) !== change.id)
+    )
+      return yield* invalid();
+    // A project file's id names its project and path; neither can be pointed elsewhere.
+    if (
+      change.kind === "project-file" &&
+      (Object.hasOwn(change.fields, "projectId") || Object.hasOwn(change.fields, "path")) &&
+      (typeof change.fields.projectId !== "string" ||
+        typeof change.fields.path !== "string" ||
+        projectFileDocumentId(change.fields.projectId, change.fields.path) !== change.id)
     )
       return yield* invalid();
     const keys = Object.keys(change.fields);
@@ -405,5 +441,6 @@ export const decodeProject = Schema.decodeUnknownEffect(ProjectFields);
 export const decodeAgent = Schema.decodeUnknownEffect(AgentFields);
 export const decodeSchedule = Schema.decodeUnknownEffect(ScheduleFields);
 export const decodeFact = Schema.decodeUnknownEffect(FactDocument);
+export const decodeProjectFile = Schema.decodeUnknownOption(ProjectFileFields);
 export const decodeVaultSealed = Schema.decodeUnknownOption(VaultSealedField);
 export const decodeVaultWrap = Schema.decodeUnknownOption(VaultWrapField);

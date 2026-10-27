@@ -84,11 +84,10 @@ export function VaultLoginsSection(props: {
       {props.logins.length === 0 ? (
         <SettingsEmpty
           icon={<KeyRoundIcon />}
-          title="No logins yet"
-          description="Sign-ins you save here, or on an agent's sign-in card, are filled by agents without them seeing the password."
+          label="Saved sign-ins are filled by agents without them seeing the password."
           action={
             <Button
-              size="sm"
+              size="xs"
               variant="outline"
               disabled={!props.canWrite}
               title={props.canWrite ? undefined : NO_WRITE_TITLE}

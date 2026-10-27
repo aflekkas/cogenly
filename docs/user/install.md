@@ -73,8 +73,9 @@ apply to a source checkout; update it with `git pull` and a rebuild.
 ## Run Cogenly on a VPS
 
 Agents, projects, and provider logins live on the VPS; your Mac only drives
-them. Sign in to the providers on the VPS first (`claude auth login`,
-`codex login`, `gh auth login`).
+them. Once connected, sign Claude and Codex in on the VPS from **Settings →
+Providers** (the browser step happens on your Mac). Sign in to GitHub there with
+`gh auth login`.
 
 **Recommended: desktop SSH.** In the desktop app, open **Settings → Connections
 → Connect a machine**, choose **SSH**, and pick the host from your `~/.ssh/config`.
@@ -121,11 +122,11 @@ and enable the provider you want. Installation, login, and configuration belong
 to that environment's machine, even when you connect from a phone or another
 computer.
 
-| Provider | Install and authenticate                                                                                                                                  |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Codex    | [Connect with ChatGPT](./providers-codex.md#connect-with-chatgpt), or install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`. |
-| Claude   | Install [Claude Code](https://claude.com/product/claude-code), then run `claude auth login`.                                                              |
-| Grok     | [Add a Grok instance](./providers-grok.md), install the Grok Build CLI, then run `grok login`.                                                            |
+| Provider | Install and authenticate                                                                                                                                                      |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Codex    | [Connect with ChatGPT](./providers-codex.md#connect-with-chatgpt), or install [Codex CLI](https://developers.openai.com/codex/cli) and sign in from **Settings → Providers**. |
+| Claude   | Install [Claude Code](https://claude.com/product/claude-code), then sign in from **Settings → Providers**.                                                                    |
+| Grok     | [Add a Grok instance](./providers-grok.md), install the Grok Build CLI, then run `grok login`.                                                                                |
 
 Provider CLIs must be on the server's `PATH`. If Cogenly cannot find one, set its
 **Binary path** in provider settings, especially when using a version manager.

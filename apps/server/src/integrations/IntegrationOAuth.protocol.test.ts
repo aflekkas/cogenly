@@ -87,6 +87,44 @@ describe("MCP OAuth protocol", () => {
     });
   });
 
+  it.effect(
+    "surfaces authorization redirect errors without following them or leaking query strings",
+    () => {
+      const state = "private-state";
+      const fetch: typeof globalThis.fetch = async (_input, init) => {
+        expect(init?.redirect).toBe("manual");
+        const params = new URLSearchParams({
+          error: "invalid_client",
+          error_description: `Client ${state} is invalid for https://app.example/callback?code=private-code`,
+        });
+        return new Response(null, { status: 302, headers: { location: `/error?${params}` } });
+      };
+      return Effect.gen(function* () {
+        const client = yield* protocol(fetch);
+        const url = OAuth.authorizationUrl({
+          server,
+          clientId: "stale-client",
+          redirectUri: "https://app.example/callback",
+          state,
+          challenge: "private-challenge",
+          scope: undefined,
+        });
+        const error = yield* client
+          .checkAuthorization(url)
+          .pipe(Effect.provideService(FetchHttpClient.Fetch, fetch), Effect.flip);
+        expect(error.cause).toEqual({
+          stage: "authorize",
+          host: "auth.example",
+          status: 302,
+          error: "invalid_client",
+          description: "Client [redacted] is invalid for app.example",
+        });
+        expect(error.message).not.toContain("private-code");
+        expect(error.message).not.toContain(state);
+      });
+    },
+  );
+
   it.effect("binds token exchange to resource and surfaces the token error", () => {
     let form = new URLSearchParams();
     const fetch: typeof globalThis.fetch = async (_input, init) => {

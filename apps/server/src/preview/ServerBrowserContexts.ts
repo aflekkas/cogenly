@@ -22,7 +22,17 @@ interface Options {
   readonly diagnose?: (executable: string, cause: unknown) => Promise<unknown>;
   readonly env?: NodeJS.ProcessEnv;
   readonly onContextClose?: (context: BrowserContext) => void;
+  /** Unpacked extension directories a human profile loads; none keeps the headless shell. */
+  readonly extensionsFor?: (profileId: string) => Promise<ReadonlyArray<string>>;
+  /** A browser that can load extensions, installing it on first use. */
+  readonly extensionsExecutable?: () => Promise<string>;
 }
+
+/** Chrome's flags to run exactly these unpacked extensions. */
+export const extensionArgs = (paths: ReadonlyArray<string>) =>
+  paths.length === 0
+    ? []
+    : [`--disable-extensions-except=${paths.join(",")}`, `--load-extension=${paths.join(",")}`];
 
 const UA_PLATFORMS: Partial<Record<NodeJS.Platform, string>> = {
   darwin: "macOS",
@@ -85,6 +95,8 @@ export class ServerBrowserContexts {
   private readonly contexts = new Map<string, Promise<BrowserContext>>();
   /** Profile clears in progress; a context for that profile opens after its storage is gone. */
   private readonly clearing = new Map<string, Promise<void>>();
+  /** The extension directories each running human profile launched with. */
+  private readonly launchedExtensions = new Map<string, string>();
   private browser: Promise<Browser> | undefined;
   private closing: Promise<void> | undefined;
 
@@ -92,8 +104,8 @@ export class ServerBrowserContexts {
     this.options = options;
   }
 
-  private async launchOptions() {
-    const executablePath = await this.options.executable();
+  private async launchOptions(executable = this.options.executable) {
+    const executablePath = await executable();
     const env = this.options.env ?? process.env;
     return {
       executablePath,
@@ -176,12 +188,39 @@ export class ServerBrowserContexts {
       return browser.newContext(contextOptions);
     }
     const directory = this.profileDirectory(profileId);
-    const options = await this.launchOptions();
+    const extensions = (await this.options.extensionsFor?.(profileId)) ?? [];
+    // The headless shell cannot load extensions; the full build runs them in new headless mode.
+    const options =
+      extensions.length > 0 && this.options.extensionsExecutable
+        ? await this.launchOptions(this.options.extensionsExecutable)
+        : await this.launchOptions();
     const { chromium } = loadPlaywright();
     await NodeFSP.mkdir(directory, { recursive: true });
+    this.launchedExtensions.set(JSON.stringify([profileId, null]), extensions.join("\n"));
     return this.launch(options, () =>
-      chromium.launchPersistentContext(directory, { ...options, ...contextOptions }),
+      chromium.launchPersistentContext(directory, {
+        ...options,
+        args: [...options.args, ...extensionArgs(extensions)],
+        ...contextOptions,
+      }),
     );
+  }
+
+  /**
+   * Closes a human profile's running browser, ending its tabs, so the next tab
+   * starts it again with the profile's current extensions. Keeps its storage.
+   * False when it was not running.
+   */
+  async restartProfile(profileId: string, extensions: ReadonlyArray<string>) {
+    const key = JSON.stringify([profileId, null]);
+    const pending = this.contexts.get(key);
+    if (!pending) return false;
+    // Already running exactly these.
+    if (this.launchedExtensions.get(key) === extensions.join("\n")) return false;
+    this.contexts.delete(key);
+    const context = await pending.catch(() => undefined);
+    await context?.close().catch(constVoid);
+    return context !== undefined;
   }
 
   private profileDirectory(profileId: string) {

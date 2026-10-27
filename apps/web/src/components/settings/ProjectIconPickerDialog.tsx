@@ -16,6 +16,7 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
+import { Empty, EmptyDescription } from "../ui/empty";
 import { SearchInput } from "../ui/search-input";
 import { ScrollArea } from "../ui/scroll-area";
 
@@ -125,7 +126,9 @@ export function ProjectIconPickerDialog({
             </div>
           </ScrollArea>
           {icons.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">No icons found.</p>
+            <Empty size="sm">
+              <EmptyDescription>No icons match this search.</EmptyDescription>
+            </Empty>
           ) : null}
         </DialogPanel>
         <DialogFooter>

@@ -22,6 +22,7 @@ import { AppErrorScreen } from "../components/AppErrorScreen";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
 import { CustomSnoozeDialogHost } from "../components/CustomSnoozeDialog";
+import { ProviderSignInDialogHost } from "../components/providers/ProviderSignInDialog";
 import { LaunchMachineDialog } from "../machines/LaunchMachineDialog";
 import { ConfirmDialogHost } from "../components/ConfirmDialogHost";
 import { KeybindingsConfigWarning } from "../components/KeybindingsConfigWarning";
@@ -175,6 +176,7 @@ function RootRouteView() {
 
         <ProviderAuthCallbackCoordinator />
         <CustomSnoozeDialogHost />
+        <ProviderSignInDialogHost />
         <CommandPalette>
           <AppSidebarLayout>
             <Outlet />
@@ -231,6 +233,7 @@ function RootRouteView() {
         <ConfirmDialogHost />
         <LaunchMachineDialog />
         <CustomSnoozeDialogHost />
+        <ProviderSignInDialogHost />
         <SlowRpcRequestToastCoordinator />
         <PermissionUpdateNotice />
         {primaryEnvironmentAuthenticated ? <LegacyThreadMigrationToast /> : null}

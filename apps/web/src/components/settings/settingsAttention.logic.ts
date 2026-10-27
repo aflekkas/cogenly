@@ -108,6 +108,7 @@ function owningSettingsPage(alert: SettingsAttentionAlert): SettingsPath | null 
     case "canary":
     case "chat-terminal-sandbox":
     case "agent-processes":
+    case "preview-browser":
       return null;
   }
 }

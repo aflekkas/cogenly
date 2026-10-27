@@ -2,6 +2,7 @@ import { assert, it } from "@effect/vitest";
 import {
   type ModelSelection,
   AgentId,
+  NodeId,
   EnvironmentId,
   type OrchestrationV2AppThread,
   ProjectId,
@@ -26,6 +27,9 @@ import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
+import { makeSubagentChildThread } from "@cogenly/provider-core/server/subagentProjection";
+import { terminalLaunchPolicy } from "@cogenly/provider-core/server/mcpSession";
+import { museServeArgs } from "@cogenly/provider-muse/testing";
 
 const decodeRuntimeMode = Schema.decodeUnknownSync(RuntimeMode);
 
@@ -237,6 +241,46 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
 
       assert.equal(yield* modeFor("chat"), "full-access");
       assert.equal(yield* modeFor("work"), "full-access");
+    }),
+  );
+
+  it.effect("gives delegated Work children shell access independently of the parent surface", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      for (const surface of ["chat", "builder", "work"] as const) {
+        const parent = {
+          ...makeThread({ now, worktreePath: "/repo", surface }),
+          agent: { id: AgentId.make("agent:parent"), role: "conversation" as const },
+        };
+        const child = makeSubagentChildThread({
+          parentThread: parent,
+          childThreadId: ThreadId.make(`thread:child:${surface}`),
+          parentNodeId: NodeId.make("node:task"),
+          activeProviderThreadId: null,
+          providerInstanceId,
+          modelSelection,
+          title: "Implementation",
+          now,
+          createdBy: "agent",
+          creationSource: "server",
+        });
+        const resolved = yield* policy.resolve({ thread: child, modelSelection });
+        assert.equal(child.surface, "work");
+        assert.isUndefined(child.agent);
+        assert.isUndefined(resolved.conversationMode);
+        assert.isUndefined(resolved.builderMode);
+        assert.equal(terminalLaunchPolicy({ ...child, enabled: true }), "unrestricted");
+        // Muse keeps writes and workspace trust, and a shell when MCP terminals are absent.
+        assert.deepEqual(
+          museServeArgs({
+            runtimeMode: resolved.runtimeMode,
+            readOnly: resolved.conversationMode === true,
+            disableShell: false,
+          }),
+          ["serve", "--trust-workspace", "--disable-sandbox"],
+        );
+      }
     }),
   );
 

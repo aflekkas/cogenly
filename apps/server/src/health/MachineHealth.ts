@@ -13,6 +13,10 @@ import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
  * backlogs between samples so a backlog that never drains reads as stuck.
  */
 import * as NodeFSP from "node:fs/promises";
+import * as HostProcess from "@cogenly/shared/HostProcess";
+import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
+import * as PreviewBrowserHost from "../preview/PreviewBrowserHost.ts";
+import { resolveRootCliCommand } from "../cli/invocation.ts";
 
 import {
   type EnvironmentId,
@@ -30,6 +34,9 @@ import {
   type MachineListResult,
   type PeerCallError,
 } from "@cogenly/contracts";
+import type * as FileSystem from "effect/FileSystem";
+import type * as Path from "effect/Path";
+import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -70,6 +77,7 @@ import {
   agentProcessesCheck,
   bootServiceCheck,
   computerUseCheck,
+  previewBrowserCheck,
   chatSandboxCheck,
   buildReport,
   databaseCheck,
@@ -274,6 +282,10 @@ const make = Effect.gen(function* () {
   const greetings = yield* ChatGreetingService.ChatGreetingService;
   const computerUse = yield* ComputerUseService.ComputerUse;
   const sandbox = yield* ReadOnlySandbox.ReadOnlySandbox;
+  const previewBrowser = yield* Effect.serviceOption(PreviewBrowser.PreviewBrowser);
+  const browserHostServices = yield* Effect.context<
+    FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
+  >();
   const agentProcesses = yield* AgentProcesses.AgentProcesses;
 
   const freeSpace = yield* Effect.cachedWithTTL(
@@ -457,6 +469,33 @@ const make = Effect.gen(function* () {
           ),
         ),
         Effect.sync(() => chatSandboxCheck(sandbox.status)),
+        guarded(
+          "preview-browser",
+          Effect.gen(function* () {
+            if (Option.isNone(previewBrowser)) return unknownCheck("preview-browser");
+            const status = yield* previewBrowser.value.status;
+            if (status.state !== "ready") return previewBrowserCheck(status);
+            const executable = yield* previewBrowser.value.installed;
+            const setupCommand = yield* resolveRootCliCommand(PreviewBrowserHost.SETUP_SUBCOMMAND);
+            const blocked =
+              !PreviewBrowserHost.sandboxDisabled(yield* HostProcess.Environment) &&
+              (yield* PreviewBrowserHost.sandboxBlocked);
+            const libraries =
+              Option.isSome(executable) && (yield* HostProcess.Platform) === "linux"
+                ? yield* PreviewBrowserHost.missingLibraries(executable.value)
+                : [];
+            const hostProblem = blocked
+              ? new PreviewBrowserHost.PreviewBrowserSandboxError({ setupCommand }).message
+              : libraries.length > 0
+                ? new PreviewBrowserHost.PreviewBrowserLibrariesError({ setupCommand, libraries })
+                    .message
+                : undefined;
+            return previewBrowserCheck({
+              ...status,
+              ...(hostProblem === undefined ? {} : { hostProblem }),
+            });
+          }).pipe(Effect.provideContext(browserHostServices)),
+        ),
         database,
         guarded("disk", Effect.map(freeSpace, diskCheck)),
         guarded(

@@ -630,7 +630,8 @@ function accountProbeStatus({ account, rateLimits }: CodexAppServerProviderSnaps
     return {
       status: "error",
       auth: { status: "unauthenticated" },
-      message: "Codex CLI is not authenticated. Run `codex login` and try again.",
+      // Clients offer in-app sign-in; `codex login` is the manual route.
+      message: "Codex is not signed in on this machine.",
     };
   }
 

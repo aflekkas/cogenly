@@ -126,3 +126,94 @@ export function instructionsSaveState(input: {
 export function normalizeInstructions(text: string): string {
   return text.replace(/\s+$/u, "");
 }
+
+/** One file or folder in the Files card's tree. */
+export interface ProjectFileNode<T> {
+  readonly name: string;
+  readonly path: string;
+  readonly kind: "file" | "folder";
+  /** Absent for a folder only implied by a file under it. */
+  readonly resource: T | undefined;
+  readonly children: ReadonlyArray<ProjectFileNode<T>>;
+  /** Files anywhere below, for a folder's count. */
+  readonly fileCount: number;
+}
+
+/**
+ * The project's resources as a tree by path: folders first by name, then
+ * files newest first, as the flat list showed them.
+ */
+export function projectFileTree<
+  T extends {
+    readonly relativePath: string;
+    readonly kind: "file" | "folder";
+    readonly modifiedAt: string;
+  },
+>(resources: ReadonlyArray<T>): ReadonlyArray<ProjectFileNode<T>> {
+  interface Draft {
+    name: string;
+    path: string;
+    kind: "file" | "folder";
+    resource: T | undefined;
+    children: Map<string, Draft>;
+  }
+  const root: Draft = {
+    name: "",
+    path: "",
+    kind: "folder",
+    resource: undefined,
+    children: new Map(),
+  };
+  for (const resource of resources) {
+    const segments = resource.relativePath.split("/");
+    let at = root;
+    segments.forEach((name, index) => {
+      const path = segments.slice(0, index + 1).join("/");
+      const leaf = index === segments.length - 1;
+      let next = at.children.get(name);
+      if (next === undefined) {
+        next = { name, path, kind: "folder", resource: undefined, children: new Map() };
+        at.children.set(name, next);
+      }
+      if (leaf) {
+        next.kind = resource.kind;
+        next.resource = resource;
+      }
+      at = next;
+    });
+  }
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+  const finish = (draft: Draft): ProjectFileNode<T> => {
+    const children = [...draft.children.values()].map(finish);
+    const folders = children
+      .filter((child) => child.kind === "folder")
+      .sort((left, right) => collator.compare(left.name, right.name));
+    const files = children
+      .filter((child) => child.kind === "file")
+      .map((child, index) => ({
+        child,
+        index,
+        ms: Date.parse(child.resource?.modifiedAt ?? "") || 0,
+      }))
+      .sort((left, right) => right.ms - left.ms || left.index - right.index)
+      .map((entry) => entry.child);
+    return {
+      name: draft.name,
+      path: draft.path,
+      kind: draft.kind,
+      resource: draft.resource,
+      children: [...folders, ...files],
+      fileCount:
+        draft.kind === "file" ? 1 : children.reduce((total, child) => total + child.fileCount, 0),
+    };
+  };
+  return finish(root).children;
+}
+
+/** A dropped or picked file's folder below `base`, from its path inside an uploaded folder. */
+export function uploadFolderFor(base: string, relativePath: string): string {
+  const parts = relativePath
+    .split("/")
+    .filter((part) => part !== "" && part !== "." && part !== "..");
+  return [base, ...parts.slice(0, -1)].join("/");
+}

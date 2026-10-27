@@ -376,11 +376,7 @@ function IntroSection({
         <SettingsNote className="swap-motion">{T3_IMPORT_RUNNING_NOTE}</SettingsNote>
       ) : null}
       {selectable && source.projects.length === 0 ? (
-        <SettingsEmpty
-          size="sm"
-          title="No projects in T3 Code"
-          description="Add a project in T3 Code, then check again here."
-        />
+        <SettingsEmpty label="Add a project in T3 Code, then check again here." />
       ) : null}
       {selectable && source.projects.length > 0 ? (
         <SettingsRow

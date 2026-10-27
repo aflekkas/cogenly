@@ -19,6 +19,10 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.previewClearProfile]: AuthPreviewOperateScope,
   [WS_METHODS.browserCookieSources]: AuthPreviewOperateScope,
   [WS_METHODS.browserImportCookies]: AuthPreviewOperateScope,
+  [WS_METHODS.browserExtensionsList]: AuthPreviewOperateScope,
+  [WS_METHODS.browserExtensionInstall]: AuthPreviewOperateScope,
+  [WS_METHODS.browserExtensionRemove]: AuthPreviewOperateScope,
+  [WS_METHODS.browserExtensionToggle]: AuthPreviewOperateScope,
   [WS_METHODS.searchQuery]: AuthOrchestrationReadScope,
   [WS_METHODS.exportCreate]: AuthSettingsWriteScope,
   [WS_METHODS.exportValidate]: AuthSettingsWriteScope,
@@ -120,6 +124,12 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.integrationsSaveApiKey]: AuthOrchestrationOperateScope,
   // Installing uv puts software on this machine, like installing a provider CLI.
   [WS_METHODS.integrationsInstallRuntime]: AuthProvidersManageScope,
+  // Signing a provider in or out changes which account every agent on that machine uses.
+  [WS_METHODS.providerAuthStart]: AuthProvidersManageScope,
+  [WS_METHODS.providerAuthRespond]: AuthProvidersManageScope,
+  [WS_METHODS.providerAuthComplete]: AuthProvidersManageScope,
+  [WS_METHODS.providerAuthCancel]: AuthProvidersManageScope,
+  [WS_METHODS.providerAuthLogout]: AuthProvidersManageScope,
   // The composer's Sources picker runs for every paired client that can read threads.
   [WS_METHODS.integrationsSubscribeSources]: AuthOrchestrationReadScope,
   [WS_METHODS.machineSecurityStatus]: AuthOrchestrationReadScope,

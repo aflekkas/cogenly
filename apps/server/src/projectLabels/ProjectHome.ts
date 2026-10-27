@@ -76,6 +76,8 @@ export class ProjectHome extends Context.Service<
       readonly id: ProjectLabelId;
       readonly title: string;
       readonly text: string;
+      /** Project-relative folder, made if missing; defaults to `Resources`. */
+      readonly folder?: string;
     }) => Effect.Effect<ProjectChangeReceipt, ProjectLabelError>;
     readonly removeFile: (input: {
       readonly id: ProjectLabelId;
@@ -314,6 +316,7 @@ const make = Effect.gen(function* () {
     function* (input) {
       const { resource } = yield* files.createResource({
         id: input.id,
+        ...(input.folder === undefined ? {} : { folder: input.folder }),
         resource: { kind: "note", title: input.title, text: input.text },
       });
       return receipt(input.id, "file", resource.relativePath, "added");

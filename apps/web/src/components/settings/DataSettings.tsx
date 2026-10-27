@@ -250,11 +250,7 @@ function DataSettingsPanel({
           ) : recent === null ? (
             <SettingsRow title="Loading exports…" role="status" />
           ) : recent.length === 0 ? (
-            <SettingsEmpty
-              size="sm"
-              title="No exports yet"
-              description="Exports you make appear here."
-            />
+            <SettingsEmpty label="Exports you make appear here." />
           ) : (
             recent.map((entry) => {
               const createdAt = exportCreatedAt(entry.path);

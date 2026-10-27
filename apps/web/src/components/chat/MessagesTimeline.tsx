@@ -46,6 +46,7 @@ import {
 } from "./timelineMinimap.logic";
 import {
   COMPOSER_CONTEXT_KINDS,
+  isProviderSignedOutFailure,
   ORCHESTRATION_V2_WORKSPACE_PREPARATION_FAILURE_CODE,
   type AssistantCitation,
   type EnvironmentId,
@@ -60,6 +61,8 @@ import {
   type ToolActivityIcon,
 } from "@cogenly/contracts";
 import { parseScopedThreadKey, scopeThreadRef } from "@cogenly/client-runtime/environment";
+import { ProviderSignInCard } from "../providers/ProviderSignInCard";
+import type { ProviderSignInRequest } from "../providers/ProviderSignInFlow";
 import { resolveUserMessagePresentation } from "@cogenly/client-runtime/user-message";
 import { Link } from "@tanstack/react-router";
 import { canForkProjectedAssistantItem } from "@cogenly/client-runtime/state/thread-workflows";
@@ -426,6 +429,7 @@ interface TimelineRowSharedState {
   onCancelWorktreeSetup: (() => void) | null;
   retryableWorkspacePreparationRunIds: ReadonlySet<RunId>;
   onRetryWorkspacePreparation: ((runId: RunId) => void) | null;
+  providerSignInForFailedRun: ProviderSignInForFailedRun | null;
   onWorktreeSetupWorkLocally: (() => void) | null;
   onOpenWorktreeSetupTerminal: ((terminalId: string) => void) | null;
   onShowTerminalRun: ((call: TerminalRunToolCall) => void) | null;
@@ -433,6 +437,12 @@ interface TimelineRowSharedState {
 }
 
 /** A "Terminal run" tool call, for opening the bottom panel on the command it started. */
+/** The sign-in a turn that failed signed out offers: only for the thread's latest run. */
+export interface ProviderSignInForFailedRun {
+  readonly runId: RunId;
+  readonly request: ProviderSignInRequest;
+}
+
 export interface TerminalRunToolCall {
   readonly output: unknown;
   readonly command: string | null;
@@ -557,6 +567,8 @@ interface MessagesTimelineProps {
   /** Runs whose failed workspace preparation can be retried, keyed by run id. */
   retryableWorkspacePreparationRunIds?: ReadonlySet<RunId>;
   onRetryWorkspacePreparation?: (runId: RunId) => void;
+  /** The sign-in a signed-out failure of this run offers; older failures stay plain rows. */
+  providerSignInForFailedRun?: ProviderSignInForFailedRun | null;
   onWorktreeSetupWorkLocally?: () => void;
   onOpenWorktreeSetupTerminal?: (terminalId: string) => void;
   /** Opens the bottom panel on the command a "Terminal run" row started. */
@@ -676,6 +688,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   onCancelWorktreeSetup,
   retryableWorkspacePreparationRunIds = EMPTY_RUN_IDS,
   onRetryWorkspacePreparation,
+  providerSignInForFailedRun = null,
   onWorktreeSetupWorkLocally,
   onOpenWorktreeSetupTerminal,
   onShowTerminalRun,
@@ -1705,6 +1718,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       onCancelWorktreeSetup: onCancelWorktreeSetup ?? null,
       retryableWorkspacePreparationRunIds,
       onRetryWorkspacePreparation: onRetryWorkspacePreparation ?? null,
+      providerSignInForFailedRun,
       onWorktreeSetupWorkLocally: onWorktreeSetupWorkLocally ?? null,
       onOpenWorktreeSetupTerminal: onOpenWorktreeSetupTerminal ?? null,
       onShowTerminalRun: onShowTerminalRun ?? null,
@@ -1747,6 +1761,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       onCancelWorktreeSetup,
       retryableWorkspacePreparationRunIds,
       onRetryWorkspacePreparation,
+      providerSignInForFailedRun,
       onWorktreeSetupWorkLocally,
       onOpenWorktreeSetupTerminal,
       onShowTerminalRun,
@@ -6291,6 +6306,27 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
     );
   }
   const failureItem = workEntry.projectedItem?.item;
+  const signInForFailure = ctx.providerSignInForFailedRun;
+  if (
+    failureItem?.type === "error" &&
+    failureItem.status === "failed" &&
+    signInForFailure !== null &&
+    failureItem.runId === signInForFailure.runId &&
+    isProviderSignedOutFailure(failureItem.failure)
+  ) {
+    return (
+      <div
+        data-v2-item-type="error"
+        data-v2-item-visibility={workEntry.projectedItem?.visibility}
+        className="py-1"
+      >
+        <ProviderSignInCard
+          request={signInForFailure.request}
+          description="This turn didn't run because the provider is signed out there. Sign in, then send your message again."
+        />
+      </div>
+    );
+  }
   if (failureItem?.type === "error" && failureItem.status === "failed") {
     const warning = failureItem.failure.class === "usage_limit";
     const resetAt = failureItem.failure.resetAt;

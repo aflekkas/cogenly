@@ -99,6 +99,7 @@ import * as ServerBrowser from "./preview/ServerBrowser.ts";
 import * as DesktopBrowserChannel from "./preview/DesktopBrowserChannel.ts";
 import * as ServerBrowserStream from "./preview/ServerBrowserStream.ts";
 import * as PreviewBrowser from "./preview/PreviewBrowser.ts";
+import * as BrowserExtensions from "./preview/BrowserExtensions.ts";
 import * as ProcessRunner from "./processRunner.ts";
 import * as GitManager from "./git/GitManager.ts";
 import * as Keybindings from "./keybindings.ts";
@@ -191,6 +192,7 @@ import * as Scheduler from "./scheduling/Scheduler.ts";
 import * as SharedState from "./sync/SharedState.ts";
 import * as IntegrationSync from "./sync/IntegrationSync.ts";
 import * as SettingsSync from "./sync/SettingsSync.ts";
+import * as ProjectFileSync from "./sync/ProjectFileSync.ts";
 import * as SharedSync from "./sync/SharedSync.ts";
 import * as SharedSyncStatus from "./sync/SharedSyncStatus.ts";
 import * as VaultSync from "./vault/VaultSync.ts";
@@ -633,6 +635,11 @@ const layerMachineSetup = MachineSetup.layer.pipe(
 const layerPairedMachines = Layer.mergeAll(
   SharedSync.layer.pipe(Layer.provide(SharedState.layer)),
   SharedSyncStatus.layer,
+  // Project folders' files, by content hash; the bytes travel over the same link.
+  ProjectFileSync.layer.pipe(
+    Layer.provide(SharedState.layer),
+    Layer.provide(RuntimeLayer.layerProjectFilesProvided),
+  ),
   // Vault items shared with paired machines, end-to-end encrypted over the same documents.
   layerVaultSync,
   // Web integration sign-ins ride the vault: who refreshes them, and renewing them in time.
@@ -923,6 +930,8 @@ const layerMakeRoutes = Layer.mergeAll(
   ),
   // Server browser tabs and HTML render previews install and run the same headless browser.
   Layer.provide(PreviewBrowser.layer),
+  // The RPCs, the agent tools and both browsers share one extension store.
+  Layer.provide(BrowserExtensions.layer),
   Layer.provide(PreviewAutomationBroker.layer),
   Layer.provide(layerServerSelfUpdate),
   Layer.provide(layerCommandReadiness),

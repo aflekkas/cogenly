@@ -36,7 +36,10 @@ import {
   useEnvironmentRepositories,
 } from "../../projectLabels/ProjectLabelEditorDialog";
 import { ProjectFolderIcon } from "../../projectLabels/ProjectFolderMark";
-import { ProjectSourceLinksDialog } from "../../projectLabels/ProjectSourceLinks";
+import {
+  ProjectOwnerSuggestion,
+  ProjectSourceLinksDialog,
+} from "../../projectLabels/ProjectSourceLinks";
 import {
   projectExtraSourceLinks,
   projectGitHubOrg,
@@ -573,6 +576,7 @@ function ProjectPage(props: {
               />
             </span>
           </div>
+          <ProjectOwnerSuggestion environmentId={environmentId} label={label} />
           {duplicates.map((pair) => (
             <PossibleDuplicateNotice key={pair.key} pair={pair} />
           ))}

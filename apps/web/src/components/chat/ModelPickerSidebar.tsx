@@ -1,7 +1,7 @@
 import { Toolbar } from "@base-ui/react/toolbar";
 import { type ProviderInstanceId } from "@cogenly/contracts";
 import { memo, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { SparklesIcon, StarIcon, type LucideIcon } from "lucide-react";
+import { KeyRoundIcon, SparklesIcon, StarIcon, type LucideIcon } from "lucide-react";
 import { ProviderInstanceIcon, providerTextColor } from "./ProviderInstanceIcon";
 import {
   createTooltipHandle,
@@ -42,6 +42,7 @@ const SELECTED_INDICATOR_CLASS =
 const BADGE_BASE_CLASS =
   "pointer-events-none absolute -right-0.5 top-0.5 z-10 flex size-3.5 items-center justify-center rounded-full bg-transparent shadow-sm ";
 const NEW_BADGE_CLASS = `${BADGE_BASE_CLASS} text-update-foreground `;
+const SIGNED_OUT_BADGE_CLASS = `${BADGE_BASE_CLASS} text-warning`;
 
 /**
  * Rail tooltips open to the left, outside the popover, so they never cover the
@@ -114,6 +115,8 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
   /** Non-ready instances whose selected unavailable model remains reachable. */
   selectableUnavailableInstanceIds?: ReadonlySet<ProviderInstanceId>;
   getDisabledInstanceTooltip?: (entry: ProviderInstanceEntry) => string;
+  /** Instances signed out on the thread's machine, with that machine's name. */
+  signedOutInstances?: ReadonlyMap<ProviderInstanceId, string>;
   /**
    * Instance id values that should render the "new" sparkle badge. Callers
    * pass the subset of default built-in ids they want flagged (custom
@@ -209,13 +212,16 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
               const showNewBadge = props.newBadgeInstanceIds?.has(entry.instanceId) ?? false;
               const showInstanceBadge = shouldShowInstanceBadge(entry, props.instanceEntries);
 
-              const tooltip = isUnavailable
-                ? describeUnavailableInstance(entry)
-                : isContextDisabled
-                  ? (props.getDisabledInstanceTooltip?.(entry) ?? entry.displayName)
-                  : showNewBadge
-                    ? `${entry.displayName} (New)`
-                    : entry.displayName;
+              const signedOutOn = props.signedOutInstances?.get(entry.instanceId);
+              const tooltip = isContextDisabled
+                ? (props.getDisabledInstanceTooltip?.(entry) ?? entry.displayName)
+                : signedOutOn !== undefined
+                  ? `${entry.displayName}: not signed in on ${signedOutOn}`
+                  : isUnavailable
+                    ? describeUnavailableInstance(entry)
+                    : showNewBadge
+                      ? `${entry.displayName} (New)`
+                      : entry.displayName;
 
               const button = (
                 <Toolbar.Button
@@ -242,7 +248,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                   aria-pressed={isSelected}
                   type="button"
                   aria-label={
-                    isUnavailable || isContextDisabled
+                    isUnavailable || isContextDisabled || signedOutOn !== undefined
                       ? tooltip
                       : showNewBadge
                         ? `${entry.displayName}, new`
@@ -264,7 +270,11 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                           : "color-mix(in oklab, var(--muted) 30%, transparent)"
                     }
                   />
-                  {showNewBadge ? (
+                  {signedOutOn !== undefined ? (
+                    <span className={SIGNED_OUT_BADGE_CLASS} aria-hidden>
+                      <KeyRoundIcon className="size-2.5" />
+                    </span>
+                  ) : showNewBadge ? (
                     <span className={NEW_BADGE_CLASS} aria-hidden>
                       <SparklesIcon className="size-2" />
                     </span>
@@ -273,7 +283,9 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
               );
 
               const railTooltip =
-                isUnavailable || isContextDisabled ? tooltip : providerInstanceEntryLabel(entry);
+                isUnavailable || isContextDisabled || signedOutOn !== undefined
+                  ? tooltip
+                  : providerInstanceEntryLabel(entry);
               const trigger = isDisabled ? (
                 <span className="relative block w-full">{button}</span>
               ) : (

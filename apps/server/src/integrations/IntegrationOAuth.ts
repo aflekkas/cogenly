@@ -144,16 +144,23 @@ const decodeServerMetadata = Schema.decodeUnknownOption(
 );
 const decodeRegistration = Schema.decodeUnknownOption(Schema.fromJsonString(RegistrationResponse));
 const decodeToken = Schema.decodeUnknownOption(Schema.fromJsonString(TokenResponse));
+const encodeTokenError = Schema.encodeSync(Schema.fromJsonString(TokenErrorResponse));
 const decodeTokenError = Schema.decodeUnknownOption(Schema.fromJsonString(TokenErrorResponse));
 const responseFailure = (
   stage: string,
   url: string,
   response: { status: number; text: string },
+  secrets: ReadonlyArray<string> = [],
 ) => {
   const error = Option.getOrUndefined(decodeTokenError(response.text));
   // Only protocol error fields reach the UI; never echo arbitrary response bodies.
   const bounded = (value: string | undefined, size: number) =>
-    value?.replace(/\s+/g, " ").slice(0, size);
+    secrets
+      .reduce((text, secret) => (secret ? text?.replaceAll(secret, "[redacted]") : text), value)
+      ?.replace(/https?:\/\/[^\s<>"')]+/gi, (url) => URL.parse(url)?.host ?? "[URL]")
+      .replace(/[\r\n\t]+/g, " ")
+      .replace(/\s+/g, " ")
+      .slice(0, size);
   return {
     stage,
     host: new URL(url).host,
@@ -252,6 +259,10 @@ export const make = Effect.gen(function* () {
           },
         ),
         Effect.map((text) => text + decoder.decode()),
+        Effect.catchTags({
+          HttpClientError: (error) =>
+            error.reason._tag === "EmptyBodyError" ? Effect.succeed("") : Effect.fail(error),
+        }),
       );
       return { status: response.status, headers: response.headers, text };
     }).pipe(
@@ -260,24 +271,26 @@ export const make = Effect.gen(function* () {
           Effect.provideService(IntegrationEndpointPolicy, endpointPolicy),
         ),
       Effect.timeout(METADATA_TIMEOUT),
-      Effect.mapError((cause) =>
-        isIntegrationError(cause)
-          ? cause
-          : new IntegrationError({
-              operation,
-              reason: "upstream_unreachable",
-              cause,
-              oauthFailure: {
-                stage:
-                  operation === "discover"
-                    ? "discovery"
-                    : operation === "register"
-                      ? "DCR"
-                      : "token",
-                host: new URL(request.url).host,
-              },
-            }),
-      ),
+      Effect.mapError((cause) => {
+        if (isIntegrationError(cause) && cause.oauthFailure) return cause;
+        const detail = {
+          stage:
+            operation === "discover"
+              ? "discovery"
+              : operation === "register"
+                ? "DCR"
+                : operation === "authorize"
+                  ? "authorize"
+                  : "token",
+          host: new URL(request.url).host,
+        };
+        return new IntegrationError({
+          operation,
+          reason: isIntegrationError(cause) ? cause.reason : "upstream_unreachable",
+          cause: detail,
+          oauthFailure: detail,
+        });
+      }),
     );
 
   /** The first of `urls` that answers with a document `decode` accepts. */
@@ -305,6 +318,7 @@ export const make = Effect.gen(function* () {
               operation,
               reason: "upstream_error",
               oauthFailure: responseFailure("discovery", url, response),
+              cause: responseFailure("discovery", url, response),
             });
             return decoded;
           }),
@@ -484,6 +498,7 @@ export const make = Effect.gen(function* () {
           operation: "register",
           reason: "upstream_error",
           oauthFailure: responseFailure("DCR", server.registrationEndpoint, response),
+          cause: responseFailure("DCR", server.registrationEndpoint, response),
         });
       const { client_id, client_secret, token_endpoint_auth_method } = registered.value;
       const authMethod: ClientAuthMethod =
@@ -496,6 +511,31 @@ export const make = Effect.gen(function* () {
         registration: { clientId: client_id, authMethod, redirectUris: [redirectUri] },
         clientSecret: client_secret,
       };
+    });
+
+  /** Inspect only the first response, without following redirects or granting consent. */
+  const checkAuthorization = (url: string) =>
+    Effect.gen(function* () {
+      const response = yield* send(HttpClientRequest.get(url), "authorize");
+      const location = response.headers.location ? URL.parse(response.headers.location, url) : null;
+      const redirectError = location?.searchParams.get("error");
+      if (response.status < 400 && !redirectError) return;
+      const text = redirectError
+        ? encodeTokenError({
+            error: redirectError,
+            error_description: location?.searchParams.get("error_description") ?? undefined,
+          })
+        : response.text;
+      const detail = responseFailure("authorize", url, { ...response, text }, [
+        new URL(url).searchParams.get("state") ?? "",
+        new URL(url).searchParams.get("code_challenge") ?? "",
+      ]);
+      return yield* new IntegrationError({
+        operation: "sign in",
+        reason: "upstream_error",
+        oauthFailure: detail,
+        cause: detail,
+      });
     });
 
   /** One token request; refusals carry only the OAuth error code. */
@@ -536,7 +576,12 @@ export const make = Effect.gen(function* () {
         error.error?.slice(0, MAX_ERROR_CODE_CHARS),
       );
       return yield* new OAuthTokenError({
-        oauthFailure: responseFailure("token", server.tokenEndpoint, response),
+        oauthFailure: responseFailure("token", server.tokenEndpoint, response, [
+          params.code ?? "",
+          params.refresh_token ?? "",
+          params.code_verifier ?? "",
+          oauthClient.clientSecret ?? "",
+        ]),
         revoked:
           (response.status === 400 || response.status === 401) &&
           Option.isSome(code) &&
@@ -562,6 +607,7 @@ export const make = Effect.gen(function* () {
   return {
     discover,
     register,
+    checkAuthorization,
     exchangeCode: (input: {
       readonly server: OAuthServer;
       readonly client: OAuthClient;

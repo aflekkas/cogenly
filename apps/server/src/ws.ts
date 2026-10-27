@@ -213,6 +213,7 @@ import * as ClientTerminals from "./terminal/ClientTerminals.ts";
 import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as ServerBrowser from "./preview/ServerBrowser.ts";
+import * as BrowserExtensions from "./preview/BrowserExtensions.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -1047,6 +1048,7 @@ const makeWsRpcHandlers = (
   clientAnalyticsProps: Readonly<Record<string, unknown>>,
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
   serverBrowser: ServerBrowser.ServerBrowser["Service"],
+  browserExtensions: BrowserExtensions.BrowserExtensions["Service"],
   /** The origin this socket's upgrade reached; integration sign-in returns there. */
   requestOrigin: string | undefined,
 ) =>
@@ -2649,6 +2651,10 @@ const makeWsRpcHandlers = (
       [WS_METHODS.previewList]: (input) => previewManager.list(input),
       [WS_METHODS.browserCookieSources]: () => serverBrowser.cookieSources,
       [WS_METHODS.browserImportCookies]: (input) => serverBrowser.importCookies(input),
+      [WS_METHODS.browserExtensionsList]: (input) => browserExtensions.list(input),
+      [WS_METHODS.browserExtensionInstall]: (input) => browserExtensions.install(input),
+      [WS_METHODS.browserExtensionRemove]: (input) => browserExtensions.remove(input),
+      [WS_METHODS.browserExtensionToggle]: (input) => browserExtensions.toggle(input),
       [WS_METHODS.previewClearProfile]: (input) => serverBrowser.clearProfile(input.profileId),
       [WS_METHODS.previewReportProfiles]: (input) => serverBrowser.reportProfiles(input),
       [WS_METHODS.previewReportShown]: (input) => serverBrowser.reportShown(input),
@@ -2972,6 +2978,7 @@ type WsRequestServices =
   | WorkspacePaths.WorkspacePaths
   | WorktreeSetupTracker.WorktreeSetupTracker;
 type WsLayerServices =
+  | BrowserExtensions.BrowserExtensions
   | HttpRouter.HttpRouter
   | PreviewAutomationBroker.PreviewAutomationBroker
   | PullRequestReviewGuideService.PullRequestReviewGuideService
@@ -2985,6 +2992,7 @@ export const layer: Layer.Layer<never, never, WsLayerServices> = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const serverBrowser = yield* ServerBrowser.ServerBrowser;
+    const browserExtensions = yield* BrowserExtensions.BrowserExtensions;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const pullRequests = yield* PullRequestService.PullRequestService;
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
@@ -3042,6 +3050,7 @@ export const layer: Layer.Layer<never, never, WsLayerServices> = Layer.unwrap(
               clientAnalyticsProps,
               previewAutomationBroker,
               serverBrowser,
+              browserExtensions,
               Option.getOrUndefined(Option.map(requestUrl, (url) => url.origin)),
             ).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),

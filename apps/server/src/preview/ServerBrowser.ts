@@ -87,6 +87,7 @@ import * as ServerConfig from "../config.ts";
 import { resolveRootCliCommand } from "../cli/invocation.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as PreviewAutomationBroker from "../mcp/PreviewAutomationBroker.ts";
+import * as BrowserExtensions from "./BrowserExtensions.ts";
 import * as DesktopBrowserChannel from "./DesktopBrowserChannel.ts";
 import * as PreviewManager from "./Manager.ts";
 import * as ServerBrowserPage from "./ServerBrowserPage.ts";
@@ -159,6 +160,15 @@ export class ServerBrowserTabNotFoundError extends Schema.TaggedError<ServerBrow
 }
 
 const isTabNotFound = Schema.is(ServerBrowserTabNotFoundError);
+const isBrowserSetupError = Schema.is(
+  Schema.Union([
+    PreviewBrowser.PreviewBrowserInstallError,
+    PreviewBrowser.PreviewBrowserInstallingError,
+    PreviewBrowser.PreviewBrowserUnsupportedError,
+    PreviewBrowserHost.PreviewBrowserSandboxError,
+    PreviewBrowserHost.PreviewBrowserLibrariesError,
+  ]),
+);
 const isHostSetupError = Schema.is(
   Schema.Union([
     PreviewBrowserHost.PreviewBrowserSandboxError,
@@ -171,9 +181,13 @@ export class ServerBrowserLaunchError extends Schema.TaggedError<ServerBrowserLa
   { cause: Schema.Defect() },
 ) {
   override get message(): string {
-    return "The server preview browser could not start.";
+    return isBrowserSetupError(this.cause)
+      ? this.cause.message
+      : "The server preview browser could not start. Open machine health to check browser setup.";
   }
 }
+
+const isLaunchError = Schema.is(ServerBrowserLaunchError);
 
 export type ServerBrowserViewerOutput =
   | {
@@ -601,16 +615,24 @@ const make = Effect.gen(function* () {
     Targeting.isTabShown(targetable(tab), { reported: shownReport });
 
   const cookieReader = yield* LocalBrowserCookies.LocalBrowserCookies;
+  const browserExtensions = yield* BrowserExtensions.BrowserExtensions;
   const contexts = new ServerBrowserContexts({
     profilesDir: NodePath.join(config.stateDir, "server-browser", "profiles"),
     executable: () => Effect.runPromise(previewBrowser.executable),
+    extensionsFor: (profileId) =>
+      Effect.runPromise(
+        browserExtensions
+          .loadable(profileId)
+          .pipe(Effect.map((extensions) => extensions.map((extension) => extension.path))),
+      ),
+    extensionsExecutable: () => Effect.runPromise(previewBrowser.extensionsExecutable),
     // Playwright's launch error drops Chrome's own output; its sandbox note survives.
     diagnose: (executable, cause) =>
       Effect.runPromiseWith(launchServices)(
         PreviewBrowserHost.diagnoseLaunchFailure({
           executable,
           setupCommand,
-          output: /sandboxing failed/i.test(String(cause))
+          output: /sandboxing failed|No usable sandbox/i.test(String(cause))
             ? PreviewBrowserHost.NO_SANDBOX_SIGNATURE
             : "",
         }),
@@ -1565,7 +1587,10 @@ const make = Effect.gen(function* () {
       if (!snapshot) return yield* new ServerBrowserTabNotFoundError({ threadId, tabId });
       return yield* Effect.tryPromise({
         try: () => ensureTab(snapshot),
-        catch: (cause) => (isTabNotFound(cause) ? cause : new ServerBrowserLaunchError({ cause })),
+        catch: (cause) =>
+          isTabNotFound(cause) || isLaunchError(cause)
+            ? cause
+            : new ServerBrowserLaunchError({ cause }),
       });
     });
 
@@ -3280,6 +3305,44 @@ const make = Effect.gen(function* () {
     Effect.promise(async () => {
       await contexts.close();
     }),
+  );
+
+  // A profile's extensions load into the desktop panel's session for it and,
+  // by restarting it, into its running server browser. The desktop gets every
+  // profile's list at startup, before it opens a tab in one.
+  const loadExtensions = (profileId: string, restart: boolean) =>
+    Effect.gen(function* () {
+      const extensions = yield* browserExtensions.loadable(profileId);
+      if (restart) {
+        yield* Effect.promise(() =>
+          contexts.restartProfile(
+            profileId,
+            extensions.map((extension) => extension.path),
+          ),
+        );
+      }
+      if (desktopChannel.available) {
+        const loaded = yield* desktopChannel.extensions(environmentId, profileId, extensions);
+        if (!loaded) {
+          yield* Effect.logWarning("The desktop app did not load a profile's extensions.", {
+            profileId,
+          });
+        }
+      }
+    });
+  yield* browserExtensions.profiles.pipe(
+    Effect.flatMap((profiles) =>
+      Effect.forEach(profiles, (profileId) => loadExtensions(profileId, false), { discard: true }),
+    ),
+    Effect.andThen(
+      browserExtensions.changes.pipe(
+        Stream.runForEach((profileId) => loadExtensions(profileId, true)),
+      ),
+    ),
+    Effect.catchCause((cause) =>
+      Effect.logWarning("Browser extensions stopped loading.", { cause }),
+    ),
+    Effect.forkScoped,
   );
 
   const clearProfile = (profileId: string) =>

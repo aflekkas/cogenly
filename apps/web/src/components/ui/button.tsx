@@ -126,13 +126,7 @@ const inlineButtonVariants = cva(
         destructive: "text-destructive/80 hover:text-destructive",
         /** Opens a menu from inside a sentence; the quiet underline marks it as a choice. */
         picker:
-          "gap-1.5 text-foreground underline decoration-foreground/30 decoration-from-font underline-offset-4 hover:decoration-foreground data-popup-open:decoration-foreground",
-        /**
-         * A choice inside a hero heading: reads as part of the sentence, and
-         * underlines on hover, focus or while its menu is open.
-         */
-        sentence:
-          "group/inline-button gap-[0.06em] text-foreground underline decoration-transparent decoration-from-font underline-offset-[0.18em] hover:decoration-foreground/45 focus-visible:decoration-foreground/45 data-popup-open:decoration-foreground/45",
+          "group/inline-button gap-1.5 text-foreground underline decoration-foreground/30 decoration-from-font underline-offset-4 hover:decoration-foreground focus-visible:decoration-foreground data-popup-open:decoration-foreground",
       },
     },
   },

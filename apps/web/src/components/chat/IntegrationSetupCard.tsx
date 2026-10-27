@@ -14,13 +14,15 @@ import { CheckIcon, PlugIcon } from "lucide-react";
 import { integrationsRpc } from "../../rpc/integrations";
 import { useEnvironmentQuery } from "../../state/query";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
-import { integrationErrorText } from "../settings/integrationServices.logic";
+import { integrationSignInView, integrationErrorText } from "../settings/integrationServices.logic";
+import { useIntegrationActionState } from "../settings/useIntegrationActionState";
+import { useStatusFade } from "../settings/integrationStatusMotion";
 import { openSignInPage } from "../settings/openIntegrationSignIn";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { IntegrationSourceIcon } from "./ComposerSourcesPicker";
 import { ThreadPromptCard } from "./ThreadPromptCard";
-import { WorkLogCollapse, WorkLogRow } from "./WorkLog";
+import { WorkLogCollapse, WorkLogDisclosure, WorkLogRow } from "./WorkLog";
 
 /** The card reads the destination environment, including after consent in an external browser. */
 export function IntegrationSetupCard({
@@ -54,8 +56,8 @@ export function IntegrationSetupCard({
   const update = useOrchestrationCommand(integrationsRpc.update, { reportFailure: false });
   const canSignIn = useAtomValue(integrationsRpc.beginSignIn.permissionAtom(environmentId));
   const canUpdate = useAtomValue(integrationsRpc.update.permissionAtom(environmentId));
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const action = useIntegrationActionState();
+  const { pending } = action;
   // Until the user toggles it, the editor follows the account's current step: a "fix" opens it.
   const [editingChoice, setEditing] = useState<boolean | null>(null);
   const [url, setUrl] = useState<string | null>(null);
@@ -68,6 +70,12 @@ export function IntegrationSetupCard({
   };
   const editing = editingChoice ?? setup?.type === "fix";
   const connected = summary?.status === "connected";
+  const view = integrationSignInView(action.state, summary?.integration, {
+    catalogId: target?.setup?.catalogId ?? catalogId,
+    connected,
+    message: summary?.status === "error" ? summary.message : undefined,
+  });
+  const signInLabelRef = useStatusFade<HTMLSpanElement>(view.label);
   if (item.secretStatus !== "pending" || connected || visibility !== "local")
     return (
       <WorkLogRow
@@ -84,24 +92,22 @@ export function IntegrationSetupCard({
     );
   const integration = summary?.integration;
   const start = () => {
-    setPending(true);
-    setError(null);
+    action.begin();
     void openSignInPage(async () => {
       if (!integration) return null;
       const result = await signIn({ environmentId, input: { id: integration.id } });
       if (result._tag === "Success") return result.value.authorizationUrl;
       if (!isAtomCommandInterrupted(result))
-        setError(integrationErrorText(squashAtomCommandFailure(result)));
+        action.fail(integrationErrorText(squashAtomCommandFailure(result)));
       return null;
     })
-      .catch(() => setError("Could not open the sign-in page. Try again."))
-      .finally(() => setPending(false));
+      .catch(() => action.fail("Could not open the sign-in page. Try again."))
+      .finally(() => action.settle());
   };
   const save = async () => {
     if (pending) return;
     if (catalogId && (setup?.type === "api_key" || setup?.type === "oauth_client")) {
-      setPending(true);
-      setError(null);
+      action.begin("change");
       const targetInput = {
         catalogId,
         ...(integration ? { integrationId: integration.id } : {}),
@@ -114,17 +120,16 @@ export function IntegrationSetupCard({
               environmentId,
               input: { ...targetInput, clientId: clientId ?? "", clientSecret: credential },
             });
-      setPending(false);
+      action.settle();
       if (result._tag === "Success") {
         setCredential("");
         edit(false);
       } else if (!isAtomCommandInterrupted(result))
-        setError(integrationErrorText(squashAtomCommandFailure(result)));
+        action.fail(integrationErrorText(squashAtomCommandFailure(result)));
       return;
     }
     if (!integration) return;
-    setPending(true);
-    setError(null);
+    action.begin("change");
     const result = await update({
       environmentId,
       input: {
@@ -142,10 +147,10 @@ export function IntegrationSetupCard({
           : {}),
       },
     });
-    setPending(false);
+    action.settle();
     if (result._tag === "Success") edit(false);
     else if (!isAtomCommandInterrupted(result))
-      setError(integrationErrorText(squashAtomCommandFailure(result)));
+      action.fail(integrationErrorText(squashAtomCommandFailure(result)));
   };
   return (
     <ThreadPromptCard data-v2-item-type={item.type}>
@@ -159,11 +164,13 @@ export function IntegrationSetupCard({
         <div className="flex min-w-0 flex-col gap-1">
           <p className="text-sm font-medium text-foreground">{item.label}</p>
           <p className="text-sm text-muted-foreground [overflow-wrap:anywhere]">
-            {summary?.message ?? setup?.message ?? item.reason}
+            {action.state.type === "pending" && action.state.purpose !== "change"
+              ? "Preparing sign-in…"
+              : (setup?.message ?? item.reason)}
           </p>
         </div>
       </div>
-      {setup?.type === "api_key" || setup?.type === "oauth_client" ? (
+      {setup?.type === "api_key" || (setup?.type === "oauth_client" && view.showClientId) ? (
         <div className="flex flex-col gap-2">
           {setup.type === "oauth_client" ? (
             <>
@@ -216,13 +223,13 @@ export function IntegrationSetupCard({
             size="sm"
             disabled={pending || !setup.canInstall || !canUpdate}
             onClick={() => {
-              setPending(true);
+              action.begin("change");
               void install({ environmentId, input: { runtime: setup.runtime } })
                 .then((result) => {
                   if (result._tag === "Failure" && !isAtomCommandInterrupted(result))
-                    setError(integrationErrorText(squashAtomCommandFailure(result)));
+                    action.fail(integrationErrorText(squashAtomCommandFailure(result)));
                 })
-                .finally(() => setPending(false));
+                .finally(() => action.settle());
             }}
           >
             Install runtime
@@ -231,20 +238,26 @@ export function IntegrationSetupCard({
       ) : (
         <>
           <div className="flex items-center gap-2">
-            <Button size="sm" disabled={pending || !integration || !canSignIn} onClick={start}>
-              {pending ? "Opening sign-in…" : "Sign in"}
-            </Button>
             <Button
               size="sm"
-              variant="ghost"
-              disabled={pending || !canUpdate}
-              onClick={() => edit(!editing)}
+              disabled={view.disabled || !integration || !canSignIn}
+              onClick={start}
             >
-              Fix
+              <span ref={signInLabelRef}>{view.label}</span>
             </Button>
+            {view.showServerUrl ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={pending || !canUpdate}
+                onClick={() => edit(!editing)}
+              >
+                Fix
+              </Button>
+            ) : null}
           </div>
-          <WorkLogCollapse open={editing}>
-            {integration ? (
+          <WorkLogCollapse open={editing && view.showServerUrl}>
+            {integration && view.showServerUrl ? (
               <div className="flex flex-col gap-2">
                 <label className="text-xs text-muted-foreground">
                   Server URL
@@ -253,23 +266,23 @@ export function IntegrationSetupCard({
                     onChange={(event) => setUrl(event.currentTarget.value)}
                   />
                 </label>
-                {integration.auth?.type === "oauth" ? (
-                  <>
+                {view.showClientId ? (
+                  <WorkLogDisclosure label="Advanced" onToggle={onToggle}>
                     <label className="text-xs text-muted-foreground">
                       Client ID (if required)
                       <Input
-                        value={clientId ?? integration.auth.clientId ?? ""}
+                        value={clientId ?? integration.auth?.clientId ?? ""}
                         onChange={(event) => setClientId(event.currentTarget.value)}
                       />
                     </label>
                     <label className="text-xs text-muted-foreground">
                       OAuth scopes
                       <Input
-                        value={scope ?? integration.auth.scope ?? ""}
+                        value={scope ?? integration.auth?.scope ?? ""}
                         onChange={(event) => setScope(event.currentTarget.value)}
                       />
                     </label>
-                  </>
+                  </WorkLogDisclosure>
                 ) : null}
                 <div>
                   <Button size="sm" disabled={pending || !canUpdate} onClick={() => void save()}>
@@ -294,11 +307,11 @@ export function IntegrationSetupCard({
           </WorkLogCollapse>
         </>
       )}
-      {error ? (
+      <WorkLogCollapse open={view.error !== null}>
         <p role="alert" className="text-xs text-destructive">
-          {error}
+          {view.error}
         </p>
-      ) : null}
+      </WorkLogCollapse>
     </ThreadPromptCard>
   );
 }

@@ -4,7 +4,20 @@ import {
   BrowserCookieImportError,
   BrowserImportSource,
   CookieDomain,
+  BrowserExtension,
+  BrowserExtensionError,
+  BrowserExtensionId,
+  BrowserExtensionInstallInput,
+  BrowserExtensionInstallResult,
+  BrowserExtensionPage,
+  BrowserExtensionRemoveInput,
+  BrowserExtensionToggleInput,
+  BrowserExtensionsListInput,
+  BrowserExtensionsListResult,
+  BrowserProfileId,
+  PreviewTabId,
 } from "@cogenly/contracts";
+import * as BrowserExtensions from "../../../preview/BrowserExtensions.ts";
 import * as ServerBrowser from "../../../preview/ServerBrowser.ts";
 import {
   BrowserNavigationTarget,
@@ -401,9 +414,79 @@ const PreviewRecordingStopTool = safeBrowserTool(
   }).annotate(Tool.Title, "Stop browser recording"),
 );
 
+const extensionDependencies = [...dependencies, BrowserExtensions.BrowserExtensions];
+const EXTENSION_HOSTS =
+  "Extensions load per browser profile into the server browser (background and agent tabs, and every tab on a remote or VPS environment) and into the desktop panel when this environment runs on the same machine as the desktop app. Remote environments' panel tabs on another machine do not get them. Incognito and isolated agent tabs never run extensions. A change restarts that profile's server browser, which closes its server-browser tabs; desktop panel tabs keep running and pick up content scripts on their next load. The desktop panel supports content scripts, background service workers, storage, messaging, and opening extension pages, but not declarativeNetRequest blocking, cookies, context menus, notifications, identity, or side panels; the server browser supports all of them.";
+
+const BrowserExtensionsListTool = Tool.make("browser_extensions_list", {
+  description: `List the Chromium extensions installed in a browser profile (default: the user's default profile), with each one's version, whether it is on, its source, the API permissions and sites it can read and change, and its popup and options pages. ${EXTENSION_HOSTS}`,
+  parameters: BrowserExtensionsListInput,
+  success: BrowserExtensionsListResult,
+  failure: Schema.Union([BrowserExtensionError, OrchestratorMcpFailure]),
+  dependencies: extensionDependencies,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, true);
+
+const BrowserExtensionInstallTool = Tool.make("browser_extension_install", {
+  description: `Install or update a Chromium extension in a browser profile, turned on. source is a Chrome Web Store link (https://chromewebstore.google.com/detail/<name>/<id>), a bare 32-letter extension ID, or an absolute path to an unpacked extension folder on this environment's machine. Web Store packages are downloaded from Google and their CRX3 signatures verified (developer and Web Store) before anything unpacks; other sites are refused. Installing an installed ID again updates it to the current version. Extensions can read and change the pages they list, including pages where Cogenly fills vault passwords, so install only what the task needs. Use browser_extensions_list to see what it can access and browser_extension_open to use it. No extra owner approval is needed. ${EXTENSION_HOSTS}`,
+  parameters: BrowserExtensionInstallInput,
+  success: BrowserExtensionInstallResult,
+  failure: Schema.Union([BrowserExtensionError, OrchestratorMcpFailure]),
+  dependencies: extensionDependencies,
+})
+  .annotate(Tool.OpenWorld, true)
+  .annotate(Tool.Destructive, false);
+
+const BrowserExtensionToggleTool = Tool.make("browser_extension_toggle", {
+  description:
+    "Turn an installed extension on or off in a browser profile without removing it or its data. Restarts that profile's server browser, closing its server-browser tabs.",
+  parameters: BrowserExtensionToggleInput,
+  success: BrowserExtension,
+  failure: Schema.Union([BrowserExtensionError, OrchestratorMcpFailure]),
+  dependencies: extensionDependencies,
+})
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, true);
+
+const BrowserExtensionRemoveTool = Tool.make("browser_extension_remove", {
+  description:
+    "Uninstall an extension from a browser profile and delete its files. Returns the remaining list. Restarts that profile's server browser, closing its server-browser tabs.",
+  parameters: BrowserExtensionRemoveInput,
+  success: BrowserExtensionsListResult,
+  failure: Schema.Union([BrowserExtensionError, OrchestratorMcpFailure]),
+  dependencies: extensionDependencies,
+}).annotate(Tool.Destructive, true);
+
+const BrowserExtensionOpenTool = browserTool(
+  Tool.make("browser_extension_open", {
+    description: `Open an installed extension's own UI as a browser tab in its profile, as clicking its toolbar button would: page "popup" opens the toolbar popup, "options" its options page, or pass a path inside the extension such as "dashboard.html". Then drive the returned tab with the usual preview_* tools (snapshot, click, type, screenshot). An extension whose toolbar button only runs code, with no popup, cannot be clicked: Cogenly's browser has no extension toolbar. A popup opened as a tab sees itself as the active tab, so popups that act on "the current page" may need that page open in another tab. To see what a content script changed on a site, open or snapshot that site in the same profile. Pass open=false to keep the tab in the background, or tabId to load the page in an existing tab of that profile. ${EXTENSION_HOSTS}`,
+    parameters: Schema.Struct({
+      id: BrowserExtensionId,
+      page: BrowserExtensionPage,
+      profileId: Schema.optional(BrowserProfileId),
+      open: Schema.optional(Schema.Boolean),
+      tabId: Schema.optional(PreviewTabId),
+    }),
+    success: Schema.Struct({ ...PreviewAutomationStatus.fields, ...presentationFields }),
+    failure: Schema.Union([BrowserExtensionError, PreviewToolFailure]),
+    dependencies: extensionDependencies,
+  }).annotate(Tool.Title, "Open extension page"),
+);
+
+const extensionTools = [
+  BrowserExtensionsListTool,
+  BrowserExtensionInstallTool,
+  BrowserExtensionToggleTool,
+  BrowserExtensionRemoveTool,
+  BrowserExtensionOpenTool,
+] as const;
+
 export const PreviewToolkit = Toolkit.make(
   BrowserCookieSourcesTool,
   BrowserImportCookiesTool,
+  ...extensionTools,
   PreviewDialogTool,
   PreviewStatusTool,
   PreviewOpenTool,
@@ -430,6 +513,7 @@ export const PreviewToolkit = Toolkit.make(
 export const PreviewStandardToolkit = Toolkit.make(
   BrowserCookieSourcesTool,
   BrowserImportCookiesTool,
+  ...extensionTools,
   PreviewDialogTool,
   PreviewStatusTool,
   PreviewOpenTool,

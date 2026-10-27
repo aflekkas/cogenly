@@ -17,11 +17,19 @@ Before 0.3.2 a setting could be overridden for one project. Those overrides no l
 every project now uses the global value. A repository's own actions moved to its Repository page.
 The old per-project values are kept in `legacy-project-settings.json` beside `settings.json`.
 
+## Notifications
+
+Cogenly plays a short sound when an agent finishes, fails or needs you, unless it was a quick reply
+in the thread you are looking at. Change this in **Settings → General → Notifications → Thread
+notifications**: choose **Off**, or add desktop notifications.
+
 ## Providers on paired machines
 
 Add or edit a provider in **Settings → Providers** and its identity and model preferences follow you to your paired machines. CLI locations and sensitive environment values stay with their machine; use the vault for shared secrets.
 
-The provider's account section shows where it is signed in. Choose **Sign in on** a paired machine to start its official CLI login, then complete the sign-in in your browser here. Codex uses a device code; Claude may ask you to paste the code from its sign-in page. Each machine keeps an independent login, so a token refresh on one cannot consume a copied refresh token on another. Signing out affects the selected machine. Credentials use each official CLI's storage. On Linux, Claude protects its credential file with file permissions; use an encrypted disk if you need encryption at rest.
+The provider's **Account** section lists each machine with its sign-in status: **Sign in**, **Change account** or **Sign out**. You don't need a terminal on that machine. Sign-in opens the provider's page in your browser on the device you're using: Codex shows a code to enter there and finishes by itself once you approve; Claude shows a code on its page for you to paste back. Each machine keeps an independent login, so a token refresh on one cannot consume a copied refresh token on another. Signing out affects only that machine. Credentials use each official CLI's storage. On Linux, Claude protects its credential file with file permissions; use an encrypted disk if you need encryption at rest.
+
+The same sign-in opens wherever a signed-out provider gets in your way: the notice above the composer, the model picker, a turn that failed because the provider was signed out, and machine health. If you sent a message while signed out, it sends once sign-in finishes. An agent can ask you to sign in too; its card appears in the thread, and the agent continues when the machine is signed in.
 
 A new additional account gets a separate CLI home on each machine. Muse and other providers that do not advertise in-app authentication still require their own setup on that machine.
 

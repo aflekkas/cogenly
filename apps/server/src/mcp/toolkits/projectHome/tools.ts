@@ -116,7 +116,7 @@ export const ProjectHomeToolkit = Toolkit.make(
     .annotate(Tool.OpenWorld, false),
   Tool.make("project_file_write", {
     ...shared,
-    description: `Save a markdown note to the project's Resources/ folder; a taken name gets a numeric suffix, so this never overwrites. ${target} ${receipt}`,
+    description: `Save a markdown note to the project's Resources/ folder, or to \`folder\` (project-relative, made if missing); a taken name gets a numeric suffix, so this never overwrites. Project files reach the user's paired machines. ${target} ${receipt}`,
     parameters: ProjectFileWriteInput,
     success: ProjectChangeReceipt,
   })

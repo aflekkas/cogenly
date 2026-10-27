@@ -55,6 +55,10 @@
       "types": "./src/secretRequest.ts",
       "default": "./src/secretRequest.ts"
     },
+    "./provider-sign-in": {
+      "types": "./src/providerSignIn.ts",
+      "default": "./src/providerSignIn.ts"
+    },
     "./scheduled-task-webhook": {
       "types": "./src/scheduledTaskWebhook.ts",
       "default": "./src/scheduledTaskWebhook.ts"

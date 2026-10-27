@@ -143,6 +143,9 @@ const make = Effect.gen(function* () {
       // An integration setup card is answered by its sign-in or approval, not a value.
       if (item.integrationSetup !== undefined)
         return yield* new SecretRequestError({ reason: "not_found" });
+      // A provider sign-in card closes saved when its machine signs in; the user can only decline it.
+      if (item.providerSignIn !== undefined && input.answer.type === "save")
+        return yield* new SecretRequestError({ reason: "not_found" });
       // Store first: the card only says saved once the value is kept. Create,
       // not set: a second answer racing this one must not replace the value.
       // A value already there on a card still pending is an earlier save whose
@@ -194,6 +197,7 @@ const make = Effect.gen(function* () {
           ...(item.placeholder === undefined ? {} : { placeholder: item.placeholder }),
           secretStatus,
           ...(secretVault ? { secretVault } : {}),
+          ...(item.providerSignIn ? { providerSignIn: item.providerSignIn } : {}),
         })
         .pipe(
           Effect.mapError((cause) => new SecretRequestError({ reason: "record_failed", cause })),
@@ -213,7 +217,9 @@ const make = Effect.gen(function* () {
         summary:
           input.answer.type === "save"
             ? `Secret saved: ${secretVault?.savedItemName ?? item.label}. ${secretVault ? "Use vault_list to access it" : `Use secretRef ${refFor(salt, input.threadId, item.id)}`}`
-            : `Secret request declined: ${item.label}`,
+            : item.providerSignIn
+              ? `Provider sign-in declined: ${item.label}`
+              : `Secret request declined: ${item.label}`,
       });
       if (input.answer.type !== "save" || secretVault) return;
       // A concurrent explicit cancellation must not leave an unused ref behind.

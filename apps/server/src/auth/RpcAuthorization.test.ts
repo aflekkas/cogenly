@@ -328,6 +328,10 @@ describe("RPC authorization scopes", () => {
       WS_METHODS.previewClearProfile,
       WS_METHODS.previewReportProfiles,
       WS_METHODS.previewReportShown,
+      WS_METHODS.browserExtensionsList,
+      WS_METHODS.browserExtensionInstall,
+      WS_METHODS.browserExtensionRemove,
+      WS_METHODS.browserExtensionToggle,
     ]) {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthPreviewOperateScope);
     }

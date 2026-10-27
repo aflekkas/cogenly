@@ -572,7 +572,7 @@ export function QueuedRunsControl({
                         onClick={() => void runBulkAction("send-all")}
                       >
                         <ArrowUpIcon className="size-3.5" />
-                        Send all
+                        <ComposerBanner.ActionLabel>Send all</ComposerBanner.ActionLabel>
                       </Button>
                     </TooltipTrigger>
                     <TooltipPopup>

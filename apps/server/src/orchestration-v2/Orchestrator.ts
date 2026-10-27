@@ -117,6 +117,10 @@ import {
 } from "./NotificationMailbox.ts";
 import { EventSinkV2 } from "./EventSink.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
+import {
+  delegatedTaskFailureNotice,
+  pendingDelegatedTaskFailures,
+} from "./DelegatedTaskFailureNotice.ts";
 import type { OrchestrationEffectRequestV2, PendingOrchestrationEffectV2 } from "./EffectOutbox.ts";
 import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
@@ -1437,6 +1441,75 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ]);
     });
 
+  // Prune before queue admission, including held queues recovered at startup.
+  // The message update or cancellation commits before any provider-start effect.
+  const refreshQueuedFailureNotices = (projection: OrchestrationV2ThreadProjection) =>
+    Effect.gen(function* () {
+      const events = yield* Ref.make<Array<OrchestrationV2DomainEvent>>([]);
+      for (const run of projection.runs) {
+        if (run.status !== "queued") continue;
+        const message = projection.messages.find((candidate) => candidate.id === run.userMessageId);
+        if (!message?.id.startsWith("message:delegated-task-failure:")) continue;
+        const failures = message.notification?.delegatedFailures ?? [];
+        const pending = pendingDelegatedTaskFailures(projection, failures, message.id);
+        if (pending.length === failures.length) continue;
+        const command = {
+          type: "queued-run.cancel" as const,
+          commandId: CommandId.make(`command:system:stale-failure-notice:${run.id}`),
+          threadId: projection.thread.id,
+          runId: run.id,
+        };
+        if (pending.length === 0) {
+          yield* dispatchQueuedRunCancel(command, events);
+          continue;
+        }
+        const now = yield* DateTime.now;
+        const notice = delegatedTaskFailureNotice(pending);
+        const emitEvent = emit(events, command);
+        yield* emitEvent({
+          type: "message.updated",
+          threadId: projection.thread.id,
+          runId: run.id,
+          occurredAt: now,
+          payload: {
+            ...message,
+            text: notice.text,
+            notification: notice.notification,
+            updatedAt: now,
+          },
+        });
+        for (const item of projection.turnItems) {
+          if (item.type === "notification" && item.runId === run.id) {
+            yield* emitEvent({
+              type: "turn-item.updated",
+              threadId: projection.thread.id,
+              runId: run.id,
+              occurredAt: now,
+              payload: { ...item, ...notice.notification, updatedAt: now },
+            });
+            continue;
+          }
+          if (item.type !== "user_message" || item.messageId !== message.id) continue;
+          yield* emitEvent({
+            type: "turn-item.updated",
+            threadId: projection.thread.id,
+            runId: run.id,
+            occurredAt: now,
+            payload: {
+              ...item,
+              text: notice.text,
+              notification: notice.notification,
+              updatedAt: now,
+            },
+          });
+        }
+      }
+      const updates = yield* Ref.get(events);
+      if (updates.length === 0) return projection;
+      yield* writeSystemEvents(updates);
+      return yield* readCommandProjection(projection.thread.id);
+    });
+
   const startNextQueuedRun = (
     threadId: ThreadId,
     options?: {
@@ -1449,7 +1522,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       // Every terminal run checks the queue. Only a deliverable queued run
       // needs the transcript for provider handoff and legacy import context.
       if (!(yield* projectionStore.canStartQueuedRun(threadId))) return;
-      const projection = yield* readCommandProjection(threadId);
+      const projection = yield* refreshQueuedFailureNotices(yield* readCommandProjection(threadId));
       if (
         projection.thread.archivedAt !== null ||
         projection.thread.deletedAt !== null ||
@@ -4824,6 +4897,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   ) =>
     Effect.gen(function* () {
       let projection = yield* getProjectionWithPendingEvents(command.threadId, events);
+      if (command.messageId.startsWith("message:delegated-task-failure:")) {
+        const failures = command.notification?.delegatedFailures ?? [];
+        const pending = pendingDelegatedTaskFailures(projection, failures);
+        if (pending.length === 0) return;
+        if (pending.length !== failures.length) {
+          const notice = delegatedTaskFailureNotice(pending);
+          command = { ...command, text: notice.text, notification: notice.notification };
+        }
+      }
       if (command.manualContinuationOfRunId !== undefined) {
         const source = projection.runs.find((run) => run.id === command.manualContinuationOfRunId);
         const limited = latestRootProviderFailure(source ?? null, projection.turnItems);
@@ -8078,6 +8160,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const secretVault =
         command.secretVault ??
         (existing?.type === "secret_request" ? existing.secretVault : undefined);
+      const providerSignIn =
+        command.providerSignIn ??
+        (existing?.type === "secret_request" ? existing.providerSignIn : undefined);
       const turnItem: OrchestrationV2TurnItem = unchanged
         ? existing
         : {
@@ -8109,6 +8194,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             secretStatus: command.secretStatus,
             ...(secretVault === undefined ? {} : { secretVault }),
             ...(login === undefined ? {} : { login }),
+            ...(providerSignIn === undefined ? {} : { providerSignIn }),
           };
       yield* emit(
         events,
@@ -11649,7 +11735,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           candidate.origin === "app_owned" &&
           candidate.childThreadId === childThreadId,
       );
-      if (task === undefined) {
+      // A persisted result already settled this task, including legacy records
+      // without a matching context transfer. Recovery must not notify it again.
+      if (task === undefined || task.result !== null) {
         return;
       }
       const existingResultTransfer = parentProjection.contextTransfers.find(

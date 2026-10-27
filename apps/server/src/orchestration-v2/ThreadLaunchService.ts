@@ -1314,6 +1314,9 @@ const make = Effect.gen(function* () {
   )(function* (input) {
     const scheduled = yield* Effect.gen(function* () {
       const projection = yield* threads.getThreadProjection(input.threadId);
+      // The owner's peer handler schedules remote retries. Paths and worker commands
+      // belong there; a replica must never prepare the same run a second time.
+      if (projection.thread.ownerMachine != null) return;
       const run = projection.runs.find((candidate) => candidate.id === input.runId);
       const workspacePreparation = run?.workspacePreparation;
       if (run?.status !== "preparing" || workspacePreparation === undefined) return;

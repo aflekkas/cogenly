@@ -2,6 +2,7 @@
 import * as NodeCrypto from "node:crypto";
 
 import {
+  PROJECT_FILE_SYNC_MAX_BYTES,
   PROJECT_REPOSITORIES_SEGMENT,
   PROJECT_RECALL_DEFAULT_LIMIT,
   PROJECT_RECALL_MAX_LIMIT,
@@ -106,11 +107,43 @@ export class ProjectFiles extends Context.Service<
       { readonly entries: ReadonlyArray<string>; readonly total: number },
       ProjectLabelError
     >;
+    /**
+     * A fresh scan for ProjectFileSync: the folder, and every resource with
+     * its hash. A file without one is too large to replicate.
+     */
+    readonly syncScan: (labelId: ProjectLabelId) => Effect.Effect<
+      {
+        readonly dir: string;
+        readonly entries: ReadonlyArray<ProjectSyncEntry>;
+      },
+      ProjectLabelError
+    >;
+    /** Rescans after a write that bypassed this service and tells subscribers. */
+    readonly refresh: (labelId: ProjectLabelId) => Effect.Effect<void, ProjectLabelError>;
+    /** A project whose files changed through this service or its watcher. */
+    readonly changes: Stream.Stream<ProjectLabelId>;
+    /** The absolute path of an indexed file with this content, in any project. */
+    readonly fileWithSha256: (sha256: string) => Effect.Effect<string | null, ProjectLabelError>;
+    /**
+     * Replaces symlinked files that lead outside the project with real
+     * copies; the originals stay. Idempotent: a copy is no longer a link.
+     */
+    readonly copyLinkedFiles: (labelId: ProjectLabelId) => Effect.Effect<number, ProjectLabelError>;
   }
 >()("cogenly-server/projectLabels/ProjectFiles") {}
 
+export interface ProjectSyncEntry {
+  readonly relativePath: string;
+  readonly kind: "file" | "folder";
+  readonly sha256: string | undefined;
+  readonly sizeBytes: number;
+}
+
+/** In-flight downloads; never a resource, never synced. */
+export const PROJECT_FILE_PARTIAL_SUFFIX = ".cogenly-partial";
+
 /** Top-level project entries that are never resources: the id file, `repos/` and worktrees. */
-const isReservedEntry = (entry: string): boolean =>
+export const isReservedEntry = (entry: string): boolean =>
   entry === PROJECT_LABEL_ID_FILE ||
   entry === PROJECT_REPOSITORIES_SEGMENT ||
   isWorktreesSegment(entry);
@@ -212,6 +245,7 @@ const make = Effect.gen(function* () {
   const scope = yield* Effect.scope;
   // Rescans serialize: watcher events, subscriptions and mutations share it.
   const scanLock = yield* Semaphore.make(1);
+  const changed = yield* PubSub.unbounded<ProjectLabelId>();
   const watchers = yield* Ref.make(
     new Map<
       string,
@@ -282,6 +316,15 @@ const make = Effect.gen(function* () {
   const sha256Of = (bytes: Uint8Array): string =>
     NodeCrypto.createHash("sha256").update(bytes).digest("hex");
 
+  const streamSha256 = (full: string) =>
+    Effect.suspend(() => {
+      const hash = NodeCrypto.createHash("sha256");
+      return fileSystem.stream(full).pipe(
+        Stream.runForEach((chunk) => Effect.sync(() => void hash.update(chunk))),
+        Effect.map(() => hash.digest("hex")),
+      );
+    });
+
   // Effect reports mtime as an optional Date; filesystems without one read as epoch.
   const modifiedAtOf = (stat: FileSystem.File.Info): string =>
     Option.getOrNull(stat.mtime)?.toISOString() ?? "1970-01-01T00:00:00.000Z";
@@ -349,6 +392,7 @@ const make = Effect.gen(function* () {
         .stat(current.full)
         .pipe(Effect.catch(() => Effect.succeed(null)));
       if (stat === null) continue;
+      if (current.relative.endsWith(PROJECT_FILE_PARTIAL_SUFFIX)) continue;
       // A symlink (or a path through one) that resolves outside the project
       // folder is not a resource: never walk or index its content.
       const realTarget = yield* realPathOrNull(current.full);
@@ -400,14 +444,20 @@ const make = Effect.gen(function* () {
         });
         continue;
       }
-      // Oversize files are never read: no hash, no indexed text, extension mime.
+      // Oversize files are never read whole: no indexed text, extension mime.
+      // Those small enough to replicate are hashed as a stream.
       if (sizeBytes > MAX_HASHED_BYTES) {
         entries.push({
           relativePath: current.relative,
           kind: "file",
           mimeType: mimeFor(current.relative, null, false),
           sizeBytes,
-          sha256: undefined,
+          sha256:
+            sizeBytes > PROJECT_FILE_SYNC_MAX_BYTES
+              ? undefined
+              : yield* streamSha256(current.full).pipe(
+                  Effect.catch(() => Effect.succeed(undefined)),
+                ),
           modifiedAt,
           content: null,
         });
@@ -498,6 +548,7 @@ const make = Effect.gen(function* () {
   const publish = Effect.fn("ProjectFiles.publish")(function* (labelId: ProjectLabelId) {
     const entry = (yield* Ref.get(watchers)).get(labelId);
     if (entry !== undefined) yield* PubSub.publish(entry.hub, undefined);
+    yield* PubSub.publish(changed, labelId);
   });
 
   const listResources: ProjectFiles["Service"]["listResources"] = Effect.fn(
@@ -710,15 +761,70 @@ const make = Effect.gen(function* () {
     return realResources;
   });
 
+  // A folder below the project for an add, made if missing. It must be a
+  // resource path (not reserved, not in a repository) whose real path stays
+  // inside the project, symlinks included.
+  const containedFolder = Effect.fn("ProjectFiles.containedFolder")(function* (
+    dir: string,
+    folder: string,
+  ) {
+    const { full, relative } = yield* resolveResourcePath("add", dir, folder);
+    yield* requireMember("add", dir, relative, full);
+    if (relative.endsWith(PROJECT_FILE_PARTIAL_SUFFIX)) return yield* invalidPath("add");
+    // Each level is made on its own and checked, so a symlink on the way cannot lead out.
+    const realRoot = (yield* realPathOrNull(dir)) ?? path.resolve(dir);
+    let at = dir;
+    for (const segment of relative.split("/")) {
+      at = path.join(at, segment);
+      if ((yield* realPathOrNull(at)) === null) {
+        yield* fileSystem.makeDirectory(at).pipe(Effect.mapError(storage("add")));
+      }
+      const real = yield* realPathOrNull(at);
+      if (real === null || !isWithinRoot(realRoot, real) || !(yield* isDirectory(real))) {
+        return yield* invalidPath("add");
+      }
+    }
+    return { real: (yield* realPathOrNull(at))!, relative };
+  });
+
   const createResource: ProjectFiles["Service"]["createResource"] = Effect.fn(
     "ProjectFiles.createResource",
   )(function* (input) {
     const label = yield* requireLabel(input.id);
     const { dir } = yield* folders.ensureForLabel(label).pipe(Effect.mapError(storage("add")));
-    const resourcesDir = yield* containedResourcesDir(dir);
+    const target =
+      input.folder === undefined
+        ? { real: yield* containedResourcesDir(dir), relative: PROJECT_LABEL_RESOURCES_SEGMENT }
+        : yield* containedFolder(dir, input.folder);
+    const resourcesDir = target.real;
     const kind = input.resource.kind;
     let fileName: string;
-    if (kind === "upload") {
+    if (kind === "folder") {
+      fileName = yield* dedupeName(resourcesDir, sanitizeFileName(input.resource.name, "Folder"));
+      yield* fileSystem
+        .makeDirectory(path.join(resourcesDir, fileName))
+        .pipe(Effect.mapError(storage("add")));
+    } else if (kind === "attachment") {
+      // Attaching from a chat copies: the conversation keeps its file.
+      const source = resolveAttachmentPathById({
+        attachmentsDir: config.attachmentsDir,
+        attachmentId: input.resource.attachmentId,
+      });
+      if (source === null) return yield* missing("add");
+      const diskBase = source.slice(source.lastIndexOf("/") + 1);
+      const diskExtension = diskBase.includes(".") ? diskBase.slice(diskBase.lastIndexOf(".")) : "";
+      const wanted = sanitizeFileName(
+        input.resource.fileName ?? `attachment${diskExtension}`,
+        `attachment${diskExtension}`,
+      );
+      fileName = yield* dedupeName(
+        resourcesDir,
+        wanted.includes(".") || diskExtension === "" ? wanted : `${wanted}${diskExtension}`,
+      );
+      yield* fileSystem
+        .copyFile(source, path.join(resourcesDir, fileName))
+        .pipe(Effect.mapError(storage("add")));
+    } else if (kind === "upload") {
       const { attachmentId } = input.resource;
       if (parseThreadSegmentFromAttachmentId(attachmentId) !== PENDING_ATTACHMENT_THREAD_SEGMENT) {
         return yield* invalidPath("add");
@@ -774,7 +880,7 @@ const make = Effect.gen(function* () {
         )
         .pipe(Effect.mapError(storage("add")));
     }
-    const relative = `${PROJECT_LABEL_RESOURCES_SEGMENT}/${fileName}`;
+    const relative = `${target.relative}/${fileName}`;
     yield* scanLock.withPermits(1)(rescanLabel(label));
     yield* publish(label.id);
     const stat = yield* fileSystem
@@ -783,9 +889,12 @@ const make = Effect.gen(function* () {
     return {
       resource: {
         relativePath: relative,
-        kind: "file" as const,
-        mimeType: mimeFor(relative, null, kind !== "upload"),
-        sizeBytes: Number(stat.size),
+        kind: kind === "folder" ? ("folder" as const) : ("file" as const),
+        mimeType:
+          kind === "folder"
+            ? DIRECTORY_MIME_TYPE
+            : mimeFor(relative, null, kind === "link" || kind === "note"),
+        sizeBytes: kind === "folder" ? 0 : Number(stat.size),
         modifiedAt: modifiedAtOf(stat),
       },
     };
@@ -1071,7 +1180,117 @@ const make = Effect.gen(function* () {
     };
   });
 
+  const syncScan: ProjectFiles["Service"]["syncScan"] = Effect.fn("ProjectFiles.syncScan")(
+    function* (labelId) {
+      const label = yield* requireLabel(labelId);
+      const { dir } = yield* folders.ensureForLabel(label).pipe(Effect.mapError(storage("scan")));
+      const scanned = yield* scanLock.withPermits(1)(rescanLabel(label));
+      return {
+        dir,
+        entries: scanned.entries.map((entry) => ({
+          relativePath: entry.relativePath,
+          kind: entry.kind,
+          sha256: entry.sha256,
+          sizeBytes: entry.sizeBytes,
+        })),
+      };
+    },
+  );
+
+  const refresh: ProjectFiles["Service"]["refresh"] = Effect.fn("ProjectFiles.refresh")(
+    function* (labelId) {
+      const label = yield* requireLabel(labelId);
+      yield* scanLock.withPermits(1)(rescanLabel(label));
+      yield* publish(labelId);
+    },
+  );
+
+  const fileWithSha256: ProjectFiles["Service"]["fileWithSha256"] = Effect.fn(
+    "ProjectFiles.fileWithSha256",
+  )(function* (sha256) {
+    const rows = yield* sql<{ label_id: string; relative_path: string; name: string }>`
+      SELECT f.label_id, f.relative_path, l.name FROM project_resource_files f
+      JOIN project_labels l ON l.label_id = f.label_id
+      WHERE f.sha256 = ${sha256} AND f.kind = 'file' LIMIT 8
+    `.pipe(Effect.mapError(storage("read")));
+    for (const row of rows) {
+      const found = yield* Effect.gen(function* () {
+        const { dir } = yield* folders
+          .dirForLabel({ id: ProjectLabelId.make(row.label_id), name: row.name })
+          .pipe(Effect.mapError(storage("read")));
+        const { resolvedFull } = yield* resolveResourcePath("read", dir, row.relative_path);
+        const stat = yield* fileSystem.stat(resolvedFull);
+        return stat.type === "File" ? resolvedFull : null;
+      }).pipe(Effect.catch(() => Effect.succeed(null)));
+      if (found !== null) return found;
+    }
+    return null;
+  });
+
+  const copyLinkedFiles: ProjectFiles["Service"]["copyLinkedFiles"] = Effect.fn(
+    "ProjectFiles.copyLinkedFiles",
+  )(function* (labelId) {
+    const label = yield* requireLabel(labelId);
+    const { dir } = yield* folders.dirForLabel(label).pipe(Effect.mapError(storage("scan")));
+    if (!(yield* isDirectory(dir))) return 0;
+    const realRoot = (yield* realPathOrNull(dir)) ?? path.resolve(dir);
+    const top = yield* fileSystem
+      .readDirectory(dir)
+      .pipe(Effect.catch(() => Effect.succeed([] as ReadonlyArray<string>)));
+    const stack = top
+      .filter((entry) => !isReservedEntry(entry))
+      .map((entry) => ({ full: path.join(dir, entry), topLevel: true }));
+    let copied = 0;
+    let visited = 0;
+    while (stack.length > 0 && visited < MAX_RESOURCE_ENTRIES) {
+      const current = stack.pop()!;
+      visited++;
+      const link = yield* fileSystem.readLink(current.full).pipe(Effect.option);
+      if (Option.isSome(link)) {
+        const real = yield* realPathOrNull(current.full);
+        if (real === null || isWithinRoot(realRoot, real)) continue;
+        const stat = yield* fileSystem.stat(real).pipe(Effect.catch(() => Effect.succeed(null)));
+        // Linked folders stay links: their size is unbounded and they may be anything.
+        if (stat?.type !== "File" || Number(stat.size) > PROJECT_FILE_SYNC_MAX_BYTES) continue;
+        const partial = `${current.full}${PROJECT_FILE_PARTIAL_SUFFIX}`;
+        // Renaming over the link replaces the link itself; its target is never touched.
+        const done = yield* fileSystem.copyFile(real, partial).pipe(
+          Effect.andThen(fileSystem.rename(partial, current.full)),
+          Effect.as(true),
+          Effect.catch((cause) =>
+            fileSystem
+              .remove(partial, { force: true })
+              .pipe(
+                Effect.ignore,
+                Effect.andThen(
+                  Effect.logWarning("Could not copy a linked project file", { cause }),
+                ),
+                Effect.as(false),
+              ),
+          ),
+        );
+        if (done) copied++;
+        continue;
+      }
+      if (!(yield* isDirectory(current.full))) continue;
+      if (current.topLevel && (yield* isGitWorkTree(current.full))) continue;
+      const children = yield* fileSystem
+        .readDirectory(current.full)
+        .pipe(Effect.catch(() => Effect.succeed([] as ReadonlyArray<string>)));
+      for (const child of children) {
+        stack.push({ full: path.join(current.full, child), topLevel: false });
+      }
+    }
+    if (copied > 0) yield* refresh(labelId);
+    return copied;
+  });
+
   return ProjectFiles.of({
+    syncScan,
+    refresh,
+    changes: Stream.fromPubSub(changed),
+    fileWithSha256,
+    copyLinkedFiles,
     listResources,
     readResource,
     createResource,

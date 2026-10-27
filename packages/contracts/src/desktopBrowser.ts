@@ -77,6 +77,20 @@ export const DesktopBrowserCommand = Schema.Union([
     profileId: BrowserProfileId,
     cookie: LocalImportedBrowserCookie,
   }),
+  /**
+   * The unpacked extensions a profile runs, as directories on this machine.
+   * The desktop loads these into the profile's session and unloads any other,
+   * answering with `browserStorageResult`.
+   */
+  Schema.Struct({
+    type: Schema.Literal("extensions"),
+    requestId: Schema.String,
+    environmentId: TrimmedNonEmptyString,
+    profileId: BrowserProfileId,
+    extensions: Schema.Array(
+      Schema.Struct({ id: TrimmedNonEmptyString, path: TrimmedNonEmptyString }),
+    ),
+  }),
   /** Starts a generation before its first CDP command, retiring the old relay. */
   Schema.Struct({
     type: Schema.Literal("connect"),

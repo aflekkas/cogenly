@@ -1,5 +1,6 @@
 import type { ImportedCookie } from "@cogenly/shared/browserCookies/CookieDatabase";
 import { resolvePartitionScope } from "./BrowserPartitionScope.ts";
+import { planExtensionLoad } from "./BrowserExtensionLoad.ts";
 import type { Session, WebContents } from "electron";
 import { BrowserWindow, session, systemPreferences } from "electron";
 import * as Context from "effect/Context";
@@ -180,6 +181,15 @@ export class BrowserSession extends Context.Service<
       environmentId: string,
       profileId: string,
       cookie: ImportedCookie,
+    ) => Effect.Effect<boolean>;
+    /**
+     * Runs exactly these unpacked extensions in the profile's session: loads
+     * new or moved ones and unloads the rest. False if any failed to load.
+     */
+    readonly loadExtensions: (
+      environmentId: string,
+      profileId: string,
+      extensions: ReadonlyArray<{ readonly id: string; readonly path: string }>,
     ) => Effect.Effect<boolean>;
     readonly getPartition: (
       scope?: string,
@@ -471,6 +481,30 @@ export const make = Effect.gen(function* BrowserSessionMake() {
         Effect.orElseSucceed(() => false),
         Effect.withTracerEnabled(false),
       ),
+    loadExtensions: (environmentId, profileId, extensions) =>
+      Effect.gen(function* () {
+        const { scope, persistent, namespace } = resolvePartitionScope(environmentId, profileId);
+        const target = yield* getSession(scope, persistent, namespace);
+        const plan = planExtensionLoad(target.extensions.getAllExtensions(), extensions);
+        for (const id of plan.unload) target.extensions.removeExtension(id);
+        const loaded = yield* Effect.forEach(
+          plan.load,
+          (extension) =>
+            Effect.tryPromise(() =>
+              target.extensions.loadExtension(extension.path, { allowFileAccess: false }),
+            ).pipe(
+              Effect.as(true),
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Could not load a browser extension.", {
+                  id: extension.id,
+                  cause,
+                }).pipe(Effect.as(false)),
+              ),
+            ),
+          { concurrency: 1 },
+        );
+        return loaded.every(Boolean);
+      }).pipe(Effect.orElseSucceed(() => false)),
     getPartition,
     isPartition: (partition) =>
       partition.startsWith(PREVIEW_PARTITION_PREFIX) ||

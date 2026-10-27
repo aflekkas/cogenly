@@ -228,7 +228,26 @@ describe("healthFixAction", () => {
     ).toEqual({
       kind: "open",
       label: "Fix",
-      link: { kind: "provider", environmentId: HUB, instanceId: provider },
+      link: { kind: "providerSignIn", environmentId: HUB, instanceId: provider },
+    });
+  });
+
+  it("signs a machine this client can't reach in through the server it came through", () => {
+    // The laptop reads the hub's health; the hub's provider signs in over the paired link.
+    expect(
+      healthFixAction(
+        [problem({ fix: "sign-in", target: { _tag: "provider", instanceId: provider } })],
+        context([LAPTOP], { viaEnvironmentId: LAPTOP }),
+      ),
+    ).toEqual({
+      kind: "open",
+      label: "Fix",
+      link: {
+        kind: "providerSignIn",
+        environmentId: LAPTOP,
+        targetEnvironmentId: HUB,
+        instanceId: provider,
+      },
     });
   });
 
@@ -243,12 +262,12 @@ describe("healthFixAction", () => {
     expect(action).toMatchObject({
       kind: "fix",
       direct: { itemKeys: ["stuck-runs:thread:thread-1"] },
-      signIns: [{ kind: "provider", environmentId: HUB, instanceId: provider }],
+      signIns: [{ kind: "providerSignIn", environmentId: HUB, instanceId: provider }],
     });
     if (action?.kind !== "fix") return;
     // The sign-in never reaches the agent, even when the direct fix comes back manual.
     expect(healthFixFollowUp(action, [])).toEqual({
-      signIn: { kind: "provider", environmentId: HUB, instanceId: provider },
+      signIn: { kind: "providerSignIn", environmentId: HUB, instanceId: provider },
       agent: [],
       remaining: 0,
     });
@@ -283,7 +302,7 @@ describe("healthFixAction", () => {
     if (action?.kind !== "fix") return;
     expect(action.signIns).toHaveLength(3);
     expect(healthFixFollowUp(action, [])).toEqual({
-      signIn: { kind: "provider", environmentId: HUB, instanceId: provider },
+      signIn: { kind: "providerSignIn", environmentId: HUB, instanceId: provider },
       agent: [],
       remaining: 2,
     });
@@ -292,12 +311,12 @@ describe("healthFixAction", () => {
       {
         kind: "open",
         label: "Sign in",
-        link: { kind: "provider", environmentId: HUB, instanceId: provider },
+        link: { kind: "providerSignIn", environmentId: HUB, instanceId: provider },
       },
       {
         kind: "open",
         label: "Sign in",
-        link: { kind: "provider", environmentId: HUB, instanceId: "codex" },
+        link: { kind: "providerSignIn", environmentId: HUB, instanceId: "codex" },
       },
       { kind: "open", label: "Sign in", link: { kind: "integrations", environmentId: HUB } },
       { kind: "open", label: "Sign in", link: { kind: "integrations", environmentId: HUB } },
@@ -428,4 +447,17 @@ it("routes a version-skew Fix through the origin machine", () => {
     context([HUB]),
   );
   expect(action).toMatchObject({ kind: "fix", direct: { kind: "healthFix" } });
+});
+
+it("browser setup uses the machine's direct Fix command", () => {
+  const missing = problem({
+    itemKey: "preview-browser:install",
+    checkId: "preview-browser",
+    fix: "setup-browser",
+    target: null,
+  });
+  expect(healthFixAction([missing], context([HUB]))).toMatchObject({
+    kind: "fix",
+    direct: { kind: "healthFix", itemKeys: ["preview-browser:install"] },
+  });
 });

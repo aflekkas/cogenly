@@ -30,6 +30,7 @@ import { toastManager } from "../ui/toast";
 import {
   integrationAccountLabel,
   integrationErrorText,
+  integrationSignInView,
   integrationStatus,
   integrationTitle,
   scopeLabel,
@@ -44,6 +45,7 @@ import {
   SettingsMasterDetailEditor,
   SettingsMasterDetailRow,
 } from "./SettingsMasterDetail";
+import { useIntegrationActionState } from "./useIntegrationActionState";
 import { openSignInPage } from "./openIntegrationSignIn";
 import { useStatusFade } from "./integrationStatusMotion";
 import { useEnvironmentMachineList } from "../../machines/useMachines";
@@ -77,7 +79,7 @@ export function IntegrationServicesSettings() {
     integrations?.[0] ??
     null;
   const addButton = (
-    <Button size="sm" variant="outline" disabled={addDisabled} onClick={add}>
+    <Button size="xs" variant="outline" disabled={addDisabled} onClick={add}>
       <PlusIcon />
       Add integration
     </Button>
@@ -98,7 +100,7 @@ export function IntegrationServicesSettings() {
         </SettingsGroup>
       ) : integrations.length === 0 ? (
         <SettingsGroup>
-          <SettingsEmpty title="No integrations yet" action={addButton} />
+          <SettingsEmpty label="No integrations yet." action={addButton} />
         </SettingsGroup>
       ) : (
         <SettingsMasterDetail
@@ -264,24 +266,25 @@ function IntegrationDetail({
   const canRemove = useAtomValue(integrationsRpc.remove.permissionAtom(environmentId));
   const canTest = useAtomValue(integrationsRpc.testConnection.permissionAtom(environmentId));
   const canSignIn = useAtomValue(integrationsRpc.beginSignIn.permissionAtom(environmentId));
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const action = useIntegrationActionState();
+  const { pending, error } = action;
   const status = integrationStatus(summary, undefined);
   const statusRef = useStatusFade<HTMLSpanElement>(status.label);
   const icon = integrationIcon(integration);
   const report = (result: Awaited<ReturnType<typeof update>>) => {
     if (result._tag === "Success") return true;
     if (!isAtomCommandInterrupted(result))
-      setError(integrationErrorText(squashAtomCommandFailure(result)));
+      action.fail(integrationErrorText(squashAtomCommandFailure(result)));
     return false;
   };
-  const run = async (action: () => Promise<void>) => {
-    setPending(true);
-    setError(null);
+  const run = async (operation: () => Promise<void>, purpose: "sign_in" | "change" = "change") => {
+    action.begin(purpose);
     try {
-      await action();
+      await operation();
+    } catch {
+      action.fail("Could not complete the change. Try again.");
     } finally {
-      setPending(false);
+      action.settle();
     }
   };
   const reconnect = async () => {
@@ -300,7 +303,7 @@ function IntegrationDetail({
       const result = await signIn({ environmentId, input: { id: integration.id } });
       if (result._tag === "Success") return result.value.authorizationUrl;
       if (!isAtomCommandInterrupted(result))
-        setError(integrationErrorText(squashAtomCommandFailure(result)));
+        action.fail(integrationErrorText(squashAtomCommandFailure(result)));
       return null;
     });
   };
@@ -321,21 +324,26 @@ function IntegrationDetail({
             },
       );
     else if (!isAtomCommandInterrupted(result))
-      setError(integrationErrorText(squashAtomCommandFailure(result)));
+      action.fail(integrationErrorText(squashAtomCommandFailure(result)));
   };
   // An account that needs the user offers Reconnect first; a healthy one offers Test.
   const needsReconnect =
     status.tone === "warning" || status.tone === "error" || !integration.enabled;
-  const reconnectDisabled = pending || !canWrite || !canSignIn;
+  const signInView = integrationSignInView(action.state, integration, {
+    connected: summary.status === "connected",
+    message: summary.status === "error" ? summary.message : undefined,
+  });
+  const signInLabelRef = useStatusFade<HTMLSpanElement>(signInView.label);
+  const reconnectDisabled = signInView.disabled || !canWrite || !canSignIn;
   const testDisabled = pending || !canTest || !integration.enabled;
   const reconnectButton = (
     <Button
       size="sm"
       variant={needsReconnect ? "outline" : "ghost"}
       disabled={reconnectDisabled}
-      onClick={() => void run(reconnect)}
+      onClick={() => void run(reconnect, "sign_in")}
     >
-      Reconnect
+      <span ref={signInLabelRef}>{signInView.label}</span>
     </Button>
   );
   const testButton = (
@@ -368,7 +376,7 @@ function IntegrationDetail({
                 return;
               const result = await remove({ environmentId, input: { id: integration.id } });
               if (result._tag !== "Success" && !isAtomCommandInterrupted(result))
-                setError(integrationErrorText(squashAtomCommandFailure(result)));
+                action.fail(integrationErrorText(squashAtomCommandFailure(result)));
             })
           }
         >
@@ -404,9 +412,9 @@ function IntegrationDetail({
         }
       >
         <AnimatedHeight>
-          {error || status.reason ? (
+          {signInView.error || (!pending && status.reason) ? (
             <p role="status" className="pt-2 pb-2 text-sm text-destructive">
-              {error ?? status.reason}
+              {signInView.error ?? error ?? status.reason}
             </p>
           ) : null}
         </AnimatedHeight>

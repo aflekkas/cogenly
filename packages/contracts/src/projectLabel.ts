@@ -189,6 +189,8 @@ export type ProjectLabelRepositoryLink = typeof ProjectLabelRepositoryLink.Type;
 const projectLabelWithRepositoriesFields = {
   ...ProjectLabel.fields,
   possibleDuplicateIds: Schema.optionalKey(Schema.Array(ProjectLabelId)),
+  /** An unaccepted account suggestion; never grants access or changes folder names. */
+  suggestedHomeOwner: Schema.optionalKey(TrimmedNonEmptyString),
   repositoryIds: Schema.Array(ProjectId),
   // Older servers (and caches written by them) predate portable repo identity.
   repositories: Schema.optionalKey(Schema.Array(ProjectLabelRepositoryLink)),
@@ -538,6 +540,7 @@ export const ProjectLabelUpdateInput = Schema.Struct({
   color: Schema.optional(Schema.NullOr(ProjectLabelColor)),
   description: Schema.optional(Schema.NullOr(description)),
   instructions: Schema.optional(instructions),
+  dismissHomeOwnerSuggestion: Schema.optional(TrimmedNonEmptyString),
 });
 export type ProjectLabelUpdateInput = typeof ProjectLabelUpdateInput.Type;
 export const ProjectLabelKey = Schema.Struct({ id: ProjectLabelId });
@@ -694,6 +697,11 @@ export const ProjectLabelListResourcesResult = Schema.Struct({
 export type ProjectLabelListResourcesResult = typeof ProjectLabelListResourcesResult.Type;
 export const ProjectLabelAddResourceInput = Schema.Struct({
   id: ProjectLabelId,
+  /**
+   * Project-relative folder the resource lands in, made if missing, e.g.
+   * `Resources/briefs`. Defaults to `Resources`.
+   */
+  folder: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(1024))),
   resource: Schema.Union([
     Schema.Struct({
       kind: Schema.Literal("upload"),
@@ -701,6 +709,16 @@ export const ProjectLabelAddResourceInput = Schema.Struct({
       attachmentId: TrimmedNonEmptyString,
       /** Original file name; defaults to the upload's. */
       fileName: Schema.optional(TrimmedNonEmptyString),
+    }),
+    /** A copy of a file already attached in a chat; the attachment stays. */
+    Schema.Struct({
+      kind: Schema.Literal("attachment"),
+      attachmentId: TrimmedNonEmptyString,
+      fileName: Schema.optional(TrimmedNonEmptyString),
+    }),
+    Schema.Struct({
+      kind: Schema.Literal("folder"),
+      name: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
     }),
     Schema.Struct({
       kind: Schema.Literal("link"),
@@ -910,6 +928,8 @@ export type ProjectSourceChangeInput = typeof ProjectSourceChangeInput.Type;
 /** Saves a markdown note under `Resources/`; a taken name gets a numeric suffix. */
 export const ProjectFileWriteInput = Schema.Struct({
   ...projectFolderTarget,
+  /** Project-relative folder for the note, made if missing; defaults to `Resources`. */
+  folder: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(1024))),
   title: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   text: Schema.String.check(Schema.isMaxLength(1_000_000)),
 });

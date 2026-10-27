@@ -640,6 +640,8 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   }
 
   if (claudeAuthStatus(capabilities) === "unauthenticated") {
+    // Clients offer in-app sign-in; the CLI command is for whoever reads the logs.
+    yield* Effect.logDebug("Claude Code is not signed in; `claude auth login` signs it in.");
     return buildServerProvider({
       presentation: CLAUDE_PRESENTATION,
       enabled: claudeSettings.enabled,
@@ -652,7 +654,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         version: parsedVersion,
         status: "error",
         auth: { status: "unauthenticated" },
-        message: "Claude Code is not authenticated. Run `claude auth login` and try again.",
+        message: "Claude Code is not signed in on this machine.",
       },
     });
   }

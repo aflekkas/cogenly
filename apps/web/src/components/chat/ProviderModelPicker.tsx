@@ -9,7 +9,11 @@ import { Badge } from "../ui/badge";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
-import { ModelPickerContent, resolveModelPickerSelectedModel } from "./ModelPickerContent";
+import {
+  ModelPickerContent,
+  type ModelPickerProviderSignIn,
+  resolveModelPickerSelectedModel,
+} from "./ModelPickerContent";
 import { ChatGptSharingControl } from "./ChatGptSharingControl";
 import { ProviderIconStack } from "./ProviderIconStack";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
@@ -65,6 +69,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   triggerAriaLabel?: string;
   onOpenChange?: (open: boolean) => void;
   onOpenProviderSetup?: (instanceId: ProviderInstanceId) => void;
+  providerSignIn?: ModelPickerProviderSignIn | undefined;
   getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
 }) {
@@ -356,6 +361,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           modelOptionsByInstance={props.modelOptionsByInstance}
           onRequestClose={() => setIsMenuOpen(false)}
           {...(props.onOpenProviderSetup ? { onOpenProviderSetup: props.onOpenProviderSetup } : {})}
+          providerSignIn={props.providerSignIn}
           {...(props.getModelDisabledReason
             ? { getModelDisabledReason: props.getModelDisabledReason }
             : {})}

@@ -259,7 +259,10 @@ import {
 import { useEnvironmentQuery } from "~/state/query";
 import { useDebouncedValue } from "~/state/queries";
 import { ProviderModelPicker } from "./ProviderModelPicker";
-import { resolveModelPickerSelectedModel } from "./ModelPickerContent";
+import {
+  type ModelPickerProviderSignIn,
+  resolveModelPickerSelectedModel,
+} from "./ModelPickerContent";
 import {
   type ComposerCommandItem,
   ComposerCommandMenu,
@@ -1629,6 +1632,8 @@ export interface ChatComposerProps {
     options?: { focusComposer?: boolean },
   ) => void;
   onOpenProviderSetup: (instanceId: ProviderInstanceId) => void;
+  /** Providers signed out on the machine that runs this thread, for the model picker. */
+  providerSignIn?: ModelPickerProviderSignIn | undefined;
   getModelDisabledReason: (instanceId: ProviderInstanceId, model: string) => string | null;
   toggleInteractionMode: () => void;
   handleInteractionModeChange: (mode: ProviderInteractionMode) => void;
@@ -1736,6 +1741,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onChangeActivePendingUserInputCustomAnswer,
     onProviderModelSelect,
     onOpenProviderSetup,
+    providerSignIn,
     getModelDisabledReason,
     toggleInteractionMode,
     handleInteractionModeChange,
@@ -4907,6 +4913,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           onProviderModelSelect(instanceId, model);
         }}
         onOpenProviderSetup={onOpenProviderSetup}
+        providerSignIn={providerSignIn}
       />
 
       <>

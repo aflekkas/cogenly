@@ -46,6 +46,7 @@ import * as McpAppRequests from "../mcpApps/McpAppRequests.ts";
 import * as ProviderSessionRuntime from "../persistence/ProviderSessionRuntime.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as ProviderAuthService from "../provider/ProviderAuthService.ts";
+import * as ProviderSignInRequests from "../provider/ProviderSignInRequests.ts";
 import * as AgentSessionImporter from "../project/AgentSessionImporter.ts";
 import * as AgentSessionScanner from "../project/AgentSessionScanner.ts";
 import * as T3Import from "../t3Import/T3ImportService.ts";
@@ -113,7 +114,9 @@ export const layerEventInfrastructure = Layer.mergeAll(
 );
 
 // Shared so every consumer gets the one files index and watcher.
-const layerProjectFilesProvided = ProjectFiles.layer.pipe(Layer.provide(ProjectLabelFolders.layer));
+export const layerProjectFilesProvided = ProjectFiles.layer.pipe(
+  Layer.provide(ProjectLabelFolders.layer),
+);
 
 // One signal shared by every writer of agent_approvals and both approval streams.
 const layerApprovalChanges = ApprovalChanges.layer;
@@ -557,6 +560,9 @@ const layerIntegrationSetupRequestsProvided = IntegrationSetupRequests.layer.pip
     ),
   ),
 );
+const layerProviderSignInRequestsProvided = ProviderSignInRequests.layer.pipe(
+  Layer.provide(Layer.mergeAll(layerThreadManagementProvided, layerInlineCardNotifications)),
+);
 const layerAgentMcpPolicyProvided = AgentMcpPolicy.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
@@ -674,6 +680,7 @@ const layerProductionBase = Layer.mergeAll(
   ),
   layerAgentWorkspaceProvided,
   layerIntegrationSetupRequestsProvided,
+  layerProviderSignInRequestsProvided,
   layerAgentEventReactorProvided,
   layerAgentMcpPolicyProvided,
   AgentStore.layer,

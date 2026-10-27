@@ -30,6 +30,8 @@ import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
+import * as Option from "effect/Option";
 import * as ServerSelfUpdate from "../cloud/selfUpdate.ts";
 import { compareExactServiceVersions, isExactServiceVersion } from "../cloud/serviceProtocol.ts";
 import * as MachineIdentity from "../machines/MachineIdentity.ts";
@@ -89,6 +91,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const crypto = yield* Crypto.Crypto;
   const agentProcesses = yield* AgentProcesses.AgentProcesses;
+  const browser = yield* Effect.serviceOption(PreviewBrowser.PreviewBrowser);
 
   const commandId = (suffix: string) =>
     crypto.randomUUIDv4().pipe(
@@ -266,6 +269,24 @@ const make = Effect.gen(function* () {
               ? "Sign in again from Settings → Integrations on this machine."
               : "Sign in again from Settings → Providers on this machine.",
         });
+      case "setup-browser":
+        if (itemKey === "preview-browser:host")
+          return Effect.succeed({ itemKey, status: "manual", message: item.detail } as const);
+        return Option.isNone(browser)
+          ? Effect.succeed(failed("Browser setup is unavailable on this server."))
+          : browser.value.executable.pipe(
+              Effect.as({
+                itemKey,
+                status: "fixed",
+                message: "The preview browser is installed. Try opening it again.",
+              } as const),
+              Effect.catchTags({
+                PreviewBrowserInstallingError: (error) =>
+                  Effect.succeed({ itemKey, status: "manual", message: error.message } as const),
+                PreviewBrowserInstallError: (error) => Effect.succeed(failed(error.message)),
+                PreviewBrowserUnsupportedError: (error) => Effect.succeed(failed(error.message)),
+              }),
+            );
       case "run-now":
         return target?._tag !== "scheduledTask"
           ? Effect.succeed(failed("The task to run is missing."))

@@ -84,8 +84,7 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
 import { ExpandableText } from "./ExpandableText";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
-import { ProviderMachineSignIns } from "./ProviderMachineSignIns";
-import { ProviderAuthenticationSection } from "./ProviderAuthenticationSection";
+import { ProviderAccountMachines } from "./ProviderAccountMachines";
 import { CodexSetupSection, CodexManagedRuntimeFields } from "./CodexSetupSection";
 import { readCodexSetupMode } from "./CodexSetupSection.logic";
 import { providerClients } from "./providerDriverMeta";
@@ -99,7 +98,6 @@ import {
 } from "./SettingsPanels.logic";
 import {
   SettingResetButton,
-  SettingsEmpty,
   SettingsNumberField,
   SettingsRefreshAction,
   SettingsRow,
@@ -826,27 +824,19 @@ export function EnvironmentProviderSettings({
                   })
                 }
               />
-            ) : mode === "editor" &&
-              !readOnly &&
-              liveProvider &&
-              liveProvider.setup?.canAuthenticate ? (
-              <>
-                <ProviderAuthenticationSection
-                  key={`${environmentId}:${row.instanceId}`}
-                  environmentId={environmentId}
-                  environmentLabel={environmentLabel}
-                  instanceId={row.instanceId}
-                  provider={liveProvider}
-                  readOnly={readOnly}
-                />
-              </>
             ) : null}
             {mode === "editor" && liveProvider ? (
-              <ProviderMachineSignIns
+              <ProviderAccountMachines
+                key={`${environmentId}:${row.instanceId}`}
                 environmentId={environmentId}
+                environmentLabel={environmentLabel}
                 instanceId={row.instanceId}
                 provider={liveProvider}
                 readOnly={readOnly}
+                // Managed Codex signs this machine in with ChatGPT above.
+                skipCurrent={
+                  row.driver === "codex" && readCodexSetupMode(row.instance.config) === "managed"
+                }
               />
             ) : null}
           </>
@@ -976,15 +966,19 @@ export function EnvironmentProviderSettings({
                 {renderProviderInstance(selectedRow, "editor")}
               </SettingsMasterDetailEditor>
             ) : (
-              <SettingsEmpty
-                title={targetInstanceMissing ? "Provider not found" : "No providers yet"}
-                description={
-                  targetInstanceMissing
-                    ? `This provider is no longer set up on ${environmentLabel}. Pick another one from the list.`
-                    : "Add Codex, Claude or another agent CLI so threads can run on this machine."
-                }
-                action={
-                  readOnly ? undefined : (
+              <Empty size="sm">
+                <EmptyHeader>
+                  <EmptyTitle>
+                    {targetInstanceMissing ? "Provider not found" : "No providers yet"}
+                  </EmptyTitle>
+                  <EmptyDescription>
+                    {targetInstanceMissing
+                      ? `This provider is no longer set up on ${environmentLabel}. Pick another one from the list.`
+                      : "Add Codex, Claude or another agent CLI so threads can run on this machine."}
+                  </EmptyDescription>
+                </EmptyHeader>
+                {readOnly ? null : (
+                  <EmptyContent>
                     <Button
                       size="sm"
                       variant="outline"
@@ -993,9 +987,9 @@ export function EnvironmentProviderSettings({
                       <PlusIcon />
                       Add provider
                     </Button>
-                  )
-                }
-              />
+                  </EmptyContent>
+                )}
+              </Empty>
             )
           }
         />

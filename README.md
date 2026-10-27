@@ -2,6 +2,8 @@
 
 One workspace for chats, coding tasks and always-on agents. Cogenly runs the Claude Code and Codex CLIs with your own subscriptions, and you use it from the desktop app or a browser. Run it on your Mac, on a Linux server, or both: paired machines share one set of conversations, projects and settings.
 
+![Cogenly on a laptop, following a Work thread that runs on the paired cloud server](./docs/images/work-on-cloud-server.webp)
+
 ## What's in it
 
 - **Chats, Work and Agents.** Chats are conversations. Work is coding in a repository, with a worktree, diffs and pull requests. Agents are persistent assistants with their own conversation, triggers and schedules. See [Agents](./docs/user/agents.md).
@@ -14,9 +16,21 @@ One workspace for chats, coding tasks and always-on agents. Cogenly runs the Cla
 - **Cloud subagents.** An agent can delegate work to another paired machine, then get the result back. See [Machines](./docs/user/machines.md).
 - **Providers.** Claude and Codex, plus Muse Code and Grok. See [Install](./docs/user/install.md#providers).
 
+Work in a repository, with the files the agent changed open beside the thread:
+
+![A Work thread with the changed file open in the side panel](./docs/images/work-file-preview.webp)
+
+An agent with its own conversation, standing instructions and a weekly schedule:
+
+![A Release Notes agent with its Details panel open](./docs/images/agent-details.webp)
+
+Connecting a service: the agent does the setup and asks you only to sign in:
+
+![An agent connecting Linear and waiting on the Sign in card](./docs/images/integration-sign-in.webp)
+
 ## Install
 
-Sign in to at least one provider on the machine that runs your agents, such as `claude auth login` or `codex login`.
+Install at least one provider CLI (Claude Code or Codex) on the machine that runs your agents, then sign it in from **Settings → Providers**.
 
 **Mac.** Download the `.dmg` from [the latest release](https://github.com/alexandros-lekkas/cogenly/releases/latest). It is built for Apple Silicon, runs its own server and updates itself. To install the `cogenly` command, open **Settings → General → About**.
 

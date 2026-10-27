@@ -1,4 +1,5 @@
 import { BrowserCookieImportSettings } from "./BrowserCookieImportSettings";
+import { BrowserExtensionsSetting } from "./BrowserExtensionsSettings";
 import { OverlayPresence, useLastPresent } from "~/components/ui/overlay-presence";
 import { DeviceHostUpdates } from "../device/DeviceHostUpdates";
 import { DeviceToolVersions } from "../device/DeviceToolVersions";
@@ -1542,6 +1543,8 @@ export function IntegrationsSettingsPanel() {
       <AgentAccessSettings />
       <SettingsSection id="browser" title="Browser">
         <BrowserCookieImportSettings />
+        {/* Kept by the selected machine, so it works from the web app too. */}
+        <BrowserExtensionsSetting />
         <DesktopOnlyRows>
           <BrowserLinkTargetSetting disabled={disabled} />
           <BrowserProfilesSetting disabled={disabled} />

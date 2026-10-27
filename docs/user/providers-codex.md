@@ -21,9 +21,11 @@ localhost page into the sign-in panel, even if that page could not load.
 
 ## Use an existing Codex login
 
-Cogenly can use your installed Codex and its existing login. Run `codex login`
-on the environment's machine to sign in. [Provider setup](./install.md#providers)
-covers installation and custom configuration.
+Cogenly can use your installed Codex and its existing login. To sign it in, choose
+**Sign in** for that machine under the provider's **Account** in **Settings →
+Providers**, then enter the code it shows on OpenAI's page.
+[Provider setup](./install.md#providers) covers installation and custom
+configuration.
 
 ## Use multiple accounts
 

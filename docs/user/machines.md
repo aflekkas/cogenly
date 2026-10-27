@@ -33,8 +33,15 @@ Portable vault items and web sign-ins share by default, with a per-machine
 opt-out in Settings → Vault; see
 [Vault on several machines](vault.md#vault-on-several-machines).
 Local integrations, including Google Workspace, sign in on each machine.
-Resource files stay local. Matching project names are kept separately until you
-choose how to combine them.
+Matching project names are kept separately until you choose how to combine them.
+
+Project files and folders sync too: everything in a project's folder except its
+repositories and worktrees, whether you added it on the project page, an agent
+wrote it, or you saved it there in Finder. Adds, edits, renames and deletes
+reach every paired machine. Files over 100 MB stay on the machine that has
+them. When two machines change the same file before they hear from each other,
+the newer change keeps the name and the other is kept beside it as
+`name (conflict from <machine>)`, so nothing is lost.
 
 ## Your conversations on every machine
 
@@ -52,6 +59,8 @@ not connected to. A new conversation runs on the machine that has the project's
 repository unless you pick another. A machine without the repository clones it
 first. If the machine you picked is offline, nothing starts and your draft
 stays as it was; the notice offers to run it on this machine instead.
+
+![The Run on control under the composer, listing MacBook and Cloud server](../images/machine-picker.webp)
 
 Start Work asks which machine to use after you choose its repository. You can
 also choose a machine when creating an agent or editing a schedule. A schedule

@@ -7,7 +7,6 @@ import {
   SourceControlRepositoryError,
   projectHomeOwner,
   repositoryDirectoryNameFor,
-  repositoryRemoteParts,
   type ProjectLabelCloneRepositoryInput,
 } from "@cogenly/contracts";
 import type * as Crypto from "effect/Crypto";
@@ -33,7 +32,7 @@ import type * as ProjectLabelService from "./ProjectLabelService.ts";
 export interface ProjectLabelCloneDeps {
   readonly labels: Pick<
     ProjectLabelService.ProjectLabelService["Service"],
-    "readActive" | "linkRepository" | "ensureHomeOwner"
+    "readActive" | "linkRepository"
   >;
   readonly clones: Pick<ProjectCloneTracker.ProjectCloneTracker["Service"], "start">;
   readonly projects: Pick<ProjectService.ProjectService["Service"], "create" | "update" | "delete">;
@@ -109,13 +108,9 @@ export const cloneRepositoryIntoLabel = Effect.fn("ProjectLabelCloneRepository.c
                 new ProjectLabelError({ operation: "cloneRepository", reason: "storage", cause }),
             ),
           )).dir;
-  // The folder is derived, never chosen: the remote's name under the
-  // project's home owner (recorded now if the project has none yet).
+  // Folder naming follows only an explicitly linked owner.
   const remote = cloneInputRemote(input);
-  const homeOwner =
-    remote !== null && repositoryRemoteParts(remote)?.host === "github.com"
-      ? yield* deps.labels.ensureHomeOwner(label.id).pipe(Effect.orElseSucceed(() => null))
-      : projectHomeOwner(label.sourceLinks);
+  const homeOwner = projectHomeOwner(label.sourceLinks);
   const directoryName =
     (remote === null ? null : repositoryDirectoryNameFor(remote, homeOwner)) ?? folderName;
   const destinationPath = projectRepositoryDirectory(projectDir, directoryName, deps.path);

@@ -103,7 +103,10 @@ export class Declaration<out Handler> {
         handle(params).pipe(
           NodeSqliteClient.interactive,
           Effect.map((result) =>
-            declaration.#toolName?.startsWith("preview_") ? redactPreview(result) : result,
+            declaration.#toolName?.startsWith("preview_") ||
+            declaration.#toolName === "browser_extension_open"
+              ? redactPreview(result)
+              : result,
           ),
           // Second layer: scrub exact vault values from every tool result
           // before serialization. Transformed values need source-level

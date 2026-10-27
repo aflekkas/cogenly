@@ -81,6 +81,22 @@ export function createPreviewEnvironmentAtoms<R, E>(
       tag: WS_METHODS.browserImportCookies,
       concurrency: { mode: "singleFlight", key: ({ environmentId }) => environmentId },
     }),
+    extensionsList: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:browser:extensions-list",
+      tag: WS_METHODS.browserExtensionsList,
+    }),
+    extensionInstall: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:browser:extension-install",
+      tag: WS_METHODS.browserExtensionInstall,
+    }),
+    extensionRemove: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:browser:extension-remove",
+      tag: WS_METHODS.browserExtensionRemove,
+    }),
+    extensionToggle: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:browser:extension-toggle",
+      tag: WS_METHODS.browserExtensionToggle,
+    }),
     clearProfile: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:preview:clear-profile",
       tag: WS_METHODS.previewClearProfile,

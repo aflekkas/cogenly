@@ -60,6 +60,8 @@ interface SearchFieldProps extends React.ComponentProps<"div"> {
   actions?: React.ReactNode;
   /** Replaces the search icon, for a field that also says where it searches or lets you go back. */
   icon?: React.ReactNode;
+  /** Sits between the icon and the query, such as a chip naming a filter the search composes with. */
+  leading?: React.ReactNode;
 }
 
 function SearchField({
@@ -71,6 +73,7 @@ function SearchField({
   shortcut,
   actions,
   icon,
+  leading,
   className,
   children,
   ...props
@@ -95,6 +98,7 @@ function SearchField({
           className="size-4 shrink-0 text-(--sidebar-icon-color,var(--icon-muted))"
         />
       )}
+      {leading}
       {children}
       {/* The clear button is a 28px tile like the actions after it, in the same gapless row, so
           it keeps their rhythm. Its slot is always reserved and the clear button and shortcut
@@ -138,7 +142,10 @@ function SearchField({
 }
 
 type SearchInputProps = Omit<React.ComponentProps<"input">, "size" | "type"> &
-  Pick<SearchFieldProps, "size" | "variant" | "onClear" | "clearLabel" | "shortcut" | "actions"> & {
+  Pick<
+    SearchFieldProps,
+    "size" | "variant" | "onClear" | "clearLabel" | "shortcut" | "actions" | "leading"
+  > & {
     /** Classes for the frame, for layout. */
     frameClassName?: string;
     ref?: React.Ref<HTMLInputElement>;
@@ -151,6 +158,7 @@ function SearchInput({
   clearLabel,
   shortcut,
   actions,
+  leading,
   frameClassName,
   className,
   value,
@@ -167,6 +175,7 @@ function SearchInput({
       {...(clearLabel ? { clearLabel } : {})}
       {...(shortcut ? { shortcut } : {})}
       {...(actions ? { actions } : {})}
+      {...(leading ? { leading } : {})}
       {...(frameClassName ? { className: frameClassName } : {})}
     >
       <input

@@ -3,8 +3,9 @@ import type { ReactNode } from "react";
 /**
  * A sidebar list with nothing to show (Chats, Work, Agents, Projects): one
  * quiet line, and an optional action read as part of it ("No chats yet ·
- * New chat"). Filters never land here (an empty filter cannot be chosen, see
- * `useSegmentSelection`); only a list with nothing at all does. Give it the
+ * New chat"). Count-bar filters never land here (an empty filter cannot be
+ * chosen, see `useSegmentSelection`); a list with nothing at all does, and so
+ * does a project filter whose last item left ("Nothing in X · Show all"). Give it the
  * list's remaining height (a `flex-1` parent): it centres in the space between
  * the dock above and the column's bottom, lifted a little above true centre, the
  * same in every mode. It fades in place on mount (opacity only).

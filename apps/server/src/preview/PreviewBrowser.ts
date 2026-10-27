@@ -29,7 +29,7 @@ import { openZipArchive } from "../zipArchive.ts";
 // and every byte count and SHA-256 below. Hosts drop the old build after the
 // new one installs.
 const VERSION = "154.0.8037.92";
-const ARCHIVES = {
+const HEADLESS_SHELL_ARCHIVES = {
   linux64: {
     bytes: 120_477_194,
     sha256: "636aa5c79f2693632e9921b8bbb050038ba11672e02346c06c20f991aed096f9",
@@ -55,6 +55,65 @@ const ARCHIVES = {
     sha256: "3ac2561f02d9d87aadc0399d00b9002d718a4c365624fa67db9e7bfaf6b1a568",
   },
 } as const;
+// The full Chrome for Testing build at the same version, downloaded only for a
+// browser profile with extensions: the headless shell cannot load extensions.
+// Bump it with the headless shell, from each platform's chrome zip.
+const CHROME_ARCHIVES = {
+  linux64: {
+    bytes: 196_202_491,
+    sha256: "ff43322f335e436b2f4dcdfeeec5db032299e335a7e8c1c618b326e100ce8732",
+  },
+  "linux-arm64": {
+    bytes: 196_517_840,
+    sha256: "c0af361aab66b24c72e36a4326dce4d7edf4bc23f9aede8af988c2cb6ea3fec0",
+  },
+  "mac-arm64": {
+    bytes: 191_153_086,
+    sha256: "b62e904b6571c5ff5108ed7812cf93ac6d1c4027f10ae47ac34d8e229ed88001",
+  },
+  "mac-x64": {
+    bytes: 202_045_791,
+    sha256: "9ddd0959603a3cdb90926427b2942279d81414c9aad856c97d405bb406d50e8b",
+  },
+  win32: {
+    bytes: 184_469_809,
+    sha256: "ed07adc92a948b215fe75d86b02ceb1b6993cad7979d2437e836aaea6b3679d4",
+  },
+  win64: {
+    bytes: 205_614_867,
+    sha256: "b897ef3601c947ac0620c784556dec719ac602b0159ce105927acf645ee0f598",
+  },
+} as const;
+
+/** The Chrome version extensions are downloaded for, so the Web Store serves a build that runs here. */
+export const PREVIEW_BROWSER_CHROME_VERSION = VERSION;
+
+/**
+ * Which build to install. The headless shell renders every page; the full
+ * build runs only profiles with extensions, in Chrome's new headless mode.
+ */
+export type PreviewBrowserFlavor = "headless-shell" | "chrome";
+
+const FLAVORS = {
+  "headless-shell": {
+    directory: "chrome-headless-shell",
+    archives: HEADLESS_SHELL_ARCHIVES,
+    archiveRoot: (platform: string) => `chrome-headless-shell-${platform}/`,
+    executable: (platform: NodeJS.Platform) =>
+      platform === "win32" ? "chrome-headless-shell.exe" : "chrome-headless-shell",
+  },
+  chrome: {
+    directory: "chrome-for-testing",
+    archives: CHROME_ARCHIVES,
+    archiveRoot: (platform: string) => `chrome-${platform}/`,
+    executable: (platform: NodeJS.Platform) =>
+      platform === "darwin"
+        ? "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+        : platform === "win32"
+          ? "chrome.exe"
+          : "chrome",
+  },
+} as const;
 
 const chromePlatform = (platform: NodeJS.Platform, arch: NodeJS.Architecture) => {
   switch (platform) {
@@ -71,6 +130,7 @@ const chromePlatform = (platform: NodeJS.Platform, arch: NodeJS.Architecture) =>
 };
 
 export interface PreviewBrowserRelease {
+  readonly flavor: PreviewBrowserFlavor;
   readonly version: string;
   /** Chrome for Testing's platform name, which also names the archive's top directory. */
   readonly platform: string;
@@ -82,15 +142,18 @@ export interface PreviewBrowserRelease {
 export const previewBrowserRelease = (
   platform: NodeJS.Platform,
   arch: NodeJS.Architecture,
+  flavor: PreviewBrowserFlavor = "headless-shell",
 ): PreviewBrowserRelease | null => {
   const chrome = chromePlatform(platform, arch);
+  const archive = FLAVORS[flavor].archiveRoot(chrome ?? "").slice(0, -1);
   return chrome === null
     ? null
     : {
+        flavor,
         version: VERSION,
         platform: chrome,
-        url: `https://storage.googleapis.com/chrome-for-testing-public/${VERSION}/${chrome}/chrome-headless-shell-${chrome}.zip`,
-        ...ARCHIVES[chrome],
+        url: `https://storage.googleapis.com/chrome-for-testing-public/${VERSION}/${chrome}/${archive}.zip`,
+        ...FLAVORS[flavor].archives[chrome],
       };
 };
 
@@ -127,6 +190,11 @@ export class PreviewBrowserUnsupportedError extends Schema.TaggedError<PreviewBr
   }
 }
 
+export interface PreviewBrowserStatus {
+  readonly state: "ready" | "missing" | "installing" | "failed" | "unsupported";
+  readonly detail: string;
+}
+
 export class PreviewBrowser extends Context.Service<
   PreviewBrowser,
   {
@@ -141,11 +209,22 @@ export class PreviewBrowser extends Context.Service<
     >;
     /** The installed headless shell, if any. Never starts or waits on an install. */
     readonly installed: Effect.Effect<Option.Option<string>>;
+    /** Installation state without starting a download, for machine health. */
+    readonly status: Effect.Effect<PreviewBrowserStatus>;
+    /**
+     * Path to the full Chrome for Testing build, which can load extensions.
+     * Installs on first use the way `executable` does.
+     */
+    readonly extensionsExecutable: Effect.Effect<
+      string,
+      PreviewBrowserInstallError | PreviewBrowserInstallingError | PreviewBrowserUnsupportedError
+    >;
   }
 >()("cogenly-server/preview/PreviewBrowser") {}
 
 export interface PreviewBrowserOptions {
   readonly baseDir: string;
+  readonly flavor?: PreviewBrowserFlavor;
   readonly release?: PreviewBrowserRelease | null;
   /** How long a caller waits on an install in progress. Provider tool calls time out near 60s. */
   readonly wait?: Duration.Input;
@@ -167,7 +246,8 @@ type InstallState =
   | { readonly _tag: "installed"; readonly executable: string }
   | { readonly _tag: "failed"; readonly error: PreviewBrowserInstallError };
 
-export const makePreviewBrowser = Effect.fn("PreviewBrowser.make")(function* (
+/** Installs one flavor of the pinned browser on demand. */
+export const makePreviewBrowserInstaller = Effect.fn("PreviewBrowser.makeInstaller")(function* (
   options: PreviewBrowserOptions,
 ) {
   const fs = yield* FileSystem.FileSystem;
@@ -177,19 +257,22 @@ export const makePreviewBrowser = Effect.fn("PreviewBrowser.make")(function* (
   const serviceScope = yield* Effect.scope;
   const platform = yield* HostProcess.Platform;
   const arch = yield* HostProcess.Architecture;
+  const flavor = FLAVORS[options.release?.flavor ?? options.flavor ?? "headless-shell"];
   const release =
-    options.release === undefined ? previewBrowserRelease(platform, arch) : options.release;
+    options.release === undefined
+      ? previewBrowserRelease(platform, arch, options.flavor)
+      : options.release;
   const wait = options.wait ?? "45 seconds";
   const installRoot = path.join(
     options.baseDir,
     "tools",
-    "chrome-headless-shell",
+    flavor.directory,
     release?.platform ?? `${platform}-${arch}`,
   );
-  const executableName =
-    platform === "win32" ? "chrome-headless-shell.exe" : "chrome-headless-shell";
+  const executableName = flavor.executable(platform);
   const gate = yield* Semaphore.make(1);
   let state: InstallState = { _tag: "idle" };
+  let lastFailure: PreviewBrowserInstallError | undefined;
   const progress = { downloadedBytes: 0, unpacking: false };
 
   // The version directory appears by one rename of a fully unpacked tree, so a
@@ -263,7 +346,8 @@ export const makePreviewBrowser = Effect.fn("PreviewBrowser.make")(function* (
       const unsafe = new PreviewBrowserInstallError({
         detail: "The archive contains an unexpected or unsafe entry.",
       });
-      const root = `chrome-headless-shell-${release.platform}/`;
+      const root = flavor.archiveRoot(release.platform);
+      const inside = (target: string) => target.startsWith(`${destination}${path.sep}`);
       yield* fs.makeDirectory(destination);
       let foundExecutable = false;
       for (;;) {
@@ -272,15 +356,17 @@ export const makePreviewBrowser = Effect.fn("PreviewBrowser.make")(function* (
         const unixMode = entry.externalFileAttributes >>> 16;
         const unixType = unixMode & 0o170000;
         const isDirectory = entry.fileName.endsWith("/");
+        // macOS app bundles link framework versions; only within the bundle.
+        const isSymlink = unixType === 0o120000 && !isDirectory && platform !== "win32";
         // Everything sits under the one top directory, which is stripped.
         const relative = entry.fileName.startsWith(root) ? entry.fileName.slice(root.length) : null;
         const target = relative === null ? null : path.resolve(destination, relative);
         if (
           relative === null ||
           target === null ||
-          (relative !== "" && !target.startsWith(`${destination}${path.sep}`)) ||
+          (relative !== "" && !inside(target)) ||
           relative.split("/").includes("..") ||
-          (unixType !== 0 && unixType !== (isDirectory ? 0o040000 : 0o100000)) ||
+          (unixType !== 0 && !isSymlink && unixType !== (isDirectory ? 0o040000 : 0o100000)) ||
           (entry.generalPurposeBitFlag & 1) !== 0 ||
           ![0, 8].includes(entry.compressionMethod)
         ) {
@@ -291,6 +377,30 @@ export const makePreviewBrowser = Effect.fn("PreviewBrowser.make")(function* (
           continue;
         }
         yield* fs.makeDirectory(path.dirname(target), { recursive: true });
+        if (isSymlink) {
+          const link = yield* Effect.gen(function* () {
+            const readable = yield* archive.streamEntry(entry);
+            return yield* EffectNodeStream.fromReadable<Uint8Array, PreviewBrowserInstallError>({
+              evaluate: () => readable,
+              onError: wrapFailure("Could not unpack the browser."),
+            }).pipe(
+              Stream.runFold(
+                () => new Uint8Array(),
+                (all, chunk) => new Uint8Array([...all, ...chunk]),
+              ),
+            );
+          }).pipe(Effect.scoped);
+          const linkTarget = new TextDecoder().decode(link);
+          if (
+            linkTarget.length === 0 ||
+            path.isAbsolute(linkTarget) ||
+            !inside(path.resolve(path.dirname(target), linkTarget))
+          ) {
+            return yield* unsafe;
+          }
+          yield* fs.symlink(linkTarget, target);
+          continue;
+        }
         yield* Effect.gen(function* () {
           const readable = yield* archive.streamEntry(entry);
           yield* EffectNodeStream.fromReadable<Uint8Array, PreviewBrowserInstallError>({
@@ -306,7 +416,7 @@ export const makePreviewBrowser = Effect.fn("PreviewBrowser.make")(function* (
       }
       if (!foundExecutable) {
         return yield* new PreviewBrowserInstallError({
-          detail: "The archive does not contain chrome-headless-shell.",
+          detail: `The archive does not contain ${executableName}.`,
         });
       }
     },
@@ -384,6 +494,7 @@ export const makePreviewBrowser = Effect.fn("PreviewBrowser.make")(function* (
           return state;
         }
         const done = yield* Deferred.make<string, PreviewBrowserInstallError>();
+        lastFailure = undefined;
         progress.downloadedBytes = 0;
         progress.unpacking = false;
         const installing: InstallState = { _tag: "installing", done };
@@ -402,6 +513,7 @@ export const makePreviewBrowser = Effect.fn("PreviewBrowser.make")(function* (
                           () => new PreviewBrowserInstallError({ detail: "The install stopped." }),
                         ),
                       };
+                  lastFailure = state._tag === "failed" ? state.error : undefined;
                 }),
               )
               .pipe(Effect.andThen(Deferred.done(done, exit))),
@@ -453,7 +565,35 @@ export const makePreviewBrowser = Effect.fn("PreviewBrowser.make")(function* (
 
   const installed = release === null ? Effect.succeedNone : installedExecutable(release);
 
-  return PreviewBrowser.of({ executable, installed });
+  const status: PreviewBrowser["Service"]["status"] = Effect.gen(function* () {
+    if (release === null)
+      return {
+        state: "unsupported",
+        detail: new PreviewBrowserUnsupportedError({ platform, arch }).message,
+      };
+    if (Option.isSome(yield* installed))
+      return { state: "ready", detail: "The preview browser is installed." };
+    if (state._tag === "installing")
+      return {
+        state: "installing",
+        detail: new PreviewBrowserInstallingError({ ...progress, totalBytes: release.bytes })
+          .message,
+      };
+    if (lastFailure !== undefined) return { state: "failed", detail: lastFailure.message };
+    return {
+      state: "missing",
+      detail: "Cogenly downloads its browser on first use. Choose Fix to install it now.",
+    };
+  });
+  return { executable, installed, status };
+});
+
+export const makePreviewBrowser = Effect.fn("PreviewBrowser.make")(function* (
+  options: Omit<PreviewBrowserOptions, "flavor" | "release">,
+) {
+  const shell = yield* makePreviewBrowserInstaller({ ...options, flavor: "headless-shell" });
+  const chrome = yield* makePreviewBrowserInstaller({ ...options, flavor: "chrome" });
+  return PreviewBrowser.of({ ...shell, extensionsExecutable: chrome.executable });
 });
 
 export const layer = Layer.effect(

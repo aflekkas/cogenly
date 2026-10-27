@@ -22,7 +22,7 @@ export function NotificationSettings() {
       {...searchableSetting("thread-notifications")}
       description={
         permissionMessage ??
-        "Alert you when a thread finishes, fails or needs you. Each device asks for permission."
+        "Play a sound or notify you when an agent finishes, fails or needs you. Notifications ask each device for permission."
       }
       control={
         <Select
