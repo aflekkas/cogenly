@@ -108,6 +108,7 @@ it.effect(
           background: true,
         });
         expect(started.status).toBe("running");
+        expect(yield* manager.activeAgentCount).toBe(1);
         expect((yield* manager.listAgents("A"))[0]?.label).toContain("agent · echo hello");
         expect(yield* manager.listAgents("B")).toEqual([]);
         expect(
@@ -136,6 +137,7 @@ it.effect(
         expect(process.input).toEqual(["yes\r"]);
         yield* manager.killAgent({ threadId: "A", terminalId: started.terminalId });
         expect(process.signals).toContain("SIGKILL");
+        expect(yield* manager.activeAgentCount).toBe(0);
         expect(
           (yield* manager.readAgent({ threadId: "A", terminalId: started.terminalId })).status,
         ).toBe("exited");

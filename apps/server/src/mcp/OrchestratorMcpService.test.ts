@@ -235,7 +235,22 @@ const crossMachineFixture = (
           ? Effect.fail(
               new ThreadRemoteError({ reason: "offline", detail: "Old server did not answer." }),
             )
-          : Effect.succeed(Option.some(remote(machine))),
+          : Effect.succeed(
+              Option.some({
+                providers: remote(machine),
+                resources: {
+                  sampledAt: 42,
+                  cpuCores: 12,
+                  loadAverage1m: 2,
+                  loadAverage5m: 1,
+                  availableMemoryBytes: 1024,
+                  totalMemoryBytes: 4096,
+                  freeDiskBytes: 8192,
+                  activeAgentRuns: 20,
+                  activeAgentTerminals: 3,
+                },
+              }),
+            ),
     }),
   );
   const scope = {
@@ -323,6 +338,13 @@ it.effect("capabilities list each paired machine's providers compactly", () => {
     Effect.gen(function* () {
       const service = yield* Orchestrator.OrchestratorMcpService;
       const { machines } = yield* service.capabilities(fixture.scope);
+      expect(machines?.[0]?.resources).toMatchObject({
+        cpuCores: 12,
+        loadAverage1m: 2,
+        activeAgentRuns: 20,
+        activeAgentTerminals: 3,
+      });
+      expect(machines?.[1]?.resources).toBeUndefined();
       expect(
         machines?.map(({ name, catalog, catalogError }) => ({ name, catalog, catalogError })),
       ).toEqual([

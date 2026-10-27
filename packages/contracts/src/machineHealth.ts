@@ -1,3 +1,4 @@
+import { MachineResourcesSnapshot } from "./resourceTelemetry.ts";
 import * as Schema from "effect/Schema";
 
 import {
@@ -128,6 +129,7 @@ export const MachineHealthCheck = Schema.Struct({
 export type MachineHealthCheck = typeof MachineHealthCheck.Type;
 
 export const MachineHealthReport = Schema.Struct({
+  resources: Schema.optional(MachineResourcesSnapshot),
   environmentId: EnvironmentId,
   machineName: TrimmedNonEmptyString,
   status: MachineHealthStatus,

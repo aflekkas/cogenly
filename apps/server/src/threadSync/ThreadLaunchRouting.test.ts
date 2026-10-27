@@ -262,6 +262,19 @@ it.live(
         "-m",
         "local commit",
       ]);
+      const originRoot = path.join(root, "origin");
+      yield* execute(sourceRoot, ["clone", "--bare", sourceRoot, originRoot]);
+      yield* execute(sourceRoot, ["remote", "add", "origin", originRoot]);
+      yield* execute(sourceRoot, [
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "unpublished",
+      ]);
       const revision = (yield* git.resolveCommit({ cwd: sourceRoot, revision: "HEAD" })).commitSha;
       const hub = yield* startThreadMachine(
         "bundle-source",
@@ -289,11 +302,15 @@ it.live(
             Effect.gen(function* () {
               yield* fs.makeDirectory(targetRoot);
               yield* execute(targetRoot, ["init", "--initial-branch=main"]);
+              yield* execute(targetRoot, ["remote", "add", "origin", originRoot]);
               ready = true;
             }).pipe(Effect.orDie),
         },
       );
       yield* pair(hub, target);
+      expect(
+        Option.getOrThrow(yield* hub.remoteLaunch.catalog(target.environmentId)).repositoryTransfer,
+      ).toBe("remote-delta-v1");
       yield* addRacing(hub, true);
       yield* addRacing(target, false);
       const launched = yield* hub.remoteLaunch.launch(
@@ -316,5 +333,42 @@ it.live(
         ),
       ),
     ),
+  30000,
+);
+
+it.live(
+  "relays the target's optional resource snapshot through the hub",
+  () =>
+    Effect.gen(function* () {
+      const resources = {
+        sampledAt: 42,
+        cpuCores: 12,
+        loadAverage1m: 2,
+        loadAverage5m: 1,
+        availableMemoryBytes: 1000,
+        totalMemoryBytes: 2000,
+        activeAgentRuns: 20,
+      };
+      const hub = yield* startThreadMachine("resources-hub", "cloud-server");
+      const laptop = yield* startThreadMachine("resources-laptop", "computer");
+      const target = yield* startThreadMachine(
+        "resources-target",
+        "computer",
+        undefined,
+        undefined,
+        false,
+        undefined,
+        false,
+        { resources },
+      );
+      yield* pair(hub, laptop);
+      yield* pair(hub, target);
+      expect(
+        Option.getOrThrow(yield* laptop.remoteLaunch.catalog(target.environmentId)).resources,
+      ).toEqual(resources);
+      expect(
+        Option.getOrThrow(yield* laptop.remoteLaunch.catalog(hub.environmentId)).resources,
+      ).toBeUndefined();
+    }).pipe(Effect.scoped),
   30000,
 );

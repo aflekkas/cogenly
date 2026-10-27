@@ -1,3 +1,4 @@
+import * as MachineResources from "../resourceTelemetry/MachineResources.ts";
 import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
 /**
  * ThreadLaunchRouting: starting a new thread on another paired machine. The
@@ -135,6 +136,7 @@ const make = Effect.gen(function* () {
   const self = replication.environmentId;
   const routing = yield* ThreadRouting.ThreadRouting;
   const providers = yield* Effect.serviceOption(ProviderRegistry.ProviderRegistry);
+  const resources = yield* Effect.serviceOption(MachineResources.MachineResources);
   const orchestrator = yield* Effect.serviceOption(Orchestrator.OrchestratorV2);
   const scheduler = yield* Scheduler.Scheduler;
   const crypto = yield* Crypto.Crypto;
@@ -306,13 +308,17 @@ const make = Effect.gen(function* () {
       ? Effect.succeed(Option.none())
       : routing
           .callMachine(machine, ThreadMachineCatalog, { target: machine }, "30 seconds")
-          .pipe(Effect.map((result) => Option.some(result.providers))),
+          .pipe(Effect.map((result) => Option.some(result))),
   );
   yield* channels.register(ThreadMachineCatalog, (payload) =>
     payload.target === self
-      ? Option.isNone(providers)
-        ? Effect.succeed({ providers: [] })
-        : providers.value.getProviders.pipe(Effect.map((providers) => ({ providers })))
+      ? Effect.gen(function* () {
+          return {
+            providers: Option.isNone(providers) ? [] : yield* providers.value.getProviders,
+            ...(Option.isNone(resources) ? {} : { resources: yield* resources.value.read }),
+            repositoryTransfer: "remote-delta-v1" as const,
+          };
+        })
       : routing.callMachine(payload.target, ThreadMachineCatalog, payload, "30 seconds"),
   );
 
@@ -523,12 +529,19 @@ const make = Effect.gen(function* () {
           detail: `Only a new thread can start on ${name}.`,
         });
       const project = yield* portableProject(input, name);
+      const remoteDelta =
+        input.repositorySource === undefined
+          ? false
+          : Option.getOrUndefined(yield* registry.catalog(machine))?.repositoryTransfer ===
+            "remote-delta-v1";
       const bundle =
         input.repositorySource === undefined
           ? undefined
-          : yield* exportBundle(input.repositorySource.cwd, input.repositorySource.revision).pipe(
-              Effect.provideContext(context),
-            );
+          : yield* exportBundle(
+              input.repositorySource.cwd,
+              input.repositorySource.revision,
+              remoteDelta,
+            ).pipe(Effect.provideContext(context));
       const files = yield* readAttachmentFiles(input.initialMessage?.attachments ?? []).pipe(
         Effect.provideContext(context),
       );
@@ -799,7 +812,7 @@ const make = Effect.gen(function* () {
       const result = yield* routing.callMachine(
         owner.owner,
         ThreadTaskBranch,
-        { target: owner.owner, threadId },
+        { target: owner.owner, threadId, remoteDelta: true },
         LAUNCH_TIMEOUT,
       );
       yield* importBundle(project.value.workspaceRoot, result.bundle, result.branch).pipe(
@@ -843,9 +856,11 @@ const make = Effect.gen(function* () {
         .pipe(Effect.mapError(() => new ThreadRemoteError({ reason: "needs-repository" })));
       return {
         branch: thread.thread.branch,
-        bundle: yield* exportBundle(thread.thread.worktreePath, commit.commitSha).pipe(
-          Effect.provideContext(context),
-        ),
+        bundle: yield* exportBundle(
+          thread.thread.worktreePath,
+          commit.commitSha,
+          payload.remoteDelta === true,
+        ).pipe(Effect.provideContext(context)),
       };
     }),
   );

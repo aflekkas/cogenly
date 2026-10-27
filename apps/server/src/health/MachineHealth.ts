@@ -1,3 +1,4 @@
+import * as MachineResources from "../resourceTelemetry/MachineResources.ts";
 import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 // @effect-diagnostics nodeBuiltinImport:off -- Effect's FileSystem has no statfs; free disk space needs node:fs.
 /**
@@ -287,6 +288,7 @@ const make = Effect.gen(function* () {
     FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
   >();
   const agentProcesses = yield* AgentProcesses.AgentProcesses;
+  const resources = yield* Effect.serviceOption(MachineResources.MachineResources);
 
   const freeSpace = yield* Effect.cachedWithTTL(
     Effect.tryPromise(() => NodeFSP.statfs(config.stateDir)).pipe(
@@ -559,7 +561,7 @@ const make = Effect.gen(function* () {
       ],
       { concurrency: "unbounded" },
     );
-    return buildReport({
+    const report = buildReport({
       environmentId: self.environmentId,
       machineName: self.name,
       observedAt: now,
@@ -567,6 +569,10 @@ const make = Effect.gen(function* () {
       uptimeSeconds: Math.floor(process.uptime()),
       checks,
     });
+    return {
+      ...report,
+      ...(Option.isNone(resources) ? {} : { resources: yield* resources.value.read }),
+    };
   }).pipe(Effect.withSpan("MachineHealth.evaluate"));
 
   // The newest report whose content changed; subscribers share it.
