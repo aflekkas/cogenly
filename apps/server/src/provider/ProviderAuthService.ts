@@ -64,7 +64,7 @@ export class ProviderAuthService extends Context.Service<
       ownerSessionId: string,
     ) => Effect.Effect<ProviderAuthState, ProviderSetupError>;
     readonly cancel: (
-      input: ProviderAuthTarget & { readonly flowId: string },
+      input: ProviderAuthTarget & { readonly flowId?: string | null },
       ownerSessionId: string,
     ) => Effect.Effect<ProviderAuthState, ProviderSetupError>;
     readonly logout: (

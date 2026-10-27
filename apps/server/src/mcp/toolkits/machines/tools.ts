@@ -52,7 +52,7 @@ export const MachinesToolkit = Toolkit.make(
     }),
     success: ProviderAuthState,
     description:
-      "Sign a provider (Claude, Codex) in on this machine or a paired targetEnvironmentId, or read, cancel or sign out its login. From a thread, start posts a guided sign-in card in the thread and returns at once: the user opens the sign-in page and enters any code on their own device, and this thread is told when that machine is signed in, even after this turn ends. Don't ask for links or codes in chat. Without a thread, start runs the official CLI login: read for browser instructions and completion, and pass a Claude browser code collected with request_secret as codeRef on a respond request. Each machine obtains its own login, so rotating refresh tokens are never copied. Never print credentials. No approval gate.",
+      "Sign a provider (Claude, Codex) in on this machine or a paired targetEnvironmentId, or read, cancel or sign out its login. Cancel may omit flowId (or pass null) to stop the active sign-in even when read hides its details. From a thread, start posts a guided sign-in card in the thread and returns at once: the user opens the sign-in page and enters any code on their own device, and this thread is told when that machine is signed in, even after this turn ends. Don't ask for links or codes in chat. Without a thread, start runs the official CLI login: read for browser instructions and completion, and pass a Claude browser code collected with request_secret as codeRef on a respond request. Each machine obtains its own login, so rotating refresh tokens are never copied. Never print credentials. No approval gate.",
   }).annotate(Tool.Destructive, false),
   Tool.make("machines_list", {
     failure: OrchestratorMcpFailure,

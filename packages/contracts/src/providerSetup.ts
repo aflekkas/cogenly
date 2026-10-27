@@ -157,7 +157,8 @@ export type ProviderAuthCompleteInput = typeof ProviderAuthCompleteInput.Type;
 export const ProviderAuthCancelInput = Schema.Struct({
   targetEnvironmentId: Schema.optionalKey(EnvironmentId),
   instanceId: ProviderInstanceId,
-  flowId: SetupOperationId,
+  // Omit (or pass null) to stop the active sign-in, including one owned by another client.
+  flowId: Schema.optionalKey(Schema.NullOr(SetupOperationId)),
 });
 export type ProviderAuthCancelInput = typeof ProviderAuthCancelInput.Type;
 

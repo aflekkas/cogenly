@@ -42,7 +42,7 @@ export interface ProviderAuthController {
   ) => Effect.Effect<ProviderAuthState, ProviderSetupError>;
   readonly cancel: (
     ownerSessionId: string,
-    flowId: string,
+    flowId?: string | null,
   ) => Effect.Effect<ProviderAuthState, ProviderSetupError>;
   readonly respond?: (
     ownerSessionId: string,

@@ -2,7 +2,11 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
 import { CLIENT_GUARDED_RPC_SCOPES } from "./clientRpcPermissions.ts";
-import { ProviderAuthResponse, ProviderAuthState } from "./providerSetup.ts";
+import {
+  ProviderAuthCancelInput,
+  ProviderAuthResponse,
+  ProviderAuthState,
+} from "./providerSetup.ts";
 import { WS_METHODS } from "./rpc.ts";
 
 const decodeResponse = Schema.decodeUnknownSync(ProviderAuthResponse);
@@ -65,4 +69,16 @@ describe("provider auth state", () => {
       methods: [method],
     });
   });
+});
+
+it("accepts cancellation without private flow details and still validates supplied IDs", () => {
+  const decode = Schema.decodeUnknownSync(ProviderAuthCancelInput);
+  for (const input of [
+    { instanceId: "claudeAgent", targetEnvironmentId: "contabo" },
+    { instanceId: "claudeAgent", targetEnvironmentId: "contabo", flowId: null },
+    { instanceId: "claudeAgent", targetEnvironmentId: "contabo", flowId: "flow" },
+  ])
+    expect(decode(input)).toEqual(input);
+  for (const flowId of ["", 42, {}])
+    expect(() => decode({ instanceId: "claudeAgent", flowId })).toThrow();
 });

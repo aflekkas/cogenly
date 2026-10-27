@@ -146,13 +146,17 @@ it.effect(
       expect(own.interaction?.type).toBe("credentials");
       const stranger = yield* mac.manageSignIn({ operation: "read", input }, "client-two");
       expect(stranger.interaction).toBeNull();
+      expect(stranger.flowId).toBeNull();
       const denied = yield* mac
         .cancel({ ...input, flowId: flow.flowId! }, "client-two")
         .pipe(Effect.exit);
       expect(Exit.isFailure(denied)).toBe(true);
-      expect((yield* mac.cancel({ ...input, flowId: flow.flowId! }, "client-one")).phase).toBe(
-        "cancelled",
-      );
+      expect(
+        (yield* mac.manageSignIn(
+          { operation: "cancel", input: { ...input, flowId: null } },
+          "client-two",
+        )).phase,
+      ).toBe("cancelled");
       const retry = yield* mac.start(input, "client-one");
       yield* controller.subscribe("hub:macbook:client-one").pipe(
         Stream.filter((state) => state.flowId === retry.flowId && state.phase === "waiting"),

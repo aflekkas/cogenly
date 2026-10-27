@@ -435,7 +435,12 @@ export const make = Effect.fn("ProviderAuthFlow.make")(function* (options: {
       Effect.gen(function* () {
         const flow = yield* lock.withPermit(
           Effect.gen(function* () {
-            const flow = yield* requireFlow(owner, id);
+            // Auth-management permission is checked by every transport. A client without
+            // the private flow details may still stop the machine's active sign-in.
+            const flow =
+              id == null && operation === "auth" && active
+                ? active
+                : yield* requireFlow(owner, id ?? "");
             yield* publish(flow, {
               phase: "cancelled",
               interaction: null,
@@ -443,6 +448,8 @@ export const make = Effect.fn("ProviderAuthFlow.make")(function* (options: {
               expiresAt: null,
               message: "Sign-in cancelled.",
             });
+            // No private instructions remain; starter and canceller both need the result.
+            yield* SubscriptionRef.update(snapshot, (current) => ({ ...current, owner: null }));
             active = undefined;
             operation = "stopping";
             return flow;

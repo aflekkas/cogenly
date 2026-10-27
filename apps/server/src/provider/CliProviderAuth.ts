@@ -1,5 +1,6 @@
 import * as NodeUtil from "node:util";
 import { ProviderSetupError, type ProviderInstanceId } from "@cogenly/contracts";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
@@ -33,8 +34,9 @@ export function cliLoginInteraction(driver: "codex" | "claudeAgent", output: str
     }
     if (
       driver === "claudeAgent" &&
-      ["claude.ai", "platform.claude.com", "console.anthropic.com"].includes(url.hostname) &&
-      url.pathname === "/oauth/authorize" &&
+      ((url.hostname === "claude.com" && url.pathname === "/cai/oauth/authorize") ||
+        (["claude.ai", "platform.claude.com", "console.anthropic.com"].includes(url.hostname) &&
+          url.pathname === "/oauth/authorize")) &&
       !["access_token", "refresh_token", "id_token"].some((key) => url.searchParams.has(key))
     ) {
       return { type: "browser" as const, id: "cli-login", url: url.href, requiresConsent: false };
@@ -87,54 +89,81 @@ export const make = Effect.fn("CliProviderAuth.make")(function* (input: {
     defaultMethodId: "cli",
     authenticate: (_method, context) =>
       Effect.gen(function* () {
-        const stdin = yield* Queue.unbounded<Uint8Array>();
-        const child = yield* spawner.spawn(
-          command(input.driver === "codex" ? ["login", "--device-auth"] : ["auth", "login"]),
+        const instructions = yield* Deferred.make<void>();
+        const login = Effect.gen(function* () {
+          const stdin = yield* Queue.unbounded<Uint8Array>();
+          // Stop only the process we spawned, escalating if it ignores termination.
+          const child = yield* Effect.acquireRelease(
+            spawner.spawn(
+              command(input.driver === "codex" ? ["login", "--device-auth"] : ["auth", "login"]),
+            ),
+            (child) => child.kill({ forceKillAfter: 1_000 }).pipe(Effect.ignore),
+          );
+          yield* Stream.fromQueue(stdin).pipe(Stream.run(child.stdin), Effect.forkScoped);
+          let buffer = "";
+          let published = false;
+          yield* child.all.pipe(
+            Stream.decodeText(),
+            Stream.runForEach((chunk) =>
+              Effect.gen(function* () {
+                // Bound memory even if a CLI fails noisily. Do not publish raw terminal output.
+                buffer = (buffer + chunk).slice(-32_768);
+                const interaction = cliLoginInteraction(input.driver, buffer);
+                if (published || !interaction) return;
+                published = true;
+                yield* Deferred.succeed(instructions, undefined);
+                if (input.driver === "claudeAgent") {
+                  // The CLI's documented SSH fallback accepts the browser's one-time code on stdin.
+                  yield* context.setInteraction(
+                    {
+                      type: "credentials",
+                      url: interaction.url,
+                      id: "cli-code",
+                      fields: [{ name: "code", label: "Code from the sign-in page", secret: true }],
+                    },
+                    (response) => {
+                      if (
+                        response.type !== "credentials" ||
+                        !response.values.code?.trim() ||
+                        /[\r\n]/.test(response.values.code)
+                      )
+                        return Effect.fail(fail());
+                      return Queue.offer(
+                        stdin,
+                        new TextEncoder().encode(`${response.values.code.trim()}\n`),
+                      ).pipe(Effect.asVoid);
+                    },
+                  );
+                } else {
+                  yield* context.setInteraction(interaction);
+                }
+              }),
+            ),
+          );
+          const exitCode = yield* child.exitCode;
+          if (exitCode !== 0) return yield* fail();
+          yield* input.onChanged;
+        }).pipe(
+          Effect.scoped,
+          Effect.mapError(() => fail()),
         );
-        yield* Stream.fromQueue(stdin).pipe(Stream.run(child.stdin), Effect.forkScoped);
-        let buffer = "";
-        let published = false;
-        yield* child.all.pipe(
-          Stream.decodeText(),
-          Stream.runForEach((chunk) =>
-            Effect.gen(function* () {
-              // Bound memory even if a CLI fails noisily. Do not publish raw terminal output.
-              buffer = (buffer + chunk).slice(-32_768);
-              const interaction = cliLoginInteraction(input.driver, buffer);
-              if (published || !interaction) return;
-              published = true;
-              if (input.driver === "claudeAgent") {
-                // The CLI's documented SSH fallback accepts the browser's one-time code on stdin.
-                yield* context.setInteraction(
-                  {
-                    type: "credentials",
-                    url: interaction.url,
-                    id: "cli-code",
-                    fields: [{ name: "code", label: "Code from the sign-in page", secret: true }],
-                  },
-                  (response) => {
-                    if (
-                      response.type !== "credentials" ||
-                      !response.values.code?.trim() ||
-                      /[\r\n]/.test(response.values.code)
-                    )
-                      return Effect.fail(fail());
-                    return Queue.offer(
-                      stdin,
-                      new TextEncoder().encode(`${response.values.code.trim()}\n`),
-                    ).pipe(Effect.asVoid);
-                  },
-                );
-              } else {
-                yield* context.setInteraction(interaction);
-              }
-            }),
-          ),
+        // A CLI that never emits usable instructions must not leave a spinning card.
+        const startup = Deferred.await(instructions).pipe(
+          Effect.timeoutOrElse({
+            duration: 30_000,
+            orElse: () =>
+              Effect.fail(
+                new ProviderSetupError({
+                  instanceId: input.instanceId,
+                  operation: "login",
+                  detail: "The CLI did not provide a sign-in link within 30 seconds. Start again.",
+                }),
+              ),
+          }),
+          Effect.andThen(Effect.never),
         );
-        const exitCode = yield* child.exitCode;
-        if (exitCode !== 0) return yield* fail();
-        yield* input.onChanged;
-      }).pipe(Effect.mapError(() => fail())),
+        yield* Effect.raceFirst(login, startup);
+      }),
     logout: spawner
       .exitCode(command(input.driver === "codex" ? ["logout"] : ["auth", "logout"]))
       .pipe(
