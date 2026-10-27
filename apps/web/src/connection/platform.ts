@@ -51,7 +51,7 @@ import { clearComposerDraftsEnvironment } from "../composerDraftStore";
 import { isHostedStaticApp } from "../hostedPairing";
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { appAtomRegistry } from "../rpc/atomRegistry";
-import { acknowledgeRpcRequest, trackRpcRequestSent } from "../rpc/requestLatencyState";
+import { observeRpcRequest } from "../rpc/observeRequestLatency";
 import {
   desktopLocalConnectionId,
   readDesktopSecondaryBootstrapsResult,
@@ -59,8 +59,6 @@ import {
 } from "./desktopLocal";
 import * as ConnectionStorage from "./storage";
 import { clientPresentationMetadata } from "./clientMetadata";
-
-let nextObservedRpcRequestId = 0;
 
 function currentNetworkStatus(): "unknown" | "offline" | "online" {
   if (typeof navigator === "undefined") {
@@ -755,15 +753,7 @@ const layerEnvironmentOwnedDataCleanup = Layer.succeed(
 const layerRpcRequestObserver = Layer.succeed(
   EnvironmentRpcRequestObserver,
   EnvironmentRpcRequestObserver.of({
-    observe: ({ environmentId, method }) =>
-      Effect.sync(() => {
-        nextObservedRpcRequestId += 1;
-        const requestId = `${environmentId}:${nextObservedRpcRequestId}`;
-        trackRpcRequestSent(requestId, method, `${method} · ${environmentId}`);
-        return Effect.sync(() => {
-          acknowledgeRpcRequest(requestId);
-        });
-      }),
+    observe: observeRpcRequest,
   }),
 );
 

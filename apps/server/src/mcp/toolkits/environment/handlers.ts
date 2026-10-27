@@ -1,3 +1,5 @@
+import * as TraceDiagnostics from "../../../diagnostics/TraceDiagnostics.ts";
+import * as ServerConfig from "../../../config.ts";
 import {
   AuthOrchestrationOperateScope,
   type MachineHealthError,
@@ -101,6 +103,16 @@ const cliCommand = (input: {
   );
 
 export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
+  action_latency: McpToolAccess.reads(() =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const diagnostics = yield* TraceDiagnostics.TraceDiagnostics;
+      return yield* diagnostics.readLatency({
+        traceFilePath: config.serverTracePath,
+        maxFiles: config.traceMaxFiles,
+      });
+    }),
+  ),
   storage_status: McpToolAccess.reads(() =>
     StorageCleanup.StorageCleanup.pipe(
       Effect.flatMap((storage) => storage.status),

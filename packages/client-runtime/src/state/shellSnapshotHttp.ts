@@ -1,3 +1,4 @@
+import { EnvironmentRpcRequestObserver } from "../rpc/client.ts";
 import { EnvironmentHttpCommonError } from "@cogenly/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -53,12 +54,24 @@ export const fetchEnvironmentShellSnapshot = Effect.fn(
     // rows. Every declared error is an `EnvironmentHttpCommonError`, so decoding one keeps
     // the error the credential retry checks for.
     request: ({ client, headers }) =>
-      client
-        .shellSnapshot({
-          headers: withOrchestrationProtocolHeader(headers),
-          responseMode: "response-only",
-        })
-        .pipe(Effect.flatMap(decodeShellSnapshotResponse)),
+      Effect.gen(function* () {
+        const observer = yield* EnvironmentRpcRequestObserver;
+        const complete = yield* observer.observe({
+          environmentId: input.prepared.environmentId,
+          method: "orchestration.shellSnapshot",
+          input: {},
+          remote: input.prepared.target._tag !== "PrimaryConnectionTarget",
+        });
+        return yield* client
+          .shellSnapshot({
+            headers: withOrchestrationProtocolHeader(headers),
+            responseMode: "response-only",
+          })
+          .pipe(
+            Effect.flatMap(decodeShellSnapshotResponse),
+            Effect.onExit((exit) => complete(exit)),
+          );
+      }),
   });
 });
 

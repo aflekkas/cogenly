@@ -1,3 +1,10 @@
+import {
+  actionTimestamp,
+  beginAction,
+  finishAction,
+  finishActionAfterPaint,
+  finishMessageActionsAfterPaint,
+} from "../observability/actionLatency";
 import { useNewThreadPending } from "../hooks/useHandleNewThread";
 import { RepoMcpTrustPrompt } from "./chat/RepoMcpTrustPrompt";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
@@ -1287,6 +1294,13 @@ export default function ChatView(props: ChatViewProps) {
     status: threadStatus,
   });
   const threadDetailLoading = threadSyncPhase === "loading";
+  useEffect(() => {
+    if (!threadDetailLoading && serverProjection !== null) {
+      finishActionAfterPaint("thread.open", `${environmentId}:${serverProjection.thread.id}`);
+      finishMessageActionsAfterPaint(environmentId, serverProjection.messages);
+    }
+  }, [environmentId, serverProjection, threadDetailLoading]);
+
   // Latest provider-reported context usage (#8144): the newest report wins;
   // stale turns keep the meter alive between turns.
   const activeThreadLiveTokenUsage = useMemo(
@@ -4076,11 +4090,13 @@ export default function ChatView(props: ChatViewProps) {
       !readEnvironmentScope(activeThread.environmentId, AuthOrchestrationOperateScope)
     )
       return;
+    beginAction("turn.stop", activeThreadKey ?? "");
     const result = await interruptThreadTurn({
       environmentId,
       input: { threadId: activeThread.id },
     });
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      finishAction("turn.stop", activeThreadKey ?? "", "failure");
       const error = squashAtomCommandFailure(result);
       setThreadError(
         activeThread.id,
@@ -5678,11 +5694,13 @@ export default function ChatView(props: ChatViewProps) {
     if (!activeThread || !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope))
       return;
     const requestKey = `${environmentId}:${activeThread.id}`;
+    beginAction("turn.stop", requestKey);
     setStoppingBackgroundWorkKey(requestKey);
     const result = await interruptThreadTurn({
       environmentId,
       input: { threadId: activeThread.id },
     });
+    if (result._tag === "Failure") finishAction("turn.stop", requestKey, "failure");
     // Acceptance does not confirm termination. Allow retry while the provider
     // finishes stopping the tasks or reports a failure.
     setStoppingBackgroundWorkKey((current) => (current === requestKey ? null : current));
@@ -7113,6 +7131,7 @@ export default function ChatView(props: ChatViewProps) {
       image: ComposerImageAttachment | null;
     },
   ) => {
+    const actionStartedAt = actionTimestamp();
     e?.preventDefault();
     // Typed out in full rather than picked from the menu. Attachments or contexts
     // mean the user is sending a prompt, so those go through as usual.
@@ -7758,10 +7777,14 @@ export default function ChatView(props: ChatViewProps) {
       });
     }
 
+    const sendLatencyAction = shouldQueueBehindActiveRun ? "message.queue" : "message.send";
+    const sendLatencyKey = `${environmentId}:${messageIdForSend}`;
+    beginAction(sendLatencyAction, sendLatencyKey, actionStartedAt);
     sendInFlightRef.current = true;
     const sendGeneration = ++composerSendGenerationRef.current;
     const attachmentCapabilitiesBeforeUpload = readLiveAttachmentCapabilities();
     if (attachmentCapabilitiesBeforeUpload.fileBlockReason !== null) {
+      finishAction(sendLatencyAction, sendLatencyKey, "failure");
       sendInFlightRef.current = false;
       setThreadError(threadIdForSend, attachmentCapabilitiesBeforeUpload.fileBlockReason);
       return;
@@ -7781,11 +7804,13 @@ export default function ChatView(props: ChatViewProps) {
       await awaitAttachmentUploads(composerAttachmentsSnapshot.map((attachment) => attachment.id));
       const attachmentCapabilitiesAfterUpload = readLiveAttachmentCapabilities();
       if (attachmentCapabilitiesAfterUpload.fileBlockReason !== null) {
+        finishAction(sendLatencyAction, sendLatencyKey, "failure");
         sendInFlightRef.current = false;
         setThreadError(threadIdForSend, attachmentCapabilitiesAfterUpload.fileBlockReason);
         return;
       }
       if (getUploadedAttachments({ environmentId, images: composerAttachmentsSnapshot }) === null) {
+        finishAction(sendLatencyAction, sendLatencyKey, "failure");
         sendInFlightRef.current = false;
         setThreadError(threadIdForSend, "Retry or remove failed uploads before sending.");
         return;
@@ -7823,6 +7848,7 @@ export default function ChatView(props: ChatViewProps) {
       !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope) ||
       attachmentCapabilitiesBeforeDispatch.fileBlockReason !== null
     ) {
+      finishAction(sendLatencyAction, sendLatencyKey, "failure");
       sendInFlightRef.current = false;
       setThreadError(
         threadIdForSend,
@@ -8187,6 +8213,8 @@ export default function ChatView(props: ChatViewProps) {
           }
         },
       );
+      if (failedSelections.length > 0) finishAction(sendLatencyAction, sendLatencyKey, "failure");
+      else finishActionAfterPaint(sendLatencyAction, sendLatencyKey);
       return;
     }
     const optimisticAttachments = composerAttachmentsSnapshot.map((attachment) =>
@@ -8581,9 +8609,12 @@ export default function ChatView(props: ChatViewProps) {
         }
       }
     }
+    if (turnStartSucceeded && submissionIntent === "background")
+      finishActionAfterPaint(sendLatencyAction, sendLatencyKey);
     sendInFlightRef.current = false;
     setSetupQueueSendThreadKey((current) => (current === activeThreadKey ? null : current));
     if (!turnStartSucceeded) {
+      finishAction(sendLatencyAction, sendLatencyKey, "failure");
       setDockedDraftHeroThreadKey((currentThreadKey) =>
         currentThreadKey === activeThreadKey ? null : currentThreadKey,
       );

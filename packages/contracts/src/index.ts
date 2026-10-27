@@ -106,3 +106,5 @@ export * from "./browserExtensions.ts";
 
 export * from "./agentFallback.ts";
 export * from "./providerMachineAuth.ts";
+
+export * from "./actionLatency.ts";

@@ -1,3 +1,4 @@
+import { ActionLatencyCoordinator } from "../components/ActionLatencyCoordinator";
 import { SharedClientPreferencesSync } from "../components/SharedClientPreferencesSync";
 import { LiveAgentsProvider } from "../agents/agentsClient";
 import { AgentsCreateHost } from "../agents/AgentsCreateHost";
@@ -235,6 +236,7 @@ function RootRouteView() {
         <CustomSnoozeDialogHost />
         <ProviderSignInDialogHost />
         <SlowRpcRequestToastCoordinator />
+        <ActionLatencyCoordinator />
         <PermissionUpdateNotice />
         {primaryEnvironmentAuthenticated ? <LegacyThreadMigrationToast /> : null}
         <ProjectCloneToastCoordinator />

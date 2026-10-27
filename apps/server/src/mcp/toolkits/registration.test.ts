@@ -1,3 +1,4 @@
+import * as TraceDiagnostics from "../../diagnostics/TraceDiagnostics.ts";
 import * as ProviderAuthService from "../../provider/ProviderAuthService.ts";
 import * as ProviderSignInRequests from "../../provider/ProviderSignInRequests.ts";
 import * as BrowserExtensions from "../../preview/BrowserExtensions.ts";
@@ -121,6 +122,7 @@ const project = {
   deletedAt: null,
 };
 const layerStubServices = Layer.mergeAll(
+  Layer.mock(TraceDiagnostics.TraceDiagnostics)({}),
   Layer.mock(Accounts.Accounts)({
     list: () => Effect.succeed({ accounts: [], statuses: [], services: [] }),
   }),
@@ -679,6 +681,7 @@ const smokeCases = [
       "environment_add",
       "environment_preferences_update",
       "environment_read",
+      "action_latency",
       "machine_health",
       "machine_health_fix",
       "machine_security_status",

@@ -1,3 +1,6 @@
+import { useAtomValue } from "@effect/atom-react";
+import { serverEnvironment } from "../state/server";
+import { finishActionAfterPaint } from "../observability/actionLatency";
 import {
   Outlet,
   createFileRoute,
@@ -63,6 +66,9 @@ function SettingsContentLayout() {
   const navigateToMainApp = useNavigateToMainApp();
   useEscapeToGoBack(navigateToMainApp);
   const { search, environment } = useSettingsScope();
+  const config = useAtomValue(
+    serverEnvironment.configValueAtom(environment?.environmentId ?? null),
+  );
   const contentScopeKey = MACHINE_SETTINGS_PATHS.has(location.pathname)
     ? environment?.environmentId
     : JSON.stringify(search);
@@ -72,8 +78,14 @@ function SettingsContentLayout() {
   // into Settings (the rail's Settings button).
   const sectionRouteId = useChildMatches({ select: (matches) => matches[0]?.routeId });
   useLayoutEffect(() => {
-    if (sectionRouteId !== undefined) settleModeSwitchMainPane();
+    if (sectionRouteId !== undefined) {
+      settleModeSwitchMainPane();
+      finishActionAfterPaint("settings.open");
+    }
   }, [sectionRouteId]);
+  useLayoutEffect(() => {
+    if (sectionRouteId !== undefined && config !== null) finishActionAfterPaint("settings.load");
+  }, [sectionRouteId, config]);
 
   return (
     // Clips vertically only, so content gliding past the pane's new left edge

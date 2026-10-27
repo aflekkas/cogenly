@@ -1,4 +1,6 @@
+import { makeActionLatencyAggregator } from "./actionLatency.ts";
 import type {
+  ActionLatencyReport,
   ServerTraceDiagnosticsErrorKind,
   ServerTraceDiagnosticsFailureSummary,
   ServerTraceDiagnosticsLogEvent,
@@ -55,12 +57,15 @@ export class TraceFileReadError extends Schema.TaggedError<TraceFileReadError>()
   }
 }
 
+type TraceDiagnosticsResult = ServerTraceDiagnosticsResult & {
+  readonly actionLatency: ActionLatencyReport;
+};
+
 export class TraceDiagnostics extends Context.Service<
   TraceDiagnostics,
   {
-    readonly read: (
-      options: TraceDiagnosticsOptions,
-    ) => Effect.Effect<ServerTraceDiagnosticsResult>;
+    readonly read: (options: TraceDiagnosticsOptions) => Effect.Effect<TraceDiagnosticsResult>;
+    readonly readLatency: (options: TraceDiagnosticsOptions) => Effect.Effect<ActionLatencyReport>;
   }
 >()("cogenly-server/diagnostics/TraceDiagnostics") {}
 
@@ -136,7 +141,7 @@ function makeEmptyDiagnostics(input: {
   readonly slowSpanThresholdMs: number;
   readonly error?: TraceDiagnosticsErrorSummary;
   readonly partialFailure?: boolean;
-}): ServerTraceDiagnosticsResult {
+}): TraceDiagnosticsResult {
   return {
     traceFilePath: input.traceFilePath,
     scannedFilePaths: [...input.scannedFilePaths],
@@ -150,6 +155,7 @@ function makeEmptyDiagnostics(input: {
     slowSpanThresholdMs: input.slowSpanThresholdMs,
     slowSpanCount: 0,
     logLevelCounts: {},
+    actionLatency: makeActionLatencyAggregator(DateTime.toEpochMillis(input.readAt)).finish(),
     topSpansByCount: [],
     slowestSpans: [],
     commonFailures: [],
@@ -205,9 +211,8 @@ const latestSeenFirst = (
  * Folds trace NDJSON into diagnostics. Call `addLine` once per line as the
  * rotated files stream in, then `finish` for the result.
  */
-export function makeTraceDiagnosticsAggregator(
-  slowSpanThresholdMs = DEFAULT_SLOW_SPAN_THRESHOLD_MS,
-) {
+function makeTraceDiagnosticsAggregator(slowSpanThresholdMs: number, readAtEpochMs: number) {
+  const latency = makeActionLatencyAggregator(readAtEpochMs);
   let parseErrorCount = 0;
   let recordCount = 0;
   let failureCount = 0;
@@ -254,6 +259,7 @@ export function makeTraceDiagnosticsAggregator(
       return;
     }
 
+    latency.addRecord(parsed);
     recordCount += 1;
     firstSpanAt =
       startedAt && (firstSpanAt === null || DateTime.isLessThan(startedAt, firstSpanAt))
@@ -339,7 +345,7 @@ export function makeTraceDiagnosticsAggregator(
     readonly readAt: DateTime.Utc;
     readonly error?: TraceDiagnosticsErrorSummary;
     readonly partialFailure?: boolean;
-  }): ServerTraceDiagnosticsResult => {
+  }): TraceDiagnosticsResult => {
     const topSpansByCount: ServerTraceDiagnosticsSpanSummary[] = [...spansByName.entries()]
       .map(([name, span]) => ({
         name,
@@ -367,6 +373,7 @@ export function makeTraceDiagnosticsAggregator(
       slowSpanThresholdMs,
       slowSpanCount,
       logLevelCounts,
+      actionLatency: latency.finish(),
       topSpansByCount,
       slowestSpans,
       commonFailures: [...failuresByKey.values()]
@@ -424,7 +431,10 @@ export const make = Effect.gen(function* () {
       const readAt = options.readAt ?? (yield* DateTime.now);
       const slowSpanThresholdMs = options.slowSpanThresholdMs ?? DEFAULT_SLOW_SPAN_THRESHOLD_MS;
       const paths = toRotatedTracePaths(options.traceFilePath, options.maxFiles);
-      const aggregator = makeTraceDiagnosticsAggregator(slowSpanThresholdMs);
+      const aggregator = makeTraceDiagnosticsAggregator(
+        slowSpanThresholdMs,
+        DateTime.toEpochMillis(readAt),
+      );
       const results = yield* Effect.forEach(
         paths,
         (path) =>
@@ -476,7 +486,10 @@ export const make = Effect.gen(function* () {
     },
   );
 
-  return TraceDiagnostics.of({ read });
+  return TraceDiagnostics.of({
+    read,
+    readLatency: (options) => read(options).pipe(Effect.map((result) => result.actionLatency)),
+  });
 });
 
 export const layer = Layer.effect(TraceDiagnostics, make);

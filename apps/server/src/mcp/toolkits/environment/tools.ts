@@ -1,5 +1,8 @@
+import * as TraceDiagnostics from "../../../diagnostics/TraceDiagnostics.ts";
+import * as ServerConfig from "../../../config.ts";
 import {
   BackgroundActivityProfile,
+  ActionLatencyReport,
   BackgroundActivityProfileSelection,
   DesktopCliCommandLocation,
   DesktopCliCommandStateSchema,
@@ -62,6 +65,19 @@ const shared = {
     ThreadCommandExecutor.ThreadCommandExecutor,
   ],
 };
+const ActionLatencyTool = Tool.make("action_latency", {
+  ...shared,
+  dependencies: [
+    ...shared.dependencies,
+    TraceDiagnostics.TraceDiagnostics,
+    ServerConfig.ServerConfig,
+  ],
+  description:
+    "Read this machine's recent action latency budgets, p50/p95, breach counts and slow server spans from the existing rotating server.trace.ndjson files. Covers the last 30 minutes; unmeasured means no completed sample, never a pass. Client visible timings include paint; ack timings end at the RPC response. Server spans include trace/span IDs for breakdown queries. Subscription lifetime is excluded. Run on each machine to inspect its local log; browser spans are exported to the primary environment.",
+  success: ActionLatencyReport,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false);
 const EnvironmentReadTool = Tool.make("environment_read", {
   ...shared,
   description:
@@ -214,6 +230,7 @@ const StorageCleanupTool = Tool.make("storage_cleanup", {
 }).annotate(Tool.Destructive, true);
 
 export const EnvironmentToolkit = Toolkit.make(
+  ActionLatencyTool,
   StorageStatusTool,
   StorageCleanupTool,
   EnvironmentReadTool,

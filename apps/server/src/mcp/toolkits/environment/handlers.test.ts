@@ -1,3 +1,6 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Config from "../../../config.ts";
+import * as TraceDiagnostics from "../../../diagnostics/TraceDiagnostics.ts";
 import * as StorageCleanup from "../../../storageCleanup.ts";
 import { expect, it } from "@effect/vitest";
 import {
@@ -88,6 +91,10 @@ const makeServer = (
     Layer.provideMerge(McpServer.McpServer.layer),
     Layer.provideMerge(
       Layer.mergeAll(
+        Layer.mock(TraceDiagnostics.TraceDiagnostics)({}),
+        Config.layerTest("/tmp", { prefix: "latency-mcp-" }).pipe(
+          Layer.provide(NodeServices.layer),
+        ),
         Layer.mock(ThreadManagement.ThreadManagementService)({
           getThreadShell: (threadId) => Effect.succeed(shells.get(threadId) ?? null),
         }),
@@ -242,6 +249,10 @@ it.effect("environment_preferences_update saves local and shared settings", () =
       Layer.provideMerge(McpServer.McpServer.layer),
       Layer.provideMerge(
         Layer.mergeAll(
+          Layer.mock(TraceDiagnostics.TraceDiagnostics)({}),
+          Config.layerTest("/tmp", { prefix: "latency-mcp-" }).pipe(
+            Layer.provide(NodeServices.layer),
+          ),
           Layer.mock(ThreadManagement.ThreadManagementService)({
             getThreadShell: (threadId) => Effect.succeed(shells.get(threadId) ?? null),
           }),

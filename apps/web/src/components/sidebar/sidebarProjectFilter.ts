@@ -1,3 +1,4 @@
+import { beginAction, finishActionAfterPaint } from "../../observability/actionLatency";
 import { useSyncExternalStore } from "react";
 
 import type { SidebarMode } from "./modes/sidebarModes.logic";
@@ -15,9 +16,11 @@ const listeners = new Set<() => void>();
 
 export function setSidebarProjectFilter(mode: SidebarMode, next: SidebarProjectFilter) {
   if ((filters.get(mode) ?? null) === next) return;
+  beginAction("project.switch");
   if (next === null) filters.delete(mode);
   else filters.set(mode, next);
   for (const listener of listeners) listener();
+  finishActionAfterPaint("project.switch");
 }
 
 export function readSidebarProjectFilter(mode: SidebarMode): SidebarProjectFilter {

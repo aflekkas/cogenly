@@ -1,3 +1,4 @@
+import { ActionLatencyReport } from "./actionLatency.ts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
@@ -444,6 +445,7 @@ export const ServerTraceDiagnosticsResult = Schema.Struct({
   slowSpanThresholdMs: NonNegativeInt,
   slowSpanCount: NonNegativeInt,
   logLevelCounts: Schema.Record(TrimmedNonEmptyString, NonNegativeInt),
+  actionLatency: Schema.optionalKey(ActionLatencyReport),
   topSpansByCount: Schema.Array(ServerTraceDiagnosticsSpanSummary),
   slowestSpans: Schema.Array(ServerTraceDiagnosticsSpanOccurrence),
   commonFailures: Schema.Array(ServerTraceDiagnosticsFailureSummary),

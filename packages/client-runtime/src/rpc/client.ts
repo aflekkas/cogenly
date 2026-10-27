@@ -10,6 +10,7 @@ import {
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
+import type * as Exit from "effect/Exit";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -32,15 +33,17 @@ export class EnvironmentRpcUnavailableError extends Schema.TaggedError<Environme
 export interface EnvironmentRpcRequestObservation {
   readonly environmentId: string;
   readonly method: string;
+  readonly input: unknown;
+  readonly remote: boolean;
 }
 
 export class EnvironmentRpcRequestObserver extends Context.Reference<{
   readonly observe: (
     request: EnvironmentRpcRequestObservation,
-  ) => Effect.Effect<Effect.Effect<void>>;
+  ) => Effect.Effect<(exit: Exit.Exit<unknown, unknown>) => Effect.Effect<void>>;
 }>("@cogenly/client-runtime/rpc/EnvironmentRpcRequestObserver", {
   defaultValue: () => ({
-    observe: () => Effect.succeed(Effect.void),
+    observe: () => Effect.succeed(() => Effect.void),
   }),
 }) {}
 
@@ -220,8 +223,10 @@ export const requestGuarded = Effect.fn("EnvironmentRpc.request")(function* <
   const completeObservation = yield* observer.observe({
     environmentId: supervisor.target.environmentId,
     method: tag,
+    input,
+    remote: supervisor.target._tag !== "PrimaryConnectionTarget",
   });
-  return yield* method(input).pipe(Effect.ensuring(completeObservation));
+  return yield* method(input).pipe(Effect.onExit((exit) => completeObservation(exit)));
 });
 
 export function runStreamGuarded<TTag extends EnvironmentStreamCommandRpcTag>(

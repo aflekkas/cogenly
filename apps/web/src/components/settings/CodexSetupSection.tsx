@@ -1,3 +1,8 @@
+import {
+  beginAction,
+  finishAction,
+  finishActionAfterPaint,
+} from "../../observability/actionLatency";
 import { AuthProvidersManageScope } from "@cogenly/contracts";
 import { useEnvironmentScope } from "../../state/session";
 import {
@@ -233,6 +238,12 @@ function ManagedCodexSetup({
   )?.accountEmail;
   const hasSavedAccount = auth?.methods?.some((method) => method.id.startsWith("chatgpt-profile:"));
   const url = auth?.interaction?.type === "browser" ? auth.interaction.url : auth?.authorizationUrl;
+  useEffect(() => {
+    const key = `${environmentId}:${instanceId}`;
+    if (url) finishActionAfterPaint("provider.signIn", key);
+    else if (auth?.phase === "failed" || auth?.phase === "cancelled")
+      finishAction("provider.signIn", key, auth.phase);
+  }, [environmentId, instanceId, url, auth?.phase]);
   const installation = installQuery.data;
   const httpBaseUrl = useEnvironmentHttpBaseUrl(environmentId);
   const local = httpBaseUrl !== null && isLoopbackHost(new URL(httpBaseUrl).hostname);
@@ -402,6 +413,7 @@ function ManagedCodexSetup({
   const signIn = useCallback(
     async (methodId = "chatgpt") => {
       if (pendingRef.current) return;
+      beginAction("provider.signIn", `${environmentId}:${instanceId}`);
       openRequested.current = true;
       setTransferFailed(false);
       setRequestedMethodId(methodId);

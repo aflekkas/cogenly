@@ -1,3 +1,4 @@
+import { finishActionAfterPaint } from "../../observability/actionLatency";
 import { useAtomValue } from "@effect/atom-react";
 import { isAtomCommandInterrupted } from "@cogenly/client-runtime/state/runtime";
 import type {
@@ -20,7 +21,13 @@ import {
   SquarePenIcon,
   TrashIcon,
 } from "lucide-react";
-import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from "react";
 
 import { useScratchProject } from "../../hooks/useScratchProject";
 import { machineMoveTargets, type MachineMoveTarget } from "../../machines/machines.logic";
@@ -350,6 +357,9 @@ function ProjectPage(props: {
   // The project as one across connected machines; its page names any machine's copy.
   const entry = directory.byKey.get(projectLabelKey(environmentId, labelId)) ?? null;
   const label = entry?.label ?? null;
+  useEffect(() => {
+    if (isLoaded) finishActionAfterPaint("project.switch");
+  }, [isLoaded, environmentId, labelId]);
   const contents = entry === null ? undefined : byProject.get(entry.key);
   const { environments } = useEnvironments();
   const machineIds = entry === null ? [environmentId] : projectLabelEnvironmentIds(entry);

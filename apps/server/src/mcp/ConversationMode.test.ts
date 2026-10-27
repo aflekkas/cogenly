@@ -1,3 +1,4 @@
+import * as TraceDiagnostics from "../diagnostics/TraceDiagnostics.ts";
 import * as StorageCleanup from "../storageCleanup.ts";
 import {
   EnvironmentId,
@@ -112,7 +113,11 @@ const serverLayer = Layer.mergeAll(
   ),
 ).pipe(
   Layer.provideMerge(
-    Layer.merge(McpServer.McpServer.layer, Layer.mock(StorageCleanup.StorageCleanup)({})),
+    Layer.mergeAll(
+      McpServer.McpServer.layer,
+      Layer.mock(StorageCleanup.StorageCleanup)({}),
+      Layer.mock(TraceDiagnostics.TraceDiagnostics)({}),
+    ),
   ),
   Layer.provideMerge(threadLayers),
   Layer.provideMerge(

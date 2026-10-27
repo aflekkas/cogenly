@@ -1,3 +1,4 @@
+import { EnvironmentRpcRequestObserver } from "../rpc/client.ts";
 import type { ThreadId } from "@cogenly/contracts";
 import { boundedSnapshotProjection } from "@cogenly/shared/orchestrationV2BoundedSnapshot";
 import * as Cause from "effect/Cause";
@@ -45,9 +46,20 @@ export const fetchEnvironmentBoundedThreadSnapshot = Effect.fn(
     url: (urls) => urls.threadBoundedSnapshot(endpoint),
     timeoutMs: input.timeoutMs ?? DEFAULT_BOUNDED_THREAD_SNAPSHOT_TIMEOUT_MS,
     request: ({ client, headers }) =>
-      client.threadBoundedSnapshot({
-        ...endpoint,
-        headers: withOrchestrationProtocolHeader(headers),
+      Effect.gen(function* () {
+        const observer = yield* EnvironmentRpcRequestObserver;
+        const complete = yield* observer.observe({
+          environmentId: input.prepared.environmentId,
+          method: "orchestration.threadBoundedSnapshot",
+          input: { threadId: input.threadId },
+          remote: input.prepared.target._tag !== "PrimaryConnectionTarget",
+        });
+        return yield* client
+          .threadBoundedSnapshot({
+            ...endpoint,
+            headers: withOrchestrationProtocolHeader(headers),
+          })
+          .pipe(Effect.onExit((exit) => complete(exit)));
       }),
   }).pipe(
     // Drop the marker with the restore so nothing can restore twice.
