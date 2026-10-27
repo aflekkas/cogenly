@@ -349,5 +349,8 @@ On web and desktop, HTML and PDF files open as rendered pages. Switch an HTML
 file to source view to read its markup; a link to a specific line opens source
 automatically. HTML previews cannot access your Cogenly session.
 
+In the desktop app and on iPhone and iPad, a PDF opens with its own page, zoom,
+and find controls. Press Cmd+F (Ctrl+F) inside the PDF to search its text.
+
 The file viewer recognizes images, HTML, and PDF files by their filename extension,
 including filenames or folders containing `#` or `?`.
