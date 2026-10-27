@@ -1,13 +1,9 @@
 "use client";
 
 import {
-  DEFAULT_BROWSER_PROFILE_ID,
   SITE_PERMISSIONS,
-  browserExtensionPageUrl,
   type BrowserAppearanceSetting,
-  type BrowserExtension,
   type DesktopPreviewColorScheme,
-  type EnvironmentId,
   type SitePermission,
   type SitePermissionSetting,
   type SitePermissionsState,
@@ -15,13 +11,9 @@ import {
 import { Minus, MoreVertical, Plus as PlusIcon, RotateCcw } from "lucide-react";
 import { useState } from "react";
 
-import { BrowserExtensionInstallDialog } from "~/browser/BrowserExtensionInstall";
-import { browserExtensionPermissionLines } from "~/browser/browserExtensions.logic";
-import { useBrowserExtensions } from "~/browser/useBrowserExtensions";
 import { Button } from "~/components/ui/button";
 import {
   Menu,
-  MenuCheckboxItem,
   MenuItem,
   MenuPopup,
   MenuRadioGroup,
@@ -104,15 +96,6 @@ interface Props {
   move?: { readonly label: string; readonly onMove: () => void };
   /** Floats the tab in the chat's mini preview, bringing it back after its x. */
   onShowMiniPreview: () => void;
-  /** The tab profile's extensions on the tab's environment, which owns the list. */
-  extensions?: {
-    readonly environmentId: EnvironmentId;
-    readonly profileId: string;
-    /** Incognito keeps nothing between sessions, so it takes no extensions. */
-    readonly incognito: boolean;
-    /** Opens a page inside an extension in a new tab of the same profile. */
-    readonly openPage: (url: string) => void;
-  };
 }
 
 const MenuTriggerButton = () => (
@@ -185,91 +168,6 @@ function SitePermissionsSubmenu(props: {
   );
 }
 
-/**
- * The profile's extensions, one row each with its version; each row opens its
- * switch, its pages, what it may touch, and Remove. Add sits last.
- */
-function ExtensionsSubmenu(props: {
-  readonly extensions: ReadonlyArray<BrowserExtension> | null;
-  readonly loadError: string | null;
-  readonly onSetEnabled: (id: string, enabled: boolean) => void;
-  readonly onOpenPage: (url: string) => void;
-  readonly onRemove: (extension: BrowserExtension) => void;
-  readonly onAdd: () => void;
-}) {
-  return (
-    <MenuSub>
-      <MenuSubTrigger>Extensions</MenuSubTrigger>
-      <MenuSubPopup>
-        {props.extensions === null ? (
-          <MenuItem disabled>{props.loadError ?? "Loading extensions…"}</MenuItem>
-        ) : props.extensions.length === 0 ? (
-          <MenuItem disabled>No extensions in this profile</MenuItem>
-        ) : (
-          props.extensions.map((extension) => (
-            <MenuSub key={extension.id}>
-              <MenuSubTrigger>
-                <span className="flex w-full max-w-64 items-center justify-between gap-6">
-                  <span className="truncate">{extension.name}</span>
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {extension.enabled ? extension.version : "Off"}
-                  </span>
-                </span>
-              </MenuSubTrigger>
-              <MenuSubPopup>
-                <MenuCheckboxItem
-                  checked={extension.enabled}
-                  onCheckedChange={(checked) => props.onSetEnabled(extension.id, checked)}
-                >
-                  Enabled
-                </MenuCheckboxItem>
-                {extension.popupPage ? (
-                  <MenuItem
-                    disabled={!extension.enabled}
-                    onClick={() =>
-                      props.onOpenPage(browserExtensionPageUrl(extension.id, extension.popupPage!))
-                    }
-                  >
-                    Open popup
-                  </MenuItem>
-                ) : null}
-                {extension.optionsPage ? (
-                  <MenuItem
-                    disabled={!extension.enabled}
-                    onClick={() =>
-                      props.onOpenPage(
-                        browserExtensionPageUrl(extension.id, extension.optionsPage!),
-                      )
-                    }
-                  >
-                    Open options
-                  </MenuItem>
-                ) : null}
-                <MenuSeparator />
-                <MenuGroup>
-                  <MenuGroupLabel className="max-w-72">
-                    {browserExtensionPermissionLines(extension).map((line) => (
-                      <span key={line} className="block">
-                        {line}
-                      </span>
-                    ))}
-                  </MenuGroupLabel>
-                </MenuGroup>
-                <MenuSeparator />
-                <MenuItem variant="destructive" onClick={() => props.onRemove(extension)}>
-                  Remove
-                </MenuItem>
-              </MenuSubPopup>
-            </MenuSub>
-          ))
-        )}
-        <MenuSeparator />
-        <MenuItem onClick={props.onAdd}>Add from Chrome Web Store…</MenuItem>
-      </MenuSubPopup>
-    </MenuSub>
-  );
-}
-
 /** Three-dot menu in the chrome row; the same items for every kind of tab. */
 export function PreviewMoreMenu({
   enabled,
@@ -283,166 +181,137 @@ export function PreviewMoreMenu({
   profileName,
   move,
   onShowMiniPreview,
-  extensions,
 }: Props) {
   const zoomLabel = `${Math.round(zoomFactor * 100)}%`;
   const disabled = !enabled;
   const sitePermissions = actions.sitePermissions;
   // Read when the menu opens, so it shows decisions an agent made since.
   const [siteState, setSiteState] = useState<SitePermissionsState | null>(null);
-  const profileExtensions = useBrowserExtensions(
-    extensions && !extensions.incognito ? extensions.environmentId : null,
-    extensions?.profileId ?? DEFAULT_BROWSER_PROFILE_ID,
-  );
-  const [addExtensionOpen, setAddExtensionOpen] = useState(false);
   return (
-    <>
-      <Menu
-        onOpenChange={(open) => {
-          if (!open) return;
-          void profileExtensions.reload();
-          if (!sitePermissions) return;
-          void sitePermissions.read().then(setSiteState, () => setSiteState(null));
-        }}
-      >
-        <MenuTriggerButton />
-        <MenuPopup align="end" sideOffset={6}>
-          <MenuItem onClick={actions.hardReload} disabled={disabled}>
-            Hard reload
+    <Menu
+      onOpenChange={(open) => {
+        if (!open || !sitePermissions) return;
+        void sitePermissions.read().then(setSiteState, () => setSiteState(null));
+      }}
+    >
+      <MenuTriggerButton />
+      <MenuPopup align="end" sideOffset={6}>
+        <MenuItem onClick={actions.hardReload} disabled={disabled}>
+          Hard reload
+        </MenuItem>
+        {actions.openDevTools ? (
+          <MenuItem onClick={actions.openDevTools} disabled={disabled}>
+            Open DevTools
           </MenuItem>
-          {actions.openDevTools ? (
-            <MenuItem onClick={actions.openDevTools} disabled={disabled}>
-              Open DevTools
-            </MenuItem>
-          ) : null}
-          {actions.toggleNativePictureInPicture ? (
-            <MenuItem onClick={actions.toggleNativePictureInPicture} disabled={disabled}>
-              {nativePictureInPicture
-                ? "Close separate preview window"
-                : "Open separate preview window"}
-            </MenuItem>
-          ) : null}
-          <MenuItem onClick={onShowMiniPreview}>Show mini preview</MenuItem>
-          {move ? <MenuItem onClick={move.onMove}>{move.label}</MenuItem> : null}
-          <MenuItem onClick={onToggleDeviceToolbar} disabled={disabled}>
-            {deviceToolbarVisible ? "Hide device toolbar" : "Show device toolbar"}
+        ) : null}
+        {actions.toggleNativePictureInPicture ? (
+          <MenuItem onClick={actions.toggleNativePictureInPicture} disabled={disabled}>
+            {nativePictureInPicture
+              ? "Close separate preview window"
+              : "Open separate preview window"}
           </MenuItem>
-          <MenuSub>
-            <MenuSubTrigger disabled={disabled}>Appearance</MenuSubTrigger>
-            <MenuSubPopup>
-              <MenuRadioGroup
-                value={appearance}
-                onValueChange={(value) => onAppearanceChange(value as BrowserAppearanceSetting)}
-              >
-                {COLOR_SCHEME_OPTIONS.map((option) => (
-                  <MenuRadioItem key={option.value} value={option.value}>
-                    {option.label}
-                  </MenuRadioItem>
-                ))}
-              </MenuRadioGroup>
-            </MenuSubPopup>
-          </MenuSub>
-          {sitePermissions ? (
-            <SitePermissionsSubmenu
-              disabled={disabled}
-              state={siteState}
-              onChange={(permission, setting) =>
-                void sitePermissions.change(permission, setting).then(
-                  (next) => {
-                    if (next) setSiteState(next);
-                  },
-                  () => undefined,
-                )
-              }
-            />
-          ) : null}
-          {extensions?.incognito ? (
-            <MenuItem disabled>No extensions in Incognito</MenuItem>
-          ) : extensions && profileExtensions.canManage ? (
-            <ExtensionsSubmenu
-              extensions={profileExtensions.extensions}
-              loadError={profileExtensions.loadError}
-              onSetEnabled={(id, next) => void profileExtensions.setEnabled(id, next)}
-              onOpenPage={extensions.openPage}
-              onRemove={(extension) => void profileExtensions.remove(extension)}
-              onAdd={() => setAddExtensionOpen(true)}
-            />
-          ) : null}
-          <MenuSeparator />
-          {/*
+        ) : null}
+        <MenuItem onClick={onShowMiniPreview}>Show mini preview</MenuItem>
+        {move ? <MenuItem onClick={move.onMove}>{move.label}</MenuItem> : null}
+        <MenuItem onClick={onToggleDeviceToolbar} disabled={disabled}>
+          {deviceToolbarVisible ? "Hide device toolbar" : "Show device toolbar"}
+        </MenuItem>
+        <MenuSub>
+          <MenuSubTrigger disabled={disabled}>Appearance</MenuSubTrigger>
+          <MenuSubPopup>
+            <MenuRadioGroup
+              value={appearance}
+              onValueChange={(value) => onAppearanceChange(value as BrowserAppearanceSetting)}
+            >
+              {COLOR_SCHEME_OPTIONS.map((option) => (
+                <MenuRadioItem key={option.value} value={option.value}>
+                  {option.label}
+                </MenuRadioItem>
+              ))}
+            </MenuRadioGroup>
+          </MenuSubPopup>
+        </MenuSub>
+        {sitePermissions ? (
+          <SitePermissionsSubmenu
+            disabled={disabled}
+            state={siteState}
+            onChange={(permission, setting) =>
+              void sitePermissions.change(permission, setting).then(
+                (next) => {
+                  if (next) setSiteState(next);
+                },
+                () => undefined,
+              )
+            }
+          />
+        ) : null}
+        <MenuSeparator />
+        {/*
           Zoom row: label + inline control cluster. `closeOnClick=false`
           keeps the menu open while the user clicks the +/− buttons.
         */}
-          <MenuItem
-            closeOnClick={false}
-            onClick={(event: React.MouseEvent) => event.preventDefault()}
-            className="justify-between"
-            disabled={disabled}
-          >
-            <span>Zoom</span>
-            <span className="flex items-center gap-1">
-              <Button
-                variant="outline"
-                size="icon-xs"
-                type="button"
-                onClick={actions.zoomOut}
-                aria-label="Zoom out"
-                disabled={disabled}
-              >
-                <Minus />
-              </Button>
-              <span className="min-w-12 text-center text-xs tabular-nums text-muted-foreground">
-                {zoomLabel}
-              </span>
-              <Button
-                variant="outline"
-                size="icon-xs"
-                type="button"
-                onClick={actions.zoomIn}
-                aria-label="Zoom in"
-                disabled={disabled}
-              >
-                <PlusIcon />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                type="button"
-                onClick={actions.resetZoom}
-                aria-label="Reset zoom"
-                disabled={disabled}
-              >
-                <RotateCcw />
-              </Button>
+        <MenuItem
+          closeOnClick={false}
+          onClick={(event: React.MouseEvent) => event.preventDefault()}
+          className="justify-between"
+          disabled={disabled}
+        >
+          <span>Zoom</span>
+          <span className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="icon-xs"
+              type="button"
+              onClick={actions.zoomOut}
+              aria-label="Zoom out"
+              disabled={disabled}
+            >
+              <Minus />
+            </Button>
+            <span className="min-w-12 text-center text-xs tabular-nums text-muted-foreground">
+              {zoomLabel}
             </span>
-          </MenuItem>
-          <MenuSeparator />
-          {/*
+            <Button
+              variant="outline"
+              size="icon-xs"
+              type="button"
+              onClick={actions.zoomIn}
+              aria-label="Zoom in"
+              disabled={disabled}
+            >
+              <PlusIcon />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              type="button"
+              onClick={actions.resetZoom}
+              aria-label="Reset zoom"
+              disabled={disabled}
+            >
+              <RotateCcw />
+            </Button>
+          </span>
+        </MenuItem>
+        <MenuSeparator />
+        {/*
           Grouped so the heading has a `MenuGroup` ancestor: `MenuGroupLabel`
           reads its context and throws without one. The heading also answers
           which profile the tab is in, which is otherwise invisible: it is fixed
           at open and nothing else in the chrome shows it.
         */}
-          <MenuGroup>
-            {profileName ? (
-              // Truncation needs a block box: `text-overflow` on an inline child
-              // never applies and a long name would push the popup past its width.
-              <MenuGroupLabel className="max-w-64">
-                <span className="block truncate">Profile: {profileName}</span>
-              </MenuGroupLabel>
-            ) : null}
-            <MenuItem onClick={actions.clearCookies}>Clear cookies</MenuItem>
-            <MenuItem onClick={actions.clearCache}>Clear cache</MenuItem>
-          </MenuGroup>
-        </MenuPopup>
-      </Menu>
-      {/* Outside the menu, which unmounts its items as it closes. */}
-      <BrowserExtensionInstallDialog
-        open={addExtensionOpen}
-        onOpenChange={setAddExtensionOpen}
-        install={profileExtensions.install}
-        profileName={profileName}
-      />
-    </>
+        <MenuGroup>
+          {profileName ? (
+            // Truncation needs a block box: `text-overflow` on an inline child
+            // never applies and a long name would push the popup past its width.
+            <MenuGroupLabel className="max-w-64">
+              <span className="block truncate">Profile: {profileName}</span>
+            </MenuGroupLabel>
+          ) : null}
+          <MenuItem onClick={actions.clearCookies}>Clear cookies</MenuItem>
+          <MenuItem onClick={actions.clearCache}>Clear cache</MenuItem>
+        </MenuGroup>
+      </MenuPopup>
+    </Menu>
   );
 }

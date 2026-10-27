@@ -37,9 +37,12 @@ import { capturePreviewAnnotationScreenshot } from "~/lib/previewAnnotation";
 import { ensureLocalApi } from "~/localApi";
 import {
   rememberPreviewUrl,
+  selectExtensionSurfaces,
   updatePreviewServerSnapshot,
   useThreadPreviewState,
 } from "~/previewStateStore";
+import { browserExtensionTabGap } from "~/browser/browserExtensions.logic";
+import { useBrowserExtensionList } from "~/browser/useBrowserExtensions";
 import { resolveDiscoveredServerUrl } from "~/browser/browserTargetResolver";
 import { useEnvironmentSupportsServerBrowser } from "~/state/entities";
 import {
@@ -62,6 +65,9 @@ import { showPreviewPopup } from "./showPreviewPopup";
 import { PreviewChromeRow } from "./PreviewChromeRow";
 import { PreviewEmptyState } from "./PreviewEmptyState";
 import { PreviewMoreMenu, type PreviewMoreMenuActions } from "./PreviewMoreMenu";
+import { BrowserExtensionsToolbar } from "./extensions/BrowserExtensionsToolbar";
+import { ExtensionSidePanel } from "./extensions/ExtensionSidePanel";
+import { useExtensionSurfaceActions } from "./extensions/useExtensionSurfaces";
 import {
   commitBrowserViewportChange,
   subscribeBrowserViewportChange,
@@ -580,8 +586,8 @@ export function PreviewView({
     await closePreviewSession({ closePreview, snapshot, tabId, threadRef });
   }, [closePreview, moveTarget, open, snapshot, tabId, threadRef, url, viewport]);
 
-  // An extension's popup or options page opens beside this tab, in its profile
-  // and its browser, which is where the extension is loaded.
+  // An extension's options page opens beside this tab, in its profile and its
+  // browser, which is where the extension is loaded.
   const activeRuntime = snapshot?.runtime;
   const openExtensionPage = useCallback(
     async (pageUrl: string) => {
@@ -606,6 +612,23 @@ export function PreviewView({
   const activeProfileIncognito =
     browserDefaults.profiles.find((profile) => profile.id === activeProfileId)?.kind ===
     "incognito";
+  const extensionGap = browserExtensionTabGap({
+    snapshot,
+    rendersNatively: nativeServerTab,
+    remoteEnvironmentLabel:
+      threadRef.environmentId === primaryEnvironmentId ? null : environmentLabel,
+    incognito: activeProfileIncognito,
+  });
+  // An extension's side panel sits beside the page it belongs to.
+  const sidePanelSurface = useMemo(
+    () => selectExtensionSurfaces(previewState.sessions, snapshot?.tabId ?? null).sidePanel,
+    [previewState.sessions, snapshot?.tabId],
+  );
+  const profileExtensionList = useBrowserExtensionList(
+    sidePanelSurface && !activeProfileIncognito ? threadRef.environmentId : null,
+    activeProfileId,
+  );
+  const extensionSurfaceActions = useExtensionSurfaceActions(threadRef, activeProfileId);
 
   /**
    * The menu's actions. A server tab, streamed or rendered natively here, runs
@@ -841,6 +864,8 @@ export function PreviewView({
           handleResetZoom();
           return;
         case "toggle-panel":
+        // The extensions toolbar owns its side panel.
+        case "toggle-extension-side-panel":
           return;
       }
     });
@@ -917,162 +942,191 @@ export function PreviewView({
           </>
         }
         trailingActions={
-          moreMenuActions ? (
-            <PreviewMoreMenu
-              enabled={
-                runtimeTabId !== null &&
-                (serverOwnsRendering || (desktopOverlay?.hasWebContents ?? false))
-              }
-              actions={moreMenuActions}
-              {...(moveTarget
-                ? { move: { label: moveLabel, onMove: () => void handleMoveTab() } }
-                : {})}
-              profileName={activeProfileName}
-              zoomFactor={
-                serverOwnsRendering ? serverZoomFactor : (desktopOverlay?.zoomFactor ?? 1)
-              }
-              appearance={appearanceMode === "match" ? "match" : currentColorScheme}
-              onAppearanceChange={(next) => {
-                if (!appearanceKey) return;
-                const store = usePreviewAppearanceStore.getState();
-                if (next === "match") {
-                  store.setMode(appearanceKey, "match");
-                  if (currentColorScheme !== resolvedTheme)
-                    moreMenuActions.setColorScheme(resolvedTheme);
-                } else {
-                  store.setMode(appearanceKey, "explicit");
-                  moreMenuActions.setColorScheme(next);
+          <>
+            {snapshot ? (
+              <BrowserExtensionsToolbar
+                threadRef={threadRef}
+                hostTabId={snapshot.tabId}
+                profileId={activeProfileId}
+                profileName={activeProfileName}
+                incognito={activeProfileIncognito}
+                gap={extensionGap}
+                move={
+                  moveTarget === "server"
+                    ? { label: moveLabel, onMove: () => void handleMoveTab() }
+                    : undefined
                 }
-              }}
-              deviceToolbarVisible={viewport._tag !== "fill"}
-              onToggleDeviceToolbar={handleToggleDeviceToolbar}
-              nativePictureInPicture={desktopOverlay?.pictureInPicture ?? false}
-              onShowMiniPreview={showMiniPreview}
-              extensions={{
-                environmentId: threadRef.environmentId,
-                profileId: activeProfileId,
-                incognito: activeProfileIncognito,
-                openPage: (pageUrl) => void openExtensionPage(pageUrl),
-              }}
-            />
-          ) : null
+                openPage={(pageUrl) => void openExtensionPage(pageUrl)}
+                visible={visible}
+              />
+            ) : null}
+            {moreMenuActions ? (
+              <PreviewMoreMenu
+                enabled={
+                  runtimeTabId !== null &&
+                  (serverOwnsRendering || (desktopOverlay?.hasWebContents ?? false))
+                }
+                actions={moreMenuActions}
+                {...(moveTarget
+                  ? { move: { label: moveLabel, onMove: () => void handleMoveTab() } }
+                  : {})}
+                profileName={activeProfileName}
+                zoomFactor={
+                  serverOwnsRendering ? serverZoomFactor : (desktopOverlay?.zoomFactor ?? 1)
+                }
+                appearance={appearanceMode === "match" ? "match" : currentColorScheme}
+                onAppearanceChange={(next) => {
+                  if (!appearanceKey) return;
+                  const store = usePreviewAppearanceStore.getState();
+                  if (next === "match") {
+                    store.setMode(appearanceKey, "match");
+                    if (currentColorScheme !== resolvedTheme)
+                      moreMenuActions.setColorScheme(resolvedTheme);
+                  } else {
+                    store.setMode(appearanceKey, "explicit");
+                    moreMenuActions.setColorScheme(next);
+                  }
+                }}
+                deviceToolbarVisible={viewport._tag !== "fill"}
+                onToggleDeviceToolbar={handleToggleDeviceToolbar}
+                nativePictureInPicture={desktopOverlay?.pictureInPicture ?? false}
+                onShowMiniPreview={showMiniPreview}
+              />
+            ) : null}
+          </>
         }
       />
 
-      <div ref={serverBodyRef} className="relative min-h-0 flex-1 overflow-hidden">
-        {runtimeTabId && snapshot && isServerTab ? (
-          <>
-            {viewport._tag !== "fill" && !showEmptyState && !isUnreachable ? (
-              <div className="absolute inset-x-0 top-0 z-10">
-                <BrowserDeviceToolbar
-                  setting={viewport}
-                  width={serverToolbarWidth}
-                  aspectRatio={serverAspectRatioLocked ? viewport.width / viewport.height : null}
-                  onAspectRatioChange={(ratio) => setServerAspectRatioLocked(ratio !== null)}
-                  onChange={(setting) => commitBrowserViewportChange(runtimeTabId, setting)}
+      <div className="flex min-h-0 flex-1">
+        <div ref={serverBodyRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+          {runtimeTabId && snapshot && isServerTab ? (
+            <>
+              {viewport._tag !== "fill" && !showEmptyState && !isUnreachable ? (
+                <div className="absolute inset-x-0 top-0 z-10">
+                  <BrowserDeviceToolbar
+                    setting={viewport}
+                    width={serverToolbarWidth}
+                    aspectRatio={serverAspectRatioLocked ? viewport.width / viewport.height : null}
+                    onAspectRatioChange={(ratio) => setServerAspectRatioLocked(ratio !== null)}
+                    onChange={(setting) => commitBrowserViewportChange(runtimeTabId, setting)}
+                  />
+                </div>
+              ) : null}
+              <div
+                className="absolute inset-x-0 bottom-0"
+                style={{ top: viewport._tag !== "fill" ? BROWSER_DEVICE_TOOLBAR_HEIGHT : 0 }}
+              >
+                <ServerBrowserSurface
+                  key={runtimeTabId}
+                  ref={serverSurfaceRef}
+                  environmentId={threadRef.environmentId}
+                  threadId={threadRef.threadId}
+                  tabId={snapshot.tabId}
+                  visible={visible}
+                  onFirstFrame={() => setServerFrameTabId(runtimeTabId)}
+                  onControl={(control) =>
+                    setServerControl(control ? { tabId: runtimeTabId, control } : null)
+                  }
+                  onPopup={(popupTabId) => showPreviewPopup(threadRef, popupTabId)}
+                  pick={{
+                    active: serverPickActive,
+                    markers: serverPickMarkers,
+                    // Added picks stay in pick mode so several can stack before sending.
+                    onAdd: (annotation) => {
+                      setPickNotice(null);
+                      deliverAnnotation(annotation, "attach", false);
+                    },
+                    onError: (message) => setPickNotice({ message, leaving: false }),
+                    onExit: () => setServerPickTabId(null),
+                  }}
+                  // Stays connected under the empty state so a URL picked there reaches the page.
+                  className={cn(
+                    "absolute inset-0 h-full w-full",
+                    (showEmptyState || isUnreachable) && "invisible",
+                  )}
                 />
               </div>
-            ) : null}
-            <div
-              className="absolute inset-x-0 bottom-0"
-              style={{ top: viewport._tag !== "fill" ? BROWSER_DEVICE_TOOLBAR_HEIGHT : 0 }}
-            >
-              <ServerBrowserSurface
+            </>
+          ) : runtimeTabId && snapshot && !showEmptyState ? (
+            previewBridge ? (
+              <BrowserSurfaceSlot
                 key={runtimeTabId}
-                ref={serverSurfaceRef}
-                environmentId={threadRef.environmentId}
-                threadId={threadRef.threadId}
-                tabId={snapshot.tabId}
-                visible={visible}
-                onFirstFrame={() => setServerFrameTabId(runtimeTabId)}
-                onControl={(control) =>
-                  setServerControl(control ? { tabId: runtimeTabId, control } : null)
-                }
-                onPopup={(popupTabId) => showPreviewPopup(threadRef, popupTabId)}
-                pick={{
-                  active: serverPickActive,
-                  markers: serverPickMarkers,
-                  // Added picks stay in pick mode so several can stack before sending.
-                  onAdd: (annotation) => {
-                    setPickNotice(null);
-                    deliverAnnotation(annotation, "attach", false);
-                  },
-                  onError: (message) => setPickNotice({ message, leaving: false }),
-                  onExit: () => setServerPickTabId(null),
-                }}
-                // Stays connected under the empty state so a URL picked there reaches the page.
-                className={cn(
-                  "absolute inset-0 h-full w-full",
-                  (showEmptyState || isUnreachable) && "invisible",
-                )}
+                tabId={runtimeTabId}
+                visible={visible && !isUnreachable}
+                className="absolute inset-0 h-full w-full"
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center p-8 text-center">
+                <p className="max-w-sm text-sm text-muted-foreground">
+                  This tab is open in the Cogenly desktop app.
+                </p>
+              </div>
+            )
+          ) : null}
+          {showEmptyState ? (
+            <PreviewEmptyState
+              threadRef={threadRef}
+              environmentId={threadRef.environmentId}
+              configuredUrls={configuredUrls}
+              recentEntries={recentHistoryEntries}
+              onRemoveRecent={(url) => removeUrlForThread(threadRef, url)}
+              onOpenUrl={(next) => void handleOpenServerUrl(next)}
+            />
+          ) : null}
+          {snapshot && desktopOverlay ? (
+            <ZoomIndicator zoomFactor={desktopOverlay.zoomFactor} />
+          ) : null}
+          <PreviewPermissionPrompt
+            prompt={sitePermissions.prompt}
+            onAnswer={sitePermissions.answer}
+          />
+          {runtimeTabId &&
+          desktopOverlay &&
+          !showEmptyState &&
+          !isUnreachable &&
+          !activeRecordingTabIds.has(runtimeTabId) ? (
+            <AgentBrowserCursor
+              tabId={runtimeTabId}
+              zoomFactor={desktopOverlay.zoomFactor}
+              controller={controller}
+            />
+          ) : null}
+          {navStatus._tag === "LoadFailed" && navStatus.download ? (
+            <div className="absolute inset-0 z-10 bg-background">
+              <ServerTabFileNotShown
+                threadRef={threadRef}
+                tabId={snapshot?.tabId ?? ""}
+                url={navStatus.url}
+                download={navStatus.download}
               />
             </div>
-          </>
-        ) : runtimeTabId && snapshot && !showEmptyState ? (
-          previewBridge ? (
-            <BrowserSurfaceSlot
-              key={runtimeTabId}
-              tabId={runtimeTabId}
-              visible={visible && !isUnreachable}
-              className="absolute inset-0 h-full w-full"
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center p-8 text-center">
-              <p className="max-w-sm text-sm text-muted-foreground">
-                This tab is open in the Cogenly desktop app.
-              </p>
+          ) : navStatus._tag === "LoadFailed" ? (
+            <div className="absolute inset-0 z-10 bg-background">
+              <PreviewUnreachable
+                url={navStatus.url}
+                code={navStatus.code}
+                description={navStatus.description}
+                onReload={handleRefresh}
+                {...(moveTarget === "server"
+                  ? { move: { label: moveLabel, onMove: () => void handleMoveTab() } }
+                  : {})}
+              />
             </div>
-          )
-        ) : null}
-        {showEmptyState ? (
-          <PreviewEmptyState
+          ) : null}
+        </div>
+        {sidePanelSurface ? (
+          <ExtensionSidePanel
+            key={sidePanelSurface.tabId}
             threadRef={threadRef}
-            environmentId={threadRef.environmentId}
-            configuredUrls={configuredUrls}
-            recentEntries={recentHistoryEntries}
-            onRemoveRecent={(url) => removeUrlForThread(threadRef, url)}
-            onOpenUrl={(next) => void handleOpenServerUrl(next)}
+            snapshot={sidePanelSurface}
+            extension={
+              profileExtensionList.extensions?.find(
+                (extension) => extension.id === sidePanelSurface.extensionSurface?.extensionId,
+              ) ?? null
+            }
+            visible={visible}
+            onClose={() => void extensionSurfaceActions.close(sidePanelSurface)}
           />
-        ) : null}
-        {snapshot && desktopOverlay ? (
-          <ZoomIndicator zoomFactor={desktopOverlay.zoomFactor} />
-        ) : null}
-        <PreviewPermissionPrompt
-          prompt={sitePermissions.prompt}
-          onAnswer={sitePermissions.answer}
-        />
-        {runtimeTabId &&
-        desktopOverlay &&
-        !showEmptyState &&
-        !isUnreachable &&
-        !activeRecordingTabIds.has(runtimeTabId) ? (
-          <AgentBrowserCursor
-            tabId={runtimeTabId}
-            zoomFactor={desktopOverlay.zoomFactor}
-            controller={controller}
-          />
-        ) : null}
-        {navStatus._tag === "LoadFailed" && navStatus.download ? (
-          <div className="absolute inset-0 z-10 bg-background">
-            <ServerTabFileNotShown
-              threadRef={threadRef}
-              tabId={snapshot?.tabId ?? ""}
-              url={navStatus.url}
-              download={navStatus.download}
-            />
-          </div>
-        ) : navStatus._tag === "LoadFailed" ? (
-          <div className="absolute inset-0 z-10 bg-background">
-            <PreviewUnreachable
-              url={navStatus.url}
-              code={navStatus.code}
-              description={navStatus.description}
-              onReload={handleRefresh}
-              {...(moveTarget === "server"
-                ? { move: { label: moveLabel, onMove: () => void handleMoveTab() } }
-                : {})}
-            />
-          </div>
         ) : null}
       </div>
     </div>
