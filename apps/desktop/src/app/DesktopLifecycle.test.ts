@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as TestClock from "effect/testing/TestClock";
@@ -161,12 +162,18 @@ describe("DesktopLifecycle", () => {
     },
   );
 
-  it.effect("destroys windows before waiting for backend shutdown", () =>
+  it.effect("destroys windows and retains signal ownership until backend shutdown completes", () =>
     Effect.gen(function* () {
       const appListeners = new Map<string, (...args: readonly unknown[]) => void>();
       const shutdownRequested = yield* Deferred.make<void>();
       const allowShutdown = yield* Deferred.make<void>();
       const quitRequested = yield* Deferred.make<void>();
+      const backendStopping = yield* Deferred.make<void>();
+      const finishBackendShutdown = yield* Deferred.make<void>();
+      const originalSignals = {
+        SIGINT: process.listeners("SIGINT"),
+        SIGTERM: process.listeners("SIGTERM"),
+      };
       const events: string[] = [];
 
       const quit = Effect.sync(() => {
@@ -207,20 +214,47 @@ describe("DesktopLifecycle", () => {
       yield* Effect.scoped(
         Effect.gen(function* () {
           const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
-          yield* lifecycle.register;
+          const shutdown = yield* DesktopShutdown.DesktopShutdown;
+          const program = yield* Effect.scoped(
+            Effect.gen(function* () {
+              yield* Effect.addFinalizer(() =>
+                Deferred.succeed(backendStopping, undefined).pipe(
+                  Effect.andThen(Deferred.await(finishBackendShutdown)),
+                  Effect.andThen(shutdown.markComplete),
+                ),
+              );
+              yield* lifecycle.register;
+              const event = { preventDefault: () => undefined } as Electron.Event;
+              appListeners.get("before-quit")?.(event);
+              yield* shutdown.awaitRequest;
+            }),
+          ).pipe(Effect.forkScoped);
 
-          const event = { preventDefault: () => undefined } as Electron.Event;
-          appListeners.get("before-quit")?.(event);
+          yield* Deferred.await(backendStopping);
+          yield* Effect.addFinalizer(() =>
+            Deferred.succeed(finishBackendShutdown, undefined).pipe(Effect.asVoid),
+          );
 
-          yield* Deferred.await(shutdownRequested);
-          const eventsBeforeCleanup = [...events];
-          yield* Deferred.succeed(allowShutdown, undefined);
+          for (const signal of ["SIGINT", "SIGTERM"] as const) {
+            const listeners = process
+              .listeners(signal)
+              .filter((listener) => !originalSignals[signal].includes(listener));
+            assert.lengthOf(listeners, 1, `${signal} must remain owned during backend cleanup`);
+            listeners[0]?.(signal);
+          }
+          assert.deepEqual(events, ["flush", "destroy", "request"]);
+          assert.equal(appListeners.size, 0, "Electron listeners still follow the program scope");
+          assert.isFalse(yield* shutdown.isComplete);
+
+          yield* Deferred.succeed(finishBackendShutdown, undefined);
+          yield* Fiber.join(program);
           yield* Deferred.await(quitRequested);
-
-          assert.deepEqual(eventsBeforeCleanup, ["flush", "destroy", "request"]);
           assert.deepEqual(events, ["flush", "destroy", "request", "quit"]);
         }),
       ).pipe(Effect.provide(layer));
+
+      assert.deepEqual(process.listeners("SIGINT"), originalSignals.SIGINT);
+      assert.deepEqual(process.listeners("SIGTERM"), originalSignals.SIGTERM);
     }),
   );
 
@@ -260,7 +294,7 @@ describe("DesktopLifecycle", () => {
           } as Electron.Event;
           appListeners.get("before-quit")?.(event);
           appListeners.get("before-quit")?.(event);
-          yield* TestClock.adjust("9999 millis");
+          yield* TestClock.adjust("59999 millis");
           appListeners.get("before-quit")?.(event);
           assert.deepEqual(
             exitCodes,
