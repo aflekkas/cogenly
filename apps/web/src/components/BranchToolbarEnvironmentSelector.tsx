@@ -31,7 +31,7 @@ export function EnvironmentOptionContent({ option }: { option: EnvironmentOption
         className={offline ? "size-3 shrink-0 opacity-50" : "size-3 shrink-0"}
       />
       <span className="min-w-0 truncate">{option.label}</span>
-      {offline ? <span className="shrink-0 text-muted-foreground/70">offline</span> : null}
+      {offline ? <span className="shrink-0 text-muted-foreground">offline</span> : null}
     </span>
   );
 }
@@ -79,7 +79,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   if (envLocked || onEnvironmentChange === undefined) {
     const lockedRow = (
       <span
-        className="inline-flex h-7 min-w-0 max-w-full items-center gap-1 border border-transparent px-1.75 font-normal text-muted-foreground/70 text-xs sm:h-6"
+        className="inline-flex h-7 min-w-0 max-w-full items-center gap-1 border border-transparent px-1.75 font-normal text-muted-foreground text-xs sm:h-6"
         data-composer-context-control
       >
         <EnvironmentMachineIcon

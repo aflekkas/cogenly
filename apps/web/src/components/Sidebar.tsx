@@ -1514,7 +1514,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           icon: "working" as const,
           // No shimmer: a label that animates forever is noise in a sidebar
           // full of them (and repaints every vsync on high-refresh displays).
-          className: "text-info",
+          className: "text-info-foreground",
         }
       : status === "waiting"
         ? {
@@ -1540,25 +1540,25 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ? {
                   label: "Limited",
                   icon: "failed" as const,
-                  className: "text-warning",
+                  className: "text-warning-foreground",
                 }
               : status === "failed"
                 ? {
                     label: "Failed",
                     icon: "failed" as const,
-                    className: "text-error",
+                    className: "text-error-foreground",
                   }
                 : isWoke
                   ? {
                       label: "Woke",
                       icon: "woke" as const,
-                      className: "text-warning",
+                      className: "text-warning-foreground",
                     }
                   : isUnread
                     ? {
                         label: "Done",
                         icon: "done" as const,
-                        className: "text-success",
+                        className: "text-success-foreground",
                       }
                     : null;
   const isWokeStatus = topStatus?.icon === "woke";
