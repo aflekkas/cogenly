@@ -6,6 +6,7 @@
  * quarantined changes and signing in always wait for the owner or an agent.
  */
 import type { EnvironmentId, MachineHealthFix, MachineHealthItem } from "@cogenly/contracts";
+import * as Schema from "effect/Schema";
 import * as Duration from "effect/Duration";
 
 import type { HealthAutoFixView } from "./HealthAlertsState.ts";
@@ -17,19 +18,16 @@ const AUTO_FIXES: ReadonlySet<MachineHealthFix> = new Set([
   "resume",
 ]);
 
-/** A fix that ran but whose item is still there is tried again after this. */
 const AUTO_FIX_RECHECK_AFTER = Duration.minutes(10);
-/** Attempts before a lingering item counts as failed. */
 const AUTO_FIX_MAX_ATTEMPTS = 3;
-/** A failed item is tried again, quietly, after this. */
-const AUTO_FIX_RETRY_FAILED_AFTER = Duration.minutes(30);
 
-interface AutoFixAttempt {
-  readonly attempts: number;
-  readonly lastAttemptAtMs: number;
-  /** Set once a fix failed or the item outlived every attempt. */
-  readonly failure: string | null;
-}
+export const AutoFixAttempt = Schema.Struct({
+  revision: Schema.String,
+  attempts: Schema.Int,
+  lastAttemptAtMs: Schema.Number,
+  failure: Schema.NullOr(Schema.String),
+});
+type AutoFixAttempt = typeof AutoFixAttempt.Type;
 
 export type HealthAutoFixState = ReadonlyMap<string, AutoFixAttempt>;
 
@@ -57,37 +55,33 @@ export function planHealthAutoFix(
   self: EnvironmentId,
   nowMs: number,
 ): { readonly due: ReadonlyArray<MachineHealthItem>; readonly state: HealthAutoFixState } {
-  const next = new Map<string, AutoFixAttempt>();
+  // Keep exhausted items even while absent: a disappearing item is not a new budget.
+  const next = new Map(state);
   const due: Array<MachineHealthItem> = [];
   for (const item of items) {
     if (!isAutoFixable(item, self)) continue;
-    const previous = state.get(item.key);
-    if (previous === undefined) {
-      due.push(item);
-      next.set(item.key, { attempts: 0, lastAttemptAtMs: nowMs, failure: null });
-      continue;
-    }
-    const sinceLast = nowMs - previous.lastAttemptAtMs;
-    if (previous.failure !== null) {
-      if (sinceLast >= Duration.toMillis(AUTO_FIX_RETRY_FAILED_AFTER)) {
-        due.push(item);
-        next.set(item.key, { ...previous, lastAttemptAtMs: nowMs });
-      } else {
-        next.set(item.key, previous);
-      }
-      continue;
-    }
-    if (sinceLast < Duration.toMillis(AUTO_FIX_RECHECK_AFTER)) {
-      next.set(item.key, previous);
-    } else if (previous.attempts >= AUTO_FIX_MAX_ATTEMPTS) {
+    const revision = JSON.stringify([item.fix, item.detail, item.target]);
+    const stored = state.get(item.key);
+    const previous = stored?.revision === revision ? stored : undefined;
+    const delay =
+      Duration.toMillis(AUTO_FIX_RECHECK_AFTER) * 2 ** Math.max(0, (previous?.attempts ?? 0) - 1);
+    if (previous !== undefined && nowMs - previous.lastAttemptAtMs < delay) continue;
+    if (previous !== undefined && previous.attempts >= AUTO_FIX_MAX_ATTEMPTS) {
       next.set(item.key, {
         ...previous,
-        failure: `Fixed automatically ${previous.attempts} times, but it keeps coming back.`,
+        failure:
+          previous.failure ??
+          `Fixed automatically ${previous.attempts} times, but it keeps coming back.`,
       });
-    } else {
-      due.push(item);
-      next.set(item.key, { ...previous, lastAttemptAtMs: nowMs });
+      continue;
     }
+    due.push(item);
+    next.set(item.key, {
+      revision,
+      attempts: (previous?.attempts ?? 0) + 1,
+      lastAttemptAtMs: nowMs,
+      failure: previous?.failure ?? null,
+    });
   }
   return { due, state: next };
 }
@@ -97,21 +91,17 @@ export function recordHealthAutoFix(
   state: HealthAutoFixState,
   itemKey: string,
   outcome: {
-    readonly status: "fixed" | "failed" | "resolved" | "manual";
+    readonly status: "fixed" | "failed" | "resolved" | "manual" | "deferred";
     readonly message: string;
   },
 ): HealthAutoFixState {
   const previous = state.get(itemKey);
   if (previous === undefined) return state;
   const next = new Map(state);
-  if (outcome.status === "resolved") {
-    next.delete(itemKey);
-    return next;
-  }
   next.set(itemKey, {
     ...previous,
-    attempts: previous.attempts + 1,
-    failure: outcome.status === "fixed" ? null : outcome.message,
+    attempts: previous.attempts - (outcome.status === "deferred" ? 1 : 0),
+    failure: ["fixed", "resolved", "deferred"].includes(outcome.status) ? null : outcome.message,
   });
   return next;
 }

@@ -309,6 +309,15 @@ export const MachineVersionUpdate = makePeerChannel({
   error: MachineHealthError,
 });
 
+/** Older peers must reject automatic updates rather than restart without an idle check. */
+export const MachineVersionAutoUpdate = makePeerChannel({
+  name: "health.auto-update-version.v1",
+  scope: AuthPeerDelegateScope,
+  payload: MachineVersionUpdate.payload,
+  success: Schema.Struct({ started: Schema.Boolean }),
+  error: MachineHealthError,
+});
+
 /** The other machine's own alerts, never ones it relays, so they cannot loop. */
 export const MachineHealthAlertsRead = makePeerChannel({
   name: "health.alerts.v1",

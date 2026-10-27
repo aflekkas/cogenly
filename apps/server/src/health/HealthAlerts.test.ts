@@ -222,6 +222,32 @@ describe("HealthAlerts", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("an automatic hold keeps an open alert open without recovery or repeat delivery", () =>
+    Effect.gen(function* () {
+      const h = yield* harness;
+      h.world.items = [signedOut];
+      yield* h.job;
+      yield* h.minutes(3);
+      const before = yield* h.alerts.snapshot;
+      expect(before.open).toHaveLength(1);
+      const delivered = h.calls.length;
+      yield* h.state.setAutoFix({ holds: new Set([signedOut.key]), failures: new Map() });
+      yield* h.minutes(4);
+      expect(yield* h.alerts.snapshot).toEqual(before);
+      yield* h.state.setAutoFix({
+        holds: new Set(),
+        failures: new Map([[signedOut.key, "Retry failed"]]),
+      });
+      yield* h.minutes(4);
+      expect((yield* h.alerts.snapshot).open[0]?.id).toBe(before.open[0]?.id);
+      expect((yield* h.alerts.snapshot).recentlyResolved).toEqual([]);
+      expect(h.calls).toHaveLength(delivered);
+      h.world.items = [];
+      yield* h.minutes(3);
+      expect((yield* h.alerts.snapshot).open).toEqual([]);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("publishes and delivers once per transition, own alerts only", () =>
     Effect.gen(function* () {
       const { world, calls, published, alerts, minute, minutes, job } = yield* harness;

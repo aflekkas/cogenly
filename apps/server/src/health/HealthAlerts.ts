@@ -268,14 +268,14 @@ const make = Effect.gen(function* () {
         // Reachability is evaluated below with the peer as its origin.
         if (isReachabilityKey(item.key)) continue;
         // Being fixed automatically: it alerts only if that fails.
-        if (autoFix.holds.has(item.key)) continue;
         const failure = autoFix.failures.get(item.key);
         observations.push({
           originEnvironmentId: self,
           originMachineName: report.machineName,
           checkId: check.id,
-          item:
-            failure === undefined
+          item: autoFix.holds.has(item.key)
+            ? { ...item, status: "unknown" }
+            : failure === undefined
               ? item
               : {
                   ...item,

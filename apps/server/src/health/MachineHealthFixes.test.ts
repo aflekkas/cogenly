@@ -7,9 +7,11 @@ import {
   AuthSyncReplicateScope,
   EnvironmentId,
   MachineHealthError,
+  MachineHealthAlertsRead,
   MachineHealthFixRun,
   MachineHealthTurnOffProviderRun,
   MachineVersionUpdate,
+  MachineVersionAutoUpdate,
   ProviderInstanceId,
   type MachineHealthFixResult,
   type MachineHealthItem,
@@ -21,12 +23,17 @@ import {
   ThreadId,
 } from "@cogenly/contracts";
 import { NodeCrypto } from "@effect/platform-node";
+import * as Deferred from "effect/Deferred";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import * as Integrations from "../integrations/Integrations.ts";
+import * as HealthAlerts from "./HealthAlerts.ts";
+import * as Sqlite from "../persistence/Sqlite.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 import * as ServerSelfUpdate from "../cloud/selfUpdate.ts";
 import * as MachineIdentity from "../machines/MachineIdentity.ts";
@@ -100,7 +107,15 @@ const harness = (
   withVersionItem = false,
   capability: "boot-service" | "desktop-managed" | null = "boot-service",
   browserProblem = false,
-  auto: { readonly report?: MachineHealthReport; readonly enabled?: boolean } = {},
+  auto: {
+    readonly report?: MachineHealthReport;
+    readonly enabled?: boolean;
+    readonly peerUpdate?: "reject" | "busy";
+    readonly database?: Layer.Layer<SqlClient.SqlClient>;
+    readonly scheduler?: Scheduler.Scheduler["Service"];
+    readonly retried?: Deferred.Deferred<void>;
+    readonly withAlerts?: boolean;
+  } = {},
 ) =>
   Effect.gen(function* () {
     const ran: Array<string> = [];
@@ -117,9 +132,15 @@ const harness = (
       providers: [],
     };
     const call = ((environmentId: EnvironmentId, channel: PeerChannel, payload: unknown) =>
-      Effect.sync(() => {
+      Effect.gen(function* () {
         peerCalls.push({ environmentId, channel: channel.name, payload });
-        return fromVps;
+        if (channel.name === MachineHealthAlertsRead.name)
+          return { open: [], recentlyResolved: [] };
+        if (channel.name === MachineVersionAutoUpdate.name && auto.peerUpdate === "reject")
+          return yield* new MachineHealthError({ reason: "unavailable" });
+        return channel.name === MachineVersionAutoUpdate.name
+          ? { started: auto.peerUpdate !== "busy" }
+          : fromVps;
       })) as unknown as Machines.Machines["Service"]["call"];
     const machine = (environmentId: EnvironmentId, relation: "this" | "hub"): MachineInfo => ({
       environmentId,
@@ -136,7 +157,10 @@ const harness = (
       serverVersion: relation === "this" ? "0.3.3" : "0.3.4",
     });
     const context = yield* Layer.build(
-      MachineHealthFixes.layer.pipe(
+      Layer.mergeAll(
+        MachineHealthFixes.layer,
+        ...(auto.withAlerts ? [HealthAlerts.layer] : []),
+      ).pipe(
         Layer.provideMerge(
           Layer.mergeAll(
             Layer.mock(PreviewBrowser.PreviewBrowser)({
@@ -196,8 +220,9 @@ const harness = (
               retrySync: ({ environmentId }) =>
                 environmentId === offline
                   ? Effect.fail(new MachineHealthError({ reason: "unavailable" }))
-                  : Effect.sync(() => {
+                  : Effect.gen(function* () {
                       retried.push(environmentId);
+                      if (auto.retried) yield* Deferred.succeed(auto.retried, undefined);
                     }),
             }),
             Layer.mock(Machines.Machines)({
@@ -208,6 +233,7 @@ const harness = (
               call,
             }),
             PeerChannels.layer,
+            Layer.mock(Integrations.Integrations)({}),
             Layer.mock(MachineIdentity.MachineIdentity)({ self: Effect.succeed(self) }),
             Layer.mock(ThreadManagement.ThreadManagementService)({}),
             Layer.mock(ScheduledTasks.ScheduledTaskService)({
@@ -217,10 +243,10 @@ const harness = (
                   return {} as never;
                 }),
             }),
-            Layer.succeed(SqlClient.SqlClient, {} as never),
+            auto.database ?? Sqlite.layerMemory,
             ServerSettings.layerTest({ health: { autoFix: auto.enabled ?? true } }),
             HealthAlertsState.layer,
-            Layer.mock(Scheduler.Scheduler)({ register: () => Effect.void }),
+            Layer.succeed(Scheduler.Scheduler, auto.scheduler ?? { register: () => Effect.void }),
             NodeCrypto.layer,
           ),
         ),
@@ -234,7 +260,11 @@ const harness = (
     const settings = yield* ServerSettings.ServerSettingsService.pipe(
       Effect.provideContext(context),
     );
-    return { fixes, channels, alertsState, settings, ran, peerCalls, retried };
+    const sql = yield* SqlClient.SqlClient.pipe(Effect.provideContext(context));
+    const alerts = yield* Effect.serviceOption(HealthAlerts.HealthAlerts).pipe(
+      Effect.provideContext(context),
+    );
+    return { fixes, channels, alertsState, settings, ran, peerCalls, retried, sql, alerts };
   });
 
 describe("MachineHealthFixes", () => {
@@ -564,7 +594,7 @@ describe("automatic fixes", () => {
       expect(h.retried).toEqual([vps]);
       // The newer machine pushes the update; the one behind never updates itself too.
       expect(h.peerCalls.map((call) => [call.environmentId, call.channel])).toEqual([
-        [vps, MachineVersionUpdate.name],
+        [vps, MachineVersionAutoUpdate.name],
       ]);
       expect(h.ran).toEqual([]);
       const view = yield* h.alertsState.autoFix;
@@ -603,3 +633,142 @@ describe("automatic fixes", () => {
     }).pipe(Effect.scoped),
   );
 });
+
+it.effect("automatic peer updates check destination work, defer, and preserve manual updates", () =>
+  Effect.gen(function* () {
+    const h = yield* harness(true);
+    yield* h.sql`INSERT INTO orchestration_v2_projection_runs(run_id,thread_id,ordinal,provider,status,requested_at,payload_json)
+      VALUES ('busy','work',1,'codex','running','2026-01-01','{}')`;
+    const request = h.channels.dispatch({
+      channel: MachineVersionAutoUpdate.name,
+      payload: { targetVersion: "0.3.4" },
+      caller: { environmentId: vps, scopes: [AuthPeerDelegateScope] },
+    });
+    expect(yield* request).toEqual({ started: false });
+    expect(h.ran).toEqual([]);
+    yield* h.sql`UPDATE orchestration_v2_projection_runs SET status='completed' WHERE run_id='busy'`;
+    expect(yield* request).toEqual({ started: true });
+    yield* h.sql`UPDATE orchestration_v2_projection_runs SET status='running' WHERE run_id='busy'`;
+    yield* h.fixes.fix({ itemKeys: [`machine-version:${laptop}`] });
+    expect(h.ran).toEqual(["update:0.3.4", "update:0.3.4"]);
+  }).pipe(Effect.scoped),
+);
+
+it.effect.each(["reject", "busy"] as const)(
+  "automatic update handles a peer that is %s",
+  (peerUpdate) =>
+    Effect.gen(function* () {
+      const key = `machine-version:${vps}`;
+      const h = yield* harness(false, "boot-service", false, {
+        peerUpdate,
+        report: {
+          ...report,
+          checks: [
+            {
+              id: "machine-links",
+              status: "warn",
+              summary: "",
+              items: [item(key, "update-machine", { _tag: "machine", environmentId: vps })],
+            },
+          ],
+        },
+      });
+      expect(yield* h.fixes.autoFix).toMatchObject(
+        peerUpdate === "reject" ? [{ itemKey: key, status: "failed" }] : [],
+      );
+      const view = yield* h.alertsState.autoFix;
+      expect(view.failures.has(key)).toBe(peerUpdate === "reject");
+      expect(view.holds.has(key)).toBe(peerUpdate === "busy");
+      expect(h.peerCalls[0]?.channel).toBe(MachineVersionAutoUpdate.name);
+      const [row] = yield* h.sql<{
+        value_json: string;
+      }>`SELECT value_json FROM health_auto_fix_attempts WHERE item_key=${key}`;
+      expect(JSON.parse(row!.value_json).attempts).toBe(peerUpdate === "busy" ? 0 : 1);
+    }).pipe(Effect.scoped),
+);
+
+it.effect("retained retry budgets do not hold recovered health items", () =>
+  Effect.gen(function* () {
+    const problem = item("recovered", "retry-sync", { _tag: "machine", environmentId: vps });
+    const check: {
+      id: "sync";
+      status: "fail";
+      summary: string;
+      items: ReadonlyArray<MachineHealthItem>;
+    } = { id: "sync", status: "fail", summary: "", items: [problem] };
+    const h = yield* harness(false, "boot-service", false, {
+      report: { ...report, checks: [check] },
+    });
+    yield* h.fixes.autoFix;
+    expect((yield* h.alertsState.autoFix).holds.has(problem.key)).toBe(true);
+    check.items = [{ ...problem, status: "ok", fix: null }];
+    expect(yield* h.fixes.autoFix).toEqual([]);
+    expect((yield* h.alertsState.autoFix).holds.size).toBe(0);
+    const rows = yield* h.sql`SELECT item_key FROM health_auto_fix_attempts`;
+    expect(rows).toHaveLength(1);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("retry budgets survive service reconstruction and reset after a person's fix", () =>
+  Effect.gen(function* () {
+    const database = Sqlite.layerMemory;
+    // Build once, then reconstruct the feature with the same durable database.
+    const context = yield* Layer.build(database);
+    const sql = yield* SqlClient.SqlClient.pipe(Effect.provideContext(context));
+    const options = {
+      database: Layer.succeed(SqlClient.SqlClient, sql),
+      report: {
+        ...report,
+        checks: [
+          {
+            id: "sync",
+            status: "fail",
+            summary: "",
+            items: [item("persistent", "retry-sync", { _tag: "machine", environmentId: vps })],
+          },
+        ],
+      } satisfies MachineHealthReport,
+    };
+    for (const delay of [0, 10, 20]) {
+      yield* TestClock.adjust(`${delay} minutes`);
+      const h = yield* harness(false, "boot-service", false, options);
+      expect(yield* h.fixes.autoFix).toHaveLength(1);
+    }
+    yield* TestClock.adjust("1 day");
+    const h = yield* harness(false, "boot-service", false, options);
+    expect(yield* h.fixes.autoFix).toEqual([]);
+    expect((yield* h.alertsState.autoFix).failures.has("persistent")).toBe(true);
+    yield* h.fixes.fix({ itemKeys: ["persistent"] });
+    expect(yield* h.fixes.autoFix).toHaveLength(1);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("the live scheduler fires health-auto-fix and publishes to its shared alert state", () =>
+  Effect.gen(function* () {
+    const scheduler = yield* Scheduler.Scheduler;
+    const retried = yield* Deferred.make<void>();
+    const h = yield* harness(false, "boot-service", false, {
+      scheduler,
+      retried,
+      withAlerts: true,
+      report: {
+        ...report,
+        checks: [
+          {
+            id: "sync",
+            status: "fail",
+            summary: "",
+            items: [item("scheduled-auto", "retry-sync", { _tag: "machine", environmentId: vps })],
+          },
+        ],
+      },
+    });
+    yield* Deferred.await(retried);
+    expect(h.retried).toEqual([vps]);
+    expect((yield* h.alertsState.autoFix).holds.has("scheduled-auto")).toBe(true);
+    yield* TestClock.adjust("3 minutes");
+    expect(h.retried).toEqual([vps]);
+    expect(Option.isSome(h.alerts)).toBe(true);
+    if (Option.isSome(h.alerts)) expect((yield* h.alerts.value.snapshot).open).toEqual([]);
+  }).pipe(Effect.provide(Scheduler.layer), Effect.scoped),
+);

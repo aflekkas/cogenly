@@ -1,6 +1,7 @@
 import { expect, it } from "@effect/vitest";
 import {
   CommandId,
+  ThreadRemoteError,
   EnvironmentId,
   MessageId,
   NodeId,
@@ -52,6 +53,7 @@ it.effect.each([
   "same stale turn still active",
   "automatic fix with a live session",
   "idle queued messages",
+  "automatic unreachable delegated child",
 ] as const)("Fix targets only stale work: %s", (scenario) => {
   const provider = makeControllableProvider(CodexProviderCapabilitiesV2);
   const database = Sqlite.layerMemory;
@@ -139,18 +141,25 @@ it.effect.each([
         DateTime.makeUnsafe(DateTime.toEpochMillis(yield* DateTime.now) + 240_000),
       );
       expect(stuckQueuesItems(queues)[0]?.title).toBe("Queued messages not sending in Health");
-    } else if (scenario === "orphan beside healthy turn") {
+    } else if (
+      scenario === "orphan beside healthy turn" ||
+      scenario === "automatic unreachable delegated child"
+    ) {
       const task: OrchestrationV2Subagent = {
         id: orphanId,
         threadId,
         runId: null,
         parentNodeId: first.rootNodeId!,
-        origin: "provider_native",
+        origin:
+          scenario === "automatic unreachable delegated child" ? "app_owned" : "provider_native",
         createdBy: "agent",
         driver: ProviderDriverKind.make("codex"),
         providerInstanceId: modelSelection.instanceId,
         providerThreadId: null,
-        childThreadId: null,
+        childThreadId:
+          scenario === "automatic unreachable delegated child"
+            ? ThreadId.make("remote-child")
+            : null,
         nativeTaskRef: null,
         prompt: "Old work",
         title: "Old work",
@@ -164,13 +173,15 @@ it.effect.each([
       const payload = yield* encodeSubagent(task);
       yield* sql`INSERT INTO orchestration_v2_projection_subagents
           (subagent_id, thread_id, parent_node_id, provider, origin, status, started_at, updated_at, payload_json)
-          VALUES (${orphanId}, ${threadId}, ${first.rootNodeId}, 'codex', 'provider_native', 'running', ${staleIso}, ${staleIso}, ${payload})`;
+          VALUES (${orphanId}, ${threadId}, ${first.rootNodeId}, 'codex', ${task.origin}, 'running', ${staleIso}, ${staleIso}, ${payload})`;
     } else {
       yield* sql`UPDATE orchestration_v2_projection_runs SET requested_at = ${staleIso} WHERE run_id = ${first.id}`;
     }
     let replaced = false;
     const dispatch: Threads.ThreadManagementService["Service"]["dispatch"] = (command) =>
       Effect.gen(function* () {
+        if ("threadId" in command && command.threadId === ThreadId.make("remote-child"))
+          return yield* new ThreadRemoteError({ reason: "offline" });
         if (scenario === "stale turn replaced before dispatch" && !replaced) {
           replaced = true;
           const projection = yield* orchestrator.getThreadProjection(threadId);
@@ -237,7 +248,10 @@ it.effect.each([
             }),
           }),
           Layer.mock(Threads.ThreadManagementService)({
-            getThreadRecords: orchestrator.getThreadRecords,
+            getThreadRecords: (id, fields, filter) =>
+              id === ThreadId.make("remote-child")
+                ? Effect.succeed({ runs: [] } as never)
+                : orchestrator.getThreadRecords(id, fields, filter),
             dispatch,
           }),
           Layer.mock(Tasks.ScheduledTaskService)({}),
@@ -250,7 +264,10 @@ it.effect.each([
         ),
       ),
     );
-    if (scenario === "automatic fix with a live session") {
+    if (
+      scenario === "automatic fix with a live session" ||
+      scenario === "automatic unreachable delegated child"
+    ) {
       // A turn past the age limit whose session still answers may be real work.
       const { outcomes, view } = yield* Effect.gen(function* () {
         const fixes = yield* Fixes.MachineHealthFixes;
@@ -262,7 +279,9 @@ it.effect.each([
       expect(outcomes).toMatchObject([{ itemKey: key, status: "failed" }]);
       expect(after.runs.find((run) => run.id === first.id)!.status).toBe("running");
       expect(view.holds.has(key)).toBe(false);
-      expect(view.failures.get(key)).toContain("live provider session");
+      if (scenario === "automatic unreachable delegated child")
+        expect(after.subagents[0]?.status).toBe("running");
+      else expect(view.failures.get(key)).toContain("live provider session");
       return;
     }
     const result = yield* Fixes.MachineHealthFixes.pipe(
