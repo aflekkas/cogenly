@@ -6,7 +6,7 @@ import {
   sortChatsByActivity,
 } from "../components/sidebar/modes/sidebarModes.logic";
 import { useSidebarModeClassifier } from "../components/sidebar/modes/useSidebarModeState";
-import { useProjects, useServerConfigs, useThreadShells } from "../state/entities";
+import { useProjects, useServerConfigs, useQuietThreadShells } from "../state/entities";
 import { useConnectedEnvironmentIds } from "../state/environments";
 import { indexProjectContents } from "./projectContents.logic";
 import { projectLabelKey, threadProjectFolderId } from "./projectLabels.logic";
@@ -18,7 +18,7 @@ import { useProjectLabelDirectory } from "./useProjectLabels";
  * thread's folder comes from its shell, so this needs no membership query.
  */
 export function useProjectContents() {
-  const threads = useThreadShells();
+  const threads = useQuietThreadShells();
   const projects = useProjects();
   const serverConfigs = useServerConfigs();
   const directory = useProjectLabelDirectory(useConnectedEnvironmentIds());

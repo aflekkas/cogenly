@@ -22,7 +22,7 @@ import {
 import {
   useAllEnvironmentShellsBootstrapped,
   useProjects,
-  useThreadShells,
+  useQuietThreadShells,
 } from "../../state/entities";
 import { useEnvironments } from "../../state/environments";
 import { environmentProjects } from "../../state/projects";
@@ -88,7 +88,7 @@ export function FirstRunGate({
   const bootstrapped = useAllEnvironmentShellsBootstrapped();
   const { environments, isReady: environmentCatalogReady } = useEnvironments();
   const projects = useProjects();
-  const threads = useThreadShells();
+  const threads = useQuietThreadShells();
   const serverConfig = useAtomValue(primaryServerConfigAtom);
   const serverWelcome = useAtomValue(primaryServerWelcomeAtom);
   const primaryShellLive = useAtomValue(primaryShellLiveAtom);

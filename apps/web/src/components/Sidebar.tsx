@@ -152,7 +152,7 @@ import {
   useEnvironmentMachines,
   usePrimaryEnvironmentId,
 } from "../state/environments";
-import { readThreadShell, useProjects, useThreadShells } from "../state/entities";
+import { readThreadShell, useProjects, useQuietThreadShells } from "../state/entities";
 import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../state/server";
 import { threadEnvironment } from "../state/threads";
 import { useThreadSearch } from "../state/queries";
@@ -2486,7 +2486,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
 
 export default function Sidebar() {
   const projects = useProjects();
-  const threads = useThreadShells();
+  const threads = useQuietThreadShells();
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   // AppSidebarLayout shows the navigation rail beside this sidebar on wider

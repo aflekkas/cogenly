@@ -41,7 +41,7 @@ import { prefersReducedMotion } from "~/lib/sendMotion";
 import { cn, newMessageId, randomUUID } from "~/lib/utils";
 import { ComposerProjectChip } from "~/projectLabels/ComposerProjectPicker";
 import { agentsRpc } from "~/rpc/agents";
-import { useProjects, useThreadShells } from "~/state/entities";
+import { useProjects, useQuietThreadShells } from "~/state/entities";
 import { usePrimaryEnvironmentId } from "~/state/environments";
 import { threadEnvironment, useEnvironmentThread } from "~/state/threads";
 import { useOrchestrationCommand } from "~/state/use-orchestration-command";
@@ -151,7 +151,7 @@ export function AgentBuilderConversation({
   const navigate = useNavigate();
   const client = useAgentsClient();
   const { agents, models } = useAgents();
-  const shells = useThreadShells();
+  const shells = useQuietThreadShells();
   const primary = usePrimaryEnvironmentId();
   const { scratchEnvironmentId, openScratchProject } = useScratchProject();
   const projects = useProjects();

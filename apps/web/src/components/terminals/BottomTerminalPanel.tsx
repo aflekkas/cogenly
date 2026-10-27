@@ -25,7 +25,7 @@ import { PANEL_MOTION_EASING } from "~/lib/panelFlip";
 import { type TerminalContextSelection } from "~/lib/terminalContext";
 import { cn } from "~/lib/utils";
 import { PANEL_ANIMATION_DURATION, readPanelAnimationsActive } from "~/panelAnimations";
-import { useThreadShells } from "~/state/entities";
+import { useQuietThreadShells } from "~/state/entities";
 import {
   readEnvironmentScope,
   useEnvironmentScope,
@@ -81,7 +81,7 @@ const EMPTY_ENTRIES: ReadonlyArray<AgentTerminalEntry> = [];
  */
 export function useBottomPanelTabs(threadRef: ScopedThreadRef, threadStarted: boolean) {
   const environmentId = threadRef.environmentId;
-  const shells = useThreadShells();
+  const shells = useQuietThreadShells();
   const subagentsKey = useMemo(() => {
     const rows: Array<[string, string]> = [];
     for (const shell of shells) {
