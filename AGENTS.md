@@ -85,6 +85,16 @@ An empty database is a bad test. Seed your worktree's `.cogenly` with a copy of 
 - One request is one PR. Split it only when the maintainer asks. Outside contributions follow the stricter [one problem per PR](CONTRIBUTING.md#one-problem) rule.
 - When babysitting: poll checks and comments newer than the last push, verify each bot finding against the source, fix real ones, dismiss false positives with a written reason. Stay quiet when nothing is new. Stop when the bots are green on the latest commit.
 
+## Releases
+
+v0.3.5 passed CI, then deadlocked at startup on the maintainer's real database and auto-updated into an app that never opened a window. These rules exist so that cannot ship again.
+
+- **Boot the release on real data before approving production.** Run the artifact's own server against a fresh `vp run migrate-dev-db` copy, never the live install (rule 2), and require `/.well-known/t3/environment` to answer. `/health` answers before startup finishes, so it proves nothing. Steps: [Main → prod](docs/operations/release.md#main--prod).
+- **The maintainer's Mac runs it first.** Install the build and use it before approving. Nobody gets an update the maintainer has not run.
+- **Never wait on a service cache inside a writer transaction, and never let a cache load take the writer.** Startup reloads settings while other layers hold write transactions; a load queued behind a transaction that waits on it hangs the server with no error. Read on the reader (`NodeSqliteClient.readOnly`) or resolve the value before `withTransaction`.
+- **Check query plans when adding an index.** A broad index can outrank the partial indexes hot reads depend on. Run `EXPLAIN QUERY PLAN` for the queries on that table, and pin the important ones in a test.
+- **Migrations stay openable by the previous release,** so rolling back to the previous build works on the migrated database. Add tables, columns, and indexes freely, and drop an index when a query plan needs it: the previous build only loses speed. Never drop, rename, or retype a table or column the previous build reads.
+
 ## Documentation
 
 Most code changes do not need an internal documentation change. Agents can read the code.
