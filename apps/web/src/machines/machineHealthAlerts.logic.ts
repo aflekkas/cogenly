@@ -289,14 +289,15 @@ export function planHealthAlertNotifications(
     if (shown.has(key) && !openKeys.has(key) && !retract.has(key)) retract.set(key, entry);
   }
   // Apply resolutions before suppression: reconnect can deliver a recent
-  // resolution and a recurrence together after our old sighting expired.
+  // resolution and a recurrence together after our old sighting expired. A
+  // different environment may already have pruned that sighting.
   const lastSeen = new Map(quiet);
   for (const { items } of merged.resolved)
     for (const item of items) {
       const key = quietProblemKey(item);
-      const lastSeenMs = lastSeen.get(key);
-      if (lastSeenMs === undefined || item.resolvedAt === null) continue;
-      lastSeen.set(key, Math.max(lastSeenMs, DateTime.toEpochMillis(item.resolvedAt)));
+      if (!needsOwner(item) || item.resolvedAt === null) continue;
+      const resolvedAtMs = DateTime.toEpochMillis(item.resolvedAt);
+      lastSeen.set(key, Math.max(lastSeen.get(key) ?? resolvedAtMs, resolvedAtMs));
     }
   // Quiet when this alert opened within a day of the problem's last sighting:
   // a restart's new id, or a return soon after it cleared.

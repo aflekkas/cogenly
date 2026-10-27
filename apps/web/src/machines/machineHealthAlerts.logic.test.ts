@@ -364,6 +364,34 @@ describe("quiet problems that need the owner", () => {
     ).toHaveLength(1);
   });
 
+  it("restores a recent resolution after another environment prunes the quiet entry on reconnect", () => {
+    const hour = DAY / 24;
+    const opened = plan([signIn("a", 0)], new Map(), 0);
+    const snapshots = new Map<EnvironmentId, MachineHealthAlertsSnapshot>([[LAPTOP, snapshot([])]]);
+    // The unaffected machine reconnects first, before the hub can report its resolution.
+    const otherEnvironment = planHealthAlertNotifications(
+      mergeHealthAlertSnapshots(snapshots),
+      new Set(opened.remember),
+      new Set(),
+      opened.quiet,
+      25 * hour,
+    );
+    expect(otherEnvironment.quiet.size).toBe(0);
+    snapshots.set(
+      HUB,
+      snapshot([signIn("b", 25 * hour)], [signIn("a", 0, resolvedAt(24.5 * hour))]),
+    );
+    const affectedEnvironment = planHealthAlertNotifications(
+      mergeHealthAlertSnapshots(snapshots),
+      new Set(opened.remember),
+      new Set(),
+      otherEnvironment.quiet,
+      25 * hour,
+    );
+    expect(affectedEnvironment.toast).toEqual([]);
+    expect([...affectedEnvironment.quiet.values()]).toEqual([25 * hour]);
+  });
+
   it("expires a problem that vanished without a resolution a day after it was last seen", () => {
     const opened = plan([signIn("a", 0)], new Map(), 0);
     // Its machine disconnected: no snapshot, so no resolution either.
