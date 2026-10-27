@@ -1,3 +1,7 @@
+import {
+  withoutWorkspaceSnapshots,
+  workspaceRefreshProviders,
+} from "./provider/providerWorkspaceConfig.ts";
 import * as RepoMcpTrust from "./integrations/RepoMcpTrust.ts";
 import * as AccountConnections from "./accounts/AccountConnections.ts";
 import * as AccountAccess from "./accounts/AccountAccess.ts";
@@ -1256,13 +1260,19 @@ const makeWsRpcHandlers = (
         ),
       );
 
-    const loadServerConfig = (options: { readonly usageLimitsCommand: boolean }) =>
+    const loadServerConfig = (options: {
+      readonly usageLimitsCommand: boolean;
+      readonly workspaceSnapshotsOnDemand?: boolean;
+    }) =>
       Effect.gen(function* () {
         const keybindingsConfig = yield* keybindings.loadConfigState;
         const currentProviders = yield* providerRegistry.getProviders;
-        const providers = options.usageLimitsCommand
+        const commandProviders = options.usageLimitsCommand
           ? withUsageLimitsCommands(currentProviders)
           : currentProviders;
+        const providers = options.workspaceSnapshotsOnDemand
+          ? withoutWorkspaceSnapshots(commandProviders)
+          : commandProviders;
         const settings = ServerSettings.redactServerSettingsForClient(
           yield* serverSettings.getSettings,
         );
@@ -1966,7 +1976,13 @@ const makeWsRpcHandlers = (
               providers = yield* providerRegistry.refreshInstance(instance.instanceId);
             }
           }
-          return { providers };
+          if (input.workspaceSnapshotsOnDemand !== true) return { providers };
+          return {
+            providers: workspaceRefreshProviders(
+              input.usageLimitsCommand === true ? withUsageLimitsCommands(providers) : providers,
+              input,
+            ),
+          };
         }),
       [WS_METHODS.mcpAppsCallTool]: (input) => mcpAppRequests.callTool(input),
       [WS_METHODS.mcpAppsToolInfo]: (input) => mcpAppRequests.toolInfo(input),
@@ -2709,7 +2725,11 @@ const makeWsRpcHandlers = (
         Stream.unwrap(
           Effect.gen(function* () {
             const usageLimitsCommand = input.usageLimitsCommand === true;
-            const config = yield* loadServerConfig({ usageLimitsCommand });
+            const workspaceSnapshotsOnDemand = input.workspaceSnapshotsOnDemand === true;
+            const config = yield* loadServerConfig({
+              usageLimitsCommand,
+              workspaceSnapshotsOnDemand,
+            });
             const keybindingsUpdates = keybindings.streamChanges.pipe(
               Stream.map((event) => ({
                 version: 1 as const,
@@ -2721,9 +2741,14 @@ const makeWsRpcHandlers = (
               })),
             );
             const providerStatuses = providerRegistry.streamChanges.pipe(
-              Stream.map((providers) =>
-                usageLimitsCommand ? withUsageLimitsCommands(providers) : providers,
-              ),
+              Stream.map((providers) => {
+                const commandProviders = usageLimitsCommand
+                  ? withUsageLimitsCommands(providers)
+                  : providers;
+                return workspaceSnapshotsOnDemand
+                  ? withoutWorkspaceSnapshots(commandProviders)
+                  : commandProviders;
+              }),
               // Both sides replay their current value, so the first pairing normally
               // repeats the snapshot the client already holds. Compare against that
               // snapshot rather than dropping blindly: a refresh that landed between
