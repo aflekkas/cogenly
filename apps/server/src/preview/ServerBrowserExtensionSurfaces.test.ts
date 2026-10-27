@@ -317,6 +317,65 @@ const provide = <A, E>(
   );
 
 describe.skipIf(!chrome)("real Chrome extension surfaces", () => {
+  it.live("reveals new and reused MCP surfaces while toolbar opens remain unrevealed", () =>
+    provide(
+      Effect.gen(function* () {
+        const r = yield* rig;
+        const host = yield* r.manager.open({
+          threadId,
+          runtime: "server",
+          profileId: "default",
+          url: r.url,
+        });
+        yield* r.awaitTab(() => r.liveTabs.size === 2);
+        const toolbar = yield* r.extensions.openSurface({
+          id: r.id,
+          kind: "sidePanel",
+          hostTabId: host.tabId,
+          threadId,
+        });
+        const toolbarSession = (yield* r.manager.list({ threadId })).sessions.find(
+          (tab) => tab.tabId === toolbar.surfaceTabId,
+        )!;
+        expect(toolbarSession.reveal).toBe(false);
+        const userPopup = yield* r.extensions.openSurface({
+          id: r.id,
+          kind: "popup",
+          hostTabId: host.tabId,
+          threadId,
+        });
+        expect(userPopup.notice).toBeUndefined();
+        const events = yield* r.manager.subscribeEvents;
+        const agent = yield* r.invoke<PreviewAutomationStatus>("extensionOpen", host.tabId, {
+          id: r.id,
+          page: "popup",
+        });
+        const opened = yield* Stream.fromSubscription(events).pipe(
+          Stream.filter((event) => event.type === "opened" && event.tabId === agent.surfaceTabId),
+          Stream.take(1),
+          Stream.runCollect,
+        );
+        expect(opened[0]?.type === "opened" && opened[0].snapshot.reveal).toBe(true);
+        const agentSession = (yield* r.manager.list({ threadId })).sessions.find(
+          (tab) => tab.tabId === agent.surfaceTabId,
+        )!;
+        expect(agent.surfaceTabId).not.toBe(userPopup.surfaceTabId);
+        expect(agentSession.automationOwner).toBeDefined();
+        expect(agent.notice).toContain("persistent extension surface");
+        const reused = yield* r.invoke<PreviewAutomationStatus>("extensionOpen", host.tabId, {
+          id: r.id,
+          page: "sidePanel",
+        });
+        expect(reused.surfaceTabId).toBe(toolbar.surfaceTabId);
+        const revealed = (yield* r.manager.list({ threadId })).sessions.find(
+          (tab) => tab.tabId === toolbar.surfaceTabId,
+        )!;
+        expect(revealed.reveal).toBe(true);
+        expect(revealed.revealRequest?.force).toBe(true);
+      }),
+    ),
+  );
+
   it.live(
     "keeps an agent popup alive across blur, drives the native module-worker panel, and closes both with the host",
     () =>

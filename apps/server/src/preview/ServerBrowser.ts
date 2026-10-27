@@ -2841,6 +2841,7 @@ const make = Effect.gen(function* () {
             kind: extensionInput.page,
             hostTabId: tab.tabId,
             threadId: tab.threadId,
+            agentSessionId: request.agentSessionId,
             profileId: extensionInput.profileId ?? tab.profileId ?? DEFAULT_BROWSER_PROFILE_ID,
           }),
         );
@@ -3542,6 +3543,7 @@ const make = Effect.gen(function* () {
           throw new Error(
             "The host tab must use the extension's browser profile. Incognito and isolated tabs do not run extensions.",
           );
+        const surfaceOwner = input.agentSessionId ?? hostTab.control.agentId;
         const key = tabKey(hostTab.threadId, hostTab.tabId);
         const previous = surfaceLocks.get(key) ?? Promise.resolve();
         const opening = previous.catch(constVoid).then(async () => {
@@ -3554,10 +3556,23 @@ const make = Effect.gen(function* () {
               tab.extensionSurface.extensionId === input.id &&
               tab.extensionSurface.kind === input.kind,
           );
-          if (existing && !existing.page.isClosed()) {
+          const upgradePopup =
+            input.agentSessionId !== undefined &&
+            existing?.extensionSurface?.kind === "popup" &&
+            !surfaceNotices.has(existing.page);
+          if (existing && !existing.page.isClosed() && !upgradePopup) {
             if (existing.extensionSurface?.kind === "popup" && surfaceNotices.has(existing.page))
               await hostTab.page.bringToFront();
             else await existing.page.bringToFront();
+            if (input.agentSessionId !== undefined) {
+              await Effect.runPromise(
+                manager.requestReveal({
+                  threadId: hostTab.threadId,
+                  tabId: existing.tabId,
+                  force: true,
+                }),
+              );
+            }
             const notice = surfaceNotices.get(existing.page);
             return {
               surfaceTabId: existing.tabId,
@@ -3565,13 +3580,14 @@ const make = Effect.gen(function* () {
               ...(notice ? { notice } : {}),
             };
           }
+          if (existing && upgradePopup) dropTab(existing, true);
           const context = hostTab.page.context();
           let surface = await openExtensionSurface(hostTab.page, extension, input.kind, () =>
             newOwnedPage(context),
           );
           hostTab.usedAt = Date.now();
           if (!surface) return { hostTabId: hostTab.tabId };
-          if (surface.kind === "popup" && hostTab.control.agentId !== null && !surface.notice) {
+          if (surface.kind === "popup" && surfaceOwner !== null && !surface.notice) {
             // Native action popups close on Chrome focus changes. Agent-owned
             // popups keep one ordinary extension page alive from the start, so
             // subsequent host/panel actions preserve the popup's DOM and inputs.
@@ -3630,10 +3646,8 @@ const make = Effect.gen(function* () {
               runtime: "server",
               serverRendering: "stream",
               profileId: input.profileId,
-              reveal: false,
-              ...(hostTab.control.agentId === null
-                ? {}
-                : { automationOwner: hostTab.control.agentId }),
+              reveal: input.agentSessionId !== undefined,
+              ...(surfaceOwner === null ? {} : { automationOwner: surfaceOwner }),
               extensionSurface: {
                 kind: surface.kind,
                 extensionId: input.id,

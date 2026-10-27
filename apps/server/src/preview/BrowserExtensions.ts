@@ -114,6 +114,11 @@ export interface LoadableExtension {
   readonly path: string;
 }
 
+// The broker supplies agent identity internally; toolbar RPCs use the wire input unchanged.
+type SurfaceOpenInput = BrowserExtensionOpenSurfaceInput & {
+  readonly agentSessionId?: string | undefined;
+};
+
 export class BrowserExtensions extends Context.Service<
   BrowserExtensions,
   {
@@ -128,11 +133,11 @@ export class BrowserExtensions extends Context.Service<
       input: BrowserExtensionReloadInput,
     ) => Effect.Effect<BrowserExtensionInstallResult, BrowserExtensionError>;
     readonly openSurface: (
-      input: BrowserExtensionOpenSurfaceInput,
+      input: SurfaceOpenInput,
     ) => Effect.Effect<BrowserExtensionOpenSurfaceResult, BrowserExtensionError>;
     readonly registerSurfaceOpener: (
       open: (
-        input: BrowserExtensionOpenSurfaceInput & { readonly profileId: string },
+        input: SurfaceOpenInput & { readonly profileId: string },
         extension: BrowserExtension,
       ) => Effect.Effect<BrowserExtensionOpenSurfaceResult, BrowserExtensionError>,
     ) => Effect.Effect<void, never, Scope.Scope>;
