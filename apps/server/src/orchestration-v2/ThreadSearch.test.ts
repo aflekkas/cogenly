@@ -80,3 +80,15 @@ it.effect("uses the indexed prefix fallback on SQLite builds without FTS5", () =
     expect((yield* search.search({ query: "%" })).matches).toEqual([]);
   }).pipe(Effect.provide(layer)),
 );
+
+it.effect("shows the first indexed token in long, accent-folded, multi-token snippets", () =>
+  Effect.gen(function* () {
+    yield* seed;
+    yield* thread("long", `${"padding ".repeat(80)}café has alpha details ${"🙂 ".repeat(80)}`);
+    const search = yield* Search.ThreadSearch;
+    const result = (yield* search.search({ query: "cafe alp" })).matches[0];
+    expect(result?.snippet).toContain("café has alpha");
+    expect(result!.snippet.length).toBeLessThanOrEqual(240);
+    expect(result!.snippet.isWellFormed()).toBe(true);
+  }).pipe(Effect.provide(layer)),
+);

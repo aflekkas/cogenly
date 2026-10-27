@@ -46,26 +46,28 @@ function escapeLikePattern(value: string): string {
   return value.replaceAll("!", "!!").replaceAll("%", "!%").replaceAll("_", "!_");
 }
 
-function foldAsciiCase(value: string): string {
-  return value.replace(/[A-Z]/g, (character) => character.toLowerCase());
-}
-
 /** At most 240 characters, centred near the first match. */
 function buildSearchSnippet(text: string, query: string): string {
   const normalizedText = text.replace(/\s+/g, " ").trim();
   if (normalizedText.length <= 240) {
     return normalizedText;
   }
-  const normalizedQuery = foldAsciiCase(query.replace(/\s+/g, " ").trim());
-  const matchIndex = foldAsciiCase(normalizedText).indexOf(normalizedQuery);
+  const foldedText = foldSearchText(normalizedText);
+  const tokens = foldSearchText(query).match(/[\p{L}\p{N}]+/gu) ?? [];
+  const offsets = tokens.map((token) => foldedText.indexOf(token)).filter((offset) => offset >= 0);
+  const matchIndex = offsets.length > 0 ? Math.min(...offsets) : 0;
   const bodyLength = 236;
   const idealStart = Math.max(0, matchIndex - 72);
-  const start = Math.min(idealStart, normalizedText.length - bodyLength);
-  const end = Math.min(normalizedText.length, start + bodyLength);
+  let start = Math.min(idealStart, normalizedText.length - bodyLength);
+  if (isLowSurrogate(normalizedText.charCodeAt(start))) start--;
+  let end = Math.min(normalizedText.length, start + bodyLength);
+  if (isLowSurrogate(normalizedText.charCodeAt(end))) end--;
   return `${start > 0 ? "…" : ""}${normalizedText.slice(start, end)}${
     end < normalizedText.length ? "…" : ""
   }`;
 }
+
+const isLowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff;
 
 function foldSearchText(value: string): string {
   return value.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
@@ -103,22 +105,23 @@ export const make = Effect.gen(function* () {
         ${
           fts
             ? sql`
-          SELECT d.key, d.thread_id, d.body, d.matched_at
+          SELECT d.rowid AS document_rowid, d.key, d.thread_id, d.matched_at
           FROM search_fts JOIN search_documents d ON d.rowid = search_fts.rowid
-          WHERE search_fts MATCH ${match}
+          WHERE search_fts MATCH ${match} AND d.key LIKE 'message:%'
           ORDER BY search_fts.rowid DESC LIMIT 10000
         `
             : sql`
-          SELECT key, thread_id, body, matched_at FROM search_documents
-          WHERE body LIKE ${pattern} ESCAPE '!'
+          SELECT rowid AS document_rowid, key, thread_id, matched_at FROM search_documents
+          WHERE body LIKE ${pattern} ESCAPE '!' AND key LIKE 'message:%'
           ORDER BY rowid DESC LIMIT 10000
         `
         }
       )
       SELECT threads.thread_id AS "threadId", threads.project_id AS "projectId",
-        threads.title, messages.role AS source, hits.body AS "matchText",
+        threads.title, messages.role AS source, documents.body AS "matchText",
         hits.matched_at AS "messageCreatedAt", threads.updated_at AS "threadUpdatedAt"
       FROM hits
+      JOIN search_documents documents ON documents.rowid = hits.document_rowid
       JOIN orchestration_v2_projection_messages messages
         ON messages.message_id = substr(hits.key, 9)
       JOIN orchestration_v2_projection_threads threads ON threads.thread_id = hits.thread_id
@@ -128,7 +131,7 @@ export const make = Effect.gen(function* () {
         AND json_extract(threads.payload_json, '$.lineage.relationshipToParent') IS NOT 'subagent'
         AND messages.message_id NOT LIKE 'async-answer:%'
         AND messages.streaming = 0 AND messages.role IN ('user', 'assistant')
-      LIMIT 2000
+      ORDER BY hits.document_rowid DESC LIMIT 2000
     `,
   });
 
