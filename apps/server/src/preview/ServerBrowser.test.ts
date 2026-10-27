@@ -55,7 +55,7 @@ const scope: McpThreadInvocationScope = {
 afterEach(() => vi.restoreAllMocks());
 
 /** Playwright boundary only: the real manager, broker, control, operations, and viewer lifecycle run. */
-const rig = (native = false, autoOpen = true) =>
+const rig = (native = false, autoOpen = true, extensions = false) =>
   Effect.gen(function* () {
     const connected = yield* Deferred.make<void>();
     let titleAvailable = true;
@@ -136,7 +136,10 @@ const rig = (native = false, autoOpen = true) =>
           installed: Effect.succeedNone,
         }),
         Layer.mock(Extensions.BrowserExtensions)({
-          loadable: () => Effect.succeed([]),
+          loadable: () =>
+            Effect.succeed(extensions ? [{ id: "a".repeat(32), path: "/extension" }] : []),
+          registerLoader: () => Effect.void,
+          reportLoad: () => Effect.void,
           profiles: Effect.succeed([]),
           changes: Stream.empty,
         }),
@@ -572,4 +575,47 @@ it.effect.each([
       ).toBe(true);
     }),
   ),
+);
+
+it.effect(
+  "extension profiles stream full Chrome into the desktop without waiting for a native tab",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const r = yield* rig(true, false, true);
+        const events = yield* r.manager.subscribeEvents;
+        const opening = yield* r
+          .invoke<PreviewAutomationStatus>("open", undefined, {
+            profileId: "default",
+            reuseExistingTab: false,
+            open: true,
+          })
+          .pipe(Effect.forkScoped);
+        const revealed = yield* Stream.fromSubscription(events).pipe(
+          Stream.filter((event) => event.type === "navigated" && event.snapshot.reveal === true),
+          Stream.runHead,
+        );
+        const event = Option.getOrThrow(revealed);
+        const viewerScope = yield* Scope.make();
+        yield* r.browser
+          .attachViewer({
+            threadId,
+            tabId: event.tabId,
+            canOperate: true,
+            quality: 80,
+            maxWidth: 1280,
+            maxHeight: 800,
+          })
+          .pipe(Scope.provide(viewerScope));
+        const opened = yield* Fiber.join(opening);
+        expect(opened.available).toBe(true);
+        expect(opened.rendering).toBe("panel");
+        expect(opened.sessionMismatch).not.toBe(true);
+        expect(r.awaitAttached).not.toHaveBeenCalled();
+        expect(r.connectDesktop).not.toHaveBeenCalled();
+        expect(r.context.newPage).toHaveBeenCalledTimes(1);
+        expect((yield* r.manager.list({ threadId })).sessions[0]?.serverRendering).toBe("stream");
+        yield* Scope.close(viewerScope, Exit.void);
+      }),
+    ),
 );

@@ -26,13 +26,8 @@ interface Options {
   readonly extensionsFor?: (profileId: string) => Promise<ReadonlyArray<string>>;
   /** A browser that can load extensions, installing it on first use. */
   readonly extensionsExecutable?: () => Promise<string>;
+  readonly onExtensionLoad?: (profileId: string, path: string, error?: string) => Promise<void>;
 }
-
-/** Chrome's flags to run exactly these unpacked extensions. */
-export const extensionArgs = (paths: ReadonlyArray<string>) =>
-  paths.length === 0
-    ? []
-    : [`--disable-extensions-except=${paths.join(",")}`, `--load-extension=${paths.join(",")}`];
 
 const UA_PLATFORMS: Partial<Record<NodeJS.Platform, string>> = {
   darwin: "macOS",
@@ -189,21 +184,64 @@ export class ServerBrowserContexts {
     }
     const directory = this.profileDirectory(profileId);
     const extensions = (await this.options.extensionsFor?.(profileId)) ?? [];
-    // The headless shell cannot load extensions; the full build runs them in new headless mode.
-    const options =
-      extensions.length > 0 && this.options.extensionsExecutable
-        ? await this.launchOptions(this.options.extensionsExecutable)
-        : await this.launchOptions();
     const { chromium } = loadPlaywright();
     await NodeFSP.mkdir(directory, { recursive: true });
     this.launchedExtensions.set(JSON.stringify([profileId, null]), extensions.join("\n"));
-    return this.launch(options, () =>
-      chromium.launchPersistentContext(directory, {
-        ...options,
-        args: [...options.args, ...extensionArgs(extensions)],
-        ...contextOptions,
-      }),
-    );
+    const start = async (withExtensions: boolean) => {
+      const options = await this.launchOptions(
+        withExtensions ? this.options.extensionsExecutable : this.options.executable,
+      );
+      return this.launch(options, () =>
+        chromium.launchPersistentContext(directory, {
+          ...options,
+          // Load individually after startup: Chrome returns each extension's real error,
+          // and a rejected manifest cannot abort the browser's launch.
+          args: [
+            ...options.args,
+            ...(withExtensions ? ["--enable-unsafe-extension-debugging"] : []),
+          ],
+          ignoreDefaultArgs: [
+            ...options.ignoreDefaultArgs,
+            ...(withExtensions ? ["--disable-extensions"] : []),
+          ],
+          ...contextOptions,
+        }),
+      );
+    };
+    if (extensions.length === 0) return start(false);
+    let context: BrowserContext;
+    try {
+      context = await start(true);
+    } catch (cause) {
+      for (const path of extensions) {
+        await this.options.onExtensionLoad?.(profileId, path, String(cause));
+      }
+      // A missing or broken full Chrome install must not take down ordinary browsing.
+      return start(false);
+    }
+    let session: CDPSession | undefined;
+    try {
+      session = await context.browser()!.newBrowserCDPSession();
+      for (const path of extensions) {
+        try {
+          await session.send("Extensions.loadUnpacked", { path });
+          await this.options.onExtensionLoad?.(profileId, path);
+        } catch (cause) {
+          await this.options.onExtensionLoad?.(profileId, path, String(cause));
+        }
+      }
+    } catch (cause) {
+      for (const path of extensions) {
+        await this.options.onExtensionLoad?.(profileId, path, String(cause));
+      }
+    } finally {
+      await session?.detach().catch(constVoid);
+    }
+    if (!context.browser()?.isConnected()) {
+      await context.close().catch(constVoid);
+      return start(false);
+    }
+    return context;
   }
 
   /**
@@ -218,9 +256,20 @@ export class ServerBrowserContexts {
     // Already running exactly these.
     if (this.launchedExtensions.get(key) === extensions.join("\n")) return false;
     this.contexts.delete(key);
-    const context = await pending.catch(() => undefined);
-    await context?.close().catch(constVoid);
-    return context !== undefined;
+    const closing = (async () => {
+      const context = await pending.catch(() => undefined);
+      await context?.close().catch(constVoid);
+      return context !== undefined;
+    })();
+    // A concurrent tab must not launch against a profile whose browser still
+    // holds its lock. Publish the barrier before yielding to the close.
+    const clearing = closing.then(constVoid);
+    this.clearing.set(key, clearing);
+    try {
+      return await closing;
+    } finally {
+      if (this.clearing.get(key) === clearing) this.clearing.delete(key);
+    }
   }
 
   private profileDirectory(profileId: string) {

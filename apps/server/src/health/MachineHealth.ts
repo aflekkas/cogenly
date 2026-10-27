@@ -282,7 +282,7 @@ const make = Effect.gen(function* () {
   const greetings = yield* ChatGreetingService.ChatGreetingService;
   const computerUse = yield* ComputerUseService.ComputerUse;
   const sandbox = yield* ReadOnlySandbox.ReadOnlySandbox;
-  const previewBrowser = yield* Effect.serviceOption(PreviewBrowser.PreviewBrowser);
+  const previewBrowser = yield* PreviewBrowser.PreviewBrowser;
   const browserHostServices = yield* Effect.context<
     FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
   >();
@@ -472,10 +472,9 @@ const make = Effect.gen(function* () {
         guarded(
           "preview-browser",
           Effect.gen(function* () {
-            if (Option.isNone(previewBrowser)) return unknownCheck("preview-browser");
-            const status = yield* previewBrowser.value.status;
+            const status = yield* previewBrowser.status;
             if (status.state !== "ready") return previewBrowserCheck(status);
-            const executable = yield* previewBrowser.value.installed;
+            const executable = yield* previewBrowser.installed;
             const setupCommand = yield* resolveRootCliCommand(PreviewBrowserHost.SETUP_SUBCOMMAND);
             const blocked =
               !PreviewBrowserHost.sandboxDisabled(yield* HostProcess.Environment) &&
@@ -632,4 +631,7 @@ const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(MachineHealth, make).pipe(Layer.provide(ReadOnlySandbox.layer));
+export const layer = Layer.effect(MachineHealth, make).pipe(
+  Layer.provide(ReadOnlySandbox.layer),
+  Layer.provide(PreviewBrowser.layer),
+);

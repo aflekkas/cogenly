@@ -104,3 +104,27 @@ it.effect(
       expect((yield* browser.status).state).toBe("failed");
     }).pipe(Effect.provide(NodeServices.layer)),
 );
+
+it.effect(
+  "machine health names a failed full-Chrome install even when only extensions requested it",
+  () =>
+    Effect.gen(function* () {
+      const baseDir = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
+      const browser = yield* Browser.makePreviewBrowser({ baseDir }).pipe(
+        Effect.provideService(
+          HttpClient.HttpClient,
+          HttpClient.make((request) =>
+            Effect.succeed(
+              HttpClientResponse.fromWeb(request, new Response(null, { status: 503 })),
+            ),
+          ),
+        ),
+      );
+      yield* Effect.flip(browser.extensionsExecutable);
+      const status = yield* browser.status;
+      expect(status.state).toBe("failed");
+      expect(status.detail).toContain("Extension browser:");
+      expect(status.detail).toContain("network access");
+      expect(previewBrowserCheck(status).status).toBe("fail");
+    }).pipe(Effect.provide(NodeServices.layer)),
+);

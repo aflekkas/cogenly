@@ -593,7 +593,17 @@ export const makePreviewBrowser = Effect.fn("PreviewBrowser.make")(function* (
 ) {
   const shell = yield* makePreviewBrowserInstaller({ ...options, flavor: "headless-shell" });
   const chrome = yield* makePreviewBrowserInstaller({ ...options, flavor: "chrome" });
-  return PreviewBrowser.of({ ...shell, extensionsExecutable: chrome.executable });
+  return PreviewBrowser.of({
+    ...shell,
+    extensionsExecutable: chrome.executable,
+    status: Effect.gen(function* () {
+      const extensions = yield* chrome.status;
+      if (extensions.state === "failed" || extensions.state === "installing") {
+        return { ...extensions, detail: `Extension browser: ${extensions.detail}` };
+      }
+      return yield* shell.status;
+    }),
+  });
 });
 
 export const layer = Layer.effect(

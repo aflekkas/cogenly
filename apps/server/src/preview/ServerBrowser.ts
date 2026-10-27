@@ -183,7 +183,7 @@ export class ServerBrowserLaunchError extends Schema.TaggedError<ServerBrowserLa
   override get message(): string {
     return isBrowserSetupError(this.cause)
       ? this.cause.message
-      : "The server preview browser could not start. Open machine health to check browser setup.";
+      : `The server preview browser could not start: ${String(this.cause)}`;
   }
 }
 
@@ -618,14 +618,24 @@ const make = Effect.gen(function* () {
   const browserExtensions = yield* BrowserExtensions.BrowserExtensions;
   const contexts = new ServerBrowserContexts({
     profilesDir: NodePath.join(config.stateDir, "server-browser", "profiles"),
-    executable: () => Effect.runPromise(previewBrowser.executable),
+    executable: async () => {
+      const result = await Effect.runPromise(Effect.result(previewBrowser.executable));
+      if (result._tag === "Failure") throw result.failure;
+      return result.success;
+    },
     extensionsFor: (profileId) =>
       Effect.runPromise(
         browserExtensions
           .loadable(profileId)
           .pipe(Effect.map((extensions) => extensions.map((extension) => extension.path))),
       ),
-    extensionsExecutable: () => Effect.runPromise(previewBrowser.extensionsExecutable),
+    extensionsExecutable: async () => {
+      const result = await Effect.runPromise(Effect.result(previewBrowser.extensionsExecutable));
+      if (result._tag === "Failure") throw result.failure;
+      return result.success;
+    },
+    onExtensionLoad: (profileId, path, error) =>
+      Effect.runPromise(browserExtensions.reportLoad(profileId, path, error)),
     // Playwright's launch error drops Chrome's own output; its sandbox note survives.
     diagnose: (executable, cause) =>
       Effect.runPromiseWith(launchServices)(
@@ -913,11 +923,16 @@ const make = Effect.gen(function* () {
   const createTab = async (snapshot: PreviewSessionSnapshot): Promise<ServerTab> => {
     const adopted = adoptedPages.get(tabKey(snapshot.threadId, snapshot.tabId));
     adoptedPages.delete(tabKey(snapshot.threadId, snapshot.tabId));
+    // Electron implements only part of Chrome's extension APIs. Keep extension
+    // profiles in full Chrome and stream the same page into every client.
+    const serverExtensions =
+      snapshot.profileId !== undefined &&
+      (await Effect.runPromise(browserExtensions.loadable(snapshot.profileId))).length > 0;
     // An agent tab nobody shows never gets a `<webview>`, and would run headless
     // with logins the panel does not have. Ask the panel to show it first.
     if (
       Targeting.revealBeforeAttach({
-        desktopAvailable: desktopChannel.available,
+        desktopAvailable: desktopChannel.available && !serverExtensions,
         alreadyAttached: await Effect.runPromise(
           desktopChannel.isAttached({ threadId: snapshot.threadId, tabId: snapshot.tabId }),
         ),
@@ -932,12 +947,13 @@ const make = Effect.gen(function* () {
       requestPanelReveal(snapshot.threadId, snapshot.tabId);
     }
     const desktop =
+      !serverExtensions &&
       adopted === undefined &&
       snapshot.serverRendering !== "stream" &&
       (await desktopRenders(snapshot))
         ? await connectDesktop(snapshot)
         : null;
-    if (!desktop && snapshot.serverRendering === "native") {
+    if (!serverExtensions && !desktop && snapshot.serverRendering === "native") {
       throw new ServerBrowserPage.ServerBrowserOperationError(
         "PreviewAutomationExecutionError",
         `The desktop browser panel did not attach for tab ${snapshot.tabId} within 10 seconds. Cogenly requested it automatically. Retry preview_open with tabId=${snapshot.tabId}; keep this tab open and do not ask the user to show the panel.`,
@@ -3307,43 +3323,35 @@ const make = Effect.gen(function* () {
     }),
   );
 
-  // A profile's extensions load into the desktop panel's session for it and,
-  // by restarting it, into its running server browser. The desktop gets every
-  // profile's list at startup, before it opens a tab in one.
-  const loadExtensions = (profileId: string, restart: boolean) =>
+  // Installs wait for their load attempt; list and install both expose its result.
+  // Extension profiles render through Chrome's stream even on the desktop.
+  const loadExtensions = (profileId: string) =>
     Effect.gen(function* () {
       const extensions = yield* browserExtensions.loadable(profileId);
-      if (restart) {
-        yield* Effect.promise(() =>
-          contexts.restartProfile(
-            profileId,
-            extensions.map((extension) => extension.path),
+      if (extensions.length > 0) {
+        for (const tab of tabs.values()) {
+          if (tab.profileId === profileId && tab.desktop) dropTab(tab, false, "reconnect");
+        }
+      }
+      yield* Effect.promise(() =>
+        contexts.restartProfile(
+          profileId,
+          extensions.map((extension) => extension.path),
+        ),
+      );
+      if (extensions.length > 0) {
+        yield* Effect.promise(() => contexts.contextFor(profileId)).pipe(
+          Effect.catchCause((cause) =>
+            Effect.forEach(
+              extensions,
+              (extension) => browserExtensions.reportLoad(profileId, extension.path, String(cause)),
+              { discard: true },
+            ),
           ),
         );
       }
-      if (desktopChannel.available) {
-        const loaded = yield* desktopChannel.extensions(environmentId, profileId, extensions);
-        if (!loaded) {
-          yield* Effect.logWarning("The desktop app did not load a profile's extensions.", {
-            profileId,
-          });
-        }
-      }
     });
-  yield* browserExtensions.profiles.pipe(
-    Effect.flatMap((profiles) =>
-      Effect.forEach(profiles, (profileId) => loadExtensions(profileId, false), { discard: true }),
-    ),
-    Effect.andThen(
-      browserExtensions.changes.pipe(
-        Stream.runForEach((profileId) => loadExtensions(profileId, true)),
-      ),
-    ),
-    Effect.catchCause((cause) =>
-      Effect.logWarning("Browser extensions stopped loading.", { cause }),
-    ),
-    Effect.forkScoped,
-  );
+  yield* browserExtensions.registerLoader(loadExtensions);
 
   const clearProfile = (profileId: string) =>
     Effect.tryPromise({

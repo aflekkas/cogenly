@@ -164,7 +164,7 @@ it.effect("opens an extension's popup as a new tab through the preview broker", 
     const result = yield* call("browser_extension_open", thread(live), { id, page: "popup" });
     expect(result.text).toContain('"tabId":"tab-1"');
     expect(opened).toEqual([
-      { url: `chrome-extension://${id}/popup.html`, reuseExistingTab: false },
+      { url: `chrome-extension://${id}/popup.html`, reuseExistingTab: false, profileId: "default" },
     ]);
   }),
 );
