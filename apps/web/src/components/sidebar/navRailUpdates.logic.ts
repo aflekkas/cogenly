@@ -252,23 +252,19 @@ const BUILD_SUFFIX = /(?:-[A-Za-z]?\d[\w.]*|\+[\w.-]+)$/;
 /**
  * The versions a row shows, with build suffixes dropped so "1.4.13-R6996.1 →
  * 1.4.14-R7309.1" reads "1.4.13 → 1.4.14". A pair that differs only in its
- * build keeps them. `shortened` says the full values belong in a tooltip.
+ * build keeps them. The row's tooltip carries the full values.
  */
 export function shortenVersionPair(
   current: string | null,
   next: string | null,
-): { readonly current: string | null; readonly next: string | null; readonly shortened: boolean } {
+): { readonly current: string | null; readonly next: string | null } {
   const short = (version: string | null) => version?.replace(BUILD_SUFFIX, "") ?? null;
   const shortCurrent = short(current);
   const shortNext = short(next);
   if (current && next && current !== next && shortCurrent === shortNext) {
-    return { current, next, shortened: false };
+    return { current, next };
   }
-  return {
-    current: shortCurrent,
-    next: shortNext,
-    shortened: shortCurrent !== current || shortNext !== next,
-  };
+  return { current: shortCurrent, next: shortNext };
 }
 
 /** The newest of several "checked at" instants, or null when none parse. */

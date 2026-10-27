@@ -299,16 +299,14 @@ describe("describeUpdatesHeroStatus", () => {
 });
 
 describe("shortenVersionPair", () => {
-  it("drops build suffixes, and says so", () => {
+  it("drops build suffixes", () => {
     expect(shortenVersionPair("1.4.13-R6996.1", "1.4.14-R7309.1")).toEqual({
       current: "1.4.13",
       next: "1.4.14",
-      shortened: true,
     });
     expect(shortenVersionPair("1.4.13-R6996.1", null)).toEqual({
       current: "1.4.13",
       next: null,
-      shortened: true,
     });
   });
 
@@ -316,13 +314,14 @@ describe("shortenVersionPair", () => {
     expect(shortenVersionPair("1.0.0-beta.1", "1.0.0-rc.2")).toEqual({
       current: "1.0.0-beta.1",
       next: "1.0.0-rc.2",
-      shortened: false,
     });
-    expect(shortenVersionPair("2.1.311", "2.1.312")).toMatchObject({ shortened: false });
+    expect(shortenVersionPair("2.1.311", "2.1.312")).toEqual({
+      current: "2.1.311",
+      next: "2.1.312",
+    });
     expect(shortenVersionPair("1.4.13-R6996.1", "1.4.13-R7309.1")).toEqual({
       current: "1.4.13-R6996.1",
       next: "1.4.13-R7309.1",
-      shortened: false,
     });
   });
 });

@@ -4,14 +4,15 @@
  * Codex, Muse Code) on any machine has an update. Hovering or focusing it
  * previews the popover; clicking pins it open.
  *
- * The popover leads with this app: its version and one status line for
- * everything, with the app's update filled unless "Update all" (which takes
- * it too) is offered. What's new sits under it, then one row per component
- * (the Cogenly server, then each provider CLI) across every machine, quiet
- * unless one needs an update. On several machines a row sums up their
- * versions and opens on each machine's own (navRailUpdateGroups.logic.ts),
- * so five servers still make one list. A footer says when it was all last
- * checked and holds "Update all". The release history opens in the same frame.
+ * The popover leads with this app: its version and one sentence for the whole
+ * state, with the app's update filled unless "Update all" (which takes it too)
+ * is offered. What's new sits under it, then one row per component (the
+ * Cogenly server, then each provider CLI) across every machine: one version,
+ * one status, one progress line. Machines that agree collapse into that row;
+ * only when they disagree does it open on each machine's own
+ * (navRailUpdateGroups.logic.ts). Offline machines follow. A footer says when
+ * it was all last checked and holds refresh and "Update all". The release
+ * history opens in the same frame.
  */
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -26,7 +27,7 @@ import {
 } from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { Atom } from "effect/reactivity";
-import { CheckIcon, DownloadIcon, LaptopMinimalIcon } from "lucide-react";
+import { CheckIcon, CloudIcon, DownloadIcon } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { APP_VERSION } from "~/branding";
@@ -36,7 +37,7 @@ import { cn } from "~/lib/utils";
 import { observeVisibleAnimation } from "~/lib/visibleAnimation";
 import { useCogenlyReleases } from "~/state/cogenlyReleases";
 import { useDesktopUpdateState } from "~/state/desktopUpdate";
-import { useEnvironments } from "~/state/environments";
+import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
 import { serverEnvironment } from "~/state/server";
 import { readEnvironmentScope, useEnvironmentsWithScope } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -54,26 +55,20 @@ import { DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { RefreshIcon } from "../ui/refresh-icon";
 import { Separator } from "../ui/separator";
-import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import {
-  GitHubLink,
-  ReleaseHistoryView,
-  type ReleaseTone,
-  WhatsNewNotes,
-} from "./NavRailReleaseNotes";
+import { ReleaseHistoryView, type ReleaseTone, WhatsNewNotes } from "./NavRailReleaseNotes";
 import {
   collectProviderUpdateRows,
   describeAppRow,
   describeDesktopUpdateRow,
   describeServerUpdateRow,
-  describeUpdatesFooter,
   describeUpdatesHeroStatus,
   formatCheckedAgo,
   holdDesktopUpdateStateWhileChecking,
   latestCheckedAt,
   type ProviderUpdateRowView,
   rowNeedsUpdate,
+  shortenVersionPair,
   type UpdatesHeroTone,
   type UpdateRowStatus,
   type UpdateRowView,
@@ -82,12 +77,10 @@ import {
   collectUpdateAllTargets,
   type ComponentUpdateGroup,
   componentUpdateTargets,
-  describeComponentFailure,
-  describeComponentProgress,
-  describeComponentVersions,
   groupUpdatesByComponent,
   type MachineUpdateRow,
   type MachineUpdates,
+  summarizeComponent,
 } from "./navRailUpdateGroups.logic";
 import {
   type CogenlyRelease,
@@ -113,7 +106,11 @@ const UPDATED_CHECK_MS = 2_400;
 const HOVER_OPEN_DELAY_MS = 150;
 const HOVER_CLOSE_DELAY_MS = 200;
 
-/** "v0.1.2 → v0.1.3" with the incoming version in the foreground; `v` for the app only. */
+/**
+ * "v0.1.2 → v0.1.3" with the incoming version in the foreground; `v` for the
+ * app only. Build suffixes are dropped and the text truncates before anything
+ * beside it does; the full versions stay in its tooltip.
+ */
 function VersionPair({
   current,
   next,
@@ -129,18 +126,30 @@ function VersionPair({
   const from = current ?? next;
   if (!from) return null;
   const to = current && next && current !== next ? next : null;
+  const short = shortenVersionPair(from, to);
   return (
-    <span className={cn("text-xs text-muted-foreground tabular-nums", className)}>
-      {format(from)}
-      {to ? (
-        <>
-          <span aria-label=" to " className="mx-0.75 opacity-70">
-            →
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            className={cn("min-w-0 truncate text-xs text-muted-foreground tabular-nums", className)}
+          >
+            {format(short.current ?? from)}
+            {to ? (
+              <>
+                <span aria-label=" to " className="mx-0.75 opacity-70">
+                  →
+                </span>
+                <span className="text-foreground">{format(short.next ?? to)}</span>
+              </>
+            ) : null}
           </span>
-          <span className="text-foreground">{format(to)}</span>
-        </>
-      ) : null}
-    </span>
+        }
+      />
+      <TooltipPopup side="top">
+        {to ? `${format(from)} → ${format(to)}` : format(from)}
+      </TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -241,18 +250,19 @@ function RowIcon({ row }: { row: UpdateRowView }) {
 }
 
 /**
- * A row's right edge: a check for a moment once it updated, a spinner while
- * it updates, else its button, else nothing but a faint check on hover.
+ * A row's right edge, its one status: a check for a moment once it updated,
+ * "Updating" (or its percent) while the row's line fills, else its button,
+ * else nothing but a faint check on hover.
  */
 function RowTrail({
   status,
   justUpdated,
-  busyLabel,
+  percent,
   action,
 }: {
   status: UpdateRowStatus;
   justUpdated: boolean;
-  busyLabel: string;
+  percent: number | null;
   action: ReactNode;
 }) {
   if (justUpdated) {
@@ -269,12 +279,11 @@ function RowTrail({
   if (status === "updating") {
     return (
       <span
-        // Keyed without its numbers, so "Updating 2 of 3" ticks in place.
-        key={`updating:${statusMotionKey(busyLabel)}`}
-        className="swap-motion flex items-center gap-1.5 text-xs whitespace-nowrap text-muted-foreground tabular-nums"
+        // Keyed once, so a ticking percent updates in place.
+        key="updating"
+        className="swap-motion text-xs whitespace-nowrap text-muted-foreground tabular-nums"
       >
-        <Spinner size="xs" tone="muted" aria-hidden role={undefined} />
-        {busyLabel}
+        {percent === null ? "Updating" : `${Math.floor(percent)}%`}
       </span>
     );
   }
@@ -305,171 +314,188 @@ function RowTrail({
 const ROW_CLASS_NAME =
   "group/row relative -mx-1.5 flex h-7.5 items-center gap-2 rounded-md px-1.5 transition-colors duration-(--motion-duration-fast) ease-standard hover:bg-accent";
 
-function MachineIcon() {
+/**
+ * A machine as a row label. This computer is named only here, where machines
+ * are listed side by side; a remote machine carries a small cloud. The name
+ * never shrinks: the versions beside it truncate first.
+ */
+function MachineName({ label, local }: { label: string; local: boolean }) {
+  if (local) return <span className="shrink-0 text-xs text-foreground">This computer</span>;
   return (
-    <span
-      aria-hidden
-      className="flex size-5 shrink-0 items-center justify-center text-muted-foreground"
-    >
-      <LaptopMinimalIcon className="size-3.5" />
+    <span className="inline-flex shrink-0 items-center gap-1 text-xs text-foreground">
+      <CloudIcon aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+      {label}
     </span>
   );
 }
 
 /**
- * One update row: a component on the only machine, or one machine under a
- * component's disclosure. Name and version, nothing else while it is up to
- * date. One that needs an update shows the version it moves to and its
- * button; one updating, a spinner and a progress line.
+ * The popover's one row: a provider (or server) across every machine, one
+ * machine under it, or an offline machine. Leading icon, name, one version,
+ * one status at the right edge, and a progress line along the bottom while it
+ * updates. `disclosure` makes the row open on `children`, and a failure reads
+ * under it while it is closed.
  */
-function ListRow({
-  row,
-  label,
+function UpdateRow({
   leading,
-  machine = false,
-  note = null,
-  updated,
-  action,
+  name,
+  label,
+  current,
+  next,
+  percent,
+  updating,
+  highlight,
+  failure,
+  trail,
+  disclosure,
+  children,
 }: {
-  row: UpdateRowView;
-  label: string;
   leading: ReactNode;
-  /** A machine under a component: a quieter label that truncates. */
-  machine?: boolean;
-  /** Muted text after the versions, e.g. the one machine a component is on. */
-  note?: string | null;
-  /** Just finished updating: shows a check for a moment. */
-  updated: boolean;
-  action: ReactNode;
+  /** Plain words for what the row is, for its progress line. */
+  name: string;
+  label: ReactNode;
+  current: string | null;
+  next: string | null;
+  /** The progress line's fill while `updating`; null runs it indeterminate. */
+  percent: number | null;
+  updating: boolean;
+  /** Tinted while it needs an update. */
+  highlight: boolean;
+  failure: string | null;
+  trail: ReactNode;
+  disclosure?: { readonly open: boolean; readonly onToggle: () => void } | null;
+  children?: ReactNode;
 }) {
-  const failure = row.status === "failed" ? row.detail : null;
+  const open = disclosure?.open ?? false;
+  const body = (
+    <>
+      {leading}
+      {label}
+      <VersionPair current={current} next={next} prefix={false} />
+    </>
+  );
   return (
     <div className="reveal-motion flex flex-col">
-      <div className={cn(ROW_CLASS_NAME, rowNeedsUpdate(row) && "bg-muted/48")}>
-        {leading}
-        <span
-          className={
-            machine ? "min-w-0 truncate text-xs text-foreground" : "shrink-0 text-menu font-medium"
-          }
-        >
-          {label}
-        </span>
-        {note ? (
-          <span className="min-w-0 truncate text-xs text-muted-foreground tabular-nums">
-            <VersionPair current={row.currentVersion} next={row.latestVersion} prefix={false} />
-            {` ${note}`}
-          </span>
+      <div className={cn(ROW_CLASS_NAME, highlight && "bg-muted/48")}>
+        {disclosure ? (
+          <DisclosureTrigger
+            open={open}
+            className="min-w-0 flex-1 self-stretch"
+            onClick={disclosure.onToggle}
+          >
+            <span className="flex min-w-0 items-center gap-2">{body}</span>
+          </DisclosureTrigger>
         ) : (
-          <VersionPair
-            current={row.currentVersion}
-            next={row.latestVersion}
-            prefix={false}
-            className={machine ? "shrink-0" : "min-w-0 truncate"}
-          />
+          <span className="flex min-w-0 flex-1 items-center gap-2">{body}</span>
         )}
-        <span className="flex-1" />
-        <span className="flex shrink-0 items-center">
-          <RowTrail
-            status={row.status}
-            justUpdated={updated && row.status === "current"}
-            busyLabel={row.detail ?? "Updating"}
-            action={action}
-          />
-        </span>
-        {row.status === "updating" ? (
+        <span className="flex shrink-0 items-center">{trail}</span>
+        {updating ? (
           <ProgressLine
-            percent={row.percent ?? null}
-            label={`Updating ${label}`}
-            className="absolute right-1.5 bottom-0 left-8.5"
+            percent={percent}
+            label={`Updating ${name}`}
+            className={cn("absolute right-1.5 bottom-0", leading ? "left-8.5" : "left-1.5")}
           />
         ) : null}
       </div>
-      {failure ? (
-        <p className="reveal-motion pt-0.5 pb-1.5 pl-7 text-xs break-words text-muted-foreground">
+      {/* Open, each machine row carries its own reason instead. */}
+      <DisclosurePanel open={failure !== null && !open}>
+        <p
+          className={cn(
+            "line-clamp-2 pt-0.5 pb-1.5 text-xs break-words text-muted-foreground",
+            leading ? "pl-7" : "pl-0",
+          )}
+        >
           {failure}
         </p>
+      </DisclosurePanel>
+      {disclosure ? (
+        <DisclosurePanel open={open}>
+          <div className="flex flex-col pl-7">{children}</div>
+        </DisclosurePanel>
       ) : null}
     </div>
   );
 }
 
+/** A row's name: the provider's, or a nested machine's. */
+function RowLabel({ children }: { children: ReactNode }) {
+  return <span className="shrink-0 text-menu font-medium">{children}</span>;
+}
+
 /**
- * A component on several machines, as one row: its versions across them
- * ("1.4.12 → 1.4.13 on 2 of 5"), one button for every machine that
- * needs it, and "Updating 2 of 3" while they run. The row opens on each
- * machine's own version and button.
+ * A component as one row. Machines that agree collapse into it; only when they
+ * disagree (versions, one failed or behind, or the component on some machines
+ * only) does it open on each machine's own version and button.
  */
 function ComponentRow({
   group,
   batch,
   updated,
+  forceSplit,
+  isLocal,
   action,
   machineAction,
 }: {
   group: ComponentUpdateGroup;
   batch: ReadonlySet<string>;
   updated: ReadonlyMap<string, UpdateRowView>;
+  /** The component is missing from some machines, so the list says which. */
+  forceSplit: boolean;
+  isLocal: (environmentId: EnvironmentId) => boolean;
   action: ReactNode;
   machineAction: (machine: MachineUpdateRow) => ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const summary = describeComponentVersions(group.machines);
-  const progress = describeComponentProgress(group.machines, batch);
-  const failure = describeComponentFailure(group.machines);
+  const summary = summarizeComponent(group.machines, batch);
+  const split = summary.split || forceSplit;
   const justUpdated =
     group.status === "current" && group.machines.some((machine) => updated.has(machine.id));
   return (
-    <div className="reveal-motion flex flex-col">
-      <div className={cn(ROW_CLASS_NAME, rowNeedsUpdate(group) && "bg-muted/48")}>
-        <DisclosureTrigger
-          open={open}
-          className="min-w-0 flex-1 self-stretch"
-          onClick={() => setOpen((last) => !last)}
-        >
-          <RowIcon row={group.machines[0]!.row} />
-          <span className="shrink-0 text-menu font-medium">{group.name}</span>
-          <span className="min-w-0 truncate text-xs text-muted-foreground tabular-nums">
-            <VersionPair current={summary.current} next={summary.next} prefix={false} />
-            {summary.scope && (summary.current || summary.next) ? " " : null}
-            {summary.scope}
-          </span>
-        </DisclosureTrigger>
-        <span className="flex shrink-0 items-center">
-          <RowTrail
-            status={group.status}
-            justUpdated={justUpdated}
-            busyLabel={progress?.label ?? "Updating"}
-            action={action}
-          />
-        </span>
-        {progress ? (
-          <ProgressLine
-            percent={progress.percent}
-            label={`Updating ${group.name}`}
-            className="absolute right-1.5 bottom-0 left-8.5"
-          />
-        ) : null}
-      </div>
-      {/* Open, each machine row carries its own reason instead. */}
-      <DisclosurePanel open={failure !== null && !open}>
-        <p className="pt-0.5 pb-1.5 pl-7 text-xs break-words text-muted-foreground">{failure}</p>
-      </DisclosurePanel>
-      <DisclosurePanel open={open}>
-        <div className="flex flex-col pl-7">
-          {group.machines.map((machine) => (
-            <ListRow
-              key={machine.id}
-              row={machine.row}
-              label={machine.machineLabel}
-              leading={<MachineIcon />}
-              machine
-              updated={updated.has(machine.id)}
+    <UpdateRow
+      leading={<RowIcon row={group.machines[0]!.row} />}
+      name={group.name}
+      label={<RowLabel>{group.name}</RowLabel>}
+      current={summary.current}
+      next={summary.next}
+      percent={summary.percent}
+      updating={group.status === "updating"}
+      highlight={rowNeedsUpdate(group)}
+      failure={summary.failure}
+      trail={
+        <RowTrail
+          status={group.status}
+          justUpdated={justUpdated}
+          percent={summary.percent}
+          action={action}
+        />
+      }
+      disclosure={split ? { open, onToggle: () => setOpen((last) => !last) } : null}
+    >
+      {group.machines.map((machine) => (
+        <UpdateRow
+          key={machine.id}
+          leading={null}
+          name={`${group.name} on ${machine.machineLabel}`}
+          label={
+            <MachineName label={machine.machineLabel} local={isLocal(machine.environmentId)} />
+          }
+          current={machine.row.currentVersion}
+          next={machine.row.status === "current" ? null : machine.row.latestVersion}
+          percent={machine.row.percent ?? null}
+          updating={machine.row.status === "updating"}
+          highlight={false}
+          failure={machine.row.status === "failed" ? machine.row.detail : null}
+          trail={
+            <RowTrail
+              status={machine.row.status}
+              justUpdated={updated.has(machine.id) && machine.row.status === "current"}
+              percent={machine.row.percent ?? null}
               action={machineAction(machine)}
             />
-          ))}
-        </div>
-      </DisclosurePanel>
-    </div>
+          }
+        />
+      ))}
+    </UpdateRow>
   );
 }
 
@@ -637,6 +663,18 @@ export function NavRailUpdates({
     () => environments.filter((environment) => environment.connection.phase === "connected"),
     [environments],
   );
+  // Switched on but unreachable: listed so a machine missing from the rows is explained.
+  const offline = environments.filter(
+    (environment) =>
+      environment.entry.enabled &&
+      (environment.connection.phase === "offline" ||
+        environment.connection.phase === "reconnecting" ||
+        environment.connection.phase === "error"),
+  );
+  // Only the desktop app runs on a machine of its own; a browser names every machine.
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const isLocal = (environmentId: EnvironmentId) =>
+    isElectron && environmentId === primaryEnvironmentId;
   const serverStatesAtom = useMemo(
     () =>
       Atom.make((get) =>
@@ -688,7 +726,8 @@ export function NavRailUpdates({
     const manageable = providersManageable.has(environment.environmentId);
     return {
       environmentId: environment.environmentId,
-      label: environment.label,
+      // Lowercase, as it is only ever read mid-sentence ("Failed on this computer").
+      label: isLocal(environment.environmentId) ? "this computer" : environment.label,
       rows: [
         // The browser app's own server is the hero, not a row.
         ...(server && !isAppRow ? [{ row: server, canUpdate: target !== undefined }] : []),
@@ -713,7 +752,6 @@ export function NavRailUpdates({
     ...allGroups.flatMap((group) => group.machines.map(({ id, row }) => ({ id, row }))),
   ];
   const { batch, updated } = useUpdateTransitions(tracked);
-  const batchSize = batch.size;
   // Servers show only while one needs attention, or for the check once it updated.
   const groups = allGroups.filter(
     (group) =>
@@ -946,27 +984,18 @@ export function NavRailUpdates({
     app: appRow,
     ready: shownDesktopRow?.action === "install",
     restarting,
-    rows: tracked.map(({ row }) => row),
-    batchSize,
+    components: allGroups,
     checking: isChecking,
   });
-  const footerText = describeUpdatesFooter({
-    app: restarting ? { status: "updating" } : appRow,
-    rows: tracked.map(({ row }) => row),
-    batchSize,
-    checkedAgo,
-  });
+  const footerText = checkedAgo ? `Checked ${checkedAgo}` : "";
   const historyUrl = getDesktopUpdateReleaseHistoryUrl();
-  // The refresh button lives in the hero until the hero has an action to
-  // offer; then it moves down beside "Update all".
-  const refreshInHero = heroAction === null;
   const footerActions = [
     countdown ? (
       <Button key="later" size="xs" variant="ghost-muted" onClick={postponeUpdateRestart}>
         Later
       </Button>
     ) : null,
-    !refreshInHero && !anyUpdating && !countdown ? (
+    !anyUpdating && !countdown ? (
       <RefreshButton key="refresh" checking={isChecking} onCheck={() => void checkForUpdates()} />
     ) : null,
     canUpdateAll ? (
@@ -1094,11 +1123,11 @@ export function NavRailUpdates({
                       </div>
                       <HeroStatus tone={heroStatus.tone} label={heroStatus.label} />
                     </div>
-                    <div
-                      key={heroAction ? `action:${heroAction.label}` : "refresh"}
-                      className="swap-motion flex shrink-0 items-center gap-1"
-                    >
-                      {heroAction ? (
+                    {heroAction ? (
+                      <div
+                        key={`action:${heroAction.label}`}
+                        className="swap-motion flex shrink-0 items-center"
+                      >
                         <Button
                           size="xs"
                           // "Update all" takes the app's update too, so it is the filled one.
@@ -1108,13 +1137,8 @@ export function NavRailUpdates({
                         >
                           {heroAction.label}
                         </Button>
-                      ) : (
-                        <RefreshButton
-                          checking={isChecking}
-                          onCheck={() => void checkForUpdates()}
-                        />
-                      )}
-                    </div>
+                      </div>
+                    ) : null}
                   </div>
                   {/* In flow under the text column, so the hero keeps the same
                     bottom padding as every section while the bar grows in. */}
@@ -1141,50 +1165,54 @@ export function NavRailUpdates({
                     />
                   </>
                 ) : null}
-                {groups.length > 0 || connected.length === 0 ? <Separator /> : null}
-                {groups.length > 0 ? (
+                {groups.length > 0 || offline.length > 0 || connected.length === 0 ? (
+                  <Separator />
+                ) : null}
+                {groups.length > 0 || offline.length > 0 ? (
                   <section aria-label="Servers and providers" className="flex flex-col pt-2">
-                    <div className="flex h-5 items-baseline justify-between gap-2">
-                      <span className="text-2xs font-medium text-muted-foreground select-none">
-                        Providers
-                      </span>
-                      <span className="inline-flex min-w-0 items-center gap-1 text-2xs text-muted-foreground">
-                        <LaptopMinimalIcon aria-hidden className="size-2.75 shrink-0" />
-                        <span className="truncate">
-                          {connected.length === 1
-                            ? connected[0]!.label
-                            : `${connected.length} machines`}
-                        </span>
-                      </span>
-                    </div>
-                    {groups.map((group) => {
-                      const only = group.machines.length === 1 ? group.machines[0]! : null;
-                      // On one machine a component is one plain row, as it always was;
-                      // beside other machines it names the one it is on.
-                      return only ? (
-                        <ListRow
-                          key={group.key}
-                          row={only.row}
-                          label={group.name}
-                          leading={<RowIcon row={only.row} />}
-                          note={connected.length > 1 ? `on ${only.machineLabel}` : null}
-                          updated={updated.has(only.id)}
-                          action={componentAction(group)}
-                        />
-                      ) : (
-                        <ComponentRow
-                          key={group.key}
-                          group={group}
-                          batch={batch}
-                          updated={updated}
-                          action={componentAction(group)}
-                          machineAction={machineAction}
-                        />
-                      );
-                    })}
+                    <span className="flex h-5 items-baseline text-2xs font-medium text-muted-foreground select-none">
+                      Providers
+                    </span>
+                    {groups.map((group) => (
+                      <ComponentRow
+                        key={group.key}
+                        group={group}
+                        batch={batch}
+                        updated={updated}
+                        // A provider on some machines only lists the ones it is on.
+                        forceSplit={
+                          group.key !== "server" &&
+                          connected.length > 1 &&
+                          group.machines.length < connected.length
+                        }
+                        isLocal={isLocal}
+                        action={componentAction(group)}
+                        machineAction={machineAction}
+                      />
+                    ))}
+                    {offline.map((environment) => (
+                      <UpdateRow
+                        key={environment.environmentId}
+                        leading={null}
+                        name={environment.label}
+                        label={
+                          <MachineName
+                            label={environment.label}
+                            local={isLocal(environment.environmentId)}
+                          />
+                        }
+                        current={null}
+                        next={null}
+                        percent={null}
+                        updating={false}
+                        highlight={false}
+                        failure={null}
+                        trail={<span className="text-xs text-muted-foreground">Offline</span>}
+                      />
+                    ))}
                   </section>
                 ) : null}
-                {connected.length === 0 ? (
+                {connected.length === 0 && offline.length === 0 ? (
                   <span className="pt-2 text-xs text-muted-foreground">
                     No connected machines to check.
                   </span>
@@ -1200,8 +1228,6 @@ export function NavRailUpdates({
                     <div className="reveal-motion flex shrink-0 items-center gap-1.5">
                       {footerActions}
                     </div>
-                  ) : historyUrl ? (
-                    <GitHubLink href={historyUrl}>All releases on GitHub</GitHubLink>
                   ) : null}
                 </div>
               </div>
