@@ -206,6 +206,23 @@ describe("planHealthAlertNotifications", () => {
     expect(next.retract).toEqual([]);
   });
 
+  it("toasts again when a dismissed warning escalates to a failure under the same id", () => {
+    const warn = mergeHealthAlertSnapshots([[HUB, snapshot([alert("a", { fix: "resume" })])]]);
+    const toasted = planHealthAlertNotifications(warn, new Set(), new Set());
+    expect(toasted.toast).toHaveLength(1);
+    // Ids from before seen keys existed are bare ids too, so they stay seen.
+    const seen = rememberSeenHealthAlertIds([], toasted.remember, new Set());
+    expect(seen).toEqual(["a"]);
+    // The server escalates in place: same id, worse status.
+    const failed = mergeHealthAlertSnapshots([
+      [HUB, snapshot([alert("a", { fix: "resume", status: "fail" })])],
+    ]);
+    const escalated = planHealthAlertNotifications(failed, new Set(seen), new Set());
+    expect(escalated.toast.map(({ alert }) => alert.status)).toEqual(["fail"]);
+    const after = rememberSeenHealthAlertIds(seen, escalated.remember, new Set());
+    expect(planHealthAlertNotifications(failed, new Set(after), new Set()).toast).toEqual([]);
+  });
+
   it("retracts only resolved alerts whose toast this session showed", () => {
     const merged = mergeHealthAlertSnapshots([
       [
@@ -269,11 +286,21 @@ describe("worstHealthStatus", () => {
 });
 
 describe("quiet problems that need the owner", () => {
-  const signIn = (id: string, overrides: Partial<MachineHealthAlert> = {}) =>
-    alert(id, { itemKey: "providers:claude", fix: "sign-in", ...overrides });
+  const DAY = QUIET_HEALTH_PROBLEM_TTL_MS;
+  const signIn = (id: string, openedAtMs: number, overrides: Partial<MachineHealthAlert> = {}) =>
+    alert(id, {
+      itemKey: "providers:claude",
+      fix: "sign-in",
+      openedAt: DateTime.makeUnsafe(openedAtMs),
+      ...overrides,
+    });
+  const resolvedAt = (atMs: number) => ({
+    state: "resolved" as const,
+    resolvedAt: DateTime.makeUnsafe(atMs),
+  });
   const plan = (
     open: ReadonlyArray<MachineHealthAlert>,
-    quiet: ReadonlyMap<string, number | null>,
+    quiet: ReadonlyMap<string, number>,
     nowMs: number,
     resolved: ReadonlyArray<MachineHealthAlert> = [],
   ) =>
@@ -286,23 +313,49 @@ describe("quiet problems that need the owner", () => {
     );
 
   it("pops up once, then stays quiet when a restart opens a new alert for it", () => {
-    const first = plan([signIn("a")], new Map(), 0);
+    const first = plan([signIn("a", 0)], new Map(), 0);
     expect(first.toast).toHaveLength(1);
-    expect(plan([signIn("b")], first.quiet, 60_000).toast).toEqual([]);
+    expect(plan([signIn("b", 60_000)], first.quiet, 60_000).toast).toEqual([]);
   });
 
-  it("pops up again when its status changes", () => {
-    const first = plan([signIn("a")], new Map(), 0);
-    expect(plan([signIn("b", { status: "fail" })], first.quiet, 60_000).toast).toHaveLength(1);
+  it("pops up again when the server escalates it in place", () => {
+    const first = plan([signIn("a", 0)], new Map(), 0);
+    const escalated = planHealthAlertNotifications(
+      mergeHealthAlertSnapshots([[HUB, snapshot([signIn("a", 0, { status: "fail" })])]]),
+      new Set(first.remember),
+      new Set(),
+      first.quiet,
+      60_000,
+    );
+    expect(escalated.toast.map(({ alert }) => [alert.id, alert.status])).toEqual([["a", "fail"]]);
   });
 
   it("stays quiet for a day after it clears, then may pop up again", () => {
-    const opened = plan([signIn("a")], new Map(), 0);
-    const cleared = plan([], opened.quiet, 1_000, [signIn("a", { state: "resolved" })]);
-    expect(plan([signIn("b")], cleared.quiet, 2_000).toast).toEqual([]);
-    expect(
-      plan([signIn("c")], cleared.quiet, 1_000 + QUIET_HEALTH_PROBLEM_TTL_MS).toast,
-    ).toHaveLength(1);
+    const opened = plan([signIn("a", 0)], new Map(), 0);
+    const cleared = plan([], opened.quiet, 1_000, [signIn("a", 0, resolvedAt(1_000))]);
+    expect(plan([signIn("b", 2_000)], cleared.quiet, 2_000).toast).toEqual([]);
+    expect(plan([signIn("c", 1_000 + DAY)], cleared.quiet, 1_000 + DAY).toast).toHaveLength(1);
+  });
+
+  it("counts the day from when it resolved, even when this client saw that later", () => {
+    const opened = plan([signIn("a", 0)], new Map(), 0);
+    // Closed for a while: the resolution arrives with the next snapshot.
+    const back = plan([], opened.quiet, 1_000, [signIn("a", 0, resolvedAt(DAY / 2))]);
+    expect([...back.quiet.values()]).toEqual([DAY / 2]);
+    expect(plan([signIn("b", DAY)], back.quiet, DAY).toast).toEqual([]);
+    expect(plan([signIn("c", DAY * 1.5)], back.quiet, DAY * 1.5).toast).toHaveLength(1);
+    // Seen only after its day was up: nothing is left to keep it quiet.
+    const late = plan([], opened.quiet, 2 * DAY, [signIn("a", 0, resolvedAt(DAY / 2))]);
+    expect(late.quiet.size).toBe(0);
+  });
+
+  it("expires a problem that vanished without a resolution a day after it was last seen", () => {
+    const opened = plan([signIn("a", 0)], new Map(), 0);
+    // Its machine disconnected: no snapshot, so no resolution either.
+    const gone = plan([], opened.quiet, 1_000);
+    expect(plan([signIn("b", 2_000)], gone.quiet, 2_000).toast).toEqual([]);
+    expect(plan([], gone.quiet, DAY).quiet.size).toBe(0);
+    expect(plan([signIn("c", DAY + 1)], gone.quiet, DAY + 1).toast).toHaveLength(1);
   });
 
   it("keeps toasting problems Fix can clear on its own", () => {
@@ -310,6 +363,29 @@ describe("quiet problems that need the owner", () => {
       alert(id, { checkId: "stuck-runs", itemKey: "stuck-runs:t", fix: "stop-runs" });
     const first = plan([stuck("a")], new Map(), 0);
     expect(plan([stuck("b")], first.quiet, 60_000).toast).toHaveLength(1);
+  });
+});
+
+describe("sync titles", () => {
+  const sync = (id: string, target: MachineHealthAlert["target"]) =>
+    alert(id, { checkId: "sync", itemKey: `sync:${id}`, target });
+
+  it("counts the machines sync problems name", () => {
+    const items = [
+      sync("a", { _tag: "machine", environmentId: HUB }),
+      sync("b", { _tag: "machine", environmentId: LAPTOP }),
+    ];
+    expect(healthAlertGroupView({ alert: items[0]!, items }).title).toBe(
+      "Sync problems with 2 machines",
+    );
+  });
+
+  it("does not count the origin of a quarantined thread as another machine", () => {
+    const items = [
+      sync("a", { _tag: "machine", environmentId: LAPTOP }),
+      sync("b", { _tag: "thread", threadId: "t1" as ThreadId }),
+    ];
+    expect(healthAlertGroupView({ alert: items[0]!, items }).title).toBe("2 sync problems");
   });
 });
 

@@ -29,8 +29,20 @@ export interface MergedHealthAlert {
   readonly ids: ReadonlyArray<string>;
   /** One alert per distinct item, oldest first. A toast counts these. */
   readonly items: ReadonlyArray<MachineHealthAlert>;
-  /** `ids` by item key: an item is new while none of its ids is seen. */
-  readonly idsByItem: ReadonlyMap<string, ReadonlyArray<string>>;
+  /** `healthAlertSeenKey` of every id in `ids`. */
+  readonly seenKeys: ReadonlyArray<string>;
+  /** `seenKeys` by item key: an item is new while none of its keys is seen. */
+  readonly seenKeysByItem: ReadonlyMap<string, ReadonlyArray<string>>;
+}
+
+/**
+ * What `seen` records for an alert. The server escalates an alert from warn to
+ * fail in place, keeping its id, so a failure is a new key and pops up again
+ * after its warning was dismissed. Anything below fail is the bare id, which is
+ * also what older clients persisted.
+ */
+export function healthAlertSeenKey(alert: Pick<MachineHealthAlert, "id" | "status">): string {
+  return alert.status === "fail" ? `${alert.id}:fail` : alert.id;
 }
 
 /**
@@ -79,8 +91,11 @@ const GROUP_TITLES: Partial<
   "scheduled-tasks": (count) => `${count} scheduled tasks need attention`,
   integrations: (count) => `${count} integrations need attention`,
   providers: (count) => `${count} provider problems`,
+  // Only machine targets name a machine; a quarantined thread is on its origin.
   sync: (count, items) => {
-    const machines = distinctMachines(items);
+    const machines = items.every((item) => item.target?._tag === "machine")
+      ? distinctMachines(items)
+      : 1;
     return machines === 1 ? `${count} sync problems` : `Sync problems with ${machines} machines`;
   },
   "machine-links": machineLinksTitle,
@@ -151,14 +166,17 @@ export function mergeHealthAlertSnapshots(
   const resolved = new Map<string, MergedHealthAlert>();
   for (const [via, snapshot] of snapshots) {
     for (const alert of snapshot.recentlyResolved) {
-      if (!resolved.has(alert.id))
+      if (!resolved.has(alert.id)) {
+        const seenKey = healthAlertSeenKey(alert);
         resolved.set(alert.id, {
           alert,
           via,
           ids: [alert.id],
           items: [alert],
-          idsByItem: new Map([[alert.itemKey, [alert.id]]]),
+          seenKeys: [seenKey],
+          seenKeysByItem: new Map([[alert.itemKey, [seenKey]]]),
         });
+      }
     }
     for (const alert of snapshot.open) {
       if (!openById.has(alert.id)) openById.set(alert.id, { alert, via });
@@ -172,22 +190,25 @@ export function mergeHealthAlertSnapshots(
   for (const entry of byAge) {
     const key = healthAlertGroupKey(entry.alert);
     const { id, itemKey } = entry.alert;
+    const seenKey = healthAlertSeenKey(entry.alert);
     const group = groups.get(key);
     if (group === undefined) {
       groups.set(key, {
         ...entry,
         ids: [id],
         items: [entry.alert],
-        idsByItem: new Map([[itemKey, [id]]]),
+        seenKeys: [seenKey],
+        seenKeysByItem: new Map([[itemKey, [seenKey]]]),
       });
       continue;
     }
-    const itemIds = group.idsByItem.get(itemKey);
+    const itemKeys = group.seenKeysByItem.get(itemKey);
     groups.set(key, {
       ...group,
       ids: [...group.ids, id],
-      items: itemIds === undefined ? [...group.items, entry.alert] : group.items,
-      idsByItem: new Map(group.idsByItem).set(itemKey, [...(itemIds ?? []), id]),
+      items: itemKeys === undefined ? [...group.items, entry.alert] : group.items,
+      seenKeys: [...group.seenKeys, seenKey],
+      seenKeysByItem: new Map(group.seenKeysByItem).set(itemKey, [...(itemKeys ?? []), seenKey]),
     });
   }
   return { open: [...groups.values()], resolved: [...resolved.values()] };
@@ -214,22 +235,22 @@ export interface HealthAlertNotificationPlan {
   readonly toast: ReadonlyArray<MergedHealthAlert>;
   /** Problems that cleared everywhere whose toast this session showed, to close and confirm. */
   readonly retract: ReadonlyArray<MergedHealthAlert>;
-  /** Open ids to add to `seen`: the toasted ones and any sibling of a problem already seen. */
+  /** Open `seenKeys` to add to `seen`: the toasted ones and any sibling of a problem already seen. */
   readonly remember: ReadonlyArray<string>;
   /** The quiet problems to persist: open ones that need the owner, and recently cleared ones. */
   readonly quiet: QuietHealthProblems;
 }
 
 /**
- * Problems that wait for the owner, by `quietProblemKey`: null while open,
- * else when it was seen to clear. Once one has popped up, it stays in the
+ * Problems that wait for the owner, by `quietProblemKey`: when each was last
+ * seen open, or when it resolved. Once one has popped up, it stays in the
  * machine's health without popping up again: not when a server restarts and
  * opens a new alert for it, nor when it clears and comes back within a day. A
  * new status (warn to fail) is a new key, so it pops up.
  */
-export type QuietHealthProblems = ReadonlyMap<string, number | null>;
+export type QuietHealthProblems = ReadonlyMap<string, number>;
 
-/** A cleared problem stays quiet this long if it comes back. */
+/** A problem stays quiet this long after it was last seen. */
 export const QUIET_HEALTH_PROBLEM_TTL_MS = 24 * 60 * 60_000;
 
 /** A sign-in, or a problem with no direct fix: only the owner or an agent clears it. */
@@ -245,9 +266,10 @@ export function quietProblemKey(
 }
 
 /**
- * What changes on screen for a merged snapshot. `seen` is every alert id
- * this device has ever toasted (persisted, so a reload or reconnect stays
- * quiet); an item is seen when any of its collapsed ids is. `shown` holds
+ * What changes on screen for a merged snapshot. `seen` is the
+ * `healthAlertSeenKey` of every alert this device has ever toasted (persisted,
+ * so a reload or reconnect stays quiet); an item is seen when any of its
+ * collapsed keys is, so one that escalates to fail is new again. `shown` holds
  * the group keys (`healthAlertGroupKey`) whose toast is on screen: it
  * updates in place as items come and go, and a problem one server resolved
  * stays up while another still reports it open. A group whose toast was
@@ -266,43 +288,60 @@ export function planHealthAlertNotifications(
     const key = healthAlertGroupKey(entry.alert);
     if (shown.has(key) && !openKeys.has(key) && !retract.has(key)) retract.set(key, entry);
   }
-  const quietNow = (clearedAtMs: number | null | undefined) =>
-    clearedAtMs === null ||
-    (clearedAtMs !== undefined && nowMs - clearedAtMs < QUIET_HEALTH_PROBLEM_TTL_MS);
-  const isQuiet = (item: MachineHealthAlert) =>
-    needsOwner(item) && quietNow(quiet.get(quietProblemKey(item)));
+  // Quiet when this alert opened within a day of the problem's last sighting:
+  // a restart's new id, or a return soon after it cleared.
+  const isQuiet = (item: MachineHealthAlert) => {
+    const lastSeenMs = quiet.get(quietProblemKey(item));
+    return (
+      needsOwner(item) &&
+      lastSeenMs !== undefined &&
+      openedAtMs(item) - lastSeenMs < QUIET_HEALTH_PROBLEM_TTL_MS
+    );
+  };
   const toast = merged.open.filter(
-    ({ alert, items, idsByItem }) =>
+    ({ alert, items, seenKeysByItem }) =>
       !shown.has(healthAlertGroupKey(alert)) &&
       items.some(
-        (item) => !(idsByItem.get(item.itemKey) ?? []).some((id) => seen.has(id)) && !isQuiet(item),
+        (item) =>
+          !(seenKeysByItem.get(item.itemKey) ?? []).some((key) => seen.has(key)) && !isQuiet(item),
       ),
   );
-  const nextQuiet = new Map<string, number | null>();
-  for (const [key, clearedAtMs] of quiet)
-    if (quietNow(clearedAtMs)) nextQuiet.set(key, clearedAtMs ?? nowMs);
+  // A problem gone without a resolution (its machine disconnected, or this
+  // client was closed) keeps its last sighting; a resolution moves it to when
+  // the problem cleared.
+  const lastSeen = new Map(quiet);
+  for (const { items } of merged.resolved)
+    for (const item of items) {
+      const key = quietProblemKey(item);
+      const lastSeenMs = quiet.get(key);
+      if (lastSeenMs === undefined || item.resolvedAt === null) continue;
+      lastSeen.set(key, Math.max(lastSeenMs, DateTime.toEpochMillis(item.resolvedAt)));
+    }
+  const nextQuiet = new Map<string, number>();
+  for (const [key, lastSeenMs] of lastSeen)
+    if (nowMs - lastSeenMs < QUIET_HEALTH_PROBLEM_TTL_MS) nextQuiet.set(key, lastSeenMs);
   for (const { items } of merged.open)
-    for (const item of items) if (needsOwner(item)) nextQuiet.set(quietProblemKey(item), null);
+    for (const item of items) if (needsOwner(item)) nextQuiet.set(quietProblemKey(item), nowMs);
   return {
     toast,
     retract: [...retract.values()],
-    // Every id of a seen problem counts as seen, so the problem stays quiet
+    // Every key of a seen problem counts as seen, so the problem stays quiet
     // when the id that was toasted resolves and a sibling remains.
-    remember: merged.open.flatMap(({ ids }) => ids).filter((id) => !seen.has(id)),
+    remember: merged.open.flatMap(({ seenKeys }) => seenKeys).filter((key) => !seen.has(key)),
     quiet: nextQuiet,
   };
 }
 
 /** Reads the persisted quiet problems, tolerating anything a past version or a user left there. */
-export function parseQuietHealthProblems(raw: string | null): Map<string, number | null> {
+export function parseQuietHealthProblems(raw: string | null): Map<string, number> {
   if (raw === null) return new Map();
   try {
     const value: unknown = JSON.parse(raw);
     if (typeof value !== "object" || value === null || Array.isArray(value)) return new Map();
     return new Map(
       Object.entries(value).filter(
-        (entry): entry is [string, number | null] =>
-          entry[1] === null || (typeof entry[1] === "number" && Number.isFinite(entry[1])),
+        (entry): entry is [string, number] =>
+          typeof entry[1] === "number" && Number.isFinite(entry[1]),
       ),
     );
   } catch {

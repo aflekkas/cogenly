@@ -47,7 +47,7 @@ import { toastManager } from "./ui/toast";
 const SEEN_STORAGE_KEY = "cogenly:machine-health:seen-alerts:v1";
 const QUIET_STORAGE_KEY = "cogenly:machine-health:quiet-problems:v1";
 
-function readQuietProblems(): Map<string, number | null> {
+function readQuietProblems(): Map<string, number> {
   try {
     return parseQuietHealthProblems(localStorage.getItem(QUIET_STORAGE_KEY));
   } catch {
@@ -224,8 +224,12 @@ export function MachineHealthAlertCoordinator() {
   ): ShownAlert => {
     const signature = JSON.stringify(healthAlertGroupView(entry));
     if (signature === current.signature) return current;
-    const { content } = toastContent(entry, connected, () => current.toastId);
-    toastManager.update(current.toastId, content);
+    const { view, content } = toastContent(entry, connected, () => current.toastId);
+    // A warning that escalates to a failure stays, like one that opened failing.
+    toastManager.update(current.toastId, {
+      ...content,
+      ...(view.status === "fail" ? { timeout: 0 } : {}),
+    });
     return { ...current, signature };
   };
 
@@ -276,7 +280,7 @@ export function MachineHealthAlertCoordinator() {
     seen.current = rememberSeenHealthAlertIds(
       seen.current,
       plan.remember,
-      new Set(merged.open.flatMap(({ ids }) => ids)),
+      new Set(merged.open.flatMap(({ seenKeys }) => seenKeys)),
     );
     writeSeenAlertIds(seen.current);
   });
