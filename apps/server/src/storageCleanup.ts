@@ -242,18 +242,14 @@ const make = Effect.gen(function* () {
       Effect.orElseSucceed(() => null),
     );
 
-  // Archived threads retain their binding and protect shared checkouts too.
-  // The snapshot takes seconds on large databases, so it runs on the reader
-  // worker instead of the event loop.
+  // Archived owners protect shared checkouts too. Filtering before shell hydration
+  // avoids reading every chat's run and message history for a cleanup sweep.
   const readThreads = Effect.fn("StorageCleanup.readThreads")(function* () {
-    const { threads: active } = yield* projections
-      .getShellSnapshot({ location: "active" })
-      .pipe(NodeSqliteClient.readOnly);
-    const { archivedThreads: archived } = yield* projections
-      .getShellSnapshot({ location: "archive" })
+    const { threads, archivedThreads } = yield* projections
+      .getShellSnapshot({ worktreesOnly: true })
       .pipe(NodeSqliteClient.readOnly);
     const projects = yield* projectStore.listShells();
-    return { projects, threads: [...active, ...archived] };
+    return { projects, threads: [...threads, ...archivedThreads] };
   });
 
   // Local threads under another project need not have a worktreePath of their own.
@@ -990,17 +986,19 @@ const make = Effect.gen(function* () {
   const status = Effect.gen(function* () {
     const settings = yield* settingsService.getSettings;
     const roots = yield* managedRoots(settings);
-    const { threads } = yield* readThreads();
-    const agentPaths = yield* Effect.forEach(
-      threads
-        .filter(
-          (thread) =>
-            (thread.createdBy === "agent" || thread.lineage.relationshipToParent === "subagent") &&
-            thread.worktreePath !== null,
-        )
-        .map((thread) => path.resolve(thread.worktreePath!)),
-      (target) => fs.realPath(target).pipe(Effect.orElseSucceed(() => target)),
-    );
+    // Storage classification needs ownership paths, not run/message summaries.
+    const ownedPaths = yield* sql<{ worktreePath: string }>`
+      SELECT DISTINCT json_extract(payload_json, '$.worktreePath') AS "worktreePath"
+      FROM orchestration_v2_projection_threads
+      WHERE deleted_at IS NULL
+        AND json_extract(payload_json, '$.worktreePath') IS NOT NULL
+        AND (json_extract(payload_json, '$.createdBy') = 'agent'
+          OR json_extract(payload_json, '$.lineage.relationshipToParent') = 'subagent')
+    `.pipe(NodeSqliteClient.readOnly);
+    const agentPaths = yield* Effect.forEach(ownedPaths, (entry) => {
+      const target = path.resolve(entry.worktreePath);
+      return fs.realPath(target).pipe(Effect.orElseSucceed(() => target));
+    });
     const categories = yield* inspection
       .measure(
         [

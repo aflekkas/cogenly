@@ -349,6 +349,8 @@ export interface ProjectionTimelinePage {
 
 export interface ShellSnapshotOptions {
   readonly location?: "active" | "archive";
+  /** Cleanup needs worktree owners, not summaries of every chat history. */
+  readonly worktreesOnly?: boolean;
   /**
    * Reads only this project's threads. Fork sources in other projects still
    * load, so visible item counts match the unscoped snapshot.
@@ -5568,7 +5570,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
 
     const selectShellThreadRows = (
       threadId?: ThreadId,
-      { location, projectId, unsettledOnly = false }: ShellSnapshotOptions = {},
+      {
+        location,
+        projectId,
+        unsettledOnly = false,
+        worktreesOnly = false,
+      }: ShellSnapshotOptions = {},
     ) =>
       sql<ShellThreadRow>`
             SELECT
@@ -5764,7 +5771,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 candidate.ordinal DESC, candidate.run_id DESC
               LIMIT 1
             ) AND blocked.status = 'failed'
-            WHERE t.deleted_at IS NULL${threadId === undefined ? sql`` : sql` AND t.thread_id = ${threadId}`}${
+            WHERE t.deleted_at IS NULL${worktreesOnly ? sql` AND json_extract(t.payload_json, '$.worktreePath') IS NOT NULL` : sql``}${threadId === undefined ? sql`` : sql` AND t.thread_id = ${threadId}`}${
               projectId === undefined ? sql`` : sql` AND t.project_id = ${projectId}`
             }${
               location === "active"
@@ -6444,6 +6451,7 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
               ) {
                 return false;
               }
+              if (options?.worktreesOnly && projection.thread.worktreePath === null) return false;
               if (options?.location === "active") return projection.thread.archivedAt === null;
               if (options?.location === "archive") return projection.thread.archivedAt !== null;
               return true;

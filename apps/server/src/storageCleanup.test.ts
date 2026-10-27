@@ -296,11 +296,12 @@ const makeStorage = (box: ReturnType<typeof fixture>) =>
       } as OrchestrationV2ThreadShell,
       process: null as string | null,
       sessionLive: false,
+      historyUnavailable: false,
     };
     const save = () =>
       sql`DELETE FROM orchestration_v2_projection_threads`.pipe(
         Effect.andThen(
-          sql`INSERT INTO orchestration_v2_projection_threads VALUES (${state.thread.id}, ${state.thread.projectId}, NULL, ${JSON.stringify({ worktreePath: state.thread.worktreePath })})`,
+          sql`INSERT INTO orchestration_v2_projection_threads VALUES (${state.thread.id}, ${state.thread.projectId}, NULL, ${JSON.stringify({ worktreePath: state.thread.worktreePath, createdBy: state.thread.createdBy, lineage: state.thread.lineage })})`,
         ),
       );
     yield* save();
@@ -341,19 +342,16 @@ const makeStorage = (box: ReturnType<typeof fixture>) =>
         list: () => Effect.succeed([{ ...project, projectId: project.id, deletedAt: null }]),
       }),
       Layer.mock(Projections.ProjectionStoreV2)({
-        getShellSnapshot: (options) =>
-          Effect.succeed({
+        getShellSnapshot: (options) => {
+          if (state.historyUnavailable) return Effect.die("history unavailable");
+          expect(options).toEqual({ worktreesOnly: true });
+          return Effect.succeed({
             schemaVersion: 2,
             snapshotSequence: 0,
-            threads:
-              options?.location === "archive"
-                ? []
-                : [parent, state.thread].filter((thread) => thread.archivedAt === null),
-            archivedThreads:
-              options?.location === "archive"
-                ? [parent, state.thread].filter((thread) => thread.archivedAt !== null)
-                : [],
-          }),
+            threads: [parent, state.thread].filter((thread) => thread.archivedAt === null),
+            archivedThreads: [parent, state.thread].filter((thread) => thread.archivedAt !== null),
+          });
+        },
         getThreadShell: (id) => Effect.succeed(id === state.thread.id ? state.thread : parent),
       }),
       Layer.mock(Orchestrator.OrchestratorV2)({ streamDomainEvents: Stream.fromPubSub(events) }),
@@ -522,6 +520,27 @@ describe("storage cleanup lifecycle", () => {
           report.entries.find((entry) => entry.threadId === test.state.thread.id)?.outcome,
         ).toBe("kept");
         expect(NodeFS.existsSync(test.state.thread.worktreePath!)).toBe(true);
+      }),
+    ).pipe(Effect.provideService(ServerActivation, Effect.never)),
+  );
+
+  it.effect("storage classification works without hydrating unrelated chat history", () =>
+    runStorageTest((test) =>
+      Effect.gen(function* () {
+        test.state.historyUnavailable = true;
+        const storage = yield* Storage.StorageCleanup;
+        const archived = { ...test.state.thread, archivedAt: "2026-01-01T00:00:00.000Z" };
+        yield* test.sql`UPDATE orchestration_v2_projection_threads SET payload_json = ${JSON.stringify(archived)}`;
+        const report = yield* storage.status;
+        expect(report.complete).toBe(true);
+        expect(
+          report.categories.find((entry) => entry.category === "agent-worktrees")?.files,
+        ).toBeGreaterThan(0);
+        yield* test.sql`UPDATE orchestration_v2_projection_threads SET deleted_at = '2026-01-02T00:00:00.000Z'`;
+        const deleted = yield* storage.status;
+        expect(
+          deleted.categories.find((entry) => entry.category === "agent-worktrees")?.files ?? 0,
+        ).toBe(0);
       }),
     ).pipe(Effect.provideService(ServerActivation, Effect.never)),
   );
