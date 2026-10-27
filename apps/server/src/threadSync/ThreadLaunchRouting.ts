@@ -47,6 +47,7 @@ import { derive } from "@cogenly/provider-core/server/IdAllocator";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as Crypto from "effect/Crypto";
 import type * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import type * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -54,6 +55,7 @@ import * as Option from "effect/Option";
 import type * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 
 import type * as ServerConfig from "../config.ts";
 import * as Machines from "../machines/Machines.ts";
@@ -74,6 +76,15 @@ import * as ThreadSync from "./ThreadSync.ts";
 
 /** A launch answers once its thread exists; provisioning and the turn run after. */
 const LAUNCH_TIMEOUT = "2 minutes";
+
+/**
+ * Cleanup of an abandoned remote child retries with backoff (5 s doubling to
+ * an hour), then gives up after about a day of failures rather than retrying
+ * forever.
+ */
+const INTENT_RETRY_BASE_MS = 5_000;
+const INTENT_RETRY_MAX_MS = 60 * 60_000;
+const INTENT_MAX_FAILURES = 32;
 
 const decodeRemoteError = Schema.decodeUnknownOption(ThreadRemoteError);
 
@@ -128,15 +139,30 @@ const make = Effect.gen(function* () {
   const scheduler = yield* Scheduler.Scheduler;
   const crypto = yield* Crypto.Crypto;
   const creating = new Set<string>();
-  const abandon = (childThreadId: ThreadId, target: EnvironmentId, commandId: CommandId) =>
+  // Failed cleanups back off in memory; a restart retries each intent afresh.
+  const intentRetries = new Map<string, { failures: number; retryAt: number }>();
+  const forgetIntent = (childThreadId: ThreadId) =>
+    sql`DELETE FROM remote_delegation_intents WHERE child_thread_id = ${childThreadId}`.pipe(
+      Effect.tap(() => Effect.sync(() => intentRetries.delete(childThreadId))),
+    );
+  const abandon = (
+    childThreadId: ThreadId,
+    target: EnvironmentId,
+    commandId: CommandId,
+    parentThreadId: ThreadId,
+  ) =>
     Effect.gen(function* () {
       // A committed parent link wins, including a crash just after attachment.
+      // The event fallback reads only the parent's stream: an unscoped scan of
+      // the whole event log held the writer for seconds on every scheduler tick.
       const attached = yield* sql`SELECT 1 FROM orchestration_v2_projection_subagents
         WHERE child_thread_id = ${childThreadId} AND origin = 'app_owned'
         UNION ALL SELECT 1 FROM orchestration_events
-        WHERE event_type = 'subagent.updated'
+        WHERE stream_id = ${parentThreadId} AND event_type = 'subagent.updated'
           AND json_extract(payload_json, '$.childThreadId') = ${childThreadId}
-          AND json_extract(payload_json, '$.origin') = 'app_owned' LIMIT 1`;
+          AND json_extract(payload_json, '$.origin') = 'app_owned' LIMIT 1`.pipe(
+        NodeSqliteClient.readOnly,
+      );
       if (attached.length === 0)
         yield* routing.callMachine(
           target,
@@ -154,12 +180,32 @@ const make = Effect.gen(function* () {
           },
           "30 seconds",
         );
-      yield* sql`DELETE FROM remote_delegation_intents WHERE child_thread_id = ${childThreadId}`;
+      yield* forgetIntent(childThreadId);
     }).pipe(
       Effect.catch((error) =>
-        Effect.logWarning("Remote delegation cleanup deferred until reconnect", {
-          childThreadId,
-          reason: error._tag,
+        Effect.gen(function* () {
+          const failures = (intentRetries.get(childThreadId)?.failures ?? 0) + 1;
+          if (failures >= INTENT_MAX_FAILURES) {
+            yield* Effect.logWarning(
+              "Remote delegation cleanup abandoned after repeated failures",
+              {
+                childThreadId,
+                reason: error._tag,
+              },
+            );
+            yield* forgetIntent(childThreadId).pipe(Effect.ignore);
+            return;
+          }
+          const delay = Math.min(INTENT_RETRY_BASE_MS * 2 ** (failures - 1), INTENT_RETRY_MAX_MS);
+          intentRetries.set(childThreadId, {
+            failures,
+            retryAt: (yield* Clock.currentTimeMillis) + delay,
+          });
+          yield* Effect.logWarning("Remote delegation cleanup deferred", {
+            childThreadId,
+            reason: error._tag,
+            retryInMs: delay,
+          });
         }),
       ),
     );
@@ -167,20 +213,38 @@ const make = Effect.gen(function* () {
     yield* scheduler.register(
       "remote-delegated-results",
       Effect.gen(function* () {
-        if ((yield* machines.list).link._tag === "standalone") return;
+        const view = yield* machines.list;
+        if (view.link._tag === "standalone") return;
         const abandoned = yield* sql<{
           readonly child_thread_id: string;
           readonly target: string;
           readonly command_id: string;
-        }>`SELECT child_thread_id, target, command_id FROM remote_delegation_intents`;
+          readonly parent_thread_id: string;
+        }>`SELECT child_thread_id, target, command_id, parent_thread_id FROM remote_delegation_intents`.pipe(
+          NodeSqliteClient.readOnly,
+        );
+        const now = yield* Clock.currentTimeMillis;
         yield* Effect.forEach(
-          abandoned.filter((row) => !creating.has(row.child_thread_id)),
+          abandoned.filter(
+            (row) =>
+              !creating.has(row.child_thread_id) &&
+              (intentRetries.get(row.child_thread_id)?.retryAt ?? 0) <= now,
+          ),
           (row) =>
-            abandon(
-              ThreadId.make(row.child_thread_id),
-              EnvironmentIdSchema.make(row.target),
-              CommandId.make(row.command_id),
-            ),
+            // An unpaired target can never be reached to stop its child.
+            !view.machines.some(
+              (machine) =>
+                machine.environmentId === row.target &&
+                machine.relation !== "this" &&
+                machine.pairing === "paired",
+            )
+              ? forgetIntent(ThreadId.make(row.child_thread_id)).pipe(Effect.ignore)
+              : abandon(
+                  ThreadId.make(row.child_thread_id),
+                  EnvironmentIdSchema.make(row.target),
+                  CommandId.make(row.command_id),
+                  ThreadId.make(row.parent_thread_id),
+                ),
           { concurrency: 8, discard: true },
         );
         // Pending parent links are durable, so reconnect/restart resumes tracking.
@@ -192,7 +256,9 @@ const make = Effect.gen(function* () {
           FROM orchestration_v2_projection_subagents s
           JOIN thread_owners o ON o.thread_id = s.child_thread_id AND o.local = 0
           WHERE s.origin = 'app_owned' AND json_extract(s.payload_json, '$.result') IS NULL
-            AND NOT EXISTS (SELECT 1 FROM thread_owners p WHERE p.thread_id = s.thread_id AND p.local = 0)`;
+            AND NOT EXISTS (SELECT 1 FROM thread_owners p WHERE p.thread_id = s.thread_id AND p.local = 0)`.pipe(
+          NodeSqliteClient.readOnly,
+        );
         yield* Effect.forEach(
           pending,
           (row) =>
@@ -624,7 +690,9 @@ const make = Effect.gen(function* () {
         );
         return attached;
       }).pipe(
-        Effect.onExit(() => abandon(childThreadId, machine, command.commandId)),
+        Effect.onExit(() =>
+          abandon(childThreadId, machine, command.commandId, command.parentThreadId),
+        ),
         Effect.ensuring(
           Effect.sync(() => {
             creating.delete(childThreadId);

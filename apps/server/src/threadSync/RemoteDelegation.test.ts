@@ -560,6 +560,18 @@ it.live.each([
   30000,
 );
 
+it.live("abandon drops an intent whose target machine is no longer paired", () =>
+  Effect.gen(function* () {
+    const hub = yield* startThreadMachine("gone-hub", "cloud-server", () => [], undefined, true);
+    const laptop = yield* startThreadMachine("gone-laptop", "computer", () => [], undefined, true);
+    yield* pair(hub, laptop);
+    yield* hub.sql`INSERT INTO remote_delegation_intents VALUES (
+      'thread:orphan-child', 'environment:unpaired', 'orphan-launch', 'thread:orphan-parent')`;
+    yield* hub.tick("remote-delegated-results");
+    expect(yield* hub.sql`SELECT * FROM remote_delegation_intents`).toHaveLength(0);
+  }).pipe(Effect.scoped),
+);
+
 it.live("abandon preserves a just-attached cloud child while its parent projection lags", () =>
   Effect.gen(function* () {
     const hub = yield* startThreadMachine("lag-hub", "cloud-server", () => [], undefined, true);
