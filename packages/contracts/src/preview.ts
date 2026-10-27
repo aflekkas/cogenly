@@ -292,6 +292,8 @@ export const PreviewExtensionSurface = Schema.Struct({
   kind: Schema.Literals(["popup", "sidePanel"]),
   extensionId: Schema.String.check(Schema.isPattern(/^[a-p]{32}$/)),
   hostTabId: PreviewTabId,
+  /** Server-measured popup content size in CSS pixels; popups only. */
+  preferredSize: Schema.optional(Schema.Struct({ width: Schema.Number, height: Schema.Number })),
 });
 export type PreviewExtensionSurface = typeof PreviewExtensionSurface.Type;
 
