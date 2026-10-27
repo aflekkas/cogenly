@@ -3,11 +3,9 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
-import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import * as NodeFSP from "node:fs/promises";
 
@@ -95,29 +93,70 @@ describe("BrowserExtensions", () => {
         yield* writeExtension("1.1.0");
         const second = yield* extensions.install({ source: folder });
         expect(second.extension.id).toBe(first.extension.id);
-        expect(second).toMatchObject({ updated: true, previousVersion: "1.0.0" });
+        expect(second).toMatchObject({
+          updated: true,
+          previousVersion: "1.0.0",
+          extension: { version: "1.1.0" },
+        });
         const reloaded = yield* extensions.loadable("default");
         expect(reloaded).toHaveLength(1);
         expect(reloaded[0]!.path).not.toBe(loaded!.path);
         // The old version's files are gone.
         expect(yield* fs.exists(loaded!.path)).toBe(false);
+        // The test clock has not advanced: rebuilding the same version still
+        // gets a new directory, which forces both runtimes to drop cached files.
+        yield* writeExtension("1.1.0");
+        yield* extensions.install({ source: folder });
+        const rebuilt = yield* extensions.loadable("default");
+        expect(rebuilt[0]!.path).not.toBe(reloaded[0]!.path);
+        expect(yield* fs.exists(reloaded[0]!.path)).toBe(false);
       }),
     ),
   );
 
-  it.effect("turns an extension off and removes it, announcing each change", () =>
+  it.effect("reports a load failure on install and list, and clears it after reinstall", () =>
+    run(
+      Effect.gen(function* () {
+        const { extensions, folder, writeExtension } = yield* setup;
+        let loads = 0;
+        let error: string | undefined =
+          "Could not load javascript 'missing.js' for content script.";
+        yield* extensions.registerLoader((profileId) =>
+          Effect.gen(function* () {
+            loads++;
+            for (const extension of yield* extensions.loadable(profileId)) {
+              yield* extensions.reportLoad(profileId, extension.path, error);
+            }
+          }),
+        );
+        yield* writeExtension("1.0.0");
+        const installed = yield* extensions.install({ source: folder });
+        expect(installed.extension.loadError).toContain("Highlighter");
+        expect(installed.extension.loadError).toContain("missing.js");
+        expect((yield* extensions.list({})).extensions[0]?.loadError).toBe(
+          installed.extension.loadError,
+        );
+        expect(
+          (yield* Effect.flip(extensions.pageUrl({ id: installed.extension.id, page: "popup" })))
+            .message,
+        ).toContain("missing.js");
+        expect(loads).toBe(1);
+        error = undefined;
+        yield* writeExtension("1.1.0");
+        const updated = yield* extensions.install({ source: folder });
+        expect(updated.extension).toMatchObject({ id: installed.extension.id, version: "1.1.0" });
+        expect(updated.extension.loadError).toBeUndefined();
+        expect((yield* extensions.list({})).extensions[0]?.loadError).toBeUndefined();
+      }),
+    ),
+  );
+
+  it.effect("turns an extension off and removes it", () =>
     run(
       Effect.gen(function* () {
         const { fs, extensions, folder, writeExtension } = yield* setup;
         yield* writeExtension("1.0.0");
-        const changes = yield* extensions.changes.pipe(
-          Stream.take(3),
-          Stream.runCollect,
-          Effect.forkScoped,
-        );
-        yield* Effect.yieldNow;
         const { extension } = yield* extensions.install({ source: folder, profileId: "work" });
-        expect(yield* extensions.profiles).toEqual(["work"]);
         const installed = (yield* extensions.loadable("work"))[0]!.path;
 
         const off = yield* extensions.toggle({
@@ -133,7 +172,6 @@ describe("BrowserExtensions", () => {
         const remaining = yield* extensions.remove({ profileId: "work", id: extension.id });
         expect(remaining.extensions).toEqual([]);
         expect(yield* fs.exists(installed)).toBe(false);
-        expect([...(yield* Fiber.join(changes))]).toEqual(["work", "work", "work"]);
       }),
     ),
   );

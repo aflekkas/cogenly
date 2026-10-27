@@ -18,11 +18,13 @@ Agents can install, list, turn off and remove extensions themselves, and open an
 
 ## Where extensions run
 
-- **Background and agent tabs, and every tab on a remote machine or VPS**, run the full set of Chrome extension features. The first time a profile needs extensions, that machine downloads a larger copy of Chrome (about 200 MB).
-- **The desktop app's browser panel**, for the machine it runs on, supports content scripts, background workers, storage and extension pages. It does not support ad-blocking rules, cookies, context menus or notifications, so most ad blockers and password managers do nothing there.
+- New tabs opened in a profile with enabled extensions run in Cogenly’s built-in Chrome on that machine and stream into the browser panel, including in the desktop app. Existing native desktop tabs stay where they are, with their pages and logins intact. Disabling or removing all extensions makes new desktop tabs native again. The first time a profile needs extensions, that machine downloads a larger copy of Chrome (about 200 MB).
+- Extension tabs keep separate browsing storage from native desktop tabs. You may need to sign in in the new tabs.
 - Incognito never runs extensions.
 
-Changing a profile's extensions restarts its background browser, which closes that profile's background tabs.
+Changing a profile's extensions restarts its browser, which closes its streamed browser tabs. Existing native desktop tabs are never moved or closed. Reinstall an unpacked folder after rebuilding it, even if its version has not changed.
+
+An extension that fails to load is skipped so browsing can continue. The extension list shows its last load result without starting Chrome. Agents can read its name and the load error with `browser_extensions_list`; reinstall or turn it off after correcting the problem.
 
 The extension list belongs to each machine. A paired machine keeps its own list.
 

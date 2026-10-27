@@ -413,7 +413,7 @@ const PreviewRecordingStopTool = safeBrowserTool(
 const extensionDependencies = [...dependencies, BrowserExtensions.BrowserExtensions];
 const BrowserExtensionsListTool = Tool.make("browser_extensions_list", {
   description:
-    "List profile extensions with versions, enabled state, sources, permissions/sites and popup/options pages. Default profile is the user's. Server tabs support all APIs; same-machine desktop supports scripts/workers/storage/messaging/pages, not declarativeNetRequest/cookies/contextMenus/notifications/identity/sidePanel. Remote panels, incognito and isolated tabs lack extensions. Changes restart profile server tabs; desktop scripts refresh on load.",
+    "List profile extensions with versions, enabled state, sources, permissions/sites and popup/options pages, and loadError from the last load (no Chrome launch). Default profile is the user's. A profile with enabled extensions opens new tabs in Cogenly's full Chrome (all APIs, streamed into the desktop panel, separate storage); existing native desktop tabs stay put and native tabs return once none are enabled. Incognito and isolated tabs lack extensions. Changes restart and close profile server tabs. Reinstall an unpacked folder to pick up rebuilt files.",
   parameters: BrowserExtensionsListInput,
   success: BrowserExtensionsListResult,
   failure: Schema.Union([BrowserExtensionError, OrchestratorMcpFailure]),
@@ -425,7 +425,7 @@ const BrowserExtensionsListTool = Tool.make("browser_extensions_list", {
 
 const BrowserExtensionInstallTool = Tool.make("browser_extension_install", {
   description:
-    "Install/update an enabled extension from a verified Chrome Web Store URL/32-letter ID or local unpacked absolute path. Other remote sources refused. Extensions can access pages with vault fills; install only needed ones. Use browser_extensions_list for access/platform support; changes restart profile server tabs. No extra approval.",
+    "Install/update an enabled extension from a verified Chrome Web Store URL/32-letter ID or local unpacked absolute path. Other remote sources refused. Returns loadError if Chrome fails to load it; browsing continues without it. Extensions can access pages with vault fills; install only needed ones. Use browser_extensions_list for access/platform support; changes restart profile server tabs. No extra approval.",
   parameters: BrowserExtensionInstallInput,
   success: BrowserExtensionInstallResult,
   failure: Schema.Union([BrowserExtensionError, OrchestratorMcpFailure]),

@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
 import {
+  DEFAULT_BROWSER_PROFILE_ID,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   PREVIEW_RECORDING_STOP_TIMEOUT_MS,
   PreviewAutomationRecordingTransferError,
@@ -234,7 +235,7 @@ const handlers = {
         normalizePreviewOpenInput({
           url,
           ...(tabId === undefined ? { reuseExistingTab: false } : { tabId }),
-          ...(profileId === undefined ? {} : { profileId }),
+          profileId: profileId ?? DEFAULT_BROWSER_PROFILE_ID,
           ...(open === undefined ? {} : { open }),
         }),
       );

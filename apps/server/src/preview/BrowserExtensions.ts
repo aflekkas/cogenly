@@ -32,10 +32,10 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
-import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
+import type * as Scope from "effect/Scope";
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import * as EffectNodeStream from "@effect/platform-node/NodeStream";
 import * as NodeCrypto from "node:crypto";
@@ -93,8 +93,8 @@ type StoredExtension = typeof StoredExtension.Type;
 
 const Registry = Schema.Struct({ extensions: Schema.Array(StoredExtension) });
 // Chrome tolerates a byte order mark before a manifest or messages file.
-const decodeJson = (text: string) =>
-  Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(text.replace(/^﻿/, ""));
+const decodeJsonValue = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
+const decodeJson = (text: string) => decodeJsonValue(text.replace(/^﻿/, ""));
 const decodeObject = Schema.decodeUnknownEffect(Schema.Record(Schema.String, Schema.Unknown));
 const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 const isBrowserExtensionError = Schema.is(BrowserExtensionError);
@@ -125,10 +125,15 @@ export class BrowserExtensions extends Context.Service<
     ) => Effect.Effect<BrowserExtension, BrowserExtensionError>;
     /** The enabled extensions a profile's browser loads. */
     readonly loadable: (profileId: string) => Effect.Effect<ReadonlyArray<LoadableExtension>>;
-    /** Every profile that has an extension installed, enabled or not. */
-    readonly profiles: Effect.Effect<ReadonlyArray<string>>;
-    /** Profile IDs as their extensions change. */
-    readonly changes: Stream.Stream<string>;
+    /** Registers the browser adapter so installs finish after their load attempt. */
+    readonly registerLoader: (
+      load: (profileId: string) => Effect.Effect<void>,
+    ) => Effect.Effect<void, never, Scope.Scope>;
+    readonly reportLoad: (
+      profileId: string,
+      directory: string,
+      error?: string,
+    ) => Effect.Effect<void>;
     /** The URL of an installed extension's popup, options, or another page inside it. */
     readonly pageUrl: (input: {
       readonly profileId?: string | undefined;
@@ -152,9 +157,19 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const http = yield* HttpClient.HttpClient;
-  const changes = yield* PubSub.unbounded<string>();
   // One change at a time per environment: installs are rare and touch shared registry files.
   const gate = yield* Semaphore.make(1);
+  let loader: ((profileId: string) => Effect.Effect<void>) | undefined;
+  const loadErrors = new Map<string, string>();
+  const extensionPath = (profileId: string, extension: StoredExtension) =>
+    path.join(profileDir(profileId), extension.id, extension.directory);
+  const withLoadError = (profileId: string, stored: StoredExtension): BrowserExtension => {
+    const error = stored.enabled ? loadErrors.get(extensionPath(profileId, stored)) : undefined;
+    return {
+      ...publicExtension(stored),
+      ...(error ? { loadError: `${stored.name}: ${error}` } : {}),
+    };
+  };
 
   const profileDir = (profileId: string) => {
     const encoded = encodeURIComponent(profileId);
@@ -190,7 +205,10 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
 
   const listOf = (profileId: string) =>
     readRegistry(profileId).pipe(
-      Effect.map((extensions) => ({ profileId, extensions: extensions.map(publicExtension) })),
+      Effect.map((extensions) => ({
+        profileId,
+        extensions: extensions.map((extension) => withLoadError(profileId, extension)),
+      })),
     );
 
   /** Unpacks a verified ZIP into `destination`, refusing anything that could escape it. */
@@ -432,7 +450,7 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
     const { summary } = yield* readManifest(unpacked);
     const now = yield* Clock.currentTimeMillis;
     // A fresh directory per install, so a host that loaded the old one sees a new path to load.
-    const directory = `${summary.version}-${now.toString(36)}`;
+    const directory = `${summary.version}-${NodeCrypto.randomUUID()}`;
     const extensionDir = path.join(profileDir(profileId), id);
     yield* fs.makeDirectory(extensionDir, { recursive: true }).pipe(
       Effect.andThen(fs.rename(unpacked, path.join(extensionDir, directory))),
@@ -459,11 +477,12 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       ...extensions.filter((extension) => extension.id !== id),
       stored,
     ]);
+
+    if (loader) yield* loader(profileId);
     yield* removeOldVersions(profileId, id, directory);
-    yield* PubSub.publish(changes, profileId);
     return {
       profileId,
-      extension: publicExtension(stored),
+      extension: withLoadError(profileId, stored),
       updated: previous !== undefined,
       ...(previous ? { previousVersion: previous.version } : {}),
     } satisfies BrowserExtensionInstallResult;
@@ -500,7 +519,8 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       profileId,
       extensions.filter((extension) => extension.id !== input.id),
     );
-    yield* PubSub.publish(changes, profileId);
+
+    if (loader) yield* loader(profileId);
     yield* removeOldVersions(profileId, input.id, null);
     return yield* listOf(profileId);
   });
@@ -518,9 +538,9 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
         profileId,
         extensions.map((extension) => (extension.id === input.id ? next : extension)),
       );
-      yield* PubSub.publish(changes, profileId);
     }
-    return publicExtension(next);
+    if (loader) yield* loader(profileId);
+    return withLoadError(profileId, next);
   });
 
   const pageUrl = Effect.fn("BrowserExtensions.pageUrl")(function* (input: {
@@ -533,6 +553,8 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
     if (!extension) {
       return yield* fail(`Extension ${input.id} is not installed in profile ${profileId}.`);
     }
+    const loadError = withLoadError(profileId, extension).loadError;
+    if (loadError) return yield* fail(loadError);
     if (!extension.enabled) {
       return yield* fail(
         `${extension.name} is turned off. Turn it on with browser_extension_toggle first.`,
@@ -567,26 +589,35 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       ),
     );
 
-  const profiles = fs.readDirectory(options.rootDir).pipe(
-    Effect.map((names) =>
-      names.filter((name) => !name.startsWith(".")).map((name) => decodeURIComponent(name)),
-    ),
-    Effect.flatMap((ids) =>
-      Effect.filter(ids, (id) => readRegistry(id).pipe(Effect.map((list) => list.length > 0))),
-    ),
-    Effect.orElseSucceed((): ReadonlyArray<string> => []),
-  );
-
   const serialized = <A, E>(effect: Effect.Effect<A, E>) => gate.withPermit(effect);
 
   return BrowserExtensions.of({
-    list: (input) => resolveProfile(input.profileId).pipe(Effect.flatMap(listOf)),
+    list: (input) =>
+      serialized(
+        Effect.gen(function* () {
+          const profileId = yield* resolveProfile(input.profileId);
+          return yield* listOf(profileId);
+        }),
+      ),
     install: (input) => serialized(install(input)),
     remove: (input) => serialized(remove(input)),
     toggle: (input) => serialized(toggle(input)),
     loadable,
-    profiles,
-    changes: Stream.fromPubSub(changes),
+    registerLoader: (load) =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          loader = load;
+        }),
+        () =>
+          Effect.sync(() => {
+            if (loader === load) loader = undefined;
+          }),
+      ),
+    reportLoad: (_profileId, directory, error) =>
+      Effect.sync(() => {
+        if (error) loadErrors.set(directory, error);
+        else loadErrors.delete(directory);
+      }),
     pageUrl,
   });
 });
