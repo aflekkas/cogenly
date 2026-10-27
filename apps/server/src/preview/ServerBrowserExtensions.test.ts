@@ -87,6 +87,8 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
       executable: async () => chromium!,
       extensionsExecutable: async () => chromium!,
       extensionsFor: async (profileId) => (profileId === "default" ? [extension] : []),
+      // CI runners block Chromium's user-namespace sandbox; this covers extensions, not sandboxing.
+      env: { ...process.env, COGENLY_SERVER_BROWSER_SANDBOX: "0" },
     });
   });
 
