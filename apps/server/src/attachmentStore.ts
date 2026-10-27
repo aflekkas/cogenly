@@ -182,6 +182,15 @@ export function resolveAttachmentPath(input: {
   });
 }
 
+/** Only advertise sidecars that extraction has published successfully. */
+export function resolveAttachmentTextPath(input: {
+  readonly attachmentsDir: string;
+  readonly attachment: ChatAttachment;
+}): string | null {
+  const path = resolveAttachmentPath(input);
+  return path && NodeFS.existsSync(`${path}.txt`) ? `${path}.txt` : null;
+}
+
 export function resolveAttachmentPathById(input: {
   readonly attachmentsDir: string;
   readonly attachmentId: string;

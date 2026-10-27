@@ -15,6 +15,7 @@ export function providerMessageTextWithAttachmentPaths(input: {
   readonly attachments: ReadonlyArray<ChatAttachment>;
   /** Absolute path of a stored attachment, such as `ProviderHost.resolveAttachmentPath`. */
   readonly resolveAttachmentPath: (attachment: ChatAttachment) => string | null;
+  readonly resolveAttachmentTextPath?: (attachment: ChatAttachment) => string | null;
 }): string {
   let text = input.text;
   const appendContext = (context: string | undefined) => {
@@ -25,10 +26,11 @@ export function providerMessageTextWithAttachmentPaths(input: {
 
   for (const attachment of input.attachments) {
     const path = input.resolveAttachmentPath(attachment);
+    const extracted = input.resolveAttachmentTextPath?.(attachment);
     appendContext(
       path === null
         ? undefined
-        : `[Attached ${attachment.type} "${attachment.name}" is saved at: ${path}]`,
+        : `[Attached ${attachment.type} "${attachment.name}" is saved at: ${path}${extracted ? `; extracted text: ${extracted}` : ""}]`,
     );
   }
 
