@@ -165,6 +165,9 @@ export function MachineHealthSections({
             supportsHealthFix={(id) =>
               serverConfigs.get(id)?.environment.capabilities.machineHealthFix === true
             }
+            supportsTurnOffProvider={(id) =>
+              serverConfigs.get(id)?.environment.capabilities.machineHealthTurnOffProvider === true
+            }
           />
         ))}
     </SettingsSearchTarget>
@@ -195,6 +198,7 @@ function MachineHealthSection({
   runsCanary,
   isConnected,
   supportsHealthFix,
+  supportsTurnOffProvider,
 }: {
   readonly viewed: EnvironmentPresentation;
   readonly machine: MachineInfo;
@@ -202,6 +206,7 @@ function MachineHealthSection({
   readonly runsCanary: boolean;
   readonly isConnected: (environmentId: EnvironmentId) => boolean;
   readonly supportsHealthFix: (environmentId: EnvironmentId) => boolean;
+  readonly supportsTurnOffProvider: (environmentId: EnvironmentId) => boolean;
 }) {
   const isThis = machine.relation === "this";
   const query = useEnvironmentQuery(
@@ -239,6 +244,7 @@ function MachineHealthSection({
     viaEnvironmentId: viewed.environmentId,
     isConnected,
     supportsHealthFix,
+    supportsTurnOffProvider,
   };
 
   return (

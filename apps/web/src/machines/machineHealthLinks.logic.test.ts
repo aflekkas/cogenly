@@ -38,6 +38,7 @@ function context(
     viaEnvironmentId: HUB,
     isConnected: (id) => ids.has(id),
     supportsHealthFix: () => true,
+    supportsTurnOffProvider: () => true,
     ...overrides,
   };
 }
@@ -476,16 +477,27 @@ describe("healthTurnOffProviderAction", () => {
     expect(actions.fix?.label).toBe("Sign in");
     expect(actions.turnOff).toEqual({
       kind: "disableProvider",
-      label: "Turn off on this machine",
+      label: "Turn off on Cloud server",
       environmentId: HUB,
+      originEnvironmentId: HUB,
       machineName: "Cloud server",
-      instanceId: provider,
+      itemKey: "providers:claude",
     });
   });
 
-  it("needs that machine connected, and exactly one provider to name", () => {
+  it("reaches a machine this client isn't connected to through its paired machine", () => {
     expect(
       healthTurnOffProviderAction([signedOut], context([LAPTOP], { viaEnvironmentId: LAPTOP })),
+    ).toMatchObject({ environmentId: LAPTOP, originEnvironmentId: HUB });
+  });
+
+  it("needs a server that turns it off, and exactly one provider to name", () => {
+    expect(healthTurnOffProviderAction([signedOut], context([]))).toBeNull();
+    expect(
+      healthTurnOffProviderAction(
+        [signedOut],
+        context([HUB], { supportsTurnOffProvider: () => false }),
+      ),
     ).toBeNull();
     const other = problem({
       ...signedOut,

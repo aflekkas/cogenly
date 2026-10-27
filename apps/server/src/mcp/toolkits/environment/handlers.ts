@@ -1,6 +1,9 @@
 import {
   AuthOrchestrationOperateScope,
+  AuthProvidersManageScope,
+  type EnvironmentId,
   type MachineHealthError,
+  type MachineHealthFixAction,
   OrchestratorMcpFailure,
   UNIVERSAL_CLIENT_PREFERENCE_KEYS,
   type ServerSettings,
@@ -100,6 +103,35 @@ const cliCommand = (input: {
     Effect.mapError(cliCommandFailure),
   );
 
+const machineHealthFix = (input: {
+  readonly environmentId?: EnvironmentId;
+  readonly itemKeys?: ReadonlyArray<string>;
+  readonly action?: MachineHealthFixAction;
+}) =>
+  Effect.gen(function* () {
+    const fixes = yield* MachineHealthFixes.MachineHealthFixes;
+    // MCP callers hold no environment:maintain authority; privileged fixes
+    // (update, sandbox setup, killing processes) stay with the owner client.
+    // Turning a provider off on one machine is theirs to do: it is undone in
+    // Settings → Providers and leaves the provider on everywhere else.
+    const mcpCallerScopes = [AuthOrchestrationOperateScope, AuthProvidersManageScope] as const;
+    if (input.itemKeys !== undefined)
+      return yield* fixes.fix({ ...input, itemKeys: input.itemKeys }, mcpCallerScopes);
+    const health = yield* MachineHealth.MachineHealth;
+    const report = yield* health.reportFor(input);
+    const itemKeys = directlyFixableItemKeys(report);
+    const [first, ...rest] = itemKeys;
+    return first === undefined
+      ? {
+          environmentId: report.environmentId,
+          machineName: report.machineName,
+          summary:
+            "Nothing on that machine has a direct fix right now. machine_health lists what needs investigating.",
+          outcomes: [],
+        }
+      : yield* fixes.fix({ ...input, itemKeys: [first, ...rest] }, mcpCallerScopes);
+  }).pipe(Effect.mapError(healthFailure));
+
 export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
   storage_status: McpToolAccess.reads(() =>
     StorageCleanup.StorageCleanup.pipe(
@@ -121,27 +153,14 @@ export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
     MachineSecurity.MachineSecurity.pipe(Effect.flatMap((security) => security.status)),
   ),
   machine_health_fix: McpToolAccess.writesEnvironmentAsWork((input) =>
-    Effect.gen(function* () {
-      const fixes = yield* MachineHealthFixes.MachineHealthFixes;
-      // MCP callers hold no environment:maintain authority; privileged fixes
-      // (update, sandbox setup, killing processes) stay with the owner client.
-      const mcpCallerScopes = [AuthOrchestrationOperateScope] as const;
-      if (input.itemKeys !== undefined)
-        return yield* fixes.fix({ ...input, itemKeys: input.itemKeys }, mcpCallerScopes);
-      const health = yield* MachineHealth.MachineHealth;
-      const report = yield* health.reportFor(input);
-      const itemKeys = directlyFixableItemKeys(report);
-      const [first, ...rest] = itemKeys;
-      return first === undefined
-        ? {
-            environmentId: report.environmentId,
-            machineName: report.machineName,
-            summary:
-              "Nothing on that machine has a direct fix right now. machine_health lists what needs investigating.",
-            outcomes: [],
-          }
-        : yield* fixes.fix({ ...input, itemKeys: [first, ...rest] }, mcpCallerScopes);
-    }).pipe(Effect.mapError(healthFailure)),
+    input.action === "turn-off-provider" && input.itemKeys === undefined
+      ? Effect.fail(
+          new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message: "turn-off-provider needs the itemKeys of the providers to turn off.",
+          }),
+        )
+      : machineHealthFix(input),
   ),
   machine_health: McpToolAccess.reads((input) =>
     MachineHealth.MachineHealth.pipe(

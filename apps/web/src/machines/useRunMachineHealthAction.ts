@@ -5,8 +5,9 @@ import {
 import { Atom } from "effect/reactivity";
 import { useCallback } from "react";
 
+import type { EnvironmentId } from "@cogenly/contracts";
+
 import { toastManager } from "../components/ui/toast";
-import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useStartAgentChat } from "../hooks/useStartAgentChat";
 import { machinesRpc } from "../rpc/machines";
 import { serverEnvironment } from "../state/server";
@@ -39,70 +40,63 @@ export function machineHealthActionPermissionAtom(action: MachineHealthAction): 
     // Starting a chat is an operate grant on the server it opens on, as Fix is.
     case "agent":
       return machinesRpc.healthFix.permissionAtom(action.request.environmentId);
+    // The origin checks providers:manage per item against the forwarded scopes.
     case "disableProvider":
-      return serverEnvironment.mutateProviderInstance.permissionAtom(action.environmentId);
+      return turnOffPermissionAtom(action.environmentId);
   }
 }
 
+const turnOffPermissionAtom = Atom.family((environmentId: EnvironmentId) =>
+  Atom.make(
+    (get) =>
+      get(machinesRpc.healthFix.permissionAtom(environmentId)) &&
+      get(serverEnvironment.mutateProviderInstance.permissionAtom(environmentId)),
+  ).pipe(Atom.withLabel(`machine-health:turn-off-permitted:${environmentId}`)),
+);
+
 /**
- * Turns a provider off in one machine's own settings. The instance comes from
- * that machine's settings, or its provider list for a default instance nobody
- * edited; `enabled` stays on the machine (see providerSettingsDocument.ts).
+ * Turns a provider off on the machine with the problem, through the health fix
+ * service; a paired machine runs it over the peer link. `enabled` stays on
+ * that machine (see providerSettingsDocument.ts), so other machines keep it.
  */
 function useTurnOffProvider(): (
   action: Extract<MachineHealthAction, { readonly kind: "disableProvider" }>,
 ) => Promise<boolean> {
-  const mutate = useAtomCommand(serverEnvironment.mutateProviderInstance, {
-    reportFailure: false,
-  });
+  const healthFix = useAtomCommand(machinesRpc.healthFix, { reportFailure: false });
   return useCallback(
     async (action) => {
-      const { environmentId, instanceId, machineName } = action;
-      const settings = appAtomRegistry.get(serverEnvironment.settingsValueAtom(environmentId));
-      const provider = appAtomRegistry
-        .get(serverEnvironment.configValueAtom(environmentId))
-        ?.providers.find((entry) => entry.instanceId === instanceId);
-      const instance =
-        settings?.providerInstances[instanceId] ??
-        (provider === undefined ? undefined : { driver: provider.driver });
-      const name = provider?.displayName ?? instanceId;
-      if (instance === undefined) {
-        toastManager.add({
-          type: "error",
-          title: `Couldn't turn off ${name}`,
-          description: `${machineName} no longer lists it.`,
-        });
-        return false;
-      }
-      const outcome = await mutate({
+      const { environmentId, originEnvironmentId, machineName, itemKey } = action;
+      const outcome = await healthFix({
         environmentId,
         input: {
-          patch: {},
-          providerInstanceMutation: {
-            operation: "upsert",
-            instanceId,
-            instance: { ...instance, enabled: false },
-          },
+          ...(environmentId === originEnvironmentId ? {} : { environmentId: originEnvironmentId }),
+          itemKeys: [itemKey],
+          action: "turn-off-provider",
         },
       });
       if (outcome._tag !== "Success") {
         if (!isAtomCommandInterrupted(outcome))
           toastManager.add({
             type: "error",
-            title: `Couldn't turn off ${name}`,
+            title: `Couldn't turn it off on ${machineName}`,
             description: failureMessage(squashAtomCommandFailure(outcome)),
           });
         return false;
       }
+      const result = outcome.value;
+      const ok = result.outcomes.every(
+        (entry) => entry.status === "fixed" || entry.status === "resolved",
+      );
       toastManager.add({
-        type: "success",
-        title: `Turned off ${name} on ${machineName}`,
-        description:
-          "It stays on for your other machines. Turn it back on in Settings → Providers.",
+        type: ok ? "success" : "error",
+        title: ok
+          ? `Turned off on ${result.machineName}`
+          : `Couldn't turn it off on ${result.machineName}`,
+        description: result.summary,
       });
-      return true;
+      return ok;
     },
-    [mutate],
+    [healthFix],
   );
 }
 

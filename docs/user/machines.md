@@ -297,9 +297,10 @@ before it alerts, and it alerts once when it starts and once when it clears.
 Problems of one kind on one machine share an alert with a count, such as stuck
 runs in several threads. A problem that needs you, such as a sign-in, pops up
 once; after that it stays listed in the machine's health until it changes. For a
-provider that isn't signed in on one machine, the alert also offers **Turn off on
-this machine**, which leaves it on everywhere else. The alert's **Fix** works as it does in Settings →
-Machines; click its title for the details.
+provider that isn't signed in on one machine, the alert and that machine's health
+also offer **Turn off on** the machine's name, which works from any of your
+machines and leaves the provider on everywhere else. The alert's **Fix** works
+as it does in Settings → Machines; click its title for the details.
 To also get alerts as a Slack DM or an email, turn the channel on in
 Settings → Machines, choose the connected Slack or Google integration, and send
 a test. Channels are set per machine, so set them on your laptop too if you want

@@ -126,12 +126,18 @@ export type MachineHealthAction =
     }
   | { readonly kind: "agent"; readonly label: string; readonly request: MachineHealthAgentRequest }
   | {
-      /** Turns the provider off in `environmentId`'s own settings; other machines keep it on. */
+      /**
+       * Turns the item's provider off in the origin machine's own settings
+       * (`machines.healthFix` with `action: "turn-off-provider"`, sent to
+       * `environmentId`, which forwards it over the peer link when that is
+       * another machine). Other machines keep it on.
+       */
       readonly kind: "disableProvider";
       readonly label: string;
       readonly environmentId: EnvironmentId;
+      readonly originEnvironmentId: EnvironmentId;
       readonly machineName: string;
-      readonly instanceId: ProviderInstanceId;
+      readonly itemKey: string;
     };
 
 export type MachineHealthFixAction = Extract<MachineHealthAction, { readonly kind: "fix" }>;
@@ -146,6 +152,8 @@ export interface MachineHealthActionContext {
   readonly isConnected: (environmentId: EnvironmentId) => boolean;
   /** Whether a server advertises `machineHealthFix`; older ones get their per-item commands. */
   readonly supportsHealthFix: (environmentId: EnvironmentId) => boolean;
+  /** Whether a server advertises `machineHealthTurnOffProvider`; older ones aren't offered it. */
+  readonly supportsTurnOffProvider: (environmentId: EnvironmentId) => boolean;
 }
 
 /** Fixes the origin machine runs itself through `machines.healthFix`. */
@@ -492,28 +500,28 @@ export function healthFixFollowUp(
 /**
  * The other way out of a provider that isn't signed in on a machine: turn it
  * off there. Offered for a problem, or a group, with exactly one such provider,
- * when this client reaches the machine to change its settings.
+ * when this client reaches the machine or a server paired with it.
  */
 export function healthTurnOffProviderAction(
   problems: ReadonlyArray<MachineHealthProblem>,
   context: MachineHealthActionContext,
 ): MachineHealthAction | null {
-  const providers = new Set(
-    problems.flatMap((problem) =>
-      problem.fix === "sign-in" && problem.target?._tag === "provider"
-        ? [problem.target.instanceId]
-        : [],
-    ),
-  );
-  const [instanceId, ...more] = providers;
-  if (instanceId === undefined || more.length > 0) return null;
-  if (!context.isConnected(context.originEnvironmentId)) return null;
+  const providers = new Map<ProviderInstanceId, string>();
+  for (const problem of problems) {
+    if (problem.fix === "sign-in" && problem.target?._tag === "provider")
+      providers.set(problem.target.instanceId, problem.itemKey);
+  }
+  const [only, ...more] = providers.values();
+  if (only === undefined || more.length > 0) return null;
+  const environmentId = commandEnvironment(context);
+  if (environmentId === null || !context.supportsTurnOffProvider(environmentId)) return null;
   return {
     kind: "disableProvider",
-    label: "Turn off on this machine",
-    environmentId: context.originEnvironmentId,
+    label: `Turn off on ${context.originMachineName}`,
+    environmentId,
+    originEnvironmentId: context.originEnvironmentId,
     machineName: context.originMachineName,
-    instanceId,
+    itemKey: only,
   };
 }
 

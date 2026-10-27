@@ -3,11 +3,14 @@ import {
   AuthEnvironmentMaintainScope,
   AuthOrchestrationOperateScope,
   AuthPeerDelegateScope,
+  AuthProvidersManageScope,
   AuthSyncReplicateScope,
   EnvironmentId,
   MachineHealthError,
   MachineHealthFixRun,
+  MachineHealthTurnOffProviderRun,
   MachineVersionUpdate,
+  ProviderInstanceId,
   type MachineHealthFixResult,
   type MachineHealthItem,
   type MachineHealthReport,
@@ -228,7 +231,10 @@ const harness = (
     const alertsState = yield* HealthAlertsState.HealthAlertsState.pipe(
       Effect.provideContext(context),
     );
-    return { fixes, channels, alertsState, ran, peerCalls, retried };
+    const settings = yield* ServerSettings.ServerSettingsService.pipe(
+      Effect.provideContext(context),
+    );
+    return { fixes, channels, alertsState, settings, ran, peerCalls, retried };
   });
 
 describe("MachineHealthFixes", () => {
@@ -382,6 +388,93 @@ describe("MachineHealthFixes", () => {
         outcomes: [{ itemKey: "scheduled-tasks:nightly", status: "fixed" }],
       });
       expect(ran).toEqual([taskId]);
+    }).pipe(Effect.scoped),
+  );
+});
+
+describe("turning off a provider that isn't signed in", () => {
+  const claude = ProviderInstanceId.make("claude");
+  const signedOut: MachineHealthReport = {
+    ...report,
+    checks: [
+      {
+        id: "providers",
+        status: "fail",
+        summary: "",
+        items: [
+          item("providers:claude", "sign-in", { _tag: "provider", instanceId: claude }),
+          ...report.checks[0]!.items,
+        ],
+      },
+    ],
+  };
+
+  it.effect("turns it off in this machine's settings, with providers:manage", () =>
+    Effect.gen(function* () {
+      const { fixes, settings, peerCalls } = yield* harness(false, "boot-service", false, {
+        report: signedOut,
+      });
+      const denied = yield* fixes.fix(
+        { itemKeys: ["providers:claude"], action: "turn-off-provider" },
+        [AuthOrchestrationOperateScope],
+      );
+      expect(denied.outcomes).toMatchObject([{ status: "failed" }]);
+      expect((yield* settings.getSettings).providerInstances[claude]).toBeUndefined();
+
+      const result = yield* fixes.fix(
+        { itemKeys: ["providers:claude", "scheduled-tasks:nightly"], action: "turn-off-provider" },
+        [AuthProvidersManageScope],
+      );
+      expect(result.outcomes).toMatchObject([
+        {
+          itemKey: "providers:claude",
+          status: "fixed",
+          message: expect.stringContaining("MacBook"),
+        },
+        // Turn off never runs another item's fix.
+        { itemKey: "scheduled-tasks:nightly", status: "failed" },
+      ]);
+      expect((yield* settings.getSettings).providerInstances[claude]).toEqual({
+        driver: "claude",
+        enabled: false,
+      });
+      expect(peerCalls).toEqual([]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("asks the machine with the problem over its own peer channel", () =>
+    Effect.gen(function* () {
+      const { fixes, settings, peerCalls } = yield* harness(false, "boot-service", false, {
+        report: signedOut,
+      });
+      yield* fixes.fix(
+        { environmentId: vps, itemKeys: ["providers:claude"], action: "turn-off-provider" },
+        [AuthProvidersManageScope],
+      );
+      expect(peerCalls).toEqual([
+        {
+          environmentId: vps,
+          channel: MachineHealthTurnOffProviderRun.name,
+          payload: { itemKeys: ["providers:claude"], callerScopes: [AuthProvidersManageScope] },
+        },
+      ]);
+      // Only that machine's settings change.
+      expect((yield* settings.getSettings).providerInstances[claude]).toBeUndefined();
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("serves a paired machine's turn-off from this machine's own report", () =>
+    Effect.gen(function* () {
+      const { channels, settings } = yield* harness(false, "boot-service", false, {
+        report: signedOut,
+      });
+      const served = yield* channels.dispatch({
+        channel: MachineHealthTurnOffProviderRun.name,
+        payload: { itemKeys: ["providers:claude"], callerScopes: [AuthProvidersManageScope] },
+        caller: { environmentId: vps, scopes: [AuthPeerDelegateScope] },
+      });
+      expect(served).toMatchObject({ outcomes: [{ status: "fixed" }] });
+      expect((yield* settings.getSettings).providerInstances[claude]?.enabled).toBe(false);
     }).pipe(Effect.scoped),
   );
 });

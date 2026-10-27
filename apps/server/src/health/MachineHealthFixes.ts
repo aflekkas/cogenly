@@ -1,20 +1,25 @@
 /**
- * MachineHealthFixes: the Fix behind a health item, for every transport
- * (WebSocket `machines.healthFix`, MCP `machine_health_fix`, and a paired
- * machine over `MachineHealthFixRun`). It always runs on the machine the item
+ * MachineHealthFixes: the Fix behind a health item, and turning off a provider
+ * that isn't signed in, for every transport (WebSocket `machines.healthFix`,
+ * MCP `machine_health_fix`, and a paired machine over `MachineHealthFixRun` or
+ * `MachineHealthTurnOffProviderRun`). It always runs on the machine the item
  * is on: a request for another machine is forwarded over the peer link, and
  * the items are read again from that machine's own report, so a stale client
  * can never run a fix the item no longer asks for.
  */
 import {
+  AuthProvidersManageScope,
   CommandId,
   type EnvironmentId,
   MachineHealthError,
+  type MachineHealthFixAction,
   type MachineHealthFixInput,
   type MachineHealthFixOutcome,
   type MachineHealthFixResult,
   MachineHealthFixRun,
+  MachineHealthTurnOffProviderRun,
   MachineVersionUpdate,
+  ProviderDriverKind,
   requiredScopeForMachineHealthFix,
   type AuthEnvironmentScope,
   type MachineHealthItem,
@@ -411,9 +416,70 @@ const make = Effect.gen(function* () {
     }
   };
 
+  /**
+   * Turns off the provider a `sign-in` item names, in this machine's own
+   * settings. `enabled` never syncs (see providerSettingsDocument.ts), so the
+   * provider stays on for every other machine. Written to the stored settings,
+   * not the materialized ones, so no secret lands in the file in plain text.
+   */
+  const turnOffProvider = (
+    item: MachineHealthItem,
+    machineName: string,
+  ): Effect.Effect<MachineHealthFixOutcome> => {
+    const itemKey = item.key;
+    const target = item.target;
+    if (item.fix !== "sign-in" || target?._tag !== "provider") {
+      return Effect.succeed({
+        itemKey,
+        status: "failed",
+        message: "Only a provider that isn't signed in can be turned off from machine health.",
+      });
+    }
+    const { instanceId } = target;
+    let name: string = instanceId;
+    return settings
+      .updateStoredSettings((current) => {
+        // Absent from settings means a built-in default, whose driver is its id.
+        const instance = current.providerInstances[instanceId] ?? {
+          driver: ProviderDriverKind.make(instanceId),
+        };
+        name = instance.displayName ?? instanceId;
+        return {
+          ...current,
+          providerInstances: {
+            ...current.providerInstances,
+            [instanceId]: { ...instance, enabled: false },
+          },
+        };
+      })
+      .pipe(
+        Effect.map(
+          () =>
+            ({
+              itemKey,
+              status: "fixed",
+              message: `Turned off ${name} on ${machineName}. It stays on for your other machines; turn it back on in Settings → Providers.`,
+            }) as const,
+        ),
+        Effect.catch((error) =>
+          Effect.logWarning("Machine health could not turn off a provider", {
+            instanceId,
+            error,
+          }).pipe(
+            Effect.as({
+              itemKey,
+              status: "failed",
+              message: `Couldn't turn off ${name}. Turn it off in Settings → Providers on ${machineName}.`,
+            } as const),
+          ),
+        ),
+      );
+  };
+
   const fixHere = Effect.fn("MachineHealthFixes.fixHere")(function* (
     itemKeys: ReadonlyArray<string>,
     callerScopes?: ReadonlyArray<AuthEnvironmentScope>,
+    action: MachineHealthFixAction = "fix",
   ) {
     const report = yield* health.report;
     const items = new Map(
@@ -423,7 +489,10 @@ const make = Effect.gen(function* () {
     for (const itemKey of new Set(itemKeys)) {
       const entry = items.get(itemKey);
       if (entry !== undefined && entry.status !== "ok" && callerScopes !== undefined) {
-        const required = requiredScopeForMachineHealthFix(entry.fix);
+        const required =
+          action === "turn-off-provider"
+            ? AuthProvidersManageScope
+            : requiredScopeForMachineHealthFix(entry.fix);
         if (!callerScopes.includes(required)) {
           outcomes.push({
             itemKey,
@@ -436,7 +505,9 @@ const make = Effect.gen(function* () {
       outcomes.push(
         entry === undefined || entry.status === "ok"
           ? { itemKey, status: "resolved", message: "This has already cleared." }
-          : yield* runFix(entry),
+          : action === "turn-off-provider"
+            ? yield* turnOffProvider(entry, report.machineName)
+            : yield* runFix(entry),
       );
     }
     // A fresh report, so alerts and Settings catch up without waiting a round.
@@ -452,17 +523,25 @@ const make = Effect.gen(function* () {
   yield* channels.register(MachineHealthFixRun, (payload) =>
     fixHere(payload.itemKeys, payload.callerScopes),
   );
+  yield* channels.register(MachineHealthTurnOffProviderRun, (payload) =>
+    fixHere(payload.itemKeys, payload.callerScopes, "turn-off-provider"),
+  );
 
   const fixThere = (
     environmentId: EnvironmentId,
     itemKeys: ReadonlyArray<string>,
-    callerScopes?: ReadonlyArray<AuthEnvironmentScope>,
+    callerScopes: ReadonlyArray<AuthEnvironmentScope> | undefined,
+    action: MachineHealthFixAction,
   ) =>
     machines
-      .call(environmentId, MachineHealthFixRun, {
-        itemKeys,
-        ...(callerScopes === undefined ? {} : { callerScopes: [...callerScopes] }),
-      })
+      .call(
+        environmentId,
+        action === "turn-off-provider" ? MachineHealthTurnOffProviderRun : MachineHealthFixRun,
+        {
+          itemKeys,
+          ...(callerScopes === undefined ? {} : { callerScopes: [...callerScopes] }),
+        },
+      )
       .pipe(
         Effect.timeout(PEER_FIX_TIMEOUT),
         // Offline, an older Cogenly without Fix, or a fix that timed out there.
@@ -473,7 +552,7 @@ const make = Effect.gen(function* () {
     function* (input, callerScopes) {
       const self = yield* identity.self;
       if (input.environmentId === undefined || input.environmentId === self.environmentId) {
-        return yield* fixHere(input.itemKeys, callerScopes);
+        return yield* fixHere(input.itemKeys, callerScopes, input.action);
       }
       const view = yield* machines.list.pipe(
         Effect.mapError((cause) => new MachineHealthError({ reason: "unavailable", cause })),
@@ -484,7 +563,12 @@ const make = Effect.gen(function* () {
           (candidate.relation === "hub" || candidate.relation === "spoke"),
       );
       if (machine === undefined) return yield* new MachineHealthError({ reason: "not-paired" });
-      return yield* fixThere(machine.environmentId, input.itemKeys, callerScopes);
+      return yield* fixThere(
+        machine.environmentId,
+        input.itemKeys,
+        callerScopes,
+        input.action ?? "fix",
+      );
     },
   );
 

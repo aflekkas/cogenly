@@ -32,7 +32,10 @@ import {
 } from "../machines/useRunMachineHealthAction";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { machinesRpc } from "../rpc/machines";
-import { readEnvironmentSupportsHealthFix } from "../state/entities";
+import {
+  readEnvironmentSupportsHealthFix,
+  readEnvironmentSupportsTurnOffProvider,
+} from "../state/entities";
 import { useConnectedEnvironmentIds, useEnvironmentIds } from "../state/environments";
 import {
   hasNotificationSound,
@@ -122,6 +125,7 @@ export function MachineHealthAlertCoordinator() {
       viaEnvironmentId: entry.via,
       isConnected: (id: EnvironmentId) => connected.has(id),
       supportsHealthFix: readEnvironmentSupportsHealthFix,
+      supportsTurnOffProvider: readEnvironmentSupportsTurnOffProvider,
     };
     const details: MachineHealthAction = {
       kind: "open",
