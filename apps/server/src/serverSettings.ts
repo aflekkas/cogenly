@@ -47,6 +47,7 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import { writeFileStringAtomically } from "@cogenly/shared/atomicWrite";
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 import { resolveSymlinkTarget } from "@cogenly/shared/symlink";
 import * as ServerConfig from "./config.ts";
 import { type DeepPartial, deepMerge } from "@cogenly/shared/Struct";
@@ -792,7 +793,11 @@ const make = Effect.gen(function* () {
       }
     }
 
-    const providerHistory = yield* sql<{
+    // Only the retired `providers` key needs provider history, so every other
+    // load stays off the database. A writer transaction can wait on this load
+    // (VaultSync.project -> Machines.list -> MachineIdentity.self -> getSettings),
+    // and a load queued behind that writer deadlocks startup.
+    const readProviderHistory = sql<{
       readonly providerName: string;
       readonly providerInstanceId: string | null;
     }>`
@@ -808,6 +813,7 @@ const make = Effect.gen(function* () {
       FROM provider_session_runtime
       WHERE provider_name IN ('cursor', 'grok', 'opencode')
     `.pipe(
+      NodeSqliteClient.readOnly,
       Effect.mapError(
         (cause) =>
           new ServerSettingsError({
@@ -821,7 +827,7 @@ const make = Effect.gen(function* () {
     const loaded = foldProviderInstanceEnabledFlags(
       legacyProviders === undefined
         ? settings
-        : migrateLegacyProviderSettings(settings, legacyProviders, providerHistory),
+        : migrateLegacyProviderSettings(settings, legacyProviders, yield* readProviderHistory),
     );
     const deviceFolded = settingsFileTrusted
       ? foldLegacyDeviceOnboarding(loaded, storedSettings)

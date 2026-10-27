@@ -116,12 +116,28 @@ previous one, and most of those builds were never installed.
    on `main`'s first-parent history and a push CI run for exactly that SHA
    succeeded. When several commits are pushed together, only the pushed head
    has a CI run, so promote that commit.
-5. Inspect the resolved SHA and build artifacts. Approve the **production**
-   deployment when ready. The workflow publishes `vX.Y.Z` and marks it latest.
+5. Inspect the resolved SHA and build artifacts, then boot the artifact on real
+   data. Publishing auto-updates every Mac, so this happens before approval.
+   CI only boots an empty database. From a worktree with the dev server
+   stopped, seed a copy with `vp run migrate-dev-db`, unzip the run's
+   `Cogenly-X.Y.Z-arm64.zip`, and start its server on that copy:
+
+   ```sh
+   ELECTRON_RUN_AS_NODE=1 Cogenly.app/Contents/MacOS/Cogenly \
+     Cogenly.app/Contents/Resources/app.asar/apps/server/dist/bin.mjs \
+     serve --base-dir "$PWD/.cogenly" --port 47912 --host 127.0.0.1
+   curl -fsS http://127.0.0.1:47912/.well-known/t3/environment
+   ```
+
+   The endpoint must answer within seconds; `/health` does not count. Stop the
+   server by the PID you started, then install the build on your own Mac and use
+   it.
+
+6. Approve the **production** deployment. The workflow publishes `vX.Y.Z` and
+   marks it latest.
 
 The run's workflow comes from `main`; its source checkout, application code, and
-packaging script come from the selected commit. Test the prod DMG before wider
-distribution.
+packaging script come from the selected commit.
 
 The desktop matrix has one macOS arm64 row and can be extended later. The
 workflow checks zip integrity, updater metadata, and checksums, and verifies
