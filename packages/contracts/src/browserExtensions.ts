@@ -134,6 +134,8 @@ export type BrowserExtensionOpenSurfaceInput = typeof BrowserExtensionOpenSurfac
 
 export const BrowserExtensionOpenSurfaceResult = Schema.Struct({
   surfaceTabId: Schema.optional(PreviewTabId),
+  hostTabId: Schema.optional(PreviewTabId),
+  notice: Schema.optional(Schema.String),
 });
 export type BrowserExtensionOpenSurfaceResult = typeof BrowserExtensionOpenSurfaceResult.Type;
 

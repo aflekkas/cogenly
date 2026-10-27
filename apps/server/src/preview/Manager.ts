@@ -47,6 +47,7 @@ export class PreviewManager extends Context.Service<
   {
     readonly open: (
       input: PreviewOpenInput & {
+        readonly extensionSurface?: PreviewSessionSnapshot["extensionSurface"];
         readonly automationOwner?: string;
         readonly serverRendering?: "stream" | "native";
         /** Runs before the `opened` event publishes, so subscribers find state keyed by the tab. */
@@ -229,6 +230,9 @@ export const make = Effect.gen(function* PreviewManagerMake() {
         navStatus: input.url
           ? { _tag: "Loading", url: yield* normalizeUrl(input.url), title: "" }
           : { _tag: "Idle" },
+        ...(input.extensionSurface === undefined
+          ? {}
+          : { extensionSurface: input.extensionSurface }),
         canGoBack: false,
         canGoForward: false,
         viewport: input.viewport ?? FILL_PREVIEW_VIEWPORT,
@@ -243,6 +247,15 @@ export const make = Effect.gen(function* PreviewManagerMake() {
       };
       yield* SynchronizedRef.modifyEffect(stateRef, (state) =>
         Effect.gen(function* () {
+          if (
+            input.extensionSurface &&
+            !state.sessions.has(compositeKey(input.threadId, input.extensionSurface.hostTabId))
+          ) {
+            return yield* new PreviewSessionLookupError({
+              threadId: input.threadId,
+              tabId: input.extensionSurface.hostTabId,
+            });
+          }
           const revision = state.revision + 1;
           const sessions = new Map(state.sessions);
           sessions.set(compositeKey(input.threadId, tabId), {
@@ -437,11 +450,12 @@ export const make = Effect.gen(function* PreviewManagerMake() {
       yield* SynchronizedRef.modifyEffect(stateRef, (state) => {
         const eventsToEmit: PreviewEvent[] = [];
         const sessions = new Map(state.sessions);
-        const targets = input.tabId
-          ? [state.sessions.get(compositeKey(input.threadId, input.tabId))].filter(
-              (entry): entry is PreviewSessionState => entry !== undefined,
-            )
-          : sessionsForThread(state, input.threadId);
+        const targets = sessionsForThread(state, input.threadId).filter(
+          (session) =>
+            input.tabId === undefined ||
+            session.tabId === input.tabId ||
+            session.snapshot.extensionSurface?.hostTabId === input.tabId,
+        );
         let revision = state.revision;
         for (const target of targets) {
           revision += 1;

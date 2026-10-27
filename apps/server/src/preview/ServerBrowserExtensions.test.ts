@@ -19,6 +19,8 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
+import * as Option from "effect/Option";
 import { FetchHttpClient } from "effect/http";
 import type { Page } from "playwright-core";
 import { makeBrowserExtensions } from "./BrowserExtensions.ts";
@@ -67,6 +69,20 @@ const textChanged = (page: Page, selector: string, expected: string) =>
     observer.observe(document, { childList: true, subtree: true, characterData: true });
     check();
   })`);
+
+const loadFinished = (
+  store: import("./BrowserExtensions.ts").BrowserExtensions["Service"],
+  id: string,
+) =>
+  store.subscribe({}).pipe(
+    Stream.filter((list) =>
+      list.extensions.some((extension) => extension.id === id && extension.state !== "installing"),
+    ),
+    Stream.runHead,
+    Effect.map((list) =>
+      Option.getOrThrow(list).extensions.find((extension) => extension.id === id)!,
+    ),
+  );
 
 const extensionRig = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
@@ -216,11 +232,10 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
         const r = yield* extensionRig;
         yield* r.write("1.0.0", "broken", true);
         const installed = yield* r.store.install({ source: r.folder });
-        expect(installed.extension.loadError).toContain("Regression extension");
-        expect(installed.extension.loadError).toContain("missing.js");
-        expect((yield* r.store.list({})).extensions[0]?.loadError).toBe(
-          installed.extension.loadError,
-        );
+        const failed = yield* loadFinished(r.store, installed.extension.id);
+        expect(failed.loadError).toContain("Regression extension");
+        expect(failed.loadError).toContain("missing.js");
+        expect((yield* r.store.list({})).extensions[0]?.loadError).toBe(failed.loadError);
         const context = yield* Effect.promise(() => r.contexts.contextFor("default"));
         const page = yield* Effect.promise(() => context.newPage());
         yield* Effect.promise(() => page.goto(siteUrl));
@@ -230,7 +245,7 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
         yield* r.write("1.0.0", "working");
         yield* r.fs.copy(r.folder, healthy);
         const good = yield* r.store.install({ source: healthy });
-        expect(good.extension.loadError).toBeUndefined();
+        expect((yield* loadFinished(r.store, good.extension.id)).loadError).toBeUndefined();
         const active = yield* Effect.promise(() => r.contexts.contextFor("default"));
         const options = yield* Effect.promise(() => active.newPage());
         const url = yield* r.store.pageUrl({ id: good.extension.id, page: "options" });
@@ -249,7 +264,7 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
         const r = yield* extensionRig;
         yield* r.write("1.0.0");
         const first = yield* r.store.install({ source: r.folder });
-        expect(first.extension.loadError).toBeUndefined();
+        expect((yield* loadFinished(r.store, first.extension.id)).loadError).toBeUndefined();
         const url = yield* r.store.pageUrl({ id: first.extension.id, page: "options" });
         const firstContext = yield* Effect.promise(() => r.contexts.contextFor("default"));
         const firstPage = yield* Effect.promise(() => firstContext.newPage());
@@ -267,7 +282,7 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
           previousVersion: "1.0.0",
           extension: { id: first.extension.id, version: "1.1.0" },
         });
-        expect(second.extension.loadError).toBeUndefined();
+        expect((yield* loadFinished(r.store, second.extension.id)).loadError).toBeUndefined();
         const secondContext = yield* Effect.promise(() => r.contexts.contextFor("default"));
         expect(secondContext).not.toBe(firstContext);
         const page = yield* Effect.promise(() => secondContext.newPage());
@@ -281,7 +296,7 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
         ).toEqual({ greeting: "retained" });
         yield* r.write("1.1.0", "rebuilt without a version bump");
         const third = yield* r.store.reload({ id: first.extension.id });
-        expect(third.extension.loadError).toBeUndefined();
+        expect((yield* loadFinished(r.store, third.extension.id)).loadError).toBeUndefined();
         expect((yield* r.store.list({})).extensions[0]?.version).toBe("1.1.0");
         const rebuilt = yield* Effect.promise(() =>
           r.contexts.contextFor("default").then((context) => context.newPage()),
