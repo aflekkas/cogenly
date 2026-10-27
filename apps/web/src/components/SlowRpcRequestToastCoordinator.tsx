@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import { observeResize } from "../lib/observeResize";
 import { type SlowRpcAckRequest, useSlowRpcAckRequests } from "../rpc/requestLatencyState";
 import { toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -14,6 +15,37 @@ function describeSlowRequests(requests: ReadonlyArray<SlowRpcAckRequest>): strin
   return `${count} request${count === 1 ? "" : "s"} waiting longer than ${thresholdSeconds}s.`;
 }
 
+/**
+ * One line: a long method and environment id truncate. Only a cut-off tag
+ * takes focus and opens the tooltip with all of it, on hover or keyboard.
+ */
+function SlowRequestTag({ tag }: { readonly tag: string }) {
+  const tagRef = useRef<HTMLDivElement>(null);
+  const [truncated, setTruncated] = useState(false);
+  // A request keeps its tag, so only the width can change whether it fits.
+  useLayoutEffect(() => {
+    const element = tagRef.current;
+    if (element === null) return;
+    return observeResize(element, () => setTruncated(element.scrollWidth > element.clientWidth));
+  }, []);
+  return (
+    <Tooltip disabled={!truncated}>
+      <TooltipTrigger
+        render={
+          <div
+            ref={tagRef}
+            tabIndex={truncated ? 0 : undefined}
+            className="truncate rounded-sm font-medium text-foreground outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+          />
+        }
+      >
+        {tag}
+      </TooltipTrigger>
+      <TooltipPopup variant="code">{tag}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
 function SlowRequestDetails({ requests }: { requests: ReadonlyArray<SlowRpcAckRequest> }) {
   return (
     <ul className="space-y-2.5 text-xs text-muted-foreground">
@@ -22,13 +54,7 @@ function SlowRequestDetails({ requests }: { requests: ReadonlyArray<SlowRpcAckRe
           className="min-w-0 border-border/50 border-b pb-2 last:border-b-0 last:pb-0"
           key={request.requestId}
         >
-          {/* One line: a long method and environment id truncate, the tooltip has it all. */}
-          <Tooltip>
-            <TooltipTrigger render={<div className="truncate font-medium text-foreground" />}>
-              {request.tag}
-            </TooltipTrigger>
-            <TooltipPopup variant="code">{request.tag}</TooltipPopup>
-          </Tooltip>
+          <SlowRequestTag tag={request.tag} />
           <div className="mt-0.5 text-3xs opacity-75">
             Started {new Date(request.startedAt).toLocaleTimeString()}
           </div>
