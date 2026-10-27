@@ -11,7 +11,8 @@ export type PreviewAction =
   | "focus-url"
   | "zoom-in"
   | "zoom-out"
-  | "reset-zoom";
+  | "reset-zoom"
+  | "toggle-extension-side-panel";
 
 const EVENT_NAME = "cogenly:preview-action";
 
