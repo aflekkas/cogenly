@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 
 import { type SlowRpcAckRequest, useSlowRpcAckRequests } from "../rpc/requestLatencyState";
 import { toastManager } from "./ui/toast";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 function describeSlowRequests(requests: ReadonlyArray<SlowRpcAckRequest>): string {
   const count = requests.length;
@@ -21,7 +22,13 @@ function SlowRequestDetails({ requests }: { requests: ReadonlyArray<SlowRpcAckRe
           className="min-w-0 border-border/50 border-b pb-2 last:border-b-0 last:pb-0"
           key={request.requestId}
         >
-          <div className="wrap-break-word font-medium text-foreground">{request.tag}</div>
+          {/* One line: a long method and environment id truncate, the tooltip has it all. */}
+          <Tooltip>
+            <TooltipTrigger render={<div className="truncate font-medium text-foreground" />}>
+              {request.tag}
+            </TooltipTrigger>
+            <TooltipPopup variant="code">{request.tag}</TooltipPopup>
+          </Tooltip>
           <div className="mt-0.5 text-3xs opacity-75">
             Started {new Date(request.startedAt).toLocaleTimeString()}
           </div>
