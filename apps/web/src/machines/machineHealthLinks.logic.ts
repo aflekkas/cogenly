@@ -124,7 +124,15 @@ export type MachineHealthAction =
       readonly agentEnvironmentId: EnvironmentId | null;
       readonly details: MachineHealthLink;
     }
-  | { readonly kind: "agent"; readonly label: string; readonly request: MachineHealthAgentRequest };
+  | { readonly kind: "agent"; readonly label: string; readonly request: MachineHealthAgentRequest }
+  | {
+      /** Turns the provider off in `environmentId`'s own settings; other machines keep it on. */
+      readonly kind: "disableProvider";
+      readonly label: string;
+      readonly environmentId: EnvironmentId;
+      readonly machineName: string;
+      readonly instanceId: ProviderInstanceId;
+    };
 
 export type MachineHealthFixAction = Extract<MachineHealthAction, { readonly kind: "fix" }>;
 
@@ -482,18 +490,55 @@ export function healthFixFollowUp(
 }
 
 /**
+ * The other way out of a provider that isn't signed in on a machine: turn it
+ * off there. Offered for a problem, or a group, with exactly one such provider,
+ * when this client reaches the machine to change its settings.
+ */
+export function healthTurnOffProviderAction(
+  problems: ReadonlyArray<MachineHealthProblem>,
+  context: MachineHealthActionContext,
+): MachineHealthAction | null {
+  const providers = new Set(
+    problems.flatMap((problem) =>
+      problem.fix === "sign-in" && problem.target?._tag === "provider"
+        ? [problem.target.instanceId]
+        : [],
+    ),
+  );
+  const [instanceId, ...more] = providers;
+  if (instanceId === undefined || more.length > 0) return null;
+  if (!context.isConnected(context.originEnvironmentId)) return null;
+  return {
+    kind: "disableProvider",
+    label: "Turn off on this machine",
+    environmentId: context.originEnvironmentId,
+    machineName: context.originMachineName,
+    instanceId,
+  };
+}
+
+/** A Fix that only opens a sign-in reads Sign in. */
+export function labelSignIn(action: MachineHealthAction | null): MachineHealthAction | null {
+  return action?.kind === "open" ? { ...action, label: "Sign in" } : action;
+}
+
+/**
  * What a Settings → Machines item offers: its Fix, then a link to the thing it
- * points at unless Fix already opens it. A sign-in's Fix reads Sign in.
+ * points at unless Fix already opens it, and for a provider that isn't signed
+ * in, turning it off on that machine.
  */
 export function healthItemActions(
   problem: MachineHealthProblem,
   context: MachineHealthActionContext,
-): { readonly fix: MachineHealthAction | null; readonly open: MachineHealthAction | null } {
-  const action = healthFixAction([problem], context);
-  const fix = action?.kind === "open" ? { ...action, label: "Sign in" } : action;
+): {
+  readonly fix: MachineHealthAction | null;
+  readonly open: MachineHealthAction | null;
+  readonly turnOff: MachineHealthAction | null;
+} {
+  const fix = labelSignIn(healthFixAction([problem], context));
   const open =
     problem.target === null || fix?.kind === "open"
       ? null
       : healthTargetAction(problem.target, context);
-  return { fix, open };
+  return { fix, open, turnOff: healthTurnOffProviderAction([problem], context) };
 }

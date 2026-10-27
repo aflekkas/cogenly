@@ -14,6 +14,7 @@ import {
   mergeHealthAlertSnapshots,
   parseSeenHealthAlertIds,
   planHealthAlertNotifications,
+  QUIET_HEALTH_PROBLEM_TTL_MS,
   rememberSeenHealthAlertIds,
   worstHealthStatus,
 } from "./machineHealthAlerts.logic";
@@ -264,5 +265,84 @@ describe("worstHealthStatus", () => {
     expect(worstHealthStatus([])).toBeNull();
     expect(worstHealthStatus(["unknown", "warn"])).toBe("warn");
     expect(worstHealthStatus(["warn", "fail", "unknown"])).toBe("fail");
+  });
+});
+
+describe("quiet problems that need the owner", () => {
+  const signIn = (id: string, overrides: Partial<MachineHealthAlert> = {}) =>
+    alert(id, { itemKey: "providers:claude", fix: "sign-in", ...overrides });
+  const plan = (
+    open: ReadonlyArray<MachineHealthAlert>,
+    quiet: ReadonlyMap<string, number | null>,
+    nowMs: number,
+    resolved: ReadonlyArray<MachineHealthAlert> = [],
+  ) =>
+    planHealthAlertNotifications(
+      mergeHealthAlertSnapshots([[HUB, snapshot(open, resolved)]]),
+      new Set(),
+      new Set(),
+      quiet,
+      nowMs,
+    );
+
+  it("pops up once, then stays quiet when a restart opens a new alert for it", () => {
+    const first = plan([signIn("a")], new Map(), 0);
+    expect(first.toast).toHaveLength(1);
+    expect(plan([signIn("b")], first.quiet, 60_000).toast).toEqual([]);
+  });
+
+  it("pops up again when its status changes", () => {
+    const first = plan([signIn("a")], new Map(), 0);
+    expect(plan([signIn("b", { status: "fail" })], first.quiet, 60_000).toast).toHaveLength(1);
+  });
+
+  it("stays quiet for a day after it clears, then may pop up again", () => {
+    const opened = plan([signIn("a")], new Map(), 0);
+    const cleared = plan([], opened.quiet, 1_000, [signIn("a", { state: "resolved" })]);
+    expect(plan([signIn("b")], cleared.quiet, 2_000).toast).toEqual([]);
+    expect(
+      plan([signIn("c")], cleared.quiet, 1_000 + QUIET_HEALTH_PROBLEM_TTL_MS).toast,
+    ).toHaveLength(1);
+  });
+
+  it("keeps toasting problems Fix can clear on its own", () => {
+    const stuck = (id: string) =>
+      alert(id, { checkId: "stuck-runs", itemKey: "stuck-runs:t", fix: "stop-runs" });
+    const first = plan([stuck("a")], new Map(), 0);
+    expect(plan([stuck("b")], first.quiet, 60_000).toast).toHaveLength(1);
+  });
+});
+
+describe("machine-links titles", () => {
+  const reachable = (id: string, origin: EnvironmentId, name: string) =>
+    alert(id, {
+      originEnvironmentId: origin,
+      originMachineName: name,
+      checkId: "machine-links",
+      itemKey: `machine-links:reachable:${origin}`,
+      target: { _tag: "machine", environmentId: origin },
+    });
+
+  it("counts one machine with two problems as one machine", () => {
+    const view = healthAlertGroupView({
+      alert: reachable("a", HUB, "Contabo VPS"),
+      items: [
+        reachable("a", HUB, "Contabo VPS"),
+        alert("b", {
+          checkId: "machine-links",
+          itemKey: `machine-version:${HUB}`,
+          target: { _tag: "machine", environmentId: HUB },
+        }),
+      ],
+    });
+    expect(view.title).toBe("2 problems with one machine");
+    expect(view.description.startsWith("Contabo VPS: ")).toBe(true);
+  });
+
+  it("counts distinct machines that can't be reached", () => {
+    const items = [reachable("a", HUB, "Hub"), reachable("b", LAPTOP, "Laptop")];
+    expect(healthAlertGroupView({ alert: items[0]!, items }).title).toBe(
+      "2 machines can't be reached",
+    );
   });
 });

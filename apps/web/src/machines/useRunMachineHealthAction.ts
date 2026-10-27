@@ -6,6 +6,7 @@ import { Atom } from "effect/reactivity";
 import { useCallback } from "react";
 
 import { toastManager } from "../components/ui/toast";
+import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useStartAgentChat } from "../hooks/useStartAgentChat";
 import { machinesRpc } from "../rpc/machines";
 import { serverEnvironment } from "../state/server";
@@ -38,7 +39,71 @@ export function machineHealthActionPermissionAtom(action: MachineHealthAction): 
     // Starting a chat is an operate grant on the server it opens on, as Fix is.
     case "agent":
       return machinesRpc.healthFix.permissionAtom(action.request.environmentId);
+    case "disableProvider":
+      return serverEnvironment.mutateProviderInstance.permissionAtom(action.environmentId);
   }
+}
+
+/**
+ * Turns a provider off in one machine's own settings. The instance comes from
+ * that machine's settings, or its provider list for a default instance nobody
+ * edited; `enabled` stays on the machine (see providerSettingsDocument.ts).
+ */
+function useTurnOffProvider(): (
+  action: Extract<MachineHealthAction, { readonly kind: "disableProvider" }>,
+) => Promise<boolean> {
+  const mutate = useAtomCommand(serverEnvironment.mutateProviderInstance, {
+    reportFailure: false,
+  });
+  return useCallback(
+    async (action) => {
+      const { environmentId, instanceId, machineName } = action;
+      const settings = appAtomRegistry.get(serverEnvironment.settingsValueAtom(environmentId));
+      const provider = appAtomRegistry
+        .get(serverEnvironment.configValueAtom(environmentId))
+        ?.providers.find((entry) => entry.instanceId === instanceId);
+      const instance =
+        settings?.providerInstances[instanceId] ??
+        (provider === undefined ? undefined : { driver: provider.driver });
+      const name = provider?.displayName ?? instanceId;
+      if (instance === undefined) {
+        toastManager.add({
+          type: "error",
+          title: `Couldn't turn off ${name}`,
+          description: `${machineName} no longer lists it.`,
+        });
+        return false;
+      }
+      const outcome = await mutate({
+        environmentId,
+        input: {
+          patch: {},
+          providerInstanceMutation: {
+            operation: "upsert",
+            instanceId,
+            instance: { ...instance, enabled: false },
+          },
+        },
+      });
+      if (outcome._tag !== "Success") {
+        if (!isAtomCommandInterrupted(outcome))
+          toastManager.add({
+            type: "error",
+            title: `Couldn't turn off ${name}`,
+            description: failureMessage(squashAtomCommandFailure(outcome)),
+          });
+        return false;
+      }
+      toastManager.add({
+        type: "success",
+        title: `Turned off ${name} on ${machineName}`,
+        description:
+          "It stays on for your other machines. Turn it back on in Settings → Providers.",
+      });
+      return true;
+    },
+    [mutate],
+  );
 }
 
 function legacyCommandPermissionAtom(command: MachineHealthLegacyCommand): Atom.Atom<boolean> {
@@ -122,12 +187,15 @@ export function useRunMachineHealthAction(): (action: MachineHealthAction) => Pr
   const startAgentChat = useStartAgentChat();
   const healthFix = useAtomCommand(machinesRpc.healthFix, { reportFailure: false });
   const runLegacy = useRunLegacyHealthCommand();
+  const turnOffProvider = useTurnOffProvider();
   return useCallback(
     async (action: MachineHealthAction) => {
       switch (action.kind) {
         case "open":
           open(action.link);
           return true;
+        case "disableProvider":
+          return turnOffProvider(action);
         case "agent":
           return startAgentChat(action.request.environmentId, { prompt: action.request.prompt });
         case "fix": {
@@ -199,6 +267,6 @@ export function useRunMachineHealthAction(): (action: MachineHealthAction) => Pr
         }
       }
     },
-    [healthFix, open, runLegacy, startAgentChat],
+    [healthFix, open, runLegacy, startAgentChat, turnOffProvider],
   );
 }

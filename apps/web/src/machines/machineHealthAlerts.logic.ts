@@ -55,6 +55,23 @@ function stuckRunsTitle(items: ReadonlyArray<MachineHealthAlert>): string {
       : `${items.length} stuck runs in ${threads.size} threads`;
 }
 
+/** The machine an item is about: the one it names, else the one it is on. */
+const machineOf = (item: MachineHealthAlert) =>
+  item.target?._tag === "machine" ? item.target.environmentId : item.originEnvironmentId;
+
+const distinctMachines = (items: ReadonlyArray<MachineHealthAlert>) =>
+  new Set(items.map(machineOf)).size;
+
+/** Two problems with one machine are one machine, never "2 machines". */
+function machineLinksTitle(count: number, items: ReadonlyArray<MachineHealthAlert>): string {
+  const machines = distinctMachines(items);
+  if (items.every((item) => item.itemKey.startsWith("machine-links:reachable:")) && machines > 1)
+    return `${machines} machines can't be reached`;
+  return machines === 1
+    ? `${count} problems with one machine`
+    : `${count} problems across ${machines} machines`;
+}
+
 const GROUP_TITLES: Partial<
   Record<MachineHealthCheckId, (count: number, items: ReadonlyArray<MachineHealthAlert>) => string>
 > = {
@@ -62,8 +79,11 @@ const GROUP_TITLES: Partial<
   "scheduled-tasks": (count) => `${count} scheduled tasks need attention`,
   integrations: (count) => `${count} integrations need attention`,
   providers: (count) => `${count} provider problems`,
-  sync: (count) => `Sync problems with ${count} machines`,
-  "machine-links": (count) => `${count} machines can't be reached`,
+  sync: (count, items) => {
+    const machines = distinctMachines(items);
+    return machines === 1 ? `${count} sync problems` : `Sync problems with ${machines} machines`;
+  },
+  "machine-links": machineLinksTitle,
 };
 
 /** Titles listed in a group's description before the rest are counted. */
@@ -196,6 +216,32 @@ export interface HealthAlertNotificationPlan {
   readonly retract: ReadonlyArray<MergedHealthAlert>;
   /** Open ids to add to `seen`: the toasted ones and any sibling of a problem already seen. */
   readonly remember: ReadonlyArray<string>;
+  /** The quiet problems to persist: open ones that need the owner, and recently cleared ones. */
+  readonly quiet: QuietHealthProblems;
+}
+
+/**
+ * Problems that wait for the owner, by `quietProblemKey`: null while open,
+ * else when it was seen to clear. Once one has popped up, it stays in the
+ * machine's health without popping up again: not when a server restarts and
+ * opens a new alert for it, nor when it clears and comes back within a day. A
+ * new status (warn to fail) is a new key, so it pops up.
+ */
+export type QuietHealthProblems = ReadonlyMap<string, number | null>;
+
+/** A cleared problem stays quiet this long if it comes back. */
+export const QUIET_HEALTH_PROBLEM_TTL_MS = 24 * 60 * 60_000;
+
+/** A sign-in, or a problem with no direct fix: only the owner or an agent clears it. */
+export function needsOwner(alert: Pick<MachineHealthAlert, "fix">): boolean {
+  return alert.fix === null || alert.fix === "sign-in";
+}
+
+/** Stable across alert ids: the machine, the item and its status. */
+export function quietProblemKey(
+  alert: Pick<MachineHealthAlert, "originEnvironmentId" | "itemKey" | "status">,
+): string {
+  return JSON.stringify([alert.originEnvironmentId, alert.itemKey, alert.status]);
 }
 
 /**
@@ -211,6 +257,8 @@ export function planHealthAlertNotifications(
   merged: MergedHealthAlerts,
   seen: ReadonlySet<string>,
   shown: ReadonlySet<string>,
+  quiet: QuietHealthProblems = new Map(),
+  nowMs = 0,
 ): HealthAlertNotificationPlan {
   const openKeys = new Set(merged.open.map(({ alert }) => healthAlertGroupKey(alert)));
   const retract = new Map<string, MergedHealthAlert>();
@@ -218,18 +266,48 @@ export function planHealthAlertNotifications(
     const key = healthAlertGroupKey(entry.alert);
     if (shown.has(key) && !openKeys.has(key) && !retract.has(key)) retract.set(key, entry);
   }
+  const quietNow = (clearedAtMs: number | null | undefined) =>
+    clearedAtMs === null ||
+    (clearedAtMs !== undefined && nowMs - clearedAtMs < QUIET_HEALTH_PROBLEM_TTL_MS);
+  const isQuiet = (item: MachineHealthAlert) =>
+    needsOwner(item) && quietNow(quiet.get(quietProblemKey(item)));
   const toast = merged.open.filter(
-    ({ alert, idsByItem }) =>
+    ({ alert, items, idsByItem }) =>
       !shown.has(healthAlertGroupKey(alert)) &&
-      [...idsByItem.values()].some((ids) => !ids.some((id) => seen.has(id))),
+      items.some(
+        (item) => !(idsByItem.get(item.itemKey) ?? []).some((id) => seen.has(id)) && !isQuiet(item),
+      ),
   );
+  const nextQuiet = new Map<string, number | null>();
+  for (const [key, clearedAtMs] of quiet)
+    if (quietNow(clearedAtMs)) nextQuiet.set(key, clearedAtMs ?? nowMs);
+  for (const { items } of merged.open)
+    for (const item of items) if (needsOwner(item)) nextQuiet.set(quietProblemKey(item), null);
   return {
     toast,
     retract: [...retract.values()],
     // Every id of a seen problem counts as seen, so the problem stays quiet
     // when the id that was toasted resolves and a sibling remains.
     remember: merged.open.flatMap(({ ids }) => ids).filter((id) => !seen.has(id)),
+    quiet: nextQuiet,
   };
+}
+
+/** Reads the persisted quiet problems, tolerating anything a past version or a user left there. */
+export function parseQuietHealthProblems(raw: string | null): Map<string, number | null> {
+  if (raw === null) return new Map();
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return new Map();
+    return new Map(
+      Object.entries(value).filter(
+        (entry): entry is [string, number | null] =>
+          entry[1] === null || (typeof entry[1] === "number" && Number.isFinite(entry[1])),
+      ),
+    );
+  } catch {
+    return new Map();
+  }
 }
 
 export const SEEN_HEALTH_ALERT_LIMIT = 200;
