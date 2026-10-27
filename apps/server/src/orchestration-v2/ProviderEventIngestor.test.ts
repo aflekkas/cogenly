@@ -252,3 +252,80 @@ it.effect.each([
     assert.isEmpty(persisted);
   }).pipe(Effect.provide(layerFailingWrites(errors))),
 );
+
+it.effect("runtime recovery finds live runless provider turns and drops ended ones", () =>
+  Effect.gen(function* () {
+    const now = yield* DateTime.now;
+    const sink = yield* EventSink.EventSinkV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const thread = yield* threadCreatedEvent(now);
+    const nodeId = NodeId.make("node:runless-recovery");
+    const providerThreadId = ProviderThreadId.make("provider-thread:runless-recovery");
+    const providerTurnId = ProviderTurnId.make("provider-turn:runless-recovery");
+    yield* sink.write({
+      events: [
+        thread,
+        {
+          id: "event:runless-node" as OrchestrationV2DomainEvent["id"],
+          type: "node.updated",
+          threadId: thread.threadId,
+          occurredAt: now,
+          payload: {
+            id: nodeId,
+            threadId: thread.threadId,
+            runId: null,
+            parentNodeId: null,
+            rootNodeId: nodeId,
+            kind: "root_turn",
+            status: "running",
+            countsForRun: false,
+            providerThreadId,
+            providerTurnId,
+            nativeItemRef: null,
+            runtimeRequestId: null,
+            checkpointScopeId: null,
+            startedAt: now,
+            completedAt: null,
+          },
+        },
+        {
+          id: "event:runless-turn" as OrchestrationV2DomainEvent["id"],
+          type: "provider-turn.updated",
+          threadId: thread.threadId,
+          occurredAt: now,
+          payload: {
+            id: providerTurnId,
+            providerThreadId,
+            nodeId,
+            runAttemptId: null,
+            nativeTurnRef: null,
+            ordinal: 1,
+            status: "running",
+            startedAt: now,
+            completedAt: null,
+          },
+        },
+      ],
+    });
+    const active = yield* projections.getRuntimeRecoveryProjection(thread.threadId);
+    assert.deepEqual(
+      active.providerTurns.map((turn) => turn.id),
+      [providerTurnId],
+    );
+    const turn = active.providerTurns[0]!;
+    yield* sink.write({
+      events: [
+        {
+          id: "event:runless-ended" as OrchestrationV2DomainEvent["id"],
+          type: "provider-turn.updated",
+          threadId: thread.threadId,
+          occurredAt: now,
+          payload: { ...turn, status: "cancelled", completedAt: now },
+        },
+      ],
+    });
+    assert.isEmpty(
+      (yield* projections.getRuntimeRecoveryProjection(thread.threadId)).providerTurns,
+    );
+  }).pipe(Effect.provide(makeLayerTest(layerTestEventSink))),
+);
