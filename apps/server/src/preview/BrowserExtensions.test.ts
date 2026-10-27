@@ -4,7 +4,9 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Stream from "effect/Stream";
+import * as Option from "effect/Option";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -73,14 +75,19 @@ describe("BrowserExtensions", () => {
       Effect.gen(function* () {
         const { extensions, folder, writeExtension } = yield* setup;
         let loads = 0;
+        const installedLoad = yield* Deferred.make<void>();
+        const disabledLoad = yield* Deferred.make<void>();
         yield* extensions.registerLoader(() =>
-          Effect.sync(() => {
+          Effect.gen(function* () {
             loads++;
+            yield* Deferred.succeed(loads === 1 ? installedLoad : disabledLoad, undefined);
           }),
         );
         yield* writeExtension("1.0.0");
         const first = yield* extensions.install({ source: folder });
+        yield* Deferred.await(installedLoad);
         yield* extensions.toggle({ id: first.extension.id, enabled: false });
+        yield* Deferred.await(disabledLoad);
         const before = loads;
         yield* TestClock.adjust("1 day");
         yield* writeExtension("1.1.0");
@@ -114,8 +121,14 @@ describe("BrowserExtensions", () => {
         // A registered adapter may defer loading until a browser tab opens.
         yield* restarted.registerLoader(() => Effect.void);
         expect((yield* restarted.reload({ id: first.extension.id })).extension.state).toBe(
-          "pending",
+          "installing",
         );
+        yield* restarted.subscribe({}).pipe(
+          Stream.filter((list) => list.extensions[0]?.state === "pending"),
+          Stream.take(1),
+          Stream.runDrain,
+        );
+        expect((yield* restarted.list({})).extensions[0]?.state).toBe("pending");
       }),
     ),
   );
@@ -272,41 +285,93 @@ describe("BrowserExtensions", () => {
     ),
   );
 
-  it.effect("reports a load failure on install and list, and clears it after reinstall", () =>
+  it.effect("serializes background version cleanup with a concurrent reload", () =>
     run(
       Effect.gen(function* () {
-        const { extensions, folder, writeExtension } = yield* setup;
-        let loads = 0;
-        let error: string | undefined =
-          "Could not load javascript 'missing.js' for content script.";
-        yield* extensions.registerLoader((profileId) =>
-          Effect.gen(function* () {
-            loads++;
-            for (const extension of yield* extensions.loadable(profileId)) {
-              yield* extensions.reportLoad(profileId, extension.path, error);
-            }
+        const { fs, path, root, folder, writeExtension } = yield* setup;
+        const cleaning = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        const finished = yield* Deferred.make<void>();
+        let holdCleanup = true;
+        let registryReads = 0;
+        const extensions = yield* makeBrowserExtensions({ rootDir: path.join(root, "store") }).pipe(
+          Effect.provideService(FileSystem.FileSystem, {
+            ...fs,
+            readFileString: (file, ...args) => {
+              if (file.endsWith("registry.json")) registryReads++;
+              return fs.readFileString(file, ...args);
+            },
+            readDirectory: (directory) =>
+              Effect.gen(function* () {
+                if (holdCleanup && directory.startsWith(path.join(root, "store"))) {
+                  holdCleanup = false;
+                  yield* Deferred.succeed(cleaning, undefined);
+                  yield* Deferred.await(release);
+                }
+                const entries = yield* fs.readDirectory(directory);
+                yield* Deferred.succeed(finished, undefined);
+                return entries;
+              }),
           }),
         );
+        yield* extensions.registerLoader(() => Effect.void);
         yield* writeExtension("1.0.0");
-        const installed = yield* extensions.install({ source: folder });
-        expect(installed.extension.loadError).toContain("Highlighter");
-        expect(installed.extension.loadError).toContain("missing.js");
-        expect((yield* extensions.list({})).extensions[0]?.loadError).toBe(
-          installed.extension.loadError,
-        );
-        expect(
-          (yield* Effect.flip(extensions.pageUrl({ id: installed.extension.id, page: "popup" })))
-            .message,
-        ).toContain("missing.js");
-        expect(loads).toBe(1);
-        error = undefined;
+        const first = yield* extensions.install({ source: folder });
+        yield* Deferred.await(cleaning);
         yield* writeExtension("1.1.0");
-        const updated = yield* extensions.install({ source: folder });
-        expect(updated.extension).toMatchObject({ id: installed.extension.id, version: "1.1.0" });
-        expect(updated.extension.loadError).toBeUndefined();
-        expect((yield* extensions.list({})).extensions[0]?.loadError).toBeUndefined();
+        const before = registryReads;
+        const reload = yield* extensions.reload({ id: first.extension.id }).pipe(Effect.forkScoped);
+        yield* Effect.yieldNow;
+        expect(registryReads).toBe(before);
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(reload);
+        yield* Deferred.await(finished);
+        const [current] = yield* extensions.loadable("default");
+        expect(yield* fs.exists(path.join(current!.path, "manifest.json"))).toBe(true);
+        expect((yield* extensions.list({})).extensions[0]?.version).toBe("1.1.0");
       }),
     ),
+  );
+
+  it.effect(
+    "returns installing without waiting for Chrome and lists while its load is blocked",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const { extensions, folder, writeExtension } = yield* setup;
+          const release = yield* Deferred.make<void>();
+          const started = yield* Deferred.make<void>();
+          yield* extensions.registerLoader((profileId) =>
+            Effect.gen(function* () {
+              yield* Deferred.succeed(started, undefined);
+              yield* Deferred.await(release);
+              for (const extension of yield* extensions.loadable(profileId))
+                yield* extensions.reportLoad(
+                  profileId,
+                  extension.path,
+                  "Could not load missing.js",
+                );
+            }),
+          );
+          yield* writeExtension("1.0.0");
+          const installed = yield* extensions.install({ source: folder });
+          expect(installed.extension.state).toBe("installing");
+          yield* Deferred.await(started);
+          expect((yield* extensions.list({})).extensions[0]?.state).toBe("installing");
+          yield* Deferred.succeed(release, undefined);
+          const failed = yield* extensions.subscribe({}).pipe(
+            Stream.filter((list) => list.extensions[0]?.state === "failed"),
+            Stream.runHead,
+            Effect.map(Option.getOrThrow),
+          );
+          expect(failed.extensions[0]?.loadError).toContain("Highlighter");
+          expect(failed.extensions[0]?.loadError).toContain("missing.js");
+          expect(
+            (yield* Effect.flip(extensions.pageUrl({ id: installed.extension.id, page: "popup" })))
+              .message,
+          ).toContain("missing.js");
+        }),
+      ),
   );
 
   it.effect("reads toolbar metadata for extensions installed by an older registry", () =>
@@ -470,7 +535,7 @@ describe("BrowserExtensions", () => {
         );
         yield* writeExtension("1.0.0");
         const result = yield* extensions.install({ source: folder });
-        expect(result.extension.state).toBe("loaded");
+        expect(result.extension.state).toBe("installing");
         yield* Deferred.await(loaded);
       }),
     ),
@@ -495,7 +560,37 @@ describe("BrowserExtensions", () => {
     ),
   );
 
-  it.effect("keeps future surfaces behind a clear typed error", () =>
+  it.effect("validates missing and disabled extensions before invoking the surface adapter", () =>
+    run(
+      Effect.gen(function* () {
+        const { extensions, folder, writeExtension } = yield* setup;
+        const opened: string[] = [];
+        yield* extensions.registerSurfaceOpener((input, extension) =>
+          Effect.sync(() => {
+            opened.push(extension.id);
+            return { hostTabId: input.hostTabId };
+          }),
+        );
+        const missing = yield* Effect.flip(
+          extensions.openSurface({ id: "a".repeat(32), kind: "popup", hostTabId: "host" }),
+        );
+        expect(missing.message).toContain("not installed");
+        yield* writeExtension("1.0.0");
+        const { extension } = yield* extensions.install({ source: folder });
+        yield* extensions.toggle({ id: extension.id, enabled: false });
+        const disabled = yield* Effect.flip(
+          extensions.openSurface({ id: extension.id, kind: "popup", hostTabId: "host" }),
+        );
+        expect(disabled.message).toContain("turned off");
+        expect(opened).toEqual([]);
+        yield* extensions.toggle({ id: extension.id, enabled: true });
+        yield* extensions.openSurface({ id: extension.id, kind: "popup", hostTabId: "host" });
+        expect(opened).toEqual([extension.id]);
+      }),
+    ),
+  );
+
+  it.effect("reports the missing server surface runtime precisely", () =>
     run(
       Effect.gen(function* () {
         const { extensions, folder, writeExtension } = yield* setup;
@@ -504,12 +599,12 @@ describe("BrowserExtensions", () => {
         const error = yield* Effect.flip(
           extensions.openSurface({ id: extension.id, kind: "popup", hostTabId: "host" }),
         );
-        expect(error._tag).toBe("BrowserExtensionSurfaceNotImplementedError");
-        expect(error.message).toContain("not available yet");
+        expect(error._tag).toBe("BrowserExtensionError");
+        expect(error.message).toContain("server Chrome runtime");
         for (const page of ["sidePanel", "action"]) {
           expect(
             (yield* Effect.flip(extensions.pageUrl({ id: extension.id, page }))).message,
-          ).toContain("not available yet");
+          ).toContain("openSurface");
         }
       }),
     ),
@@ -560,7 +655,7 @@ describe("BrowserExtensions", () => {
         yield* writeExtension("1.0.1", { action: {} });
         yield* extensions.install({ source: folder });
         const popup = yield* Effect.exit(extensions.pageUrl({ id: extension.id, page: "popup" }));
-        expect(Exit.isFailure(popup) && String(popup.cause)).toMatch(/no extension toolbar/);
+        expect(Exit.isFailure(popup) && String(popup.cause)).toMatch(/no popup.*action/);
       }),
     ),
   );
