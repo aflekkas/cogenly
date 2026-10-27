@@ -905,7 +905,7 @@ export const make = Effect.gen(function* () {
           const instances = yield* pool.list;
           yield* Effect.forEach(
             instances,
-            (instance) => instance.stop({ timeout: Duration.seconds(5) }),
+            (instance) => instance.stop({ timeout: Duration.seconds(45) }),
             { concurrency: "unbounded" },
           );
           if (unsignedMacInstall) {

@@ -256,8 +256,14 @@ const CLAUDE_SCRIPT_EXTENSIONS = [".js", ".mjs", ".tsx", ".ts", ".jsx"];
 // mcp_set_servers once each server connected or hit its own 30 s timeout.
 const CLAUDE_MCP_REGISTRATION_TIMEOUT = "90 seconds";
 
+const CLAUDE_GROUP_WATCH_SCRIPT = [
+  "{ trap '' TERM; read -r _ <&3; kill -TERM 0; sleep 5; kill -KILL 0; } </dev/null >/dev/null 2>&1 &",
+  'exec "$@" 3<&-',
+].join("\n");
+
 /**
- * Starts the Claude CLI as the leader of its own process group. When the CLI
+ * Starts the Claude CLI as the leader of its own process group. A watcher reads
+ * a pipe only this server holds and stops the group when the server dies. When the CLI
  * exits it stops the MCP servers it started, but not their children: a
  * plugin's `bun run start` wrapper dies and its `bun server.ts` keeps running,
  * writing to a pipe nobody reads (#3089). Those stay in the CLI's group, so
@@ -269,14 +275,18 @@ const CLAUDE_MCP_REGISTRATION_TIMEOUT = "90 seconds";
  * before adding the tail to exit errors. Here stderr is dropped instead, so
  * exit errors carry only the code or signal.
  */
-function spawnClaudeProcessGroup(options: ClaudeSpawnOptions) {
-  const child = NodeChildProcess.spawn(options.command, options.args, {
-    cwd: options.cwd,
-    env: options.env,
-    signal: options.signal,
-    stdio: ["pipe", "pipe", "ignore"],
-    detached: true,
-  });
+export function spawnClaudeProcessGroup(options: ClaudeSpawnOptions) {
+  const child = NodeChildProcess.spawn(
+    "/bin/sh",
+    ["-c", CLAUDE_GROUP_WATCH_SCRIPT, "cogenly-claude", options.command, ...options.args],
+    {
+      cwd: options.cwd,
+      env: options.env,
+      signal: options.signal,
+      stdio: ["pipe", "pipe", "ignore", "pipe"],
+      detached: true,
+    },
+  );
   child.once("exit", () => {
     try {
       signalProcessGroup(child.pid ?? 0, "SIGKILL");
@@ -284,7 +294,8 @@ function spawnClaudeProcessGroup(options: ClaudeSpawnOptions) {
       // The group is already empty.
     }
   });
-  return child;
+  // The fourth descriptor makes Node type stdin/stdout as nullable; both are pipes.
+  return child as typeof child & ClaudeSpawnedProcess;
 }
 
 export const ClaudeProviderCapabilitiesV2 = {

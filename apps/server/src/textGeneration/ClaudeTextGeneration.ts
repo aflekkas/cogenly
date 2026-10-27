@@ -253,6 +253,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
         env: claudeEnvironment,
         cwd: workingDirectory,
         shell: spawnCommand.shell,
+        forceKillAfter: "1 second",
         stdin: {
           stream: Stream.encodeText(Stream.make(prompt)),
         },

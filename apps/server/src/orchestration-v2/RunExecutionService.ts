@@ -610,6 +610,7 @@ export const layer: Layer.Layer<
       readonly shouldFinalizeRun?: () => Effect.Effect<boolean, ProjectionStoreV2Error>;
       readonly hasUnpairedRunInterruptRequest?: () => Effect.Effect<boolean, never>;
       readonly openRunOwnedSubagents?: OpenRunOwnedSubagentProjection;
+      readonly abandonedProviderTurn?: OrchestrationV2ProviderTurn;
       readonly terminal: ProviderTerminalEvent;
       readonly failureItemPersisted: boolean;
       readonly refreshAfterTurn: Effect.Effect<void>;
@@ -771,6 +772,20 @@ export const layer: Layer.Layer<
             // Terminalize open run-owned subagent rows before the root run
             // settles so projections never keep a forever-running subagent card.
             ...cascadedSubagentEvents,
+            ...(input.abandonedProviderTurn === undefined
+              ? []
+              : [
+                  {
+                    id: yield* allocateEventId(),
+                    type: "provider-turn.updated" as const,
+                    threadId: input.run.threadId,
+                    runId: input.run.id,
+                    nodeId: input.rootNode.id,
+                    providerInstanceId: input.run.providerInstanceId,
+                    occurredAt: completedAt,
+                    payload: input.abandonedProviderTurn,
+                  },
+                ]),
             ...(finalizedAttempt === null
               ? []
               : [
@@ -1027,6 +1042,7 @@ export const layer: Layer.Layer<
                 : { relatedProviderThreadIds: input.relatedProviderThreadIds }),
             }),
           );
+          const latestRootProviderTurn = yield* Ref.make<OrchestrationV2ProviderTurn | null>(null);
           const rootTerminalSeen = yield* Ref.make(false);
           const rootRunFinalized = yield* Ref.make(false);
           const providerThreadOwnerLost = yield* Ref.make(false);
@@ -1288,6 +1304,14 @@ export const layer: Layer.Layer<
             ),
             Stream.tap((event) =>
               Effect.gen(function* () {
+                // Cache before publishing: an ingestion failure may lose a terminal snapshot.
+                if (
+                  event.type === "provider_turn.updated" &&
+                  (event.providerTurn.runAttemptId === input.attempt.id ||
+                    event.providerTurn.id === (yield* Ref.get(eventRouting)).rootProviderTurnId)
+                ) {
+                  yield* Ref.set(latestRootProviderTurn, event.providerTurn);
+                }
                 let storedEventCount = 0;
                 const deliveredEvent = filterAssistantEvent(
                   event,
@@ -1393,59 +1417,71 @@ export const layer: Layer.Layer<
             Effect.catchCauseIf(
               (cause) => !Cause.hasInterruptsOnly(cause),
               (cause) =>
-                Ref.get(rootRunFinalized).pipe(
-                  Effect.flatMap((finalized) =>
-                    Effect.logWarning("orchestration V2 provider event ingestion failed", {
-                      runId: input.run.id,
-                      cause,
-                    }).pipe(
-                      Effect.andThen(
-                        finalized
-                          ? Effect.void
-                          : Ref.get(latestProviderThread).pipe(
-                              Effect.flatMap((providerThread) =>
-                                Ref.get(latestTurnItemOrdinal).pipe(
-                                  Effect.flatMap((latestItemOrdinal) =>
-                                    Ref.get(openRunOwnedSubagents).pipe(
-                                      Effect.flatMap((openSubagents) =>
-                                        writeFinalRunEvents({
-                                          run: input.run,
-                                          rootNode: input.rootNode,
-                                          checkpointScope: input.checkpointScope,
-                                          providerThread,
-                                          attempt: input.attempt,
-                                          // The failure may be the ownership
-                                          // read itself, so check in the write.
-                                          writeIfRunCurrent: {
-                                            activeAttemptId: input.attempt.id,
-                                            expectedStatus: "running",
-                                          },
-                                          openRunOwnedSubagents: openSubagents,
-                                          terminal: makeFailedTerminalEvent(
-                                            makeProviderFailure({
-                                              cause: Cause.squash(cause),
-                                              class: "unknown",
-                                            }),
-                                            latestItemOrdinal + 1,
-                                          ),
-                                          failureItemPersisted: false,
-                                          refreshAfterTurn,
-                                        }),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
+                Effect.gen(function* () {
+                  yield* Effect.logWarning("orchestration V2 provider event ingestion failed", {
+                    runId: input.run.id,
+                    cause,
+                  });
+                  if (yield* Ref.get(rootRunFinalized)) return;
+                  const providerThread = yield* Ref.get(latestProviderThread);
+                  const routing = yield* Ref.get(eventRouting);
+                  const snapshot = yield* Ref.get(latestRootProviderTurn);
+                  const completedAt = yield* DateTime.now;
+                  // A failed consumer cannot persist more provider events. Stop its work
+                  // before failing the run; retain a running snapshot if interruption fails
+                  // so a later start can retry the interruption.
+                  const interrupted =
+                    routing.rootProviderTurnId !== null && !routing.rootTurnEnded
+                      ? yield* input.session
+                          .interruptTurn({
+                            providerThread,
+                            providerTurnId: routing.rootProviderTurnId,
+                            requestRuntimeRestart: true,
+                          })
+                          .pipe(
+                            Effect.as(true),
+                            Effect.catchCauseIf(
+                              (interruptCause) => !Cause.hasInterruptsOnly(interruptCause),
+                              (interruptCause) =>
+                                Effect.logWarning(
+                                  "orchestration V2 failed to interrupt turn after ingestion failure",
+                                  { runId: input.run.id, cause: interruptCause },
+                                ).pipe(Effect.as(false)),
                             ),
-                      ),
-                      Effect.mapError(
-                        (writeCause) =>
-                          new RunExecutionIngestError({
-                            runId: input.run.id,
-                            cause: { ingest: cause, write: writeCause },
-                          }),
-                      ),
+                          )
+                      : false;
+                  const abandonedProviderTurn =
+                    !interrupted || snapshot === null
+                      ? undefined
+                      : isTerminalProviderTurnStatus(snapshot.status)
+                        ? snapshot
+                        : { ...snapshot, status: "interrupted" as const, completedAt };
+                  yield* writeFinalRunEvents({
+                    run: input.run,
+                    rootNode: input.rootNode,
+                    checkpointScope: input.checkpointScope,
+                    providerThread,
+                    attempt: input.attempt,
+                    writeIfRunCurrent: {
+                      activeAttemptId: input.attempt.id,
+                      expectedStatus: "running",
+                    },
+                    ...(abandonedProviderTurn === undefined ? {} : { abandonedProviderTurn }),
+                    openRunOwnedSubagents: yield* Ref.get(openRunOwnedSubagents),
+                    terminal: makeFailedTerminalEvent(
+                      makeProviderFailure({ cause: Cause.squash(cause), class: "unknown" }),
+                      (yield* Ref.get(latestTurnItemOrdinal)) + 1,
                     ),
+                    failureItemPersisted: false,
+                    refreshAfterTurn,
+                  });
+                }).pipe(
+                  Effect.mapError(
+                    (writeCause) =>
+                      new RunExecutionIngestError({
+                        runId: input.run.id,
+                        cause: { ingest: cause, write: writeCause },
+                      }),
                   ),
                 ),
             ),

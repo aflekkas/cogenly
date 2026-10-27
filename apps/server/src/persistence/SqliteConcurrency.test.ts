@@ -379,3 +379,81 @@ it.live("production migrations boot with a warning when writer workers cannot st
     }
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
+
+it.live.each(["cold", "warm"])("finishes an interrupted shutdown read with a %s reader", (state) =>
+  Effect.gen(function* () {
+    const { sql } = yield* database;
+    const read = sql
+      .withTransaction(sql.unsafe<{ value: number }>("SELECT value FROM items"))
+      .pipe(NodeSqliteClient.readOnly);
+    if (state === "warm") yield* read;
+    const registered = yield* Deferred.make<void>();
+    let observed: number | undefined;
+    const fiber = yield* Effect.scoped(
+      Effect.gen(function* () {
+        yield* Effect.addFinalizer(() =>
+          read.pipe(
+            Effect.tap((rows) =>
+              Effect.sync(() => {
+                observed = rows[0]?.value;
+              }),
+            ),
+            Effect.orDie,
+          ),
+        );
+        yield* Deferred.succeed(registered, undefined);
+        return yield* Effect.never;
+      }),
+    ).pipe(Effect.forkChild);
+    yield* Deferred.await(registered);
+    yield* Fiber.interrupt(fiber);
+    expect(observed).toBe(0);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect.each([false, true])(
+  "preserves caller cancellation while acquiring a transaction (masked=%s)",
+  (masked) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql.unsafe("CREATE TABLE cancellation_probe(value INTEGER)");
+      const held = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const holder = yield* sql
+        .withTransaction(
+          Deferred.succeed(held, undefined).pipe(Effect.andThen(Deferred.await(release))),
+        )
+        .pipe(Effect.forkChild({ startImmediately: true }));
+      yield* Deferred.await(held);
+      const entered = yield* Deferred.make<void>();
+      const acquire = sql.withTransaction(
+        sql
+          .unsafe("INSERT INTO cancellation_probe VALUES (1)")
+          .pipe(Effect.andThen(Deferred.succeed(entered, undefined))),
+      );
+      const waiter = yield* (masked ? Effect.uninterruptible(acquire) : acquire).pipe(
+        Effect.forkChild({ startImmediately: true }),
+      );
+      const cancelled = yield* Fiber.interrupt(waiter).pipe(
+        Effect.forkChild({ startImmediately: true }),
+      );
+      yield* Effect.gen(function* () {
+        yield* NodeSqliteClient.eventLoopTurn;
+        expect(cancelled.pollUnsafe() !== undefined).toBe(!masked);
+        expect(yield* Deferred.isDone(entered)).toBe(false);
+      }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
+      yield* Fiber.join(holder);
+      yield* Fiber.join(cancelled);
+      expect(yield* Deferred.isDone(entered)).toBe(masked);
+      yield* sql.withTransaction(sql.unsafe("INSERT INTO cancellation_probe VALUES (2)"));
+      expect(yield* sql.unsafe("SELECT value FROM cancellation_probe ORDER BY value")).toEqual(
+        masked ? [{ value: 1 }, { value: 2 }] : [{ value: 2 }],
+      );
+    }).pipe(
+      Effect.provide(
+        NodeSqliteClient.layer({ filename: ":memory:" }).pipe(
+          Layer.provideMerge(NodeServices.layer),
+        ),
+      ),
+    ),
+);

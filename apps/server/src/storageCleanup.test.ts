@@ -690,60 +690,87 @@ describe("storage cleanup lifecycle", () => {
 });
 
 describe("worktree reuse and checkpoints", () => {
-  it.effect("recreates a removed child's branch and reruns setup after dependency pruning", () => {
-    const box = fixture();
-    const commit = git(box.worktree, ["rev-parse", "HEAD"]);
-    git(box.repo, ["worktree", "remove", box.worktree]);
-    let setups = 0;
-    return Effect.gen(function* () {
-      const driver = yield* Git.GitVcsDriver;
-      const lifecycle = WorktreeLifecycle.layer.pipe(
-        Layer.provide(
-          Layer.mergeAll(
-            Layer.mock(GitWorkflow.GitWorkflowService)({
-              createWorktree: (input) => driver.createWorktree(input),
-            }),
-            Layer.mock(ProjectService.ProjectService)({
-              getById: () => Effect.succeed(Option.some({ workspaceRoot: box.repo } as never)),
-            }),
-            Layer.mock(Setup.ProjectSetupScriptRunner)({
-              runForThread: () =>
-                withWorkspaceLease(
-                  NodePath.resolve(box.worktree),
-                  Effect.sync(() => {
-                    setups++;
-                    return { status: "no-script" as const };
-                  }),
-                ),
-            }),
+  it.effect.each(["stale-registration", "deleted-branch", "detached-base"] as const)(
+    "recovers worktrees after %s and reruns setup after dependency pruning",
+    (state) => {
+      const box = fixture();
+      const commit = git(state === "stale-registration" ? box.worktree : box.repo, [
+        "rev-parse",
+        "HEAD",
+      ]);
+      if (state === "stale-registration") NodeFS.rmSync(box.worktree, { recursive: true });
+      else {
+        git(box.repo, ["worktree", "remove", box.worktree]);
+        git(box.repo, ["branch", "-D", "child"]);
+        if (state === "detached-base") git(box.repo, ["checkout", "--detach", "HEAD"]);
+      }
+      let setups = 0;
+      return Effect.gen(function* () {
+        const driver = yield* Git.GitVcsDriver;
+        const lifecycle = WorktreeLifecycle.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.mock(GitWorkflow.GitWorkflowService)({
+                createWorktree: (input) => driver.createWorktree(input),
+                pruneWorktrees: (input) => driver.pruneWorktrees(input),
+                listLocalBranchNames: (cwd) => driver.listLocalBranchNames(cwd),
+                invalidateLocalStatus: () => Effect.void,
+                localStatus: (input) => driver.status(input),
+              }),
+              Layer.mock(ProjectService.ProjectService)({
+                getById: () => Effect.succeed(Option.some({ workspaceRoot: box.repo } as never)),
+              }),
+              Layer.mock(Setup.ProjectSetupScriptRunner)({
+                runForThread: () =>
+                  withWorkspaceLease(
+                    NodePath.resolve(box.worktree),
+                    Effect.sync(() => {
+                      setups++;
+                      return { status: "no-script" as const };
+                    }),
+                  ),
+              }),
+            ),
           ),
-        ),
-      );
-      yield* Effect.gen(function* () {
-        const worktrees = yield* WorktreeLifecycle.WorktreeLifecycle;
-        const input = {
-          threadId: ThreadId.make("child"),
-          projectId: liveThreadShell(ThreadId.make("child")).projectId,
-          worktreePath: box.worktree,
-          branch: "child",
-        };
-        yield* worktrees.prepare(input);
-        expect(git(box.worktree, ["rev-parse", "HEAD"])).toBe(commit);
-        expect(NodeFS.readFileSync(NodePath.join(box.worktree, "file.txt"), "utf8")).toBe(
-          "child commit\n",
         );
-        expect(setups).toBe(1);
-        const marker = NodePath.resolve(
-          box.worktree,
-          git(box.worktree, ["rev-parse", "--git-path", "cogenly-dependencies-pruned"]),
-        );
-        NodeFS.writeFileSync(marker, "pruned");
-        yield* worktrees.prepare(input);
-        expect(setups).toBe(2);
-        expect(NodeFS.existsSync(marker)).toBe(false);
-      }).pipe(Effect.provide(lifecycle));
-    }).pipe(Effect.provide(infrastructure(box)));
-  });
+        yield* Effect.gen(function* () {
+          const worktrees = yield* WorktreeLifecycle.WorktreeLifecycle;
+          const input = {
+            threadId: ThreadId.make("child"),
+            projectId: liveThreadShell(ThreadId.make("child")).projectId,
+            worktreePath: box.worktree,
+            branch: "child",
+          };
+          if (state === "detached-base") {
+            const result = yield* Effect.result(worktrees.prepare(input));
+            expect(result).toMatchObject({
+              _tag: "Failure",
+              failure: {
+                _tag: "WorktreePrepareError",
+                cause: { _tag: "WorktreeRecreateNoBaseError" },
+              },
+            });
+            expect(setups).toBe(0);
+            return;
+          }
+          yield* worktrees.prepare(input);
+          expect(git(box.worktree, ["rev-parse", "HEAD"])).toBe(commit);
+          expect(NodeFS.readFileSync(NodePath.join(box.worktree, "file.txt"), "utf8")).toBe(
+            state === "stale-registration" ? "child commit\n" : "initial\n",
+          );
+          expect(setups).toBe(1);
+          const marker = NodePath.resolve(
+            box.worktree,
+            git(box.worktree, ["rev-parse", "--git-path", "cogenly-dependencies-pruned"]),
+          );
+          NodeFS.writeFileSync(marker, "pruned");
+          yield* worktrees.prepare(input);
+          expect(setups).toBe(2);
+          expect(NodeFS.existsSync(marker)).toBe(false);
+        }).pipe(Effect.provide(lifecycle));
+      }).pipe(Effect.provide(infrastructure(box)));
+    },
+  );
 
   it.effect("checkpoint diffs survive worktree removal and the retained ref restores files", () => {
     const box = fixture();

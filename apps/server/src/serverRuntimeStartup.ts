@@ -254,7 +254,7 @@ export const resolveWelcomeBase = Effect.gen(function* () {
   } as const;
 });
 
-const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
+export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const randomUUID = crypto.randomUUIDv4();
   const serverConfig = yield* ServerConfig.ServerConfig;
@@ -284,19 +284,34 @@ const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
     if (existingThread === undefined) {
       const serverSettings = yield* ServerSettings.ServerSettingsService;
       const settings = yield* serverSettings.getSettings;
-      const launched = yield* threadLaunch.launch({
-        commandId: CommandId.make(yield* randomUUID),
-        projectId: project.id,
-        title: "New thread",
-        modelSelection: settings.defaultModelSelection ?? threadModelSelection,
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: DEFAULT_RUNTIME_MODE,
-        workspaceStrategy: { type: "root" },
-        createdBy: "system",
-        creationSource: "server",
-      });
+      const launched = yield* threadLaunch
+        .launch({
+          commandId: CommandId.make(yield* randomUUID),
+          projectId: project.id,
+          title: "New thread",
+          modelSelection: settings.defaultModelSelection ?? threadModelSelection,
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: DEFAULT_RUNTIME_MODE,
+          workspaceStrategy: { type: "root" },
+          createdBy: "system",
+          creationSource: "server",
+        })
+        .pipe(
+          Effect.catchTags({
+            ThreadManagementProviderInstanceDisabledError: (error) =>
+              Effect.logInfo("Skipped bootstrap thread because its provider instance is disabled", {
+                projectId: project.id,
+                instanceId: error.instanceId,
+              }).pipe(Effect.as(undefined)),
+            ThreadLaunchError: (error) =>
+              Effect.logWarning("Failed to launch bootstrap thread", {
+                projectId: project.id,
+                operation: error.operation,
+              }).pipe(Effect.as(undefined)),
+          }),
+        );
       bootstrapProjectId = project.id;
-      bootstrapThreadId = launched.threadId;
+      bootstrapThreadId = launched?.threadId;
     } else {
       bootstrapProjectId = project.id;
       bootstrapThreadId = existingThread.id;

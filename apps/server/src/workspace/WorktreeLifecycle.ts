@@ -22,6 +22,15 @@ export class WorktreePrepareError extends Schema.TaggedError<WorktreePrepareErro
   }
 }
 
+class WorktreeRecreateNoBaseError extends Schema.TaggedError<WorktreeRecreateNoBaseError>()(
+  "WorktreeRecreateNoBaseError",
+  { worktreePath: Schema.String, branch: Schema.String },
+) {
+  override get message() {
+    return "The project has no current branch from which to recreate the worktree.";
+  }
+}
+
 const isWorktreePrepareError = Schema.is(WorktreePrepareError);
 
 export class WorktreeLifecycle extends Context.Service<
@@ -57,11 +66,29 @@ const make = Effect.gen(function* () {
                 path: input.worktreePath,
                 cause: "Project unavailable",
               });
-            yield* git.createWorktree({
-              cwd: project.value.workspaceRoot,
-              refName: input.branch,
-              path: input.worktreePath,
-            });
+            const cwd = project.value.workspaceRoot;
+            yield* git.pruneWorktrees({ cwd });
+            const branches = yield* git.listLocalBranchNames(cwd);
+            if (branches.includes(input.branch)) {
+              yield* git.createWorktree({ cwd, refName: input.branch, path: input.worktreePath });
+            } else {
+              // The workspace can have changed outside Cogenly since its last status read.
+              yield* git.invalidateLocalStatus(cwd);
+              const { refName } = yield* git.localStatus({ cwd });
+              if (refName === null)
+                return yield* new WorktreeRecreateNoBaseError({
+                  worktreePath: input.worktreePath,
+                  branch: input.branch,
+                });
+              const baseRef = "refs/heads/" + refName;
+              yield* git.createWorktree({
+                cwd,
+                refName: baseRef,
+                baseRefName: baseRef,
+                newRefName: input.branch,
+                path: input.worktreePath,
+              });
+            }
             needsSetup = true;
           }
           const gitFile = yield* fs.readFileString(path.join(input.worktreePath, ".git"));
