@@ -607,7 +607,7 @@ function AutoFixRow({
       description={blocked === null ? description : `${description} ${blocked}`}
       control={
         <Switch
-          checked={autoFix ?? true}
+          checked={autoFix ?? false}
           disabled={!reachable || !canWrite || autoFix === null}
           aria-label={`Fix problems automatically on ${machine.name}`}
           onCheckedChange={(enabled) => update({ health: { autoFix: enabled } })}
