@@ -699,6 +699,7 @@ const smokeCases = [
       "browser_extension_install",
       "browser_extension_open",
       "browser_extension_remove",
+      "browser_extension_reload",
       "browser_extension_toggle",
       "browser_extensions_list",
       "browser_import_cookies",

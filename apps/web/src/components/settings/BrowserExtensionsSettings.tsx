@@ -19,9 +19,8 @@ import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
 
 /**
- * Extensions per browser profile, kept by the selected machine. They load in
- * that machine's browser tabs, and in the desktop panel when the desktop app
- * runs on the same machine.
+ * Extensions per browser profile, kept by the selected machine. They run in
+ * its built-in Chrome and stream into the web and desktop panels.
  */
 export function BrowserExtensionsSetting() {
   const { environment } = useSettingsScope();
@@ -50,7 +49,7 @@ function BrowserExtensionsRow({ environmentId }: { readonly environmentId: Envir
   return (
     <SettingsRow
       {...searchableSetting("browser-extensions")}
-      description="Chromium extensions for each profile on the selected machine. Its browser tabs load them, and so does the desktop panel when the app runs on that machine."
+      description="Extensions run in Cogenly's built-in Chrome on the selected machine. Desktop tabs in profiles with enabled extensions stream from it."
       control={
         <Select
           disabled={!canManage}

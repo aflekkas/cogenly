@@ -243,7 +243,7 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
   );
 
   it.live(
-    "reinstalls rebuilt files and bumped versions from the same folder while keeping the ID and storage",
+    "reloads rebuilt files and bumped versions while keeping the ID, storage and refreshed worker",
     () =>
       Effect.gen(function* () {
         const r = yield* extensionRig;
@@ -261,7 +261,7 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
           yield* Effect.promise(() => firstPage.evaluate("chrome.runtime.sendMessage({})")),
         ).toBe("1.0.0");
         yield* r.write("1.1.0");
-        const second = yield* r.store.install({ source: r.folder });
+        const second = yield* r.store.reload({ id: first.extension.id });
         expect(second).toMatchObject({
           updated: true,
           previousVersion: "1.0.0",
@@ -280,7 +280,7 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
           yield* Effect.promise(() => page.evaluate("chrome.storage.local.get('greeting')")),
         ).toEqual({ greeting: "retained" });
         yield* r.write("1.1.0", "rebuilt without a version bump");
-        const third = yield* r.store.install({ source: r.folder });
+        const third = yield* r.store.reload({ id: first.extension.id });
         expect(third.extension.loadError).toBeUndefined();
         expect((yield* r.store.list({})).extensions[0]?.version).toBe("1.1.0");
         const rebuilt = yield* Effect.promise(() =>

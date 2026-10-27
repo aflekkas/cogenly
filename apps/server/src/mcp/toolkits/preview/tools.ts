@@ -11,6 +11,7 @@ import {
   BrowserExtensionInstallResult,
   BrowserExtensionPage,
   BrowserExtensionRemoveInput,
+  BrowserExtensionReloadInput,
   BrowserExtensionToggleInput,
   BrowserExtensionsListInput,
   BrowserExtensionsListResult,
@@ -439,6 +440,15 @@ const BrowserExtensionInstallTool = Tool.make("browser_extension_install", {
   .annotate(Tool.OpenWorld, true)
   .annotate(Tool.Destructive, false);
 
+const BrowserExtensionReloadTool = Tool.make("browser_extension_reload", {
+  description:
+    "Reload an unpacked extension from its original folder to pick up changed files and manifest metadata, keeping its ID and Chrome storage. Restarts that profile's server browser and refreshes its worker. Web Store extensions must be reinstalled to update them.",
+  parameters: BrowserExtensionReloadInput,
+  success: BrowserExtensionInstallResult,
+  failure: Schema.Union([BrowserExtensionError, OrchestratorMcpFailure]),
+  dependencies: extensionDependencies,
+}).annotate(Tool.Destructive, false);
+
 const BrowserExtensionToggleTool = Tool.make("browser_extension_toggle", {
   description:
     "Turn an installed extension on or off in a browser profile without removing it or its data. Restarts that profile's server browser, closing its server-browser tabs.",
@@ -461,7 +471,7 @@ const BrowserExtensionRemoveTool = Tool.make("browser_extension_remove", {
 
 const BrowserExtensionOpenTool = browserTool(
   Tool.make("browser_extension_open", {
-    description: `Open an installed extension's own UI as a browser tab in its profile, as clicking its toolbar button would: page "popup" opens the toolbar popup, "options" its options page, or pass a path inside the extension such as "dashboard.html". Then drive the returned tab with the usual preview_* tools (snapshot, click, type, screenshot). An extension whose toolbar button only runs code, with no popup, cannot be clicked: Cogenly's browser has no extension toolbar. A popup opened as a tab sees itself as the active tab, so popups that act on "the current page" may need that page open in another tab. To see what a content script changed on a site, open or snapshot that site in the same profile. Pass open=false to keep the tab in the background, or tabId to load the page in an existing tab of that profile. ${EXTENSION_HOSTS}`,
+    description: `Open an installed extension's own UI as a browser tab in its profile, as clicking its toolbar button would: page "popup" opens the toolbar popup, "options" its options page ("sidePanel" and "action" are reserved but not available yet), or pass a path inside the extension such as "dashboard.html". Then drive the returned tab with the usual preview_* tools (snapshot, click, type, screenshot). An extension whose toolbar button only runs code, with no popup, cannot be clicked: Cogenly's browser has no extension toolbar. A popup opened as a tab sees itself as the active tab, so popups that act on "the current page" may need that page open in another tab. To see what a content script changed on a site, open or snapshot that site in the same profile. Pass open=false to keep the tab in the background, or tabId to load the page in an existing tab of that profile. ${EXTENSION_HOSTS}`,
     parameters: Schema.Struct({
       id: BrowserExtensionId,
       page: BrowserExtensionPage,
@@ -478,6 +488,7 @@ const BrowserExtensionOpenTool = browserTool(
 const extensionTools = [
   BrowserExtensionsListTool,
   BrowserExtensionInstallTool,
+  BrowserExtensionReloadTool,
   BrowserExtensionToggleTool,
   BrowserExtensionRemoveTool,
   BrowserExtensionOpenTool,

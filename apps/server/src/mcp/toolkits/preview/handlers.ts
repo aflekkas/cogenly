@@ -216,6 +216,10 @@ const handlers = {
         extensions.install(input),
       ),
   ),
+  browser_extension_reload: McpToolAccess.actsAsCaller(
+    (input: import("@cogenly/contracts").BrowserExtensionReloadInput) =>
+      Effect.flatMap(BrowserExtensions.BrowserExtensions, (extensions) => extensions.reload(input)),
+  ),
   browser_extension_toggle: McpToolAccess.actsAsCaller(
     (input: import("@cogenly/contracts").BrowserExtensionToggleInput) =>
       Effect.flatMap(BrowserExtensions.BrowserExtensions, (extensions) => extensions.toggle(input)),
