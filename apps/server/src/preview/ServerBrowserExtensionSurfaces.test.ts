@@ -210,6 +210,28 @@ const rig = Effect.gen(function* () {
         milestones.delete(check);
       });
     });
+  const awaitPage = (url: string) =>
+    Effect.gen(function* () {
+      const subscription = yield* manager.subscribeEvents;
+      const { sessions } = yield* manager.list({ threadId });
+      if (
+        sessions.some(
+          (session) => session.navStatus._tag === "Success" && session.navStatus.url === url,
+        )
+      )
+        return;
+      yield* Stream.fromSubscription(subscription).pipe(
+        Stream.filter(
+          (event) =>
+            event.type === "navigated" &&
+            event.threadId === threadId &&
+            event.snapshot.navStatus._tag === "Success" &&
+            event.snapshot.navStatus.url === url,
+        ),
+        Stream.take(1),
+        Stream.runDrain,
+      );
+    }).pipe(Effect.scoped);
   const installed = yield* extensions.install({ source: folder });
   yield* extensions.subscribe({}).pipe(
     Stream.filter((list) =>
@@ -235,6 +257,7 @@ const rig = Effect.gen(function* () {
     host,
     openSurface,
     awaitTab,
+    awaitPage,
     liveTabs,
     root,
     folder,
@@ -329,10 +352,19 @@ describe.skipIf(!chrome)("real Chrome extension surfaces", () => {
             expression: "chrome.runtime.openOptionsPage()",
           });
           yield* r.awaitTab(() => r.liveTabs.size >= 5);
+          yield* r.invoke("evaluate", popup.surfaceTabId, {
+            expression: `chrome.tabs.create({url:${JSON.stringify(r.url + "from-extension")}})`,
+          });
+          yield* r.awaitTab(() => r.liveTabs.size >= 6);
+          yield* r.awaitPage(r.url + "from-extension");
+          yield* r.awaitPage(`chrome-extension://${r.id}/options.html`);
           const status = yield* r.invoke<PreviewAutomationStatus>("status", r.host.tabId!);
+          expect(status.tabs?.filter((tab) => tab.url?.endsWith("/from-extension"))).toHaveLength(
+            1,
+          );
           expect(status.tabs?.filter((tab) => tab.url?.endsWith("/options.html"))).toHaveLength(1);
           // Eight regular tabs fill this agent's capacity; its popup does not consume a slot.
-          for (let i = 0; i < 4; i++)
+          for (let i = 0; i < 3; i++)
             yield* r.invoke("open", undefined, {
               url: r.url,
               profileId: "default",
