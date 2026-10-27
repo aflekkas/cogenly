@@ -927,6 +927,10 @@ describe("managed Google integrations", () => {
               ),
             ),
           ),
+          // Sign-in checks the consent page answers before handing out its link.
+          HttpRouter.add("GET", "/authorize", () =>
+            Effect.succeed(HttpServerResponse.text("Sign in")),
+          ),
         );
         const server = yield* Layer.build(
           HttpRouter.serve(routes, { disableListenLog: true, disableLogger: true }).pipe(
