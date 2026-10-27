@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import { ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
@@ -21,10 +22,15 @@ export const BrowserExtensionSource = Schema.Union([
 ]);
 export type BrowserExtensionSource = typeof BrowserExtensionSource.Type;
 
+/**
+ * Pending waits for a profile tab to open; installing is an active load attempt.
+ * Loaded and failed record that attempt's result; disabled is explicitly turned off.
+ */
 export const BrowserExtensionLoadState = Schema.Literals([
   "loaded",
   "failed",
   "installing",
+  "pending",
   "disabled",
 ]);
 export type BrowserExtensionLoadState = typeof BrowserExtensionLoadState.Type;
@@ -43,12 +49,12 @@ export const BrowserExtension = Schema.Struct({
   hostPermissions: Schema.Array(Schema.String),
   /** Toolbar or manifest icon as a data URL, capped at 16KB including its prefix. */
   icon: Schema.optional(Schema.String.check(Schema.isMaxLength(16_384))),
-  hasAction: Schema.Boolean,
+  hasAction: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   sidePanelPage: Schema.optional(Schema.String),
   /** The toolbar popup, relative to the extension root, when it has one. */
   popupPage: Schema.optional(Schema.String),
   optionsPage: Schema.optional(Schema.String),
-  state: BrowserExtensionLoadState,
+  state: BrowserExtensionLoadState.pipe(Schema.withDecodingDefault(Effect.succeed("pending"))),
   error: Schema.optional(Schema.String),
   /** Why this enabled extension could not load in the server browser. */
   loadError: Schema.optional(Schema.String),

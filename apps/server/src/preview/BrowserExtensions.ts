@@ -186,6 +186,7 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
   let loader: ((profileId: string) => Effect.Effect<void>) | undefined;
   const changes = yield* PubSub.unbounded<string>();
   const loadResults = new Map<string, string | undefined>();
+  const loading = new Set<string>();
   const extensionPath = (profileId: string, extension: StoredExtension) =>
     path.join(profileDir(profileId), extension.id, extension.directory);
   const withLoadError = (profileId: string, stored: StoredExtension): BrowserExtension => {
@@ -198,7 +199,9 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
           ? "failed"
           : loadResults.has(extensionPath(profileId, stored))
             ? "loaded"
-            : "installing",
+            : loading.has(extensionPath(profileId, stored))
+              ? "installing"
+              : "pending",
       ...(error
         ? { error: `${stored.name}: ${error}`, loadError: `${stored.name}: ${error}` }
         : {}),
@@ -333,8 +336,8 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
           ),
       });
       let icon: string | undefined;
-      if (summary.iconPath) {
-        const target = path.resolve(root, summary.iconPath);
+      for (const candidate of summary.iconPaths) {
+        const target = path.resolve(root, candidate);
         const mime = (
           {
             ".png": "image/png",
@@ -354,6 +357,7 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
             const url = `data:${mime};base64,${Buffer.from(bytes).toString("base64")}`;
             return url.length <= 16_384 ? url : undefined;
           }).pipe(Effect.orElseSucceed(() => undefined));
+          if (icon) break;
         }
       }
       return { manifest, summary, icon };
@@ -494,12 +498,22 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       const { manifest, summary } = yield* readManifest(unpacked);
       if (reloading) {
         // A source edit cannot change the identity (and storage) of a reload.
-        const previous = yield* readManifest(extensionPath(profileId, reloading));
-        yield* writeManifestKey(
-          unpacked,
-          manifest,
-          Buffer.from(previous.summary.key ?? "", "base64"),
-        );
+        const publicKey = yield* Effect.try({
+          try: () =>
+            reloading.generatedKey
+              ? NodeCrypto.createPublicKey(reloading.generatedKey).export({
+                  format: "der",
+                  type: "spki",
+                })
+              : Buffer.from(summary.key ?? "", "base64"),
+          catch: () => fail("Could not recover the extension's key for reload."),
+        });
+        if (publicKey.length === 0 || extensionIdFromPublicKey(publicKey) !== reloading.id) {
+          return yield* fail(
+            "The source manifest key must match the installed extension to reload it.",
+          );
+        }
+        yield* writeManifestKey(unpacked, manifest, publicKey);
         id = reloading.id;
         generatedKey = reloading.generatedKey;
       } else if (summary.key) {
@@ -547,7 +561,7 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       version: summary.version,
       description: summary.description,
       manifestVersion: summary.manifestVersion,
-      enabled: true,
+      enabled: reloading?.enabled ?? true,
       source,
       permissions: summary.permissions,
       hostPermissions: summary.hostPermissions,
@@ -556,7 +570,7 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       ...(summary.sidePanelPage ? { sidePanelPage: summary.sidePanelPage } : {}),
       ...(summary.popupPage ? { popupPage: summary.popupPage } : {}),
       ...(summary.optionsPage ? { optionsPage: summary.optionsPage } : {}),
-      installedAt: DateTime.formatIso(DateTime.makeUnsafe(now)),
+      installedAt: reloading?.installedAt ?? DateTime.formatIso(DateTime.makeUnsafe(now)),
       directory,
       ...(generatedKey ? { generatedKey } : {}),
     };
@@ -565,9 +579,7 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       stored,
     ]);
 
-    yield* PubSub.publish(changes, profileId);
-    if (loader) yield* loader(profileId);
-    yield* PubSub.publish(changes, profileId);
+    yield* publishAndLoad(profileId, stored.enabled);
     yield* removeOldVersions(profileId, id, directory);
     return {
       profileId,
@@ -629,9 +641,7 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       extensions.filter((extension) => extension.id !== input.id),
     );
 
-    yield* PubSub.publish(changes, profileId);
-    if (loader) yield* loader(profileId);
-    yield* PubSub.publish(changes, profileId);
+    yield* publishAndLoad(profileId);
     yield* removeOldVersions(profileId, input.id, null);
     return yield* listOf(profileId);
   });
@@ -643,16 +653,13 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
     const extensions = yield* readRegistry(profileId);
     const current = extensions.find((extension) => extension.id === input.id);
     if (!current) return yield* fail(`Extension ${input.id} is not installed in this profile.`);
+    if (current.enabled === input.enabled) return withLoadError(profileId, current);
     const next = { ...current, enabled: input.enabled };
-    if (current.enabled !== input.enabled) {
-      yield* writeRegistry(
-        profileId,
-        extensions.map((extension) => (extension.id === input.id ? next : extension)),
-      );
-    }
-    yield* PubSub.publish(changes, profileId);
-    if (loader) yield* loader(profileId);
-    yield* PubSub.publish(changes, profileId);
+    yield* writeRegistry(
+      profileId,
+      extensions.map((extension) => (extension.id === input.id ? next : extension)),
+    );
+    yield* publishAndLoad(profileId);
     return withLoadError(profileId, next);
   });
 
@@ -707,6 +714,30 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       ),
     );
 
+  /** Publish registry changes once; load reports publish their own state transitions. */
+  const publishAndLoad = Effect.fnUntraced(function* (profileId: string, shouldLoad = true) {
+    const load = shouldLoad ? loader : undefined;
+    const pending = load
+      ? (yield* loadable(profileId)).filter((extension) => !loadResults.has(extension.path))
+      : [];
+    for (const extension of pending) loading.add(extension.path);
+    yield* Effect.gen(function* () {
+      yield* PubSub.publish(changes, profileId);
+      if (load) yield* load(profileId);
+    }).pipe(
+      Effect.ensuring(
+        Effect.gen(function* () {
+          let changed = false;
+          for (const extension of pending) {
+            loading.delete(extension.path);
+            if (!loadResults.has(extension.path)) changed = true;
+          }
+          if (changed) yield* PubSub.publish(changes, profileId);
+        }),
+      ),
+    );
+  });
+
   const serialized = <A, E>(effect: Effect.Effect<A, E>) => gate.withPermit(effect);
 
   return BrowserExtensions.of({
@@ -735,7 +766,7 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
               Stream.filter((changedProfileId) => changedProfileId === profileId),
               Stream.mapEffect(() => listOf(profileId)),
             ),
-          );
+          ).pipe(Stream.changesWith((a, b) => JSON.stringify(a) === JSON.stringify(b)));
         }),
       ),
     remove: (input) => serialized(remove(input)),

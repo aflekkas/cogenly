@@ -302,6 +302,44 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
       ),
   );
 
+  it.live(
+    "reloads disabled files without restarting an open profile or enabling the extension",
+    () =>
+      Effect.gen(function* () {
+        const r = yield* extensionRig;
+        yield* r.write("1.0.0");
+        const first = yield* r.store.install({ source: r.folder });
+        yield* r.store.toggle({ id: first.extension.id, enabled: false });
+        const context = yield* Effect.promise(() => r.contexts.contextFor("default"));
+        const page = yield* Effect.promise(() => context.newPage());
+        yield* Effect.promise(() => page.goto(siteUrl));
+        yield* r.write("1.1.0");
+        const reloaded = yield* r.store.reload({ id: first.extension.id });
+        expect(reloaded.extension).toMatchObject({
+          id: first.extension.id,
+          version: "1.1.0",
+          enabled: false,
+          state: "disabled",
+          installedAt: first.extension.installedAt,
+        });
+        expect(yield* r.store.loadable("default")).toEqual([]);
+        expect(yield* Effect.promise(() => r.contexts.contextFor("default"))).toBe(context);
+        expect(page.isClosed()).toBe(false);
+        expect(yield* Effect.promise(() => page.title())).toBe("Site");
+        // Turning it back on loads the rebuilt copy into a new profile context.
+        yield* r.store.toggle({ id: first.extension.id, enabled: true });
+        const enabledContext = yield* Effect.promise(() => r.contexts.contextFor("default"));
+        expect(enabledContext).not.toBe(context);
+        const options = yield* Effect.promise(() => enabledContext.newPage());
+        const url = yield* r.store.pageUrl({ id: first.extension.id, page: "options" });
+        yield* Effect.promise(() => options.goto(url));
+        expect(yield* Effect.promise(() => options.locator("p").textContent())).toBe("1.1.0");
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(Layer.merge(NodeServices.layer, FetchHttpClient.layer)),
+      ),
+  );
+
   it("keeps browsing available while installing, then loads extensions when Chrome is ready", async () => {
     const failures: (string | undefined)[] = [];
     let installing = true;

@@ -11,7 +11,7 @@ export interface ExtensionManifestSummary {
   readonly manifestVersion: number;
   readonly permissions: ReadonlyArray<string>;
   readonly hostPermissions: ReadonlyArray<string>;
-  readonly iconPath?: string;
+  readonly iconPaths: ReadonlyArray<string>;
   readonly hasAction: boolean;
   readonly sidePanelPage?: string;
   readonly popupPage?: string;
@@ -56,14 +56,14 @@ export const manifestMessagesPath = (manifest: unknown) => {
 };
 
 /** Prefer toolbar art, choosing the size closest to 32 CSS pixels. */
-const iconPath = (icons: unknown): string | undefined => {
-  if (typeof icons === "string") return icons;
+const iconPaths = (icons: unknown): string[] => {
+  if (typeof icons === "string") return [icons];
   const sizes = Object.entries(record(icons) ?? {})
     .filter(([size, path]) => Number(size) > 0 && typeof path === "string")
     .sort(
       ([a], [b]) => Math.abs(Number(a) - 32) - Math.abs(Number(b) - 32) || Number(b) - Number(a),
     );
-  return text(sizes[0]?.[1]);
+  return sizes.flatMap(([, path]) => (typeof path === "string" ? [path] : []));
 };
 
 export const summarizeManifest = (
@@ -95,7 +95,7 @@ export const summarizeManifest = (
     manifestVersion === 3 ? root.action : (root.browser_action ?? root.page_action),
   );
   const popupPage = text(action?.default_popup);
-  const icon = iconPath(action?.default_icon) ?? iconPath(root.icons);
+  const icons = [...new Set([...iconPaths(action?.default_icon), ...iconPaths(root.icons)])];
   const sidePanelPage = text(record(root.side_panel)?.default_path);
   const optionsPage = text(record(root.options_ui)?.page) ?? text(root.options_page);
   const key = text(root.key);
@@ -106,8 +106,8 @@ export const summarizeManifest = (
     manifestVersion,
     permissions: permissions.filter((permission) => !isHostPattern(permission)),
     hostPermissions: [...hosts],
-    hasAction: record(root.action) !== undefined || record(root.browser_action) !== undefined,
-    ...(icon ? { iconPath: icon } : {}),
+    hasAction: action !== undefined,
+    iconPaths: icons,
     ...(sidePanelPage ? { sidePanelPage: sidePanelPage.replace(/^\/+/, "") } : {}),
     ...(popupPage ? { popupPage: popupPage.replace(/^\/+/, "") } : {}),
     ...(optionsPage ? { optionsPage: optionsPage.replace(/^\/+/, "") } : {}),
