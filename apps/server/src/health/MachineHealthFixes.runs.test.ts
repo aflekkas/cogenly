@@ -32,6 +32,7 @@ import * as Sqlite from "../persistence/Sqlite.ts";
 import * as Tasks from "../scheduledTasks/ScheduledTaskService.ts";
 import * as Health from "./MachineHealth.ts";
 import * as ServerSelfUpdate from "../cloud/selfUpdate.ts";
+import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 import * as Fixes from "./MachineHealthFixes.ts";
 import { readStuckQueues } from "./staleRuns.ts";
 import { STUCK_RUN_AFTER_MS, stuckQueuesItems } from "./healthChecks.ts";
@@ -218,6 +219,7 @@ it.effect.each([
     const fixesLayer = Fixes.layer.pipe(
       Layer.provide(
         Layer.mergeAll(
+          Layer.mock(PreviewBrowser.PreviewBrowser)({}),
           Layer.mock(Health.MachineHealth)({ report: Effect.succeed(report) }),
           Layer.mock(Machines.Machines)({}),
           Channels.layer,

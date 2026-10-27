@@ -35,6 +35,8 @@ export const BrowserExtension = Schema.Struct({
   /** The toolbar popup, relative to the extension root, when it has one. */
   popupPage: Schema.optional(Schema.String),
   optionsPage: Schema.optional(Schema.String),
+  /** Why this enabled extension could not load in the server browser. */
+  loadError: Schema.optional(Schema.String),
   installedAt: Schema.String,
 });
 export type BrowserExtension = typeof BrowserExtension.Type;

@@ -130,7 +130,7 @@ const harness = (
         Layer.provideMerge(
           Layer.mergeAll(
             Layer.mock(PreviewBrowser.PreviewBrowser)({
-              executable: Effect.sync(() => {
+              setup: Effect.sync(() => {
                 ran.push("install-browser");
                 return "/test/browser";
               }),
