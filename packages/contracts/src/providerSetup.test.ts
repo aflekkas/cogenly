@@ -76,9 +76,12 @@ it("accepts cancellation without private flow details and still validates suppli
   for (const input of [
     { instanceId: "claudeAgent", targetEnvironmentId: "contabo" },
     { instanceId: "claudeAgent", targetEnvironmentId: "contabo", flowId: null },
+    { instanceId: "claudeAgent", flowEpoch: "epoch" },
     { instanceId: "claudeAgent", targetEnvironmentId: "contabo", flowId: "flow" },
   ])
     expect(decode(input)).toEqual(input);
-  for (const flowId of ["", 42, {}])
-    expect(() => decode({ instanceId: "claudeAgent", flowId })).toThrow();
+  for (const value of ["", 42, {}]) {
+    expect(() => decode({ instanceId: "claudeAgent", flowId: value })).toThrow();
+    expect(() => decode({ instanceId: "claudeAgent", flowEpoch: value })).toThrow();
+  }
 });

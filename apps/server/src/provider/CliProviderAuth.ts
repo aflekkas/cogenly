@@ -92,7 +92,7 @@ export const make = Effect.fn("CliProviderAuth.make")(function* (input: {
         const instructions = yield* Deferred.make<void>();
         const login = Effect.gen(function* () {
           const stdin = yield* Queue.unbounded<Uint8Array>();
-          // Stop only the process we spawned, escalating if it ignores termination.
+          // Stop the spawned child’s process group, escalating if it ignores termination.
           const child = yield* Effect.acquireRelease(
             spawner.spawn(
               command(input.driver === "codex" ? ["login", "--device-auth"] : ["auth", "login"]),

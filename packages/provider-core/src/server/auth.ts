@@ -43,6 +43,7 @@ export interface ProviderAuthController {
   readonly cancel: (
     ownerSessionId: string,
     flowId?: string | null,
+    flowEpoch?: string,
   ) => Effect.Effect<ProviderAuthState, ProviderSetupError>;
   readonly respond?: (
     ownerSessionId: string,

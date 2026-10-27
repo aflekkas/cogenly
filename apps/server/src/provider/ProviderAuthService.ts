@@ -7,6 +7,7 @@ import {
   type SecretRef,
   type ChatGptReconnectProfile,
   type ChatGptTransferredProfile,
+  type ProviderAuthCancelInput,
   type ProviderAuthRespondInput,
   type ProviderAuthStartInput,
   type ProviderAuthState,
@@ -17,6 +18,7 @@ import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as Machines from "../machines/Machines.ts";
 import * as PeerChannels from "../machines/PeerChannels.ts";
 import * as Equal from "effect/Equal";
+import * as Schema from "effect/Schema";
 import * as Schedule from "effect/Schedule";
 import * as Option from "effect/Option";
 import * as Context from "effect/Context";
@@ -31,6 +33,8 @@ import * as ProviderInstanceRegistry from "./ProviderInstanceRegistry.ts";
 import type { ProviderAuthController } from "@cogenly/provider-core/server/auth";
 
 export type { ProviderAuthController } from "@cogenly/provider-core/server/auth";
+
+const decodeProviderSetupError = Schema.decodeUnknownOption(ProviderSetupError);
 
 interface ProviderAuthTarget {
   readonly instanceId: ProviderInstanceId;
@@ -64,7 +68,7 @@ export class ProviderAuthService extends Context.Service<
       ownerSessionId: string,
     ) => Effect.Effect<ProviderAuthState, ProviderSetupError>;
     readonly cancel: (
-      input: ProviderAuthTarget & { readonly flowId?: string | null },
+      input: ProviderAuthCancelInput,
       ownerSessionId: string,
     ) => Effect.Effect<ProviderAuthState, ProviderSetupError>;
     readonly logout: (
@@ -272,7 +276,7 @@ export const makeProviderAuthService = Effect.gen(function* () {
     }),
     cancel: Effect.fn("ProviderAuthService.cancel")(function* (input, ownerSessionId) {
       const auth = yield* getController(input.instanceId, "cancel");
-      return yield* auth.cancel(ownerSessionId, input.flowId);
+      return yield* auth.cancel(ownerSessionId, input.flowId, input.flowEpoch);
     }),
     logout: Effect.fn("ProviderAuthService.logout")(function* (input) {
       return yield* credentialChanges.withPermit(
@@ -372,8 +376,30 @@ export const makeProviderAuthService = Effect.gen(function* () {
         )
           ? list.link.hubEnvironmentId
           : target;
-      return yield* machines.call(destination, ProviderMachineAuth, { owner, request });
-    }).pipe(Effect.mapError(() => unreachable(request)));
+      return yield* machines.call(destination, ProviderMachineAuth, { owner, request }).pipe(
+        Effect.catchTags({
+          PeerCallError: (error) => {
+            if (error.reason === "invalid-payload" || error.reason === "unknown-channel")
+              return Effect.fail(
+                new ProviderSetupError({
+                  instanceId: request.input.instanceId,
+                  operation: request.operation,
+                  detail: "Update Cogenly on the other machine to use this sign-in action.",
+                }),
+              );
+            if (error.reason === "handler-failed" && error.error !== undefined) {
+              const decoded = decodeProviderSetupError(error.error);
+              if (Option.isSome(decoded)) return Effect.fail(decoded.value);
+            }
+            return Effect.fail(unreachable(request));
+          },
+        }),
+      );
+    }).pipe(
+      Effect.mapError((error) =>
+        error._tag === "ProviderSetupError" ? error : unreachable(request),
+      ),
+    );
   yield* channels.register(ProviderMachineAuth, ({ owner, request }, caller) =>
     Effect.gen(function* () {
       const namespacedOwner = `${caller.environmentId}:${owner}`;

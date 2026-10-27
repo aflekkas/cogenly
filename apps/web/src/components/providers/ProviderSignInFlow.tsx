@@ -248,7 +248,8 @@ export function useProviderSignInFlow(
   const canCancel =
     canManage &&
     isProviderSignInActive(step) &&
-    (step.kind === "elsewhere" || (auth?.flowId != null && auth.flowId === local.startedFlowId));
+    ((step.kind === "elsewhere" && auth?.flowEpoch != null) ||
+      (auth?.flowId != null && auth.flowId === local.startedFlowId));
 
   /** Cancels the machine's flow; resolves once it has stopped (or there was none to stop). */
   const stop = async () => {
@@ -257,7 +258,11 @@ export function useProviderSignInFlow(
     update({ cancelling: true });
     const result = await cancel({
       environmentId: target.environmentId,
-      input: { ...input, flowId: flowId ?? null },
+      input: {
+        ...input,
+        flowId: flowId ?? null,
+        ...(auth?.flowEpoch ? { flowEpoch: auth.flowEpoch } : {}),
+      },
     });
     update({
       cancelling: false,
