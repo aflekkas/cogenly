@@ -52,8 +52,8 @@ export const MachineHealthSettings = Schema.Struct({
   canary: MachineHealthCanarySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   alertChannels: MachineHealthAlertChannels.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   /**
-   * Run the safe direct fixes (update a paired machine, retry sync, stop
-   * stale runs) without asking; alerts only when one fails.
+   * Retry sync and stop stale runs that lost their provider sessions
+   * without asking; alerts only when one fails. Machine updates stay manual.
    */
   autoFix: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
 });
