@@ -245,11 +245,12 @@ describe("settings sync between paired machines", () => {
         yield* mac.sync.sync(hub.environmentId);
         yield* hub.reconcile;
         const copied = (yield* hub.settings.getSettings).providerInstances[id];
+        // On or off stays per machine.
+        expect(copied?.enabled).toBeUndefined();
         expect(copied).toMatchObject({
           driver,
           displayName: "Personal",
           accentColor: "blue",
-          enabled: true,
           environment: [{ name: "LANG", value: "C", sensitive: false }],
           config: {
             customModels: ["private-model"],

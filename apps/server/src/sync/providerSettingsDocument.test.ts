@@ -39,7 +39,6 @@ describe("portable provider configuration", () => {
     expect(value).toEqual({
       driver,
       displayName: "Personal",
-      enabled: false,
       environment: [{ name: "LANG", value: "en_US.UTF-8", sensitive: false }],
       customModels: ["my-model"],
     });
@@ -148,6 +147,15 @@ describe("portable provider configuration", () => {
     expect(
       applyProviderSettings(encodeProviderSettings({ driver }), undefined, id)?.config,
     ).toMatchObject({ homePath: "~/.cogenly/provider-homes/claude-personal" });
+  });
+
+  it("keeps a provider on or off per machine", () => {
+    const remote = { driver, enabled: false, environment: [], customModels: [] };
+    // An older peer's `enabled` neither turns this machine's provider off nor back on.
+    expect(applyProviderSettings(remote, { driver }, id)?.enabled).toBeUndefined();
+    expect(
+      applyProviderSettings({ ...remote, enabled: true }, { driver, enabled: false }, id)?.enabled,
+    ).toBe(false);
   });
 
   it("aligns the owner's VPS Personal login with the Mac's canonical Personal ID", () => {
