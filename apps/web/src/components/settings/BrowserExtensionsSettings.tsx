@@ -14,7 +14,7 @@ import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
-import { SettingsRow } from "./settingsLayout";
+import { SettingsEmpty, SettingsNote, SettingsRow } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
 
@@ -81,12 +81,12 @@ function BrowserExtensionsRow({ environmentId }: { readonly environmentId: Envir
           </p>
         ) : (
           <div className="overflow-hidden rounded-lg border border-border/60">
-            {extensions === null || extensions.length === 0 ? (
-              <p className="px-3 py-2 text-sm text-muted-foreground">
-                {extensions === null
-                  ? (loadError ?? "Loading extensions…")
-                  : "No extensions in this profile yet."}
-              </p>
+            {extensions === null ? (
+              <SettingsNote tone={loadError ? "destructive" : "muted"}>
+                {loadError ?? "Loading extensions…"}
+              </SettingsNote>
+            ) : extensions.length === 0 ? (
+              <SettingsEmpty label="No extensions in this profile yet." />
             ) : (
               extensions.map((extension, index) => (
                 <div
