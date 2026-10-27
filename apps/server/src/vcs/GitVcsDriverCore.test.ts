@@ -60,4 +60,14 @@ describe("GitVcsDriver ref-name guard", () => {
       expect(switched.refName).toBe("feature/plain");
     }).pipe(Effect.provide(layer)),
   );
+
+  it.effect("lists local branch names without prefixes when a tag has the same name", () =>
+    Effect.gen(function* () {
+      const driver = yield* GitVcsDriver.GitVcsDriver;
+      const cwd = makeRepo();
+      git(cwd, ["branch", "feature/collision"]);
+      git(cwd, ["tag", "feature/collision"]);
+      expect(yield* driver.listLocalBranchNames(cwd)).toContain("feature/collision");
+    }).pipe(Effect.provide(layer)),
+  );
 });
