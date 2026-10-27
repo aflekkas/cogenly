@@ -421,7 +421,7 @@ export function htmlRenderTheme(
   };
 }
 
-/** Agent-facing reference for the injected variables, used in tool descriptions. */
+/** Agent-facing reference for the injected variables, returned by html_guide. */
 export const HTML_RENDER_THEME_GUIDE = [
   "Cogenly injects its active theme as CSS custom properties on :root, and they follow the user's theme and light/dark mode live:",
   "--background (page background, identical to the thread around the frame), --foreground, --muted, --muted-foreground,",

@@ -107,7 +107,7 @@ const Supersede = Tool.make("fact_supersede", {
 const CoreMemoryUpdate = Tool.make("agent_core_memory_update", {
   ...shared,
   description:
-    "Replace your always-in-context core memory block (8000 characters maximum). Preserve important constraints and negations. The owner can inspect and edit it. Identity comes from this thread's credential.",
+    "Replace always-present core memory (max 8000 chars). Preserve constraints/negations; owner can inspect/edit. Identity comes from thread credential.",
   parameters: AgentCoreMemoryUpdateInput,
   success: AgentCoreMemoryResult,
 });

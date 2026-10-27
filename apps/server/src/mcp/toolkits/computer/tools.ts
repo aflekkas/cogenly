@@ -34,7 +34,7 @@ const ComputerToolFailure = Schema.Union([ComputerUseUnavailableError, Orchestra
 
 const ComputerStatusTool = Tool.make("computer_status", {
   description:
-    "Whether you can control this machine's apps right now: macOS only, on for every agent unless the owner turned it off. Reports each macOS permission (Accessibility, Screen Recording), which app they are granted to, and the exact next steps. Call it before telling the user computer use does not work, and again after they say they granted a permission.",
+    "Read macOS control availability, owner setting, Accessibility/Screen Recording grants and repair steps. Recheck after permission changes and before reporting failure.",
   // An empty struct serializes as `anyOf [object, array]`, which some
   // providers reject and then drop every tool on the server with it.
   parameters: Schema.Struct({
@@ -57,7 +57,7 @@ const ComputerStatusTool = Tool.make("computer_status", {
 
 export const ComputerScreenshotTool = Tool.make("computer_screenshot", {
   description:
-    "Screenshot one display of this Mac. The image is scaled to screen points, so a pixel at (x, y) is the point (display.x + x, display.y + y) for computer_click. Prefer computer_ui to find controls; use this to see what the user sees.",
+    "Screenshot a Mac display in screen points: pixel x/y maps to display.x+x/display.y+y. Prefer computer_ui for controls.",
   parameters: ComputerToolScreenshotInput,
   success: ComputerToolScreenshotResult,
   failure: ComputerToolFailure,
@@ -89,7 +89,7 @@ const ComputerAppsTool = Tool.make("computer_apps", {
 
 const ComputerUiTool = Tool.make("computer_ui", {
   description:
-    "Read the accessibility tree of an app's front window: buttons, fields, checkboxes, menus with their titles, values, actions, and center points. Use its paths with computer_press, or its x/y with computer_click. Re-read after anything changes the window.",
+    "Read front-window accessibility controls, values/actions, paths and centers. Use paths with computer_press or centers with computer_click; re-read after changes.",
   parameters: ComputerToolUiInput,
   success: ComputerToolUiResult,
   failure: ComputerToolFailure,
@@ -116,7 +116,7 @@ const ComputerOpenAppTool = Tool.make("computer_open_app", {
 
 const ComputerPressTool = Tool.make("computer_press", {
   description:
-    "Perform an accessibility action (AXPress by default) on a control from computer_ui. More reliable than clicking coordinates when the control lists an action.",
+    "Invoke a computer_ui control's accessibility action (default AXPress). Prefer it over coordinates when supported.",
   parameters: ComputerToolPressInput,
   success: ComputerToolActionResult,
   failure: ComputerToolFailure,

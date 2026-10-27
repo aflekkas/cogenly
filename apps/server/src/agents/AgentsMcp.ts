@@ -49,7 +49,7 @@ const List = Tool.make("list_agents", {
 const BuilderStart = Tool.make("start_agent_builder", {
   ...shared,
   description:
-    "Start an agent-builder conversation from a request. Pass projectFolderId (from project_label_list) to start it in a project; the proposed agent lands there. The builder drafts its proposal in the new thread and the owner confirms it on the proposal card; this never creates an agent directly.",
+    "Start a proposal conversation, optionally in projectFolderId. Owner confirms its card; never creates the agent directly.",
   parameters: Schema.Struct({
     ...AgentBuilderStartInput.fields,
     machine: Schema.optional(TrimmedNonEmptyString),
@@ -61,21 +61,21 @@ const BuilderStart = Tool.make("start_agent_builder", {
 const SetProject = Tool.make("update_agent_project", {
   ...shared,
   description:
-    "Move a persistent agent into a project folder (projectFolderId from project_label_list), or null for no project. Its one conversation moves with it in place, without forking, and then runs in the project directory with the project's files.",
+    "Move an agent and its conversation in place to projectFolderId or null. Preserves history; runs in project directory with its files.",
   parameters: AgentSetProjectInput,
   success: AgentMutationResult,
 }).annotate(Tool.Destructive, false);
 const Update = Tool.make("update_agent", {
   ...shared,
   description:
-    "Edit a persistent agent by id. Omitted fields stay unchanged. Change its name, face, responsibility, instructions, model, fallback chain, daily run cap or notifications. Only owner chats may change permissions or runtime mode. Edits are sent to the online owner machine.",
+    "Patch agent profile/instructions/model/fallbacks/cap/notifications on online owner machine. Omitted fields stay; only owner chats change permissions/runtime.",
   parameters: AgentUpdateInput,
   success: AgentMutationResult,
 }).annotate(Tool.Destructive, false);
 const Delete = Tool.make("delete_agent", {
   ...shared,
   description:
-    "Delete a persistent agent by id, stopping its work and removing its triggers and proposed open items. Confirmed open items return to the user. Persistent agents need the delete grant.",
+    "Delete agent, stopping work/triggers/proposed items; confirmed items return to user. Persistent agents require delete grant.",
   parameters: AgentKey,
   success: Schema.Struct({ deleted: Schema.Boolean }),
 }).annotate(Tool.Destructive, true);

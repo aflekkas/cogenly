@@ -1,13 +1,9 @@
 import { OrchestratorMcpFailure } from "@cogenly/contracts";
 import {
   HTML_RENDER_COLUMN_WIDTH,
-  HTML_RENDER_KIT_GUIDE,
-  HTML_RENDER_LAYOUT_GUIDE,
   HTML_RENDER_MAX_HEIGHT,
   HTML_RENDER_MAX_TITLE_LENGTH,
   HTML_RENDER_MIN_HEIGHT,
-  HTML_RENDER_STATE_GUIDE,
-  HTML_RENDER_THEME_GUIDE,
   HTML_RENDER_TOOL_NAME,
 } from "@cogenly/shared/htmlRender";
 import * as Schema from "effect/Schema";
@@ -32,8 +28,22 @@ const Kit = Schema.optional(
 const PAGE_RULES =
   'Write one self-contained document with inline <style> and <script>. Local images written as absolute file paths (src="/abs/shot.png", CSS url(/abs/bg.webp), or a JS string) are inlined automatically; remote http(s) URLs, such as a CDN chart library, load as-is.';
 
+const HtmlGuideTool = Tool.make("html_guide", {
+  description:
+    "Read Cogenly's HTML kit, layout, theme and interactive-state recipes before authoring a visual. Then html_preview and html_render.",
+  parameters: Tool.EmptyParams,
+  success: Schema.Struct({ guide: Schema.String }),
+  failure: OrchestratorMcpFailure,
+  dependencies: [McpInvocationContext.McpInvocationContext],
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, true)
+  .annotate(Tool.OpenWorld, false);
+
 export const HtmlPreviewTool = Tool.make("html_preview", {
-  description: `Render an HTML page in Cogenly's headless browser and get back a PNG screenshot, contentHeight (the height the page needs at this width), and its console output: log, info, warning, error, and uncaught exceptions, with stack traces pointing into page.html. console.log is a fine way to report your own checks. Use it to check and iterate on a page before html_render. The first preview on a machine can report that Cogenly is still installing its preview browser; call again a minute later. ${PAGE_RULES} The page gets the theme variables, the Cogenly kit and the layout described in html_render.`,
+  description:
+    "Preview self-contained HTML as PNG with contentHeight and console/exception stacks (page.html). Iterate before html_render; read html_guide for authoring rules. First preview may install the browser; retry a minute later. Inline style/script; absolute local images are inlined, HTTP URLs load remotely.",
   parameters: Schema.Struct({
     html: Html,
     kit: Kit,
@@ -83,7 +93,7 @@ export const HtmlPreviewTool = Tool.make("html_preview", {
 // touches no workspace, so plan mode and read-only sandboxes can use it.
 // Open-world, since the page may load remote resources, as in a preview.
 const HtmlRenderTool = Tool.make(HTML_RENDER_TOOL_NAME, {
-  description: `Show a finished HTML page (chart, table, diagram, collage, mockup) inline in this thread, above your final text reply; call it before writing that reply. The reader already sees the page, so the reply should not announce it, say where it is, or restate it: add only what the page doesn't say. Preview with html_preview first. Cogenly fits the frame to the page's height at each reader's width. A height below the page's contentHeight caps the frame there, and the rest scrolls inside it. ${PAGE_RULES} ${HTML_RENDER_KIT_GUIDE} ${HTML_RENDER_LAYOUT_GUIDE} ${HTML_RENDER_THEME_GUIDE} ${HTML_RENDER_STATE_GUIDE}`,
+  description: `Publish finished HTML inline above the reply; preview first and add only what the page doesn't say. Read html_guide for kit/layout/theme/state recipes. Use contentHeight for the frame, or less for internal scrolling. ${PAGE_RULES}`,
   parameters: Schema.Struct({
     html: Html,
     kit: Kit,
@@ -134,7 +144,7 @@ const HtmlVisualState = Schema.Struct({
 
 const HtmlStateReadTool = Tool.make("html_state_read", {
   description:
-    "Read one interactive visual's JSON document in the calling thread, by its html_render result attachmentId. Returns null before the first set. Pass the version back to html_state_write.",
+    "Read visual JSON by html_render attachmentId in this thread; null before first set. Use returned version with html_state_write.",
   parameters: Schema.Struct({
     renderId: Schema.String.annotate({
       description: "The html_render result's attachmentId.",
@@ -155,7 +165,7 @@ const HtmlStateReadTool = Tool.make("html_state_read", {
 
 const HtmlStateWriteTool = Tool.make("html_state_write", {
   description:
-    "Store one interactive visual's JSON document in the calling thread (at most 64KB), by its html_render result attachmentId, for example to mark its items processed. Pass the version html_state_read returned; a write that lost a race fails, so read again and retry. Fails once the visual is locked.",
+    "Write visual JSON (max 64KB) by attachmentId and expectedVersion from read. On conflict re-read/merge/retry. Locked visuals reject writes.",
   parameters: Schema.Struct({
     renderId: Schema.String.annotate({
       description: "The html_render result's attachmentId.",
@@ -189,11 +199,12 @@ const HtmlStateWriteTool = Tool.make("html_state_write", {
 
 export const HtmlPreviewToolkit = Toolkit.make(HtmlPreviewTool);
 
-export const HtmlRenderToolkit = Toolkit.make(HtmlRenderTool);
+export const HtmlRenderToolkit = Toolkit.make(HtmlRenderTool, HtmlGuideTool);
 
 export const HtmlStateToolkit = Toolkit.make(HtmlStateReadTool, HtmlStateWriteTool);
 
 export const HtmlToolkit = Toolkit.make(
+  HtmlGuideTool,
   HtmlPreviewTool,
   HtmlRenderTool,
   HtmlStateReadTool,

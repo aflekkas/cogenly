@@ -33,7 +33,7 @@ const shared = {
 const AttachmentUploadTool = Tool.make("attachment_prepare_upload", {
   ...shared,
   description:
-    "Create the app's signed upload URL. POST the exact bytes to relativeUrl on this MCP server's HTTP origin, then pass the attachment metadata and returned ID to thread_send_attachments. Upload is separate from sending; provider attachment support is decided by its adapter.",
+    "Create a signed upload URL. POST exact bytes to relativeUrl on this server's HTTP origin; send returned ID/metadata with thread_send_attachments. Provider support is adapter-specific.",
   parameters: Schema.Struct({ upload: AttachmentCreateUploadUrlInput }),
   success: AttachmentCreateUploadUrlResult,
 }).annotate(Tool.Destructive, true);
@@ -47,7 +47,7 @@ const AttachmentDiscardTool = Tool.make("attachment_discard", {
 const AttachmentSendTool = Tool.make("thread_send_attachments", {
   ...shared,
   description:
-    "Send uploaded attachments to this thread or any other thread in this environment. Each call is a new message, without a retry key. Acceptance does not mean the provider can consume the attachment or has finished the turn. The target cannot have broader permission modes than the caller; failures retain claimed files when dispatch outcome is uncertain.",
+    "Send uploaded attachments as a new message (no retry key). Acceptance does not prove provider support/completion. Target permissions cannot broaden; uncertain dispatch failures retain claimed files.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId),
     message: Schema.optional(Schema.String.check(Schema.isMaxLength(120000))),

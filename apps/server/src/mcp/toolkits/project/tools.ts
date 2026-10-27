@@ -69,7 +69,7 @@ const ProjectReadTool = Tool.make("project_read", {
 const ProjectCreateTool = Tool.make("project_create", {
   ...shared,
   description:
-    "Register a project directory through the existing project service. Set createWorkspaceRootIfMissing to create a directory. Omit workspaceRoot to start a new project from just its title: the app makes a Git repository for it in its own projects folder, with a README, an icon, and a first commit (commitError says why a commit failed; the project exists either way). Each call creates a new request; an existing registered workspace is rejected. Clone separately with project_clone when needed.",
+    "Register a workspace; createWorkspaceRootIfMissing creates its directory. Omitted workspaceRoot creates a Git repo under the app projects folder with README/icon/initial commit; commitError does not undo registration. Existing registered workspaces are rejected. Clone with project_clone separately.",
   parameters: Schema.Struct({
     ...ProjectCreatePayload.fields,
     workspaceRoot: Schema.optional(ProjectCreatePayload.fields.workspaceRoot),
@@ -80,19 +80,19 @@ const ProjectCreateTool = Tool.make("project_create", {
 const ProjectUpdateTool = Tool.make("project_update", {
   ...shared,
   description:
-    "Update a registered project's record: title, icon, workspace and its actions (scripts, shown on its page under Settings → Repositories). Omitted fields are preserved. Uses the same project service as the app.",
+    "Patch registered project title/icon/workspace/actions (scripts in Settings → Repositories). Omitted fields stay.",
   parameters: Schema.Struct({ projectId: ProjectId, ...ProjectUpdatePayload.fields }),
 }).annotate(Tool.Destructive, true);
 const ProjectDeleteTool = Tool.make("project_delete", {
   ...shared,
   description:
-    "Delete a project using the existing project deletion lifecycle. Nonempty projects require force=true. This does not delete the repository directory or promise a deleted-thread count.",
+    "Delete a project record/lifecycle; nonempty requires force:true. Keeps repository directory; no deleted-thread count guarantee.",
   parameters: Schema.Struct({ projectId: ProjectId, force: Schema.optionalKey(Schema.Boolean) }),
 }).annotate(Tool.Destructive, true);
 const ProjectCloneTool = Tool.make("project_clone", {
   ...shared,
   description:
-    "Clone a repository using the app's source-control service, outside any project: without destinationPath it lands in <projects root>/Repositories/<repo>, and no project is created. This is the default for a single repository: don't create or suggest a project for it. This only clones; register the returned cwd with project_create. To clone into an existing project, use project_label_clone_repository. An existing destination is not adopted or removed on failure.",
+    "Clone outside projects into destinationPath or <projects root>/Repositories/<repo>; then register cwd with project_create. Default for single repositories. For an existing project use project_label_clone_repository. Existing destinations are neither adopted nor removed on failure.",
   parameters: SourceControlCloneRepositoryInput,
   success: SourceControlCloneRepositoryResult,
   dependencies: [
@@ -105,7 +105,7 @@ const ProjectCloneTool = Tool.make("project_clone", {
 const ThreadLaunchTool = Tool.make("thread_launch", {
   ...shared,
   description:
-    'Create an ordinary TOP-LEVEL thread with an explicit workspace binding before its agent starts. Use this when the user requests independent work, a new thread, or a PR stack in its own worktree; use delegate_task for child subagents. Set workspaceStrategy to {type:"worktree",baseRef:"parent-branch",branch:"new-branch",startFromOrigin:false} for a new worktree based on local commits, or {type:"existing_worktree",worktreePath:"/absolute/path",branch:"existing-branch"} to use an existing checkout. For upstream commits, set startFromOrigin:true. Omitted workspaceStrategy means the project root, NOT the caller\'s worktree. Omit projectId/modelSelection/modes to inherit those settings from the calling thread; a caller outside a Cogenly thread must pass projectId and gets the project\'s default model. Set scratch:true instead of projectId for a thread without a project: it runs in a fresh folder of its own, outside any repository. Put the task in message. Do not ask the agent to create its own worktree via shell: that does not update the thread binding. Each call creates a new launch with no retry key; retain threadId and use thread_read/thread_wait to follow preparation. To link a thread for the user, write `[title](cogenly-thread://v1/<threadId>)` with the threadId exactly as returned, not URL-encoded; Cogenly shows the thread\'s current title. After errors or lost responses, inspect thread_list before retrying. Attachments must be pending uploads. The new thread may not run with broader runtime or interaction modes than the caller: the calling Cogenly thread\'s own modes, or the permission mode an outside agent was approved with.',
+    "Launch an explicitly requested top-level conversation, binding workspace before startup. See orchestration workspaceStrategy rules; use message for the task. project/model/modes inherit; outside callers require projectId and use project model. scratch:true instead of projectId creates a fresh non-repo folder. Attachments must be pending uploads. Modes cannot broaden. No retry key: retain threadId, follow preparation with thread_read/wait, inspect thread_list before retrying lost/error responses.",
   parameters: Schema.Struct({
     machine: Schema.optional(TrimmedNonEmptyString),
     projectId: Schema.optional(ProjectId),

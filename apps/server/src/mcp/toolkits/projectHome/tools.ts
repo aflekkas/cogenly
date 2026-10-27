@@ -28,10 +28,6 @@ const shared = {
   ],
 };
 
-const target = "Acts on the calling thread's Cogenly project, or the one named by projectFolderId.";
-const receipt =
-  "Returns a receipt {kind, label, action}; action is unchanged when nothing changed.";
-
 /**
  * Configure a project from inside it: the project chat's own toolset, also
  * open to every other thread filed in the project.
@@ -39,7 +35,8 @@ const receipt =
 export const ProjectHomeToolkit = Toolkit.make(
   Tool.make("project_overview", {
     ...shared,
-    description: `Show the project's configuration: name, instructions, repositories (with ids and checkout, their state on this machine: ready, not_cloned, missing, cloning or failed), linked GitHub sources and its project chat. ${target}`,
+    description:
+      "Read project name/instructions, repo IDs/local checkout states, linked GitHub sources and project chat. Defaults here; projectFolderId selects another.",
     parameters: ProjectTargetInput,
     success: ProjectOverviewResult,
   })
@@ -50,7 +47,8 @@ export const ProjectHomeToolkit = Toolkit.make(
     .annotate(Tool.OpenWorld, false),
   Tool.make("project_instructions_get", {
     ...shared,
-    description: `Read the project's instructions, the standing guidance every agent in the project receives. ${target}`,
+    description:
+      "Read standing project guidance received by its agents. Defaults here; projectFolderId selects another.",
     parameters: ProjectTargetInput,
     success: ProjectInstructionsResult,
   })
@@ -61,7 +59,8 @@ export const ProjectHomeToolkit = Toolkit.make(
     .annotate(Tool.OpenWorld, false),
   Tool.make("project_instructions_set", {
     ...shared,
-    description: `Replace the project's instructions with the given text; empty clears them. Read them first and pass the whole new text. They reach every thread in the project from its next session. ${target} ${receipt}`,
+    description:
+      "Read first, then replace all project instructions (empty clears); applies next session. Defaults here or projectFolderId. Returns receipt with action:unchanged for no change.",
     parameters: ProjectInstructionsSetInput,
     success: ProjectChangeReceipt,
   })
@@ -72,7 +71,8 @@ export const ProjectHomeToolkit = Toolkit.make(
     .annotate(Tool.OpenWorld, false),
   Tool.make("project_repository_add", {
     ...shared,
-    description: `Add an existing repository to the project by id (see project_list). Use it for a project the user already has or asked for; a single repository needs no project. To clone a GitHub repository into the project instead, use project_label_clone_repository. ${target} ${receipt}`,
+    description:
+      "File an existing repository ID (project_list) in this or projectFolderId's project. For cloning use project_label_clone_repository; single repos need no project. Receipt action:unchanged means no change.",
     parameters: ProjectRepositoryChangeInput,
     success: ProjectChangeReceipt,
   })
@@ -83,7 +83,8 @@ export const ProjectHomeToolkit = Toolkit.make(
     .annotate(Tool.OpenWorld, false),
   Tool.make("project_repository_remove", {
     ...shared,
-    description: `Remove a repository from the project. The repository and its threads are kept. Confirm with the user first. ${target} ${receipt}`,
+    description:
+      "Unfile a repository, keeping repo/threads. Confirm first. Defaults here or projectFolderId; returns receipt, action:unchanged for no change.",
     parameters: ProjectRepositoryChangeInput,
     success: ProjectChangeReceipt,
   })
@@ -94,7 +95,8 @@ export const ProjectHomeToolkit = Toolkit.make(
     .annotate(Tool.OpenWorld, false),
   Tool.make("project_source_link", {
     ...shared,
-    description: `Link a GitHub owner {kind:'github-owner',owner} or repository {kind:'github-repo',owner,repo} to the project, so its repositories show up in the repository picker. ${target} ${receipt}`,
+    description:
+      "Link {kind:'github-owner',owner} or {kind:'github-repo',owner,repo} for the repository picker. Defaults here or projectFolderId; returns a receipt.",
     parameters: ProjectSourceChangeInput,
     success: ProjectChangeReceipt,
   })
@@ -105,7 +107,8 @@ export const ProjectHomeToolkit = Toolkit.make(
     .annotate(Tool.OpenWorld, false),
   Tool.make("project_source_unlink", {
     ...shared,
-    description: `Unlink a GitHub owner or repository from the project. Confirm with the user first. ${target} ${receipt}`,
+    description:
+      "Unlink a GitHub owner/repository. Confirm first. Defaults here or projectFolderId; returns receipt, action:unchanged for no change.",
     parameters: ProjectSourceChangeInput,
     success: ProjectChangeReceipt,
   })
@@ -116,7 +119,8 @@ export const ProjectHomeToolkit = Toolkit.make(
     .annotate(Tool.OpenWorld, false),
   Tool.make("project_file_write", {
     ...shared,
-    description: `Save a markdown note to the project's Resources/ folder, or to \`folder\` (project-relative, made if missing); a taken name gets a numeric suffix, so this never overwrites. Project files reach the user's paired machines. ${target} ${receipt}`,
+    description:
+      "Save a Markdown note under Resources/ or project-relative folder (created if needed). Suffixes avoid overwrites; syncs to peers. Defaults here or projectFolderId; returns a receipt.",
     parameters: ProjectFileWriteInput,
     success: ProjectChangeReceipt,
   })
@@ -127,7 +131,8 @@ export const ProjectHomeToolkit = Toolkit.make(
     .annotate(Tool.OpenWorld, false),
   Tool.make("project_file_remove", {
     ...shared,
-    description: `Delete a project file or folder by project-relative path (see project_files_list). This deletes from disk; confirm with the user first. ${target} ${receipt}`,
+    description:
+      "Delete project-relative file/folder from disk. Confirm first; discover via project_files_list. Defaults here or projectFolderId; returns a receipt.",
     parameters: ProjectFileRemoveInput,
     success: ProjectChangeReceipt,
   })

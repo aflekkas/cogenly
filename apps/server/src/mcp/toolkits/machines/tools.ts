@@ -52,7 +52,7 @@ export const MachinesToolkit = Toolkit.make(
     }),
     success: ProviderAuthState,
     description:
-      "Sign a provider (Claude, Codex) in on this machine or a paired targetEnvironmentId, or read, cancel or sign out its login. From a thread, start posts a guided sign-in card in the thread and returns at once: the user opens the sign-in page and enters any code on their own device, and this thread is told when that machine is signed in, even after this turn ends. Don't ask for links or codes in chat. Without a thread, start runs the official CLI login: read for browser instructions and completion, and pass a Claude browser code collected with request_secret as codeRef on a respond request. Each machine obtains its own login, so rotating refresh tokens are never copied. Never print credentials. No approval gate.",
+      "Start/read/cancel/sign out Claude or Codex locally or on targetEnvironmentId. In-thread start returns a sign-in card and later completion notification; never request codes/links in chat. Outside threads use CLI instructions and request_secret codeRef for Claude responses. Each machine logs in independently; never copy tokens or print credentials. No approval gate.",
   }).annotate(Tool.Destructive, false),
   Tool.make("machines_list", {
     failure: OrchestratorMcpFailure,
@@ -61,7 +61,7 @@ export const MachinesToolkit = Toolkit.make(
     parameters: Tool.EmptyParams,
     success: MachineListResult,
     description:
-      "List the user's Cogenly machines: this one, the hub it is paired with, and other paired machines, with each one's name, kind (this computer, cloud server, another computer), whether it is online, and its provider sign-ins. Check this before telling the user something can't be done on another machine.",
+      "List local, hub and paired machines with names, types, online state and provider sign-ins. Check before claiming another machine cannot help.",
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false),
@@ -92,7 +92,7 @@ export const MachinesToolkit = Toolkit.make(
     }),
     success: ThreadMoveResult,
     description:
-      "Move threads (chats, Work, agent conversations) to another paired machine, which runs them from then on; every machine keeps showing them. An agent moves with its conversation, schedules included. Busy threads, Work with unpushed changes and threads whose repository the target lacks are skipped with a reason; moving them again retries. Get environment IDs from machines_list. To move a whole project with its repositories, use project_move_to_machine.",
+      "Move conversations and agents (including schedules) to a paired machine; all clients still show them. Busy threads, unpushed Work and missing target repos are skipped with reasons; retry after fixing. IDs: machines_list. Whole-project moves: project_move_to_machine.",
   }).annotate(Tool.Destructive, false),
   Tool.make("project_move_to_machine", {
     failure: OrchestratorMcpFailure,
@@ -101,7 +101,7 @@ export const MachinesToolkit = Toolkit.make(
     parameters: ProjectMoveInput,
     success: ProjectMoveResult,
     description:
-      "Move a project to another paired machine: clones each repository the project links onto that machine from its remote, then moves every thread and agent filed in the project. Clones keep running after this answers. Skipped threads come back with the reason. Get the machine's environment ID from machines_list.",
+      "Clone linked repos on a paired target, then move project threads/agents. Clones continue after return; skipped threads include reasons. IDs: machines_list.",
   }).annotate(Tool.Destructive, false),
   Tool.make("machine_setup_status", {
     failure: OrchestratorMcpFailure,
@@ -110,7 +110,7 @@ export const MachinesToolkit = Toolkit.make(
     parameters: Tool.EmptyParams,
     success: MachineSetupStatus,
     description:
-      "Check whether this machine is ready to pair with the user's other machines. Cogenly links machines through Tailscale, a free app that gives them a private, encrypted connection. Returns Tailscale's state (installed, running, signed in, tailnet, MagicDNS name, HTTPS allowed, whether Tailscale Serve fronts this server) and an ordered checklist: install, start, sign-in, enable-https, expose. Each step has a state, a plain-language title and detail, an `action` when machine_setup_step can do it, and a `handoff` (a URL to open, or a command the user runs because it needs their password). The Tailscale sign-in link is left out here; machine_setup_step returns it. When `ready` is true the user pairs machines in Settings → Machines → Add a machine.",
+      "Read Tailscale pairing readiness and ordered install/start/sign-in/enable-https/expose checklist. Actions use machine_setup_step; handoffs need the user. Sign-in URLs come from step. When ready, pair in Settings → Machines → Add a machine.",
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false),
@@ -130,7 +130,7 @@ export const MachinesToolkit = Toolkit.make(
     }),
     success: MachineSetupStatus,
     description:
-      "Run one machine setup step on this machine and return the updated checklist. It returns at once; slow steps show as working or waiting and finish in the background, so call machine_setup_status to follow them. Give the user any handoff it returns: open-url links to open, or the run-command to type in a terminal on this machine because it asks for their password. Never ask for or handle the password yourself. Use step disable-expose to turn private access off and expose to turn it back on. Requires a live full-access/default calling thread.",
+      "Start one setup step and return its checklist immediately. Follow background progress with machine_setup_status. Relay open-url/run-command handoffs; never handle passwords. disable-expose reverses expose. Requires full-access/default.",
   })
     .annotate(Tool.Readonly, false)
     .annotate(Tool.Destructive, false),
@@ -154,7 +154,7 @@ export const MachinesToolkit = Toolkit.make(
     }),
     success: Schema.Struct({ hub: DesktopAppPairedMachine, joining: DesktopAppPairedMachine }),
     description:
-      "Pair two of the user's machines so they sync, the same as Settings → Machines → Add a machine. The Cogenly desktop app on this computer runs it, because only an app signed in to both machines can: it checks the hub, mints a one-time join code bound to the joining machine's key, and redeems it, so the code never reaches you. Both machines must be connections in that app, and the hub must be ready: its machine_setup_status (or its checklist in Settings → Machines → Add a machine) shows ready. Only works from an environment on the same computer as the desktop app; elsewhere, ask the user to choose Add a machine in Settings → Machines. Requires a live full-access/default calling thread. machine_unpair undoes it.",
+      "Pair two connections in the local desktop app, which privately exchanges the join code. Hub must report ready in machine_setup_status. Requires full-access/default and a desktop on this machine; otherwise use Settings → Machines → Add a machine. machine_unpair reverses it.",
   })
     .annotate(Tool.Readonly, false)
     .annotate(Tool.Destructive, false),
@@ -174,7 +174,7 @@ export const MachinesToolkit = Toolkit.make(
     }),
     success: Schema.Struct({ unpaired: Schema.Boolean }),
     description:
-      "Unpair a machine from this one, like Unpair in Settings → Machines: the two stop syncing, and projects and conversations stay on both. A machine paired with the hub rather than with this one is unpaired on the hub. Requires a live full-access/default calling thread. machine_pair pairs them again.",
+      "Stop sync with a paired machine, preserving both copies. Hub-only peers unpair on the hub. Requires full-access/default; machine_pair reverses it.",
   })
     .annotate(Tool.Readonly, false)
     .annotate(Tool.Destructive, true),
