@@ -241,3 +241,8 @@ supportedArchitectures:
   cpu: [current, x64]
   libc: [current, glibc]
   os: [current, linux]
+
+# pdf.js only draws through @napi-rs/canvas under Node. The web viewer uses the
+# browser's canvas, so skip its native binaries (about 30 MB per platform).
+ignoredOptionalDependencies:
+  - "@napi-rs/canvas"

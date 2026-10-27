@@ -23,17 +23,28 @@ import {
   matchesKeybindingShortcut,
   normalizeEventKey,
 } from "@cogenly/shared/keybindings";
-import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { useOpenLink } from "~/browser/useOpenLink";
 import { ExpandedImageDialog } from "~/components/chat/ExpandedImageDialog";
 import type { ExpandedImagePreview } from "~/components/chat/ExpandedImagePreview";
 import { useHtmlRenderVisualBridge } from "~/components/chat/useHtmlRenderVisualBridge";
+import { isElectron } from "~/env";
 import { useHtmlRenderTheme } from "~/hooks/useHtmlRenderTheme";
 import { shortcutConflictKey } from "~/keybindings";
 import { readLocalApi } from "~/localApi";
 import { cn } from "~/lib/utils";
 import { primaryServerKeybindingsAtom, serverEnvironment } from "~/state/server";
+import { FileSurfaceLoading } from "./fileSurfaceChrome";
 
 /**
  * Chromium's viewer opens with its own toolbar, a thumbnail rail and a small
@@ -71,10 +82,43 @@ const HTML_RENDER_SHORTCUT_COMMANDS: ReadonlySet<KeybindingCommand> = new Set([
 export const isPdfPreviewFile = (path: string): boolean =>
   /\.pdf$/i.test(path.split(/[?#]/, 1)[0] ?? "");
 
+// pdf.js and its worker load only once a PDF opens without a built-in viewer.
+const PdfViewer = lazy(() => import("./PdfViewer"));
+
+/**
+ * The desktop shell never enables Chromium's PDF plugin (Electron's `plugins`
+ * webPreference defaults to false), so a framed PDF there shows nothing. WebKit
+ * embeds on iOS expose only the first page, even when pdfViewerEnabled reports
+ * support. Both read the document through pdf.js instead.
+ */
+function hasBuiltInPdfViewer(): boolean {
+  return (
+    !isElectron &&
+    navigator.pdfViewerEnabled &&
+    !/iPad|iPhone|iPod/.test(navigator.userAgent) &&
+    !(navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+}
+
+function PdfDocument(props: { readonly src: string; readonly title: string }) {
+  return hasBuiltInPdfViewer() ? (
+    // oxlint-disable-next-line react/iframe-missing-sandbox -- the built-in PDF viewer needs an unsandboxed frame.
+    <iframe
+      src={`${props.src}${PDF_VIEWER_FRAGMENT}`}
+      title={props.title}
+      className="min-h-0 flex-1 border-0 bg-white"
+    />
+  ) : (
+    <Suspense fallback={<FileSurfaceLoading />}>
+      <PdfViewer src={props.src} title={props.title} />
+    </Suspense>
+  );
+}
+
 /**
  * Renders an HTML or PDF document from its URL. HTML runs in a sandboxed frame
  * with an opaque origin, so a page cannot reach the app's session or storage.
- * The built-in PDF viewer needs an unsandboxed frame; a PDF runs no scripts.
+ * A PDF uses the browser's viewer when it has one, and pdf.js otherwise.
  * An agent's HTML render also wears the app theme.
  */
 export function BrowserDocumentFrame(props: {
@@ -87,15 +131,8 @@ export function BrowserDocumentFrame(props: {
   /** An HTML render's attachment id, which keys its interactive state in the thread. */
   readonly renderId?: string | undefined;
 }) {
-  const className = "min-h-0 flex-1 border-0 bg-white";
   return props.pdf ? (
-    // oxlint-disable-next-line react/iframe-missing-sandbox -- the built-in PDF viewer needs an unsandboxed frame.
-    <iframe
-      key={props.src}
-      src={`${props.src}${PDF_VIEWER_FRAGMENT}`}
-      title={props.title}
-      className={className}
-    />
+    <PdfDocument key={props.src} src={props.src} title={props.title} />
   ) : props.htmlRender ? (
     <HtmlRenderDocument
       key={props.src}
@@ -110,7 +147,7 @@ export function BrowserDocumentFrame(props: {
       key={props.src}
       src={props.src}
       title={props.title}
-      className={className}
+      className="min-h-0 flex-1 border-0 bg-white"
       sandbox="allow-scripts allow-forms allow-popups allow-downloads"
     />
   );
