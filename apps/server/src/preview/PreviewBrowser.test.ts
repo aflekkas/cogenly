@@ -12,6 +12,7 @@ import * as Browser from "./PreviewBrowser.ts";
 import { previewBrowserCheck } from "../health/healthChecks.ts";
 
 const release: Browser.PreviewBrowserRelease = {
+  flavor: "headless-shell",
   version: "test",
   platform: "test",
   url: "https://browser.test/download.zip",
@@ -31,7 +32,7 @@ it.effect("a fresh home reports install failure and the next attempt retries it"
         return HttpClientResponse.fromWeb(request, new Response(null, { status: 503 }));
       }),
     );
-    const browser = yield* Browser.makePreviewBrowser({ baseDir, release }).pipe(
+    const browser = yield* Browser.makePreviewBrowserInstaller({ baseDir, release }).pipe(
       Effect.provideService(HttpClient.HttpClient, http),
     );
     expect((yield* browser.status).state).toBe("missing");
@@ -83,7 +84,7 @@ it.effect(
           Effect.as(HttpClientResponse.fromWeb(request, new Response(null, { status: 503 }))),
         ),
       );
-      const browser = yield* Browser.makePreviewBrowser({
+      const browser = yield* Browser.makePreviewBrowserInstaller({
         baseDir,
         release,
         wait: "1 second",
