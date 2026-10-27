@@ -1,3 +1,4 @@
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 import {
   CommandId,
   ThreadId,
@@ -87,7 +88,9 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const pending = yield* sql<{
         thread_id: string;
-      }>`SELECT DISTINCT thread_id FROM orchestration_v2_projection_turn_items WHERE type = 'secret_request' AND json_extract(payload_json, '$.secretStatus') = 'pending' AND json_type(payload_json, '$.integrationSetup') = 'object'`;
+      }>`SELECT DISTINCT thread_id FROM orchestration_v2_projection_turn_items WHERE type = 'secret_request' AND json_extract(payload_json, '$.secretStatus') = 'pending' AND json_type(payload_json, '$.integrationSetup') = 'object'`.pipe(
+        NodeSqliteClient.readOnly,
+      );
       for (const row of pending) {
         const threadId = ThreadId.make(row.thread_id);
         const records = yield* threads.getThreadRecords(threadId, ["turnItems"], {
