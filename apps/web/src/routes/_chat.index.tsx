@@ -35,7 +35,7 @@ import {
   readProject,
   useAllEnvironmentShellsBootstrapped,
   useProjects,
-  useThreadShells,
+  useQuietThreadShells,
 } from "../state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { APP_DISPLAY_NAME } from "~/branding";
@@ -62,7 +62,7 @@ function ChatIndexRouteView() {
  */
 function ModeIndexLanding({ mode }: { readonly mode: SidebarMode }) {
   const projects = useProjects();
-  const threads = useThreadShells();
+  const threads = useQuietThreadShells();
   const bootstrapped = useAllEnvironmentShellsBootstrapped();
   const serverConfigs = useAtomValue(environmentServerConfigsAtom);
   const { agents, loading: agentsLoading } = useAgents();

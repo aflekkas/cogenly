@@ -3,6 +3,8 @@ import { isOrchestrationV2WorkActive } from "@cogenly/contracts";
 import { deriveSubagentElapsedMs } from "@cogenly/shared/orchestrationTiming";
 import { useEffect, useRef } from "react";
 
+import { useSecondTick } from "~/hooks/useNowSecond";
+
 function formatElapsedSeconds(totalSeconds: number): string {
   const seconds = Math.max(0, Math.floor(totalSeconds));
   const minutes = Math.floor(seconds / 60);
@@ -44,25 +46,17 @@ export function AgentElapsed({
   const startedAt = agent.startedAt;
   const completedAt = agent.completedAt;
 
-  useEffect(() => {
-    if (!startedAt) {
-      return;
-    }
-    const update = () => {
-      if (textRef.current) {
-        const elapsedMs = deriveSubagentElapsedMs(
-          { status: agent.status, startedAt, completedAt },
-          Date.now(),
-        );
-        const text = elapsedMs === null ? "" : format(elapsedMs / 1000);
-        if (textRef.current.textContent !== text) textRef.current.textContent = text;
-      }
-    };
-    update();
-    if (!live) return;
-    const id = setInterval(update, 1000);
-    return () => clearInterval(id);
-  }, [live, startedAt, completedAt, agent.status, format]);
+  const update = () => {
+    if (!startedAt || !textRef.current) return;
+    const elapsedMs = deriveSubagentElapsedMs(
+      { status: agent.status, startedAt, completedAt },
+      Date.now(),
+    );
+    const text = elapsedMs === null ? "" : format(elapsedMs / 1000);
+    if (textRef.current.textContent !== text) textRef.current.textContent = text;
+  };
+  useEffect(update, [startedAt, completedAt, agent.status, format]);
+  useSecondTick(live && Boolean(startedAt), update);
 
   const elapsedMs = deriveSubagentElapsedMs(agent, 0);
   if (elapsedMs === null) {

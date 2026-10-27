@@ -2,7 +2,7 @@ import { scopeThreadRef, scopedThreadKey } from "@cogenly/client-runtime/environ
 import { useMemo } from "react";
 
 import { useAgents } from "../../../agents/agentsClient";
-import { useProjects, useServerConfigs, useThreadShells } from "../../../state/entities";
+import { useProjects, useServerConfigs, useQuietThreadShells } from "../../../state/entities";
 import { useUiStateStore } from "../../../uiStateStore";
 import { resolveThreadLastVisitedAt } from "../../Sidebar.logic";
 import { modeIndicators, type ModeIndicatorTone } from "./modeIndicators.logic";
@@ -19,7 +19,7 @@ const NO_MODES: ReadonlyMap<SidebarMode, ModeIndicatorTone> = new Map();
  * downstream.
  */
 export function useModeIndicators(): ReadonlyMap<SidebarMode, ModeIndicatorTone> {
-  const threads = useThreadShells();
+  const threads = useQuietThreadShells();
   const projects = useProjects();
   const serverConfigs = useServerConfigs();
   const localLastVisitedAtById = useUiStateStore((state) => state.threadLastVisitedAtById);

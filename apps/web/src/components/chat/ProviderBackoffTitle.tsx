@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
-
 import {
   formatProviderBackoff,
   type ProviderBackoff,
 } from "@cogenly/client-runtime/state/thread-execution";
+
+import { useNowSecond } from "~/hooks/useNowSecond";
 
 /**
  * The backoff status line: "Rate-limited by OpenAI · retrying at 13:41:33
@@ -11,10 +11,6 @@ import {
  * screen, so an idle thread pays nothing for the countdown.
  */
 export function ProviderBackoffTitle(props: { readonly backoff: ProviderBackoff }) {
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => setNowMs(Date.now()), 1_000);
-    return () => window.clearInterval(id);
-  }, []);
+  const nowMs = useNowSecond();
   return <>{formatProviderBackoff(props.backoff, nowMs)}</>;
 }
