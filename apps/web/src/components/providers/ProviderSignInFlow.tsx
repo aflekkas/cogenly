@@ -245,17 +245,28 @@ export function useProviderSignInFlow(
     });
   };
 
+  const canCancel =
+    canManage &&
+    isProviderSignInActive(step) &&
+    ((step.kind === "elsewhere" && auth?.flowEpoch != null) ||
+      (auth?.flowId != null && auth.flowId === local.startedFlowId));
+
   /** Cancels the machine's flow; resolves once it has stopped (or there was none to stop). */
   const stop = async () => {
     const flowId = auth?.flowId;
-    if (!flowId || flowId !== local.startedFlowId || !isProviderSignInActive(step)) return;
+    if (!canCancel) return;
     update({ cancelling: true });
     const result = await cancel({
       environmentId: target.environmentId,
-      input: { ...input, flowId },
+      input: {
+        ...input,
+        flowId: flowId ?? null,
+        ...(auth?.flowEpoch ? { flowEpoch: auth.flowEpoch } : {}),
+      },
     });
     update({
       cancelling: false,
+      ...(result._tag === "Success" ? { startedFlowId: result.value.flowId } : {}),
       ...(result._tag === "Success" || isAtomCommandInterrupted(result)
         ? {}
         : { error: failureText(result, "Could not cancel the sign-in.") }),
@@ -295,7 +306,7 @@ export function useProviderSignInFlow(
     step,
     local,
     canManage,
-    ours: auth?.flowId != null && auth.flowId === local.startedFlowId,
+    canCancel,
     begin,
     send,
     openPage,
@@ -558,8 +569,8 @@ function StepBody({
     case "elsewhere":
       return (
         <Status>
-          A sign-in is already open on {target.machineName} in another window. This updates when it
-          finishes.
+          A sign-in is already open on {target.machineName} in another window. You can cancel it
+          here to start again.
         </Status>
       );
     case "code":
@@ -655,7 +666,6 @@ export function ProviderSignInFlow({
   readonly children?: ReactNode;
 }) {
   const { step } = flow;
-  const active = isProviderSignInActive(step);
   const retry = step.kind === "failed" || step.kind === "cancelled";
   return (
     <div className="flex min-w-0 flex-col gap-3">
@@ -670,14 +680,14 @@ export function ProviderSignInFlow({
           This device can't change sign-ins on {target.machineName}.
         </p>
       ) : null}
-      {(active && flow.ours) || retry || children ? (
+      {flow.canCancel || retry || children ? (
         <div className="flex flex-wrap items-center gap-2">
           {retry ? (
             <Button size="sm" disabled={!flow.canManage} onClick={() => void flow.begin()}>
               {step.kind === "cancelled" ? "Sign in again" : "Try again"}
             </Button>
           ) : null}
-          {active && flow.ours ? (
+          {flow.canCancel ? (
             <Button
               size="sm"
               variant="ghost-muted"

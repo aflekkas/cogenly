@@ -133,6 +133,8 @@ export const ProviderAuthState = Schema.Struct({
     "cancelled",
   ]),
   flowId: Schema.NullOr(SetupOperationId),
+  // Public identity for compare-and-cancel; never grants permission to respond.
+  flowEpoch: Schema.optionalKey(SetupOperationId),
   authorizationUrl: Schema.NullOr(Schema.String),
   expiresAt: Schema.NullOr(IsoDateTime),
   message: Schema.NullOr(Schema.String),
@@ -157,7 +159,10 @@ export type ProviderAuthCompleteInput = typeof ProviderAuthCompleteInput.Type;
 export const ProviderAuthCancelInput = Schema.Struct({
   targetEnvironmentId: Schema.optionalKey(EnvironmentId),
   instanceId: ProviderInstanceId,
-  flowId: SetupOperationId,
+  // Omit (or pass null) to stop the active sign-in, including one owned by another client.
+  flowId: Schema.optionalKey(Schema.NullOr(SetupOperationId)),
+  // When supplied, cancel only the observed flow, even without its private flowId.
+  flowEpoch: Schema.optionalKey(SetupOperationId),
 });
 export type ProviderAuthCancelInput = typeof ProviderAuthCancelInput.Type;
 
