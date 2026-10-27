@@ -1199,6 +1199,9 @@ const make = Effect.gen(function* () {
     reportLiveTabs();
     // An agent's own tab is the agent's from the start; the panel says so.
     if (control.agentDrives) broadcastControl(tab);
+    // Adoption may finish after the page's load event, especially for extension
+    // tabs whose first page event was about:blank. Publish its current URL too.
+    if (adopted) await reportLoaded(tab);
     // A popup is already loading its own URL, and the desktop loads its tab's.
     if (!adopted && !desktop && snapshot.navStatus._tag === "Loading") {
       tab.initialNavigation = page
@@ -1420,7 +1423,7 @@ const make = Effect.gen(function* () {
     if (preparedContexts.has(context)) return;
     preparedContexts.add(context);
     // Chrome extensions create normal tabs without a page opener. Observe the
-    // context as well as window.open, and wait for an initial blank to navigate.
+    // context as well as window.open. Initial blank pages keep their identity as they navigate.
     context.on("page", (page) => {
       const creations = [...(ownedPageCreations.get(context) ?? [])];
       const consider = async () => {
@@ -1436,7 +1439,7 @@ const make = Effect.gen(function* () {
           candidates
             .filter((tab) => !tab.extensionSurface)
             .toSorted((a, b) => b.usedAt - a.usedAt)[0];
-        if (!opener || (!openerPage && !page.url().startsWith("chrome-extension://"))) return;
+        if (!opener) return;
         await adoptPopup(opener, page);
       };
       page.on("framenavigated", () => void consider().catch(constVoid));
@@ -3507,6 +3510,7 @@ const make = Effect.gen(function* () {
         const previous = surfaceLocks.get(key) ?? Promise.resolve();
         const opening = previous.catch(constVoid).then(async () => {
           if (hostTab.closing) throw new Error("The host tab closed before the extension opened.");
+          hostTab.usedAt = Date.now();
           const existing = [...tabs.values()].find(
             (tab) =>
               tab.threadId === hostTab.threadId &&
@@ -3698,7 +3702,7 @@ const make = Effect.gen(function* () {
           return cookieReader
             .importCookies({ ...input, targetProfileId }, async (profileId, cookie) => {
               writer ??= contexts.contextFor(profileId).then(async (context) => {
-                const page = await context.newPage();
+                const page = await newOwnedPage(context);
                 try {
                   return { page, cdp: await context.newCDPSession(page) };
                 } catch {
