@@ -105,6 +105,12 @@ export const T3ProjectFile = Schema.Struct({
         'How new worktrees populate git submodules: "recursive" (the default) initializes nested submodules too, "top-level" initializes only those declared by this repository, and "none" leaves every submodule empty for a setup script to handle. The Cogenly setting overrides this when set.',
     }),
   ),
+  threadTitleInstructions: Schema.optionalKey(
+    Schema.String.annotate({
+      description:
+        "Overrides the server's thread title instructions for this repository; an empty string uses Cogenly's default title rules.",
+    }),
+  ),
   scripts: Schema.optionalKey(
     Schema.Array(T3ProjectFileScript)
       .annotate({

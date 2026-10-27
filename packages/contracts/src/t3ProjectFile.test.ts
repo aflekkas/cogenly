@@ -69,3 +69,11 @@ describe("T3ProjectFile", () => {
     expect(() => decode({ worktreeSubmodules: "shallow" })).toThrow();
   });
 });
+
+it("preserves an explicit empty title instructions override", () => {
+  expect(decode({ threadTitleInstructions: "" }).threadTitleInstructions).toBe("");
+  expect(decode({ threadTitleInstructions: "Use French." }).threadTitleInstructions).toBe(
+    "Use French.",
+  );
+  expect(decode({}).threadTitleInstructions).toBeUndefined();
+});

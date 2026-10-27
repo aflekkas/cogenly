@@ -376,6 +376,7 @@ export function buildBranchNamePrompt(input: BranchNamePromptInput) {
 // ---------------------------------------------------------------------------
 
 export interface ThreadTitlePromptInput {
+  instructions?: string | undefined;
   linkedContext?: string | undefined;
   message: string;
   previousTitle?: string | undefined;
@@ -460,7 +461,9 @@ function preserveMessageEnd(message: string): string {
 }
 
 function threadTitlePromptSuffix(input: ThreadTitlePromptInput): string {
-  const additionalInstructions = policyInstruction(input.policy?.threadTitleInstructions);
+  const additionalInstructions = policyInstruction(
+    input.instructions ?? input.policy?.threadTitleInstructions,
+  );
   const attachmentLines = (input.attachments ?? []).map(
     (attachment) => `- ${attachment.name} (${attachment.mimeType}, ${attachment.sizeBytes} bytes)`,
   );

@@ -1032,3 +1032,15 @@ describe("retired usage hubs", () => {
     expect(settings).not.toHaveProperty("usageLimitSources");
   });
 });
+
+describe("thread title instructions", () => {
+  it("defaults empty and accepts updates and resets", () => {
+    expect(decodeServerSettings({}).threadTitleInstructions).toBe("");
+    expect(decodeServerSettingsPatch({ threadTitleInstructions: "  Write in Spanish.  " })).toEqual(
+      { threadTitleInstructions: "Write in Spanish." },
+    );
+    expect(decodeServerSettingsPatch({ threadTitleInstructions: "" })).toEqual({
+      threadTitleInstructions: "",
+    });
+  });
+});
