@@ -21,6 +21,7 @@ import {
   MachineVersionUpdate,
   MachineVersionAutoUpdate,
   ProviderDriverKind,
+  ServerSelfUpdateError,
   requiredScopeForMachineHealthFix,
   type AuthEnvironmentScope,
   type MachineHealthItem,
@@ -296,10 +297,9 @@ const make = Effect.gen(function* () {
       ) {
         return yield* new MachineHealthError({ reason: "unavailable" });
       }
-      if (automatic) {
-        // Read on the destination immediately before handing off to the launcher.
+      const hasActiveWork =
         // Replicated work belongs to another server and cannot be interrupted here.
-        const active = yield* sql`SELECT 1 FROM orchestration_v2_projection_runs r
+        sql`SELECT 1 FROM orchestration_v2_projection_runs r
           WHERE (r.status IN ('preparing', 'starting', 'running', 'waiting')
             OR (r.status = 'queued' AND COALESCE(json_extract(r.payload_json, '$.queueHeld'), 0) <> 1))
             AND NOT EXISTS (SELECT 1 FROM thread_owners o WHERE o.thread_id = r.thread_id AND o.local = 0)
@@ -307,14 +307,42 @@ const make = Effect.gen(function* () {
           WHERE s.status IN ('pending', 'running', 'waiting')
             AND NOT EXISTS (SELECT 1 FROM thread_owners o WHERE o.thread_id = s.thread_id AND o.local = 0)
           LIMIT 1`.pipe(
-          Effect.mapError((cause) => new MachineHealthError({ reason: "unavailable", cause })),
+          Effect.map((active) => active.length > 0),
+          Effect.mapError(
+            (cause) => new ServerSelfUpdateError({ reason: "Could not check active work.", cause }),
+          ),
         );
-        if (active.length > 0) return { started: false };
-      }
-      yield* selfUpdate
-        .update({ targetVersion })
-        .pipe(Effect.mapError((cause) => new MachineHealthError({ reason: "unavailable", cause })));
-      return { started: true };
+      return yield* Effect.gen(function* () {
+        if (automatic && (yield* hasActiveWork)) return { started: false };
+        yield* selfUpdate.update(
+          { targetVersion },
+          undefined,
+          undefined,
+          automatic
+            ? () =>
+                hasActiveWork.pipe(
+                  Effect.flatMap((active) =>
+                    active
+                      ? Effect.fail(
+                          new ServerSelfUpdateError({
+                            reason: ServerSelfUpdate.AUTO_UPDATE_BUSY_REASON,
+                          }),
+                        )
+                      : Effect.void,
+                  ),
+                )
+            : undefined,
+        );
+        return { started: true };
+      }).pipe(
+        Effect.catchTags({
+          ServerSelfUpdateError: (error) =>
+            automatic && error.reason === ServerSelfUpdate.AUTO_UPDATE_BUSY_REASON
+              ? Effect.succeed({ started: false })
+              : Effect.fail(error),
+        }),
+        Effect.mapError((cause) => new MachineHealthError({ reason: "unavailable", cause })),
+      );
     });
   yield* channels.register(MachineVersionUpdate, ({ targetVersion }) => updateHere(targetVersion));
   yield* channels.register(MachineVersionAutoUpdate, ({ targetVersion }) =>

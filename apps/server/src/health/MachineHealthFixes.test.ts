@@ -26,6 +26,7 @@ import { NodeCrypto } from "@effect/platform-node";
 import * as Deferred from "effect/Deferred";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
@@ -115,6 +116,7 @@ const harness = (
     readonly scheduler?: Scheduler.Scheduler["Service"];
     readonly retried?: Deferred.Deferred<void>;
     readonly withAlerts?: boolean;
+    readonly staging?: Effect.Effect<void>;
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -171,8 +173,10 @@ const harness = (
             }),
             Layer.mock(ServerSelfUpdate.ServerSelfUpdate)({
               capability,
-              update: ({ targetVersion }) =>
-                Effect.sync(() => {
+              update: ({ targetVersion }, _progress, _accepted, beforeHandoff) =>
+                Effect.gen(function* () {
+                  if (auto.staging) yield* auto.staging;
+                  if (beforeHandoff) yield* beforeHandoff();
                   ran.push(`update:${targetVersion}`);
                   return { targetVersion, method: "boot-service" as const, updateId: "test" };
                 }),
@@ -651,6 +655,29 @@ it.effect("automatic peer updates check destination work, defer, and preserve ma
     yield* h.sql`UPDATE orchestration_v2_projection_runs SET status='running' WHERE run_id='busy'`;
     yield* h.fixes.fix({ itemKeys: [`machine-version:${laptop}`] });
     expect(h.ran).toEqual(["update:0.3.4", "update:0.3.4"]);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("defers automatic activation when work starts during staging", () =>
+  Effect.gen(function* () {
+    const staging = yield* Deferred.make<void>();
+    const staged = yield* Deferred.make<void>();
+    const h = yield* harness(true, "boot-service", false, {
+      staging: Deferred.succeed(staging, undefined).pipe(Effect.andThen(Deferred.await(staged))),
+    });
+    const request = yield* h.channels
+      .dispatch({
+        channel: MachineVersionAutoUpdate.name,
+        payload: { targetVersion: "0.3.4" },
+        caller: { environmentId: vps, scopes: [AuthPeerDelegateScope] },
+      })
+      .pipe(Effect.forkChild);
+    yield* Deferred.await(staging);
+    yield* h.sql`INSERT INTO orchestration_v2_projection_runs(run_id,thread_id,ordinal,provider,status,requested_at,payload_json)
+      VALUES ('new-work','work',1,'codex','running','2026-01-01','{}')`;
+    yield* Deferred.succeed(staged, undefined);
+    expect(yield* Fiber.join(request)).toEqual({ started: false });
+    expect(h.ran).toEqual([]);
   }).pipe(Effect.scoped),
 );
 
