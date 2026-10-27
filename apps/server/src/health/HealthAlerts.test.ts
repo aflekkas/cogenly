@@ -197,10 +197,31 @@ const harness = Effect.gen(function* () {
   const minute = TestClock.adjust("60 seconds").pipe(Effect.andThen(job));
   const minutes = (count: number) =>
     Effect.forEach(Array.from({ length: count }), () => minute, { discard: true });
-  return { world, calls, published, alerts, channels, job, minute, minutes };
+  const state = yield* HealthAlertsState.HealthAlertsState.pipe(Effect.provideContext(context));
+  return { world, calls, published, alerts, channels, state, job, minute, minutes };
 });
 
 describe("HealthAlerts", () => {
+  it.effect("stays quiet while a problem is fixed automatically, and alerts when that fails", () =>
+    Effect.gen(function* () {
+      const { world, published, alerts, state, job, minutes } = yield* harness;
+      world.items = [signedOut];
+      yield* state.setAutoFix({ holds: new Set([signedOut.key]), failures: new Map() });
+      yield* job;
+      yield* minutes(4);
+      expect(published).toEqual([]);
+      yield* state.setAutoFix({
+        holds: new Set(),
+        failures: new Map([[signedOut.key, "The machine update could not be started."]]),
+      });
+      yield* minutes(3);
+      const [opened] = (yield* alerts.snapshot).open;
+      expect(opened?.detail).toContain(
+        "Automatic fix failed: The machine update could not be started.",
+      );
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("publishes and delivers once per transition, own alerts only", () =>
     Effect.gen(function* () {
       const { world, calls, published, alerts, minute, minutes, job } = yield* harness;

@@ -104,7 +104,7 @@ const makeServer = (
         }),
         Layer.mock(StorageCleanup.StorageCleanup)({}),
         Layer.mock(MachineHealth.MachineHealth)({ reportFor }),
-        Layer.succeed(MachineHealthFixes.MachineHealthFixes, { fix }),
+        Layer.mock(MachineHealthFixes.MachineHealthFixes)({ fix }),
         Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({}),
       ),
     ),

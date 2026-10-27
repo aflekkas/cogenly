@@ -30,6 +30,9 @@ import { makeControllableProvider } from "../orchestration-v2/testkit/Controllab
 import { layerWithRegistry } from "../orchestration-v2/testkit/ProviderReplayHarness.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as Tasks from "../scheduledTasks/ScheduledTaskService.ts";
+import * as Scheduler from "../scheduling/Scheduler.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import * as AlertsState from "./HealthAlertsState.ts";
 import * as Health from "./MachineHealth.ts";
 import * as ServerSelfUpdate from "../cloud/selfUpdate.ts";
 import * as Fixes from "./MachineHealthFixes.ts";
@@ -47,6 +50,7 @@ it.effect.each([
   "orphan beside healthy turn",
   "stale turn replaced before dispatch",
   "same stale turn still active",
+  "automatic fix with a live session",
   "idle queued messages",
 ] as const)("Fix targets only stale work: %s", (scenario) => {
   const provider = makeControllableProvider(CodexProviderCapabilitiesV2);
@@ -216,7 +220,7 @@ it.effect.each([
       ],
     };
     const fixesLayer = Fixes.layer.pipe(
-      Layer.provide(
+      Layer.provideMerge(
         Layer.mergeAll(
           Layer.mock(Health.MachineHealth)({ report: Effect.succeed(report) }),
           Layer.mock(Machines.Machines)({}),
@@ -239,10 +243,28 @@ it.effect.each([
           Layer.mock(Tasks.ScheduledTaskService)({}),
           Layer.succeed(SqlClient.SqlClient, sql),
           Layer.mock(ServerSelfUpdate.ServerSelfUpdate)({ capability: null }),
+          ServerSettings.layerTest(),
+          AlertsState.layer,
+          Layer.mock(Scheduler.Scheduler)({ register: () => Effect.void }),
           NodeServices.layer,
         ),
       ),
     );
+    if (scenario === "automatic fix with a live session") {
+      // A turn past the age limit whose session still answers may be real work.
+      const { outcomes, view } = yield* Effect.gen(function* () {
+        const fixes = yield* Fixes.MachineHealthFixes;
+        const outcomes = yield* fixes.autoFix;
+        return { outcomes, view: yield* (yield* AlertsState.HealthAlertsState).autoFix };
+      }).pipe(Effect.provide(fixesLayer));
+      yield* worker.drain().pipe(Effect.orDie);
+      const after = yield* orchestrator.getThreadProjection(threadId);
+      expect(outcomes).toMatchObject([{ itemKey: key, status: "failed" }]);
+      expect(after.runs.find((run) => run.id === first.id)!.status).toBe("running");
+      expect(view.holds.has(key)).toBe(false);
+      expect(view.failures.get(key)).toContain("live provider session");
+      return;
+    }
     const result = yield* Fixes.MachineHealthFixes.pipe(
       Effect.flatMap((fixes) => fixes.fix({ itemKeys: [key] })),
       Effect.provide(fixesLayer),

@@ -32,6 +32,8 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
+import * as Semaphore from "effect/Semaphore";
 import * as ServerSelfUpdate from "../cloud/selfUpdate.ts";
 import { compareExactServiceVersions, isExactServiceVersion } from "../cloud/serviceProtocol.ts";
 import * as MachineIdentity from "../machines/MachineIdentity.ts";
@@ -40,6 +42,16 @@ import * as PeerChannels from "../machines/PeerChannels.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as AgentProcesses from "../process/AgentProcesses.ts";
 import * as ScheduledTasks from "../scheduledTasks/ScheduledTaskService.ts";
+import * as Scheduler from "../scheduling/Scheduler.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import { HEALTH_ALERT_EVALUATE_EVERY } from "./HealthAlerts.ts";
+import * as HealthAlertsState from "./HealthAlertsState.ts";
+import {
+  healthAutoFixView,
+  initialHealthAutoFixState,
+  planHealthAutoFix,
+  recordHealthAutoFix,
+} from "./healthAutoFix.ts";
 import * as MachineHealth from "./MachineHealth.ts";
 import { STUCK_RUN_AFTER_MS, newestMachineVersion } from "./healthChecks.ts";
 import { readStaleRuns } from "./staleRuns.ts";
@@ -56,6 +68,13 @@ export class MachineHealthFixes extends Context.Service<
       input: MachineHealthFixInput,
       callerScopes?: ReadonlyArray<AuthEnvironmentScope>,
     ) => Effect.Effect<MachineHealthFixResult, MachineHealthError>;
+    /**
+     * One automatic round on this machine's own report, when the machine's
+     * "Fix problems automatically" setting is on: runs the safe fixes that are
+     * due (see healthAutoFix.ts) and tells HealthAlerts which items to hold
+     * back and which failed. Returns the outcomes of the fixes it ran.
+     */
+    readonly autoFix: Effect.Effect<ReadonlyArray<MachineHealthFixOutcome>>;
   }
 >()("cogenly-server/health/MachineHealthFixes") {}
 
@@ -92,6 +111,9 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const agentProcesses = yield* AgentProcesses.AgentProcesses;
   const browser = yield* Effect.serviceOption(PreviewBrowser.PreviewBrowser);
+  const settings = yield* ServerSettings.ServerSettingsService;
+  const alertsState = yield* HealthAlertsState.HealthAlertsState;
+  const scheduler = yield* Scheduler.Scheduler;
 
   const commandId = (suffix: string) =>
     crypto.randomUUIDv4().pipe(
@@ -104,9 +126,10 @@ const make = Effect.gen(function* () {
    * delegated task's child thread, then ends whatever no live work will end.
    * Never resumes: work that lost its provider session can't pick up where it
    * was, and resuming would repeat it; the thread's agent continues on the
-   * next message.
+   * next message. `automatic` leaves work whose provider session is still
+   * live running: only the owner or an agent stops a long run that is working.
    */
-  const stopStaleRuns = (threadId: ThreadId, itemKey: string) =>
+  const stopStaleRuns = (threadId: ThreadId, itemKey: string, automatic: boolean) =>
     Effect.gen(function* () {
       const stale = yield* readStaleRuns(yield* DateTime.now, threadId).pipe(
         Effect.provideService(SqlClient.SqlClient, sql),
@@ -155,6 +178,7 @@ const make = Effect.gen(function* () {
             runIds: childRunIds,
             subagentIds: [],
             reason: STOP_REASON,
+            ...(automatic ? { keepLiveSessions: true } : {}),
           })
           .pipe(Effect.result);
         if (Result.isFailure(stopped)) {
@@ -172,6 +196,7 @@ const make = Effect.gen(function* () {
             runIds: staleRuns.map((run) => run.id),
             reason: STOP_REASON,
             unreachableChildThreadIds,
+            ...(automatic ? { keepLiveSessions: true } : {}),
           }),
         );
       }
@@ -202,6 +227,14 @@ const make = Effect.gen(function* () {
           itemKey,
           status: "fixed",
           message: `Stopped ${what}. They had lost their provider sessions, so they couldn't be resumed; send the thread a message to continue the work.`,
+        } as const;
+      }
+      if (automatic) {
+        return {
+          itemKey,
+          status: "failed",
+          message:
+            "It still has a live provider session, so it was left running. Open the thread to stop it if it's stuck.",
         } as const;
       }
       return {
@@ -249,7 +282,10 @@ const make = Effect.gen(function* () {
     });
   yield* channels.register(MachineVersionUpdate, ({ targetVersion }) => updateHere(targetVersion));
 
-  const runFix = (item: MachineHealthItem): Effect.Effect<MachineHealthFixOutcome> => {
+  const runFix = (
+    item: MachineHealthItem,
+    automatic = false,
+  ): Effect.Effect<MachineHealthFixOutcome> => {
     const itemKey = item.key;
     const target = item.target;
     const failed = (message: string) => ({ itemKey, status: "failed", message }) as const;
@@ -357,7 +393,7 @@ const make = Effect.gen(function* () {
       case "stop-runs":
         return target?._tag !== "thread"
           ? Effect.succeed(failed("The thread to stop is missing."))
-          : stopStaleRuns(target.threadId, itemKey);
+          : stopStaleRuns(target.threadId, itemKey, automatic);
       case "kill-orphans":
         return agentProcesses.killOrphans.pipe(
           Effect.map(
@@ -452,7 +488,63 @@ const make = Effect.gen(function* () {
     },
   );
 
-  return MachineHealthFixes.of({ fix });
+  const autoFixState = yield* Ref.make(initialHealthAutoFixState);
+  const autoFixLock = yield* Semaphore.make(1);
+  const autoFix: MachineHealthFixes["Service"]["autoFix"] = Effect.gen(function* () {
+    const enabled = yield* settings.getSettings.pipe(
+      Effect.map(({ health: { autoFix: on } }) => on),
+      Effect.orElseSucceed(() => false),
+    );
+    if (!enabled) {
+      yield* Ref.set(autoFixState, initialHealthAutoFixState);
+      yield* alertsState.setAutoFix(HealthAlertsState.EMPTY_AUTO_FIX_VIEW);
+      return [];
+    }
+    const report = yield* health.report;
+    const plan = planHealthAutoFix(
+      yield* Ref.get(autoFixState),
+      report.checks.flatMap((check) => check.items),
+      report.environmentId,
+      DateTime.toEpochMillis(yield* DateTime.now),
+    );
+    // Held before the fixes run, so a slow one (an update) never alerts meanwhile.
+    yield* alertsState.setAutoFix(healthAutoFixView(plan.state));
+    let state = plan.state;
+    const outcomes: Array<MachineHealthFixOutcome> = [];
+    for (const item of plan.due) {
+      const outcome = yield* runFix(item, true);
+      outcomes.push(outcome);
+      state = recordHealthAutoFix(state, item.key, outcome);
+      if (outcome.status === "fixed" || outcome.status === "resolved")
+        yield* Effect.logInfo("Machine health fixed a problem automatically", {
+          itemKey: item.key,
+          message: outcome.message,
+        });
+      else
+        yield* Effect.logWarning("Machine health could not fix a problem automatically", {
+          itemKey: item.key,
+          message: outcome.message,
+        });
+    }
+    yield* Ref.set(autoFixState, state);
+    yield* alertsState.setAutoFix(healthAutoFixView(state));
+    return outcomes;
+  }).pipe(autoFixLock.withPermits(1), Effect.withSpan("MachineHealthFixes.autoFix"));
+
+  // The alerts' cadence: the scheduler ticks more often and this throttles it.
+  const lastAutoFixAt = yield* Ref.make<number | null>(null);
+  yield* scheduler.register(
+    "health-auto-fix",
+    Effect.gen(function* () {
+      const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
+      const last = yield* Ref.get(lastAutoFixAt);
+      if (last !== null && nowMs - last < Duration.toMillis(HEALTH_ALERT_EVALUATE_EVERY)) return;
+      yield* Ref.set(lastAutoFixAt, nowMs);
+      yield* autoFix;
+    }),
+  );
+
+  return MachineHealthFixes.of({ fix, autoFix });
 });
 
 export const layer = Layer.effect(MachineHealthFixes, make);

@@ -92,7 +92,7 @@ export class HealthAlerts extends Context.Service<
 >()("cogenly-server/health/HealthAlerts") {}
 
 /** How often a round runs; the scheduler ticks more often and this throttles it. */
-const HEALTH_ALERT_EVALUATE_EVERY = Duration.seconds(60);
+export const HEALTH_ALERT_EVALUATE_EVERY = Duration.seconds(60);
 const PEER_READ_TIMEOUT = Duration.seconds(10);
 const DELIVERY_TIMEOUT = Duration.seconds(30);
 
@@ -260,17 +260,27 @@ const make = Effect.gen(function* () {
 
     const observations: Array<HealthObservation> = [];
     const unknownChecks: Array<NonNullable<HealthRound["unknownChecks"]>[number]> = [];
+    const autoFix = yield* published.autoFix;
     for (const check of report.checks) {
       if (check.status === "unknown")
         unknownChecks.push({ originEnvironmentId: self, checkId: check.id });
       for (const item of check.items) {
         // Reachability is evaluated below with the peer as its origin.
         if (isReachabilityKey(item.key)) continue;
+        // Being fixed automatically: it alerts only if that fails.
+        if (autoFix.holds.has(item.key)) continue;
+        const failure = autoFix.failures.get(item.key);
         observations.push({
           originEnvironmentId: self,
           originMachineName: report.machineName,
           checkId: check.id,
-          item,
+          item:
+            failure === undefined
+              ? item
+              : {
+                  ...item,
+                  detail: `${item.detail.trim()} Automatic fix failed: ${failure}`.trim(),
+                },
         });
       }
     }
