@@ -848,6 +848,41 @@ it.live("discarding a bounded quarantine preserves local history and lets later 
   }).pipe(Effect.scoped),
 );
 
+it.live("a slow peer link keeps batches full instead of shrinking them to one event", () =>
+  Effect.gen(function* () {
+    const hub = yield* start("latency-hub", "cloud-server");
+    const laptop = yield* start("latency-laptop", "computer");
+    yield* pair(hub, laptop);
+    const at = yield* DateTime.now;
+    const stored = yield* laptop.sink.write({
+      events: [
+        thread("event:latency", at),
+        ...Array.from({ length: 120 }, (_, i) => message(`event:latency:${i}`, at, `M${i}`)),
+      ],
+    });
+    // Each apply on the far side takes as long as a remote round trip does.
+    const original = hub.sink.writeReplica;
+    const applied: Array<number> = [];
+    const spy = vi
+      .spyOn(hub.sink, "writeReplica")
+      .mockImplementation((input) =>
+        Effect.sleep("30 millis").pipe(
+          Effect.andThen(Effect.sync(() => applied.push(input.events.length))),
+          Effect.andThen(original(input)),
+        ),
+      );
+    try {
+      yield* laptop.sync.syncThrough(hub.environmentId, stored.at(-1)!.sequence);
+      expect(yield* hub.replication.eventCount(threadId)).toBe(121);
+      // Only the byte budget bounds a batch; a halving per slow trip took ~60.
+      expect(applied.length).toBeLessThanOrEqual(8);
+      expect(Math.min(...applied.slice(0, -1))).toBeGreaterThan(8);
+    } finally {
+      spy.mockRestore();
+    }
+  }),
+);
+
 it.live("priority receive waits for the bulk replay permit", () =>
   Effect.gen(function* () {
     const hub = yield* start("permit-hub", "cloud-server");

@@ -23,7 +23,6 @@ import * as Predicate from "effect/Predicate";
 import * as References from "effect/References";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
-import * as Semaphore from "effect/Semaphore";
 import * as Context from "effect/Context";
 import * as Stream from "effect/Stream";
 import * as Tracer from "effect/Tracer";
@@ -132,6 +131,56 @@ const TransactionAcquire = Context.Reference<{ acquired?: Acquired } | undefined
   "@cogenly/shared/nodeSqliteClient/TransactionAcquire",
   { defaultValue: () => undefined },
 );
+
+/**
+ * A one-holder connection lock that hands over to interactive waiters first.
+ * Background work (replication, scheduled sweeps, projections) queues behind
+ * whatever a user is waiting on, so a backlog of it never delays a Stop or a
+ * send by more than the statement or transaction currently running. After
+ * `burst` interactive handoffs in a row with background work waiting, one
+ * background waiter goes next, so a steady stream of interactive work cannot
+ * starve background work.
+ */
+export const makePriorityLock = (burst = 8) => {
+  let held = false;
+  let urgentRun = 0;
+  const urgent: Array<() => void> = [];
+  const normal: Array<() => void> = [];
+  const releaseUnsafe = () => {
+    let next: (() => void) | undefined;
+    if (urgent.length > 0 && (normal.length === 0 || urgentRun < burst)) {
+      next = urgent.shift();
+      urgentRun = normal.length === 0 ? 0 : urgentRun + 1;
+    } else {
+      next = normal.shift();
+      urgentRun = 0;
+    }
+    if (next === undefined) held = false;
+    else next();
+  };
+  const take = (interactive: boolean) =>
+    Effect.callback<void>((resume) => {
+      if (!held) {
+        held = true;
+        resume(Effect.void);
+        return;
+      }
+      const queue = interactive ? urgent : normal;
+      let granted = false;
+      const waiter = () => {
+        granted = true;
+        resume(Effect.void);
+      };
+      queue.push(waiter);
+      return Effect.sync(() => {
+        const at = queue.indexOf(waiter);
+        if (at !== -1) queue.splice(at, 1);
+        // Granted as the waiter was interrupted: pass the lock on.
+        else if (granted) releaseUnsafe();
+      });
+    });
+  return { take, release: Effect.sync(releaseUnsafe) };
+};
 
 export class UnsupportedNodeSqliteVersionError extends Schema.TaggedError<UnsupportedNodeSqliteVersionError>()(
   "UnsupportedNodeSqliteVersionError",
@@ -971,15 +1020,15 @@ const make = Effect.fn("makeWithDatabase")(function* (
     });
   });
 
-  const semaphore = yield* Semaphore.make(1);
+  const writerLock = makePriorityLock();
   const connection = yield* makeConnection;
   const acquireReader =
     options.readerWorker && isFileDatabase ? yield* makeWorker(options) : undefined;
-  const readerSemaphore = yield* Semaphore.make(1);
+  const readerLock = makePriorityLock();
 
   const writer = {
     name: "writer" as const,
-    lock: semaphore,
+    lock: writerLock,
     acquire: Effect.suspend(() =>
       acquireWriter === undefined
         ? Effect.succeed(connection)
@@ -995,7 +1044,7 @@ const make = Effect.fn("makeWithDatabase")(function* (
             ? writer
             : {
                 name: "reader" as const,
-                lock: readerSemaphore,
+                lock: readerLock,
                 acquire: Effect.succeed(readerConnection),
               },
         )
@@ -1033,10 +1082,10 @@ const make = Effect.fn("makeWithDatabase")(function* (
       const scope = Context.getUnsafe(fiber.context, Scope.Scope);
       const clock = fiber.getRef(Clock.Clock);
       const start = clock.monotonicTimeNanosUnsafe();
-      if (Context.get(fiber.context, Interactive))
-        pressure.interactiveAt = clock.currentTimeMillisUnsafe();
+      const interactive = Context.get(fiber.context, Interactive);
+      if (interactive) pressure.interactiveAt = clock.currentTimeMillisUnsafe();
       return Effect.flatMap(
-        Effect.tap(restore(target.lock.take(1)), () => {
+        Effect.tap(restore(target.lock.take(interactive)), () => {
           const pending = fiber.getRef(TransactionAcquire);
           const sample = acquired(target, clock, start);
           observe(fiber, target.name, sample.lockWaitMs);
@@ -1046,7 +1095,7 @@ const make = Effect.fn("makeWithDatabase")(function* (
             fiber.getRef(Statement.SpanPropagationEnabled)
           )
             annotateAcquired(fiber, sample);
-          return Scope.addFinalizer(scope, target.lock.release(1));
+          return Scope.addFinalizer(scope, target.lock.release);
         }),
         () => target.acquire,
       );
