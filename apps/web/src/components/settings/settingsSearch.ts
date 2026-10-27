@@ -1004,7 +1004,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "health-auto-fix",
     title: "Fix problems automatically",
     to: "/settings/machines",
-    searchTerms: ["health auto fix self heal update sync stuck runs automatic"],
+    searchTerms: ["health auto fix self heal sync stuck runs automatic"],
   },
   {
     id: "health-canary",

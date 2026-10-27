@@ -255,11 +255,10 @@ filled in, so an agent can investigate and fix it once you send it. A paired
 machine that can't be reached is shown from what this machine last saw of it.
 
 **Fix problems automatically**, on by default in each machine's health section,
-has that machine run the safe fixes itself: it brings a paired machine that is
-behind up to its version, retries stuck sync, and stops runs that lost their
-provider session (a long run that is still working is left alone). You only
-hear about these when an automatic fix fails. Problems that need you, such as a
-sign-in, are never fixed automatically.
+has that machine run the safe fixes itself: it retries stuck sync and stops
+runs that lost their provider session (a long run that is still working is
+left alone). You only hear about these when an automatic fix fails. Problems
+that need you, such as a sign-in or a machine update, wait for you or an agent.
 
 For invalid incoming thread history, health offers **Discard quarantined changes for
 <thread>**, with the incoming item count and size. Its Fix discards only those held

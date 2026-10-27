@@ -205,19 +205,20 @@ describe("HealthAlerts", () => {
   it.effect("stays quiet while a problem is fixed automatically, and alerts when that fails", () =>
     Effect.gen(function* () {
       const { world, published, alerts, state, job, minutes } = yield* harness;
-      world.items = [signedOut];
-      yield* state.setAutoFix({ holds: new Set([signedOut.key]), failures: new Map() });
+      const problem = { ...signedOut, key: "sync:stuck", fix: "retry-sync" as const };
+      world.items = [problem];
+      yield* state.setAutoFix({ holds: new Set([problem.key]), failures: new Map() });
       yield* job;
       yield* minutes(4);
       expect(published).toEqual([]);
       yield* state.setAutoFix({
         holds: new Set(),
-        failures: new Map([[signedOut.key, "The machine update could not be started."]]),
+        failures: new Map([[problem.key, "Sync ran again, but this problem is still present."]]),
       });
       yield* minutes(3);
       const [opened] = (yield* alerts.snapshot).open;
       expect(opened?.detail).toContain(
-        "Automatic fix failed: The machine update could not be started.",
+        "Automatic fix failed: Sync ran again, but this problem is still present.",
       );
     }).pipe(Effect.scoped),
   );

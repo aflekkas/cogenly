@@ -11,7 +11,6 @@ import {
   MachineHealthFixRun,
   MachineHealthTurnOffProviderRun,
   MachineVersionUpdate,
-  MachineVersionAutoUpdate,
   ProviderInstanceId,
   type MachineHealthFixResult,
   type MachineHealthItem,
@@ -26,7 +25,6 @@ import { NodeCrypto } from "@effect/platform-node";
 import * as Deferred from "effect/Deferred";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
@@ -111,12 +109,10 @@ const harness = (
   auto: {
     readonly report?: MachineHealthReport;
     readonly enabled?: boolean;
-    readonly peerUpdate?: "reject" | "busy";
     readonly database?: Layer.Layer<SqlClient.SqlClient>;
     readonly scheduler?: Scheduler.Scheduler["Service"];
     readonly retried?: Deferred.Deferred<void>;
     readonly withAlerts?: boolean;
-    readonly staging?: Effect.Effect<void>;
     readonly afterRetry?: () => void;
   } = {},
 ) =>
@@ -135,15 +131,11 @@ const harness = (
       providers: [],
     };
     const call = ((environmentId: EnvironmentId, channel: PeerChannel, payload: unknown) =>
-      Effect.gen(function* () {
+      Effect.sync(() => {
         peerCalls.push({ environmentId, channel: channel.name, payload });
         if (channel.name === MachineHealthAlertsRead.name)
           return { open: [], recentlyResolved: [] };
-        if (channel.name === MachineVersionAutoUpdate.name && auto.peerUpdate === "reject")
-          return yield* new MachineHealthError({ reason: "unavailable" });
-        return channel.name === MachineVersionAutoUpdate.name
-          ? { started: auto.peerUpdate !== "busy" }
-          : fromVps;
+        return fromVps;
       })) as unknown as Machines.Machines["Service"]["call"];
     const machine = (environmentId: EnvironmentId, relation: "this" | "hub"): MachineInfo => ({
       environmentId,
@@ -174,10 +166,8 @@ const harness = (
             }),
             Layer.mock(ServerSelfUpdate.ServerSelfUpdate)({
               capability,
-              update: ({ targetVersion }, _progress, _accepted, beforeHandoff) =>
-                Effect.gen(function* () {
-                  if (auto.staging) yield* auto.staging;
-                  if (beforeHandoff) yield* beforeHandoff();
+              update: ({ targetVersion }) =>
+                Effect.sync(() => {
                   ran.push(`update:${targetVersion}`);
                   return { targetVersion, method: "boot-service" as const, updateId: "test" };
                 }),
@@ -595,18 +585,16 @@ describe("automatic fixes", () => {
       const outcomes = yield* h.fixes.autoFix;
       expect(outcomes.map((outcome) => [outcome.itemKey, outcome.status])).toEqual([
         [`sync:stuck:${vps}`, "failed"],
-        [`machine-version:${vps}`, "fixed"],
       ]);
       expect(h.retried).toEqual([vps]);
-      // The newer machine pushes the update; the one behind never updates itself too.
-      expect(h.peerCalls.map((call) => [call.environmentId, call.channel])).toEqual([
-        [vps, MachineVersionAutoUpdate.name],
-      ]);
+      expect(h.peerCalls).toEqual([]);
       expect(h.ran).toEqual([]);
       const view = yield* h.alertsState.autoFix;
-      expect([...view.holds]).toEqual([`machine-version:${vps}`]);
+      expect([...view.holds]).toEqual([]);
+      expect(view.failures.has(`machine-version:${vps}`)).toBe(false);
+      expect(view.failures.has(`machine-version:${laptop}`)).toBe(false);
       expect(view.failures.get(`sync:stuck:${vps}`)).toContain("still present");
-      // Fixed and settling: not run again on the next round.
+      // The retry budget prevents another immediate attempt.
       expect(yield* h.fixes.autoFix).toEqual([]);
     }).pipe(Effect.scoped),
   );
@@ -663,80 +651,44 @@ describe("automatic fixes", () => {
   );
 });
 
-it.effect("automatic peer updates check destination work, defer, and preserve manual updates", () =>
+it.effect("manual updates still start while work is running", () =>
   Effect.gen(function* () {
-    const h = yield* harness(true);
+    const h = yield* harness(true, "boot-service", false, {
+      report: {
+        ...report,
+        checks: [
+          {
+            id: "machine-links",
+            status: "warn",
+            summary: "Versions differ",
+            items: [
+              item(`machine-version:${laptop}`, "update-machine", {
+                _tag: "machine",
+                environmentId: laptop,
+              }),
+            ],
+          },
+        ],
+      },
+    });
     yield* h.sql`INSERT INTO orchestration_v2_projection_runs(run_id,thread_id,ordinal,provider,status,requested_at,payload_json)
       VALUES ('busy','work',1,'codex','running','2026-01-01','{}')`;
-    const request = h.channels.dispatch({
-      channel: MachineVersionAutoUpdate.name,
+    expect(yield* h.fixes.autoFix).toEqual([]);
+    expect(h.ran).toEqual([]);
+    expect(h.peerCalls).toEqual([]);
+    const view = yield* h.alertsState.autoFix;
+    expect(view.holds.size).toBe(0);
+    expect(view.failures.size).toBe(0);
+    const result = yield* h.fixes.fix({ itemKeys: [`machine-version:${laptop}`] });
+    expect(result.outcomes).toMatchObject([{ status: "fixed" }]);
+    expect(h.ran).toEqual(["update:0.3.4"]);
+    yield* h.channels.dispatch({
+      channel: MachineVersionUpdate.name,
       payload: { targetVersion: "0.3.4" },
       caller: { environmentId: vps, scopes: [AuthPeerDelegateScope] },
     });
-    expect(yield* request).toEqual({ started: false });
-    expect(h.ran).toEqual([]);
-    yield* h.sql`UPDATE orchestration_v2_projection_runs SET status='completed' WHERE run_id='busy'`;
-    expect(yield* request).toEqual({ started: true });
-    yield* h.sql`UPDATE orchestration_v2_projection_runs SET status='running' WHERE run_id='busy'`;
-    yield* h.fixes.fix({ itemKeys: [`machine-version:${laptop}`] });
     expect(h.ran).toEqual(["update:0.3.4", "update:0.3.4"]);
   }).pipe(Effect.scoped),
-);
-
-it.effect("defers automatic activation when work starts during staging", () =>
-  Effect.gen(function* () {
-    const staging = yield* Deferred.make<void>();
-    const staged = yield* Deferred.make<void>();
-    const h = yield* harness(true, "boot-service", false, {
-      staging: Deferred.succeed(staging, undefined).pipe(Effect.andThen(Deferred.await(staged))),
-    });
-    const request = yield* h.channels
-      .dispatch({
-        channel: MachineVersionAutoUpdate.name,
-        payload: { targetVersion: "0.3.4" },
-        caller: { environmentId: vps, scopes: [AuthPeerDelegateScope] },
-      })
-      .pipe(Effect.forkChild);
-    yield* Deferred.await(staging);
-    yield* h.sql`INSERT INTO orchestration_v2_projection_runs(run_id,thread_id,ordinal,provider,status,requested_at,payload_json)
-      VALUES ('new-work','work',1,'codex','running','2026-01-01','{}')`;
-    yield* Deferred.succeed(staged, undefined);
-    expect(yield* Fiber.join(request)).toEqual({ started: false });
-    expect(h.ran).toEqual([]);
-  }).pipe(Effect.scoped),
-);
-
-it.effect.each(["reject", "busy"] as const)(
-  "automatic update handles a peer that is %s",
-  (peerUpdate) =>
-    Effect.gen(function* () {
-      const key = `machine-version:${vps}`;
-      const h = yield* harness(false, "boot-service", false, {
-        peerUpdate,
-        report: {
-          ...report,
-          checks: [
-            {
-              id: "machine-links",
-              status: "warn",
-              summary: "",
-              items: [item(key, "update-machine", { _tag: "machine", environmentId: vps })],
-            },
-          ],
-        },
-      });
-      expect(yield* h.fixes.autoFix).toMatchObject(
-        peerUpdate === "reject" ? [{ itemKey: key, status: "failed" }] : [],
-      );
-      const view = yield* h.alertsState.autoFix;
-      expect(view.failures.has(key)).toBe(peerUpdate === "reject");
-      expect(view.holds.has(key)).toBe(peerUpdate === "busy");
-      expect(h.peerCalls[0]?.channel).toBe(MachineVersionAutoUpdate.name);
-      const [row] = yield* h.sql<{
-        value_json: string;
-      }>`SELECT value_json FROM health_auto_fix_attempts WHERE item_key=${key}`;
-      expect(JSON.parse(row!.value_json).attempts).toBe(peerUpdate === "busy" ? 0 : 1);
-    }).pipe(Effect.scoped),
 );
 
 it.effect("retained retry budgets do not hold recovered health items", () =>

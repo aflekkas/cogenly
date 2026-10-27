@@ -1,22 +1,17 @@
 /**
  * Which health items the server fixes on its own, without I/O. Only fixes
- * that are safe to repeat and lose nothing run automatically: updating a
- * paired machine to the version already running here, retrying sync, and
- * stopping runs that lost their provider session. Running a task, discarding
- * quarantined changes and signing in always wait for the owner or an agent.
+ * that are safe to repeat and lose nothing run automatically: retrying sync
+ * and stopping runs that lost their provider session. Updating a machine,
+ * running a task, discarding quarantined changes and signing in always wait
+ * for the owner or an agent.
  */
-import type { EnvironmentId, MachineHealthFix, MachineHealthItem } from "@cogenly/contracts";
+import type { MachineHealthFix, MachineHealthItem } from "@cogenly/contracts";
 import * as Schema from "effect/Schema";
 import * as Duration from "effect/Duration";
 
 import type { HealthAutoFixView } from "./HealthAlertsState.ts";
 
-const AUTO_FIXES: ReadonlySet<MachineHealthFix> = new Set([
-  "update-machine",
-  "retry-sync",
-  "stop-runs",
-  "resume",
-]);
+const AUTO_FIXES: ReadonlySet<MachineHealthFix> = new Set(["retry-sync", "stop-runs", "resume"]);
 
 const AUTO_FIX_RECHECK_AFTER = Duration.minutes(10);
 const AUTO_FIX_MAX_ATTEMPTS = 3;
@@ -33,40 +28,25 @@ export type HealthAutoFixState = ReadonlyMap<string, AutoFixAttempt>;
 
 export const initialHealthAutoFixState: HealthAutoFixState = new Map();
 
-/**
- * Whether the server fixes this item itself. A machine that is behind is
- * updated by the newer machine it is paired with, never by itself too: two
- * requests would collide on the update already in progress.
- */
-export function isAutoFixable(item: MachineHealthItem, self: EnvironmentId): boolean {
+/** Whether the server fixes this item itself. */
+export function isAutoFixable(item: MachineHealthItem): boolean {
   if (item.status === "ok" || item.status === "unknown") return false;
-  if (item.fix === null || !AUTO_FIXES.has(item.fix)) return false;
-  return !(
-    item.fix === "update-machine" &&
-    item.target?._tag === "machine" &&
-    item.target.environmentId === self
-  );
+  return item.fix !== null && AUTO_FIXES.has(item.fix);
 }
 
 /** The items to fix now, and the state with every lingering item stepped once. */
 export function planHealthAutoFix(
   state: HealthAutoFixState,
   items: ReadonlyArray<MachineHealthItem>,
-  self: EnvironmentId,
   nowMs: number,
-  updateTargetVersion?: string,
 ): { readonly due: ReadonlyArray<MachineHealthItem>; readonly state: HealthAutoFixState } {
   // Keep exhausted items even while absent: a disappearing item is not a new budget.
   const next = new Map(state);
   const due: Array<MachineHealthItem> = [];
   for (const item of items) {
-    if (!isAutoFixable(item, self)) continue;
-    const revision = JSON.stringify([
-      item.key,
-      item.fix,
-      item.target,
-      item.fix === "update-machine" ? updateTargetVersion : null,
-    ]);
+    if (!isAutoFixable(item)) continue;
+    // Keep the former update-version slot so persisted sync/run budgets stay valid.
+    const revision = JSON.stringify([item.key, item.fix, item.target, null]);
     const stored = state.get(item.key);
     let previous = stored?.revision === revision ? stored : undefined;
     const delay =
@@ -103,7 +83,7 @@ export function recordHealthAutoFix(
   state: HealthAutoFixState,
   itemKey: string,
   outcome: {
-    readonly status: "fixed" | "failed" | "resolved" | "manual" | "deferred";
+    readonly status: "fixed" | "failed" | "resolved" | "manual";
     readonly message: string;
   },
 ): HealthAutoFixState {
@@ -112,8 +92,7 @@ export function recordHealthAutoFix(
   const next = new Map(state);
   next.set(itemKey, {
     ...previous,
-    attempts: previous.attempts - (outcome.status === "deferred" ? 1 : 0),
-    failure: ["fixed", "resolved", "deferred"].includes(outcome.status) ? null : outcome.message,
+    failure: ["fixed", "resolved"].includes(outcome.status) ? null : outcome.message,
   });
   return next;
 }

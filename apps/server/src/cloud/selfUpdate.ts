@@ -28,7 +28,6 @@ import {
 
 import * as ServerConfig from "../config.ts";
 import * as DesktopAppUpdate from "../desktopUpdate/DesktopAppUpdate.ts";
-import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import {
@@ -42,8 +41,6 @@ import * as ServiceLauncherClient from "./serviceLauncherClient.ts";
 import { isExactServiceVersion, SERVICE_LAUNCHER_PROTOCOL } from "./serviceProtocol.ts";
 
 const PREFLIGHT_TIMEOUT = Duration.seconds(30);
-
-export const AUTO_UPDATE_BUSY_REASON = "Waiting for the machine to finish its work.";
 
 export function resolveServerSelfUpdateCapability(input: {
   readonly desktopManaged: boolean;
@@ -63,8 +60,6 @@ export class ServerSelfUpdate extends Context.Service<
         stage: ServerSelfUpdateProgressStage,
       ) => Effect.Effect<void, ServerSelfUpdateError>,
       onHandoffAccepted?: () => Effect.Effect<void>,
-      /** Automatic updates recheck work after staging, with command admission paused. */
-      beforeHandoff?: () => Effect.Effect<void, ServerSelfUpdateError>,
     ) => Effect.Effect<ServerSelfUpdateResult, ServerSelfUpdateError>;
     readonly commitDesktopUpdate: (
       requestId: string,
@@ -185,7 +180,6 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
   const serverConfig = yield* ServerConfig.ServerConfig;
   const desktopAppUpdate = yield* DesktopAppUpdate.DesktopAppUpdate;
   const launcher = yield* ServiceLauncherClient.ServiceLauncherClient;
-  const commands = yield* ThreadCommandExecutor.ThreadCommandExecutor;
   const runner = yield* ProcessRunner.ProcessRunner;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -219,12 +213,7 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
 
   const update: ServerSelfUpdate["Service"]["update"] = Effect.fn(
     "cloud.server_self_update.update",
-  )(function* (
-    input,
-    reportProgress = () => Effect.void,
-    onHandoffAccepted = () => Effect.void,
-    beforeHandoff,
-  ) {
+  )(function* (input, reportProgress = () => Effect.void, onHandoffAccepted = () => Effect.void) {
     if (capability === "desktop-managed") {
       // input.targetVersion is meaningless here: the desktop app's own
       // update feed decides what it downloads, and the result carries what
@@ -345,30 +334,18 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
 
       yield* reportProgress("installing");
       yield* provisionSandbox;
-      const activate = launcher.requestUpdate({ targetVersion, dbPath: serverConfig.dbPath }).pipe(
-        Effect.mapError((error) =>
-          failWith(
-            error._tag === "ServiceLauncherRejectedError"
-              ? error.reason
-              : "Could not ask the service launcher to activate the prepared update.",
-            error,
-          ),
-        ),
-        Effect.tap(() => onHandoffAccepted()),
-      );
       const updateId = yield* Effect.uninterruptible(
-        beforeHandoff === undefined
-          ? activate
-          : commands
-              .withIdleHandoff(Effect.suspend(beforeHandoff).pipe(Effect.andThen(activate)))
-              .pipe(
-                Effect.flatMap(
-                  Option.match({
-                    onNone: () => Effect.fail(failWith(AUTO_UPDATE_BUSY_REASON)),
-                    onSome: Effect.succeed,
-                  }),
-                ),
-              ),
+        launcher.requestUpdate({ targetVersion, dbPath: serverConfig.dbPath }).pipe(
+          Effect.mapError((error) =>
+            failWith(
+              error._tag === "ServiceLauncherRejectedError"
+                ? error.reason
+                : "Could not ask the service launcher to activate the prepared update.",
+              error,
+            ),
+          ),
+          Effect.tap(() => onHandoffAccepted()),
+        ),
       );
 
       yield* Effect.logInfo("Server update prepared; handing off to the service launcher.", {
@@ -389,5 +366,5 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
 });
 
 export const layer = Layer.effect(ServerSelfUpdate, make()).pipe(
-  Layer.provide(Layer.merge(ProcessRunner.layer, ThreadCommandExecutor.layer)),
+  Layer.provide(ProcessRunner.layer),
 );

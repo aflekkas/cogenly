@@ -593,7 +593,7 @@ function AutoFixRow({
   const canWrite = useEnvironmentScope(machine.environmentId, AuthSettingsWriteScope);
   const update = useUpdateEnvironmentSettings(reachable ? machine.environmentId : null);
   const autoFix = settings?.health.autoFix ?? null;
-  const description = `${machine.name} updates a paired machine that is behind, retries stuck sync and stops runs that lost their provider session on its own. You hear about these only when a fix fails.`;
+  const description = `${machine.name} retries stuck sync and stops runs that lost their provider session on its own. You hear about these only when a fix fails.`;
   const blocked = !reachable
     ? `Connect to ${machine.name} in Settings → Connections to change this.`
     : !canWrite

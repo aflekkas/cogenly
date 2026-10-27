@@ -19,9 +19,7 @@ import {
   MachineHealthFixRun,
   MachineHealthTurnOffProviderRun,
   MachineVersionUpdate,
-  MachineVersionAutoUpdate,
   ProviderDriverKind,
-  ServerSelfUpdateError,
   requiredScopeForMachineHealthFix,
   type AuthEnvironmentScope,
   type MachineHealthItem,
@@ -282,7 +280,7 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const updateHere = (targetVersion: string, automatic = false) =>
+  const updateHere = (targetVersion: string) =>
     Effect.gen(function* () {
       const self = yield* identity.self;
       const view = yield* machines.list.pipe(
@@ -297,57 +295,12 @@ const make = Effect.gen(function* () {
       ) {
         return yield* new MachineHealthError({ reason: "unavailable" });
       }
-      const hasActiveWork =
-        // Replicated work belongs to another server and cannot be interrupted here.
-        sql`SELECT 1 FROM orchestration_v2_projection_runs r
-          WHERE (r.status IN ('preparing', 'starting', 'running', 'waiting')
-            OR (r.status = 'queued' AND COALESCE(json_extract(r.payload_json, '$.queueHeld'), 0) <> 1))
-            AND NOT EXISTS (SELECT 1 FROM thread_owners o WHERE o.thread_id = r.thread_id AND o.local = 0)
-          UNION ALL SELECT 1 FROM orchestration_v2_projection_subagents s
-          WHERE s.status IN ('pending', 'running', 'waiting')
-            AND NOT EXISTS (SELECT 1 FROM thread_owners o WHERE o.thread_id = s.thread_id AND o.local = 0)
-          LIMIT 1`.pipe(
-          Effect.map((active) => active.length > 0),
-          Effect.mapError(
-            (cause) => new ServerSelfUpdateError({ reason: "Could not check active work.", cause }),
-          ),
-        );
-      return yield* Effect.gen(function* () {
-        if (automatic && (yield* hasActiveWork)) return { started: false };
-        yield* selfUpdate.update(
-          { targetVersion },
-          undefined,
-          undefined,
-          automatic
-            ? () =>
-                hasActiveWork.pipe(
-                  Effect.flatMap((active) =>
-                    active
-                      ? Effect.fail(
-                          new ServerSelfUpdateError({
-                            reason: ServerSelfUpdate.AUTO_UPDATE_BUSY_REASON,
-                          }),
-                        )
-                      : Effect.void,
-                  ),
-                )
-            : undefined,
-        );
-        return { started: true };
-      }).pipe(
-        Effect.catchTags({
-          ServerSelfUpdateError: (error) =>
-            automatic && error.reason === ServerSelfUpdate.AUTO_UPDATE_BUSY_REASON
-              ? Effect.succeed({ started: false })
-              : Effect.fail(error),
-        }),
-        Effect.mapError((cause) => new MachineHealthError({ reason: "unavailable", cause })),
-      );
+      yield* selfUpdate
+        .update({ targetVersion })
+        .pipe(Effect.mapError((cause) => new MachineHealthError({ reason: "unavailable", cause })));
+      return {};
     });
   yield* channels.register(MachineVersionUpdate, ({ targetVersion }) => updateHere(targetVersion));
-  yield* channels.register(MachineVersionAutoUpdate, ({ targetVersion }) =>
-    updateHere(targetVersion, true),
-  );
 
   const runFix = (
     item: MachineHealthItem,
@@ -678,70 +631,27 @@ const make = Effect.gen(function* () {
     }
     const report = yield* health.report;
     const items = report.checks.flatMap((check) => check.items);
-    const activeKeys = new Set(
-      items.filter((item) => isAutoFixable(item, report.environmentId)).map((item) => item.key),
-    );
+    const activeKeys = new Set(items.filter(isAutoFixable).map((item) => item.key));
     // Retain lifetime budgets for absent items, but publish only current problems.
     const viewOf = (state: HealthAutoFixState) =>
       healthAutoFixView(new Map([...state].filter(([key]) => activeKeys.has(key))));
-    const updateTargetVersion = items.some((item) => item.fix === "update-machine")
-      ? newestMachineVersion((yield* machines.list).machines)
-      : undefined;
     const plan = planHealthAutoFix(
       yield* readAutoFixState,
       items,
-      report.environmentId,
       DateTime.toEpochMillis(yield* DateTime.now),
-      updateTargetVersion,
     );
     yield* saveAutoFixState(plan.state);
-    // Held before the fixes run, so a slow one (an update) never alerts meanwhile.
+    // Hold alerts before running fixes, including slow sync retries.
     yield* alertsState.setAutoFix(viewOf(plan.state));
     let state = plan.state;
     const outcomes: Array<MachineHealthFixOutcome> = [];
     for (const item of plan.due) {
-      const target = item.target;
-      let outcome =
-        item.fix === "update-machine" && target?._tag === "machine"
-          ? yield* Effect.gen(function* () {
-              const targetVersion = updateTargetVersion;
-              if (targetVersion === undefined)
-                return {
-                  itemKey: item.key,
-                  status: "failed",
-                  message: "The target version is unknown.",
-                } as const;
-              const result = yield* machines
-                .call(target.environmentId, MachineVersionAutoUpdate, { targetVersion })
-                .pipe(Effect.timeout(PEER_FIX_TIMEOUT));
-              return result.started
-                ? ({
-                    itemKey: item.key,
-                    status: "fixed",
-                    message: `Started updating to ${targetVersion}.`,
-                  } as const)
-                : ({
-                    itemKey: item.key,
-                    status: "deferred",
-                    message: "Waiting for the machine to finish its work.",
-                  } as const);
-            }).pipe(
-              Effect.catch(() =>
-                Effect.succeed({
-                  itemKey: item.key,
-                  status: "failed",
-                  message: "The machine update could not be started.",
-                } as const),
-              ),
-            )
-          : yield* runFix(item, true);
+      let outcome = yield* runFix(item, true);
       if (item.fix === "retry-sync" && outcome.status === "fixed") {
         const after = yield* health.report;
         if (
           after.checks.some((check) =>
-            check.items.some(
-              (entry) => entry.key === item.key && isAutoFixable(entry, report.environmentId),
-            ),
+            check.items.some((entry) => entry.key === item.key && isAutoFixable(entry)),
           )
         ) {
           outcome = {
@@ -751,14 +661,14 @@ const make = Effect.gen(function* () {
           };
         }
       }
-      if (outcome.status !== "deferred") outcomes.push(outcome);
+      outcomes.push(outcome);
       state = recordHealthAutoFix(state, item.key, outcome);
       if (outcome.status === "fixed" || outcome.status === "resolved")
         yield* Effect.logInfo("Machine health fixed a problem automatically", {
           itemKey: item.key,
           message: outcome.message,
         });
-      else if (outcome.status !== "deferred")
+      else
         yield* Effect.logWarning("Machine health could not fix a problem automatically", {
           itemKey: item.key,
           message: outcome.message,
