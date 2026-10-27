@@ -999,7 +999,7 @@ function MarkdownMermaidCodeBlock({
       }
     >
       {showDiagram ? (
-        <RenderErrorBoundary resetKeys={[code, theme]} fallback={children}>
+        <RenderErrorBoundary resetKeys={[code]} fallback={children}>
           <Suspense
             fallback={
               <div className="flex min-h-36 items-center justify-center text-xs text-muted-foreground">
@@ -1007,7 +1007,7 @@ function MarkdownMermaidCodeBlock({
               </div>
             }
           >
-            <MermaidDiagram source={code} theme={theme} onExpand={onExpand} />
+            <MermaidDiagram source={code} onExpand={onExpand} />
           </Suspense>
           {/* Find counts the source; a selected match here switches to it. */}
           {searching ? (
