@@ -9,7 +9,7 @@ import {
 import { NodeCrypto } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@cogenly/shared/HostProcess";
-import { describe, expect, it } from "@effect/vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "@effect/vitest";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -277,14 +277,19 @@ const rig = Effect.gen(function* () {
       );
     }).pipe(Effect.scoped);
   const installed = yield* extensions.install({ source: folder });
-  yield* extensions.subscribe({}).pipe(
+  const settled = yield* extensions.subscribe({}).pipe(
     Stream.filter((list) =>
       list.extensions.some(
-        (entry) => entry.id === installed.extension.id && entry.state === "loaded",
+        (entry) => entry.id === installed.extension.id && entry.state !== "installing",
       ),
     ),
     Stream.take(1),
-    Stream.runDrain,
+    Stream.runCollect,
+  );
+  expect(settled[0]?.extensions.find((entry) => entry.id === installed.extension.id)).toMatchObject(
+    {
+      state: "loaded",
+    },
   );
   const host = yield* invoke<PreviewAutomationStatus>("open", undefined, {
     url,
@@ -327,6 +332,12 @@ const provide = <A, E>(
   );
 
 describe.skipIf(!chrome)("real Chrome extension surfaces", () => {
+  beforeAll(() => {
+    // CI blocks Chromium's user-namespace sandbox; these tests cover extension surfaces.
+    vi.stubEnv("COGENLY_SERVER_BROWSER_SANDBOX", "0");
+  });
+  afterAll(() => vi.unstubAllEnvs());
+
   it.live("reveals new and reused MCP surfaces while toolbar opens remain unrevealed", () =>
     provide(
       Effect.gen(function* () {
@@ -467,10 +478,11 @@ describe.skipIf(!chrome)("real Chrome extension surfaces", () => {
         yield* r.awaitPreferredSize(popup.surfaceTabId!, 320, 180);
         expect(
           yield* r.invoke("evaluate", popup.surfaceTabId, {
-            expression:
-              "chrome.tabs.query({active:true,lastFocusedWindow:true}).then(([tab])=>tab.index)",
+            // Headless Linux has no focused native window. Match the active host
+            // by its URL while retaining the duplicate-tab index assertion.
+            expression: `chrome.tabs.query({active:true}).then(tabs=>tabs.filter(tab=>tab.url===${JSON.stringify(r.url)}).map(tab=>tab.index))`,
           }),
-        ).toBe(1);
+        ).toEqual([1]);
         expect(
           JSON.stringify(yield* r.invoke("snapshot", popup.surfaceTabId, { output: "full" })),
         ).toContain("Test content script");
