@@ -86,6 +86,21 @@ const commitment = Effect.fnUntraced(function* (
 });
 
 describe("global search", () => {
+  it.effect("omits subagent thread titles and bodies from palette results", () =>
+    Effect.gen(function* () {
+      yield* seed;
+      yield* thread("parent", repo, "Quartz parent");
+      yield* thread("child", repo, "Quartz child", {
+        lineage: { relationshipToParent: "subagent" },
+      });
+      yield* message("child-message", "child", "quartz");
+      const search = yield* Search.GlobalSearch;
+      expect((yield* search.query({ query: "quartz" })).results.map((r) => r.id)).toEqual([
+        "parent",
+      ]);
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect(
     "reads historical explicit filing ahead of repository defaults while refusing new mismatches",
     () =>

@@ -21,6 +21,8 @@ import { normalizeSearchText } from "../lib/utils";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { type Project, type SidebarThreadSummary, type Thread } from "../types";
 
+import { isSidebarSubagentThread } from "./Sidebar.logic";
+
 export const RECENT_THREAD_LIMIT = 12;
 export const ITEM_ICON_CLASS = "size-4 text-icon-muted";
 export const ADDON_ICON_CLASS = "size-4";
@@ -335,6 +337,7 @@ export type BuildThreadActionItemsThread = Pick<
   | "createdAt"
   | "environmentId"
   | "id"
+  | "lineage"
   | "modelSelection"
   | "projectId"
   | "runtime"
@@ -363,7 +366,9 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
   limit?: number;
 }): CommandPaletteActionItem[] {
   const sortedThreads = sortThreads(
-    input.threads.filter((thread) => thread.archivedAt === null),
+    input.threads.filter(
+      (thread) => thread.archivedAt === null && !isSidebarSubagentThread(thread),
+    ),
     input.sortOrder,
   );
   const visibleThreads =
@@ -423,6 +428,15 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
   });
 }
 
+const ALPHANUMERIC = /[\p{L}\p{N}]/u;
+
+function startsWord(field: string, token: string): boolean {
+  for (let index = field.indexOf(token); index !== -1; index = field.indexOf(token, index + 1)) {
+    if (index === 0 || !ALPHANUMERIC.test(field[index - 1]!)) return true;
+  }
+  return false;
+}
+
 function rankSearchFieldMatch(
   field: string,
   normalizedQuery: string,
@@ -441,7 +455,7 @@ function rankSearchFieldMatch(
   if (normalizedField.startsWith(normalizedQuery)) {
     return 2;
   }
-  if (normalizedField.includes(normalizedQuery)) {
+  if (queryTokens.every((token) => startsWord(normalizedField, token))) {
     return 1;
   }
   return 0;
@@ -452,23 +466,17 @@ function rankCommandPaletteItemMatch(
   normalizedQuery: string,
   queryTokens: ReadonlyArray<string>,
 ): number {
-  const terms = item.searchTerms.filter((term) => term.length > 0);
-  if (terms.length === 0) {
-    return 0;
-  }
-
-  for (const [index, field] of terms.entries()) {
+  let best = 0;
+  for (const [index, field] of item.searchTerms.filter((term) => term.length > 0).entries()) {
     const fieldRank = rankSearchFieldMatch(field, normalizedQuery, queryTokens);
-    if (fieldRank !== Number.NEGATIVE_INFINITY) {
-      if (index === 0 && item.searchRecency !== undefined) {
-        // All non-exact thread title matches share a tier so recency breaks the tie.
-        return 1_000 + Number(fieldRank === 3);
-      }
-      return 1_000 - index * 100 + fieldRank;
-    }
+    if (fieldRank === Number.NEGATIVE_INFINITY) continue;
+    const fieldScore =
+      index === 0 && item.searchRecency !== undefined
+        ? 1_000 + Number(fieldRank === 3)
+        : 1_000 - index * 100 + fieldRank;
+    best = Math.max(best, (fieldRank > 0 ? 10_000 : 0) + fieldScore);
   }
-
-  return 0;
+  return best;
 }
 
 export function filterCommandPaletteGroups(input: {
