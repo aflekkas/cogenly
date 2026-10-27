@@ -327,8 +327,15 @@ export const ThreadHandoffCommit = makePeerChannel({
     /**
      * How many of the thread's events the owner replicates. The target
      * refuses as behind with fewer, so a gap in its copy never becomes the log.
+     * Omitted when replication may have skipped superseded updates, which
+     * builds without `entityEventCount` cannot account for.
      */
     eventCount: Schema.optional(Counter),
+    /**
+     * The same check counting each coalesced streaming entity once, so it
+     * matches a copy that received only the latest of its updates.
+     */
+    entityEventCount: Schema.optional(Counter),
     /** Attachment ids the target copies before it accepts, since the owner may go offline. */
     attachmentIds: Schema.Array(ThreadAttachmentFile.fields.name),
   }),

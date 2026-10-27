@@ -3,6 +3,7 @@ import {
   CommandId,
   EventId,
   GitManagerError,
+  MessageId,
   ThreadHandoffCommit,
   type OrchestrationV2DomainEvent,
   ProjectId,
@@ -520,6 +521,38 @@ describe("handoff failure regressions", () => {
         expect(result.skipped[0]?.reason).toBe("behind");
         expect((yield* hub.replication.owner(threadId))?.local).toBe(false);
         expect((yield* laptop.replication.owner(threadId))?.handoff).toBeNull();
+      }).pipe(Effect.scoped),
+    30000,
+  );
+
+  it.live(
+    "a replica that received only the latest streaming updates takes the thread",
+    () =>
+      Effect.gen(function* () {
+        const { hub, laptop, at } = yield* start("coalesced");
+        yield* addProject(laptop, "/laptop/racing");
+        yield* addProject(hub, "/hub/racing");
+        const streamed = (step: number) => {
+          const event = userMessage(`event:stream:${step}`, at, "x".repeat(step));
+          return {
+            ...event,
+            payload: { ...event.payload, id: MessageId.make("message:stream") },
+          } as OrchestrationV2DomainEvent;
+        };
+        yield* laptop.sink.write({
+          events: [
+            threadCreated("event:created", at),
+            ...Array.from({ length: 20 }, (_, i) => streamed(i + 1)),
+          ],
+        });
+        yield* laptop.sync.sync(hub.environmentId);
+        expect(yield* hub.replication.eventCount(threadId)).toBe(3);
+        expect(
+          yield* laptop.transfer.move({ threadIds: [threadId], target: hub.environmentId }),
+        ).toEqual({ moved: [threadId], skipped: [] });
+        expect(
+          (yield* hub.projections.getThreadProjection(threadId)).messages.map((x) => x.text),
+        ).toEqual(["x".repeat(20)]);
       }).pipe(Effect.scoped),
     30000,
   );

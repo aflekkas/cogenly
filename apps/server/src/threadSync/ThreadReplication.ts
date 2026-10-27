@@ -5,6 +5,12 @@ import { isMisroutedLegacyRecoveryEvent } from "@cogenly/shared/legacyRecoveryEv
 import { projectReplicaFilings } from "./replicaFiling.ts";
 import { normalizeLegacyProviderThread } from "@cogenly/shared/legacyProviderThreadIdentity";
 import { normalizeLegacySession } from "./legacySessionIdentity.ts";
+import {
+  COALESCED_EVENT_TYPES,
+  PRESERVED_EVENT_FIELDS,
+  replicationEntityKey,
+  supersededReplicationEvents,
+} from "./replicationCoalescing.ts";
 /**
  * ThreadReplication: copies thread event logs between paired machines. Each
  * thread has one owner, the only machine that appends its events; others
@@ -186,6 +192,11 @@ export class ThreadReplication extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<{ readonly owner: EnvironmentId; readonly threads: number }>>;
     /** Events of the thread that replicate, for the target to confirm it has them all. */
     readonly eventCount: (threadId: ThreadId) => Effect.Effect<number>;
+    /**
+     * eventCount with each coalesced entity counted once, so it matches on any
+     * machine holding the replicated subsequence (see replicationCoalescing.ts).
+     */
+    readonly entityEventCount: (threadId: ThreadId) => Effect.Effect<number>;
     /** This machine's checkout of the project a replica runs in on its owner. */
     readonly sourceProject: (threadId: ThreadId) => Effect.Effect<{
       readonly source: ThreadReplicaSource | null;
@@ -463,20 +474,84 @@ const make = Effect.gen(function* () {
       const ownerFilter = localOnly
         ? sql`NOT EXISTS (SELECT 1 FROM thread_owners o WHERE o.thread_id = e.stream_id AND o.local = 0)`
         : sql`NOT EXISTS (SELECT 1 FROM thread_owners o WHERE o.thread_id = e.stream_id AND o.owner_env = ${target})`;
-      const listed = yield* sql<{
+      // Look past the batch so updates a later one replaces can be skipped.
+      // Only sizes, ids and a few field types are read for the lookahead.
+      const lookahead = Math.max(256, limit * 8);
+      const examined = yield* sql<{
         readonly sequence: number;
         readonly stream_id: string;
+        readonly event_type: string;
         readonly bytes: number;
+        readonly retained: number;
+        readonly entity_id: string | null;
+        readonly field_types: string | null;
       }>`
-      SELECT e.sequence, e.stream_id, max(length(CAST(e.payload_json AS BLOB)) + 2048, COALESCE(length(CAST(r.event_json AS BLOB)), 0)) AS bytes
+      SELECT e.sequence, e.stream_id, e.event_type,
+        max(length(CAST(e.payload_json AS BLOB)) + 2048, COALESCE(length(CAST(r.event_json AS BLOB)), 0)) AS bytes,
+        r.event_id IS NOT NULL AS retained,
+        CASE WHEN e.event_type IN ${sql.in(COALESCED_EVENT_TYPES)}
+          THEN json_extract(e.payload_json, '$.id') END AS entity_id,
+        CASE WHEN e.event_type IN ${sql.in(COALESCED_EVENT_TYPES)}
+          THEN (SELECT json_group_object(key, type) FROM json_each(e.payload_json)
+            WHERE key IN ${sql.in(PRESERVED_EVENT_FIELDS)}) END AS field_types
       FROM orchestration_events e LEFT JOIN thread_replication_raw_events r ON r.event_id = e.event_id
       WHERE e.sequence > ${after.events} AND e.sequence <= ${latest.events}
         AND e.aggregate_kind = 'thread' AND e.application_event_version = 2
         AND ${ownerFilter}
         AND ${threadId === undefined ? sql`TRUE` : sql`e.stream_id = ${threadId}`}
-      ORDER BY e.sequence LIMIT ${limit}`;
-      // Fewer candidates than the limit: everything up to `latest` was examined.
-      let eventsCursor = listed.length < limit ? latest.events : listed.at(-1)!.sequence;
+      ORDER BY e.sequence LIMIT ${lookahead}`;
+      // Entities the peer has from just before the cursor: their first event
+      // here is not a first sight. Older ones are kept, which is only less saving.
+      const seen =
+        after.events === 0
+          ? []
+          : yield* sql<{
+              readonly stream_id: string;
+              readonly event_type: string;
+              readonly entity_id: unknown;
+            }>`
+      SELECT DISTINCT e.stream_id, e.event_type, json_extract(e.payload_json, '$.id') AS entity_id
+      FROM orchestration_events e
+      WHERE e.sequence > ${Math.max(0, after.events - lookahead)} AND e.sequence <= ${after.events}
+        AND e.aggregate_kind = 'thread' AND e.application_event_version = 2
+        AND e.event_type IN ${sql.in(COALESCED_EVENT_TYPES)}
+        AND ${ownerFilter}
+        AND ${threadId === undefined ? sql`TRUE` : sql`e.stream_id = ${threadId}`}`;
+      const superseded = supersededReplicationEvents(
+        examined.map((row) => ({
+          sequence: row.sequence,
+          threadId: row.stream_id,
+          type: row.event_type,
+          entityId: typeof row.entity_id === "string" ? row.entity_id : null,
+          fieldTypes: (row.field_types === null
+            ? {}
+            : Option.getOrElse(decodeJsonOption(row.field_types), () => ({}))) as Record<
+            string,
+            string
+          >,
+          retained: row.retained === 1,
+        })),
+        new Set(
+          seen.flatMap((row) =>
+            typeof row.entity_id === "string"
+              ? [replicationEntityKey(row.stream_id, row.event_type, row.entity_id)]
+              : [],
+          ),
+        ),
+      );
+      const listed = examined.filter((row) => !superseded.has(row.sequence)).slice(0, limit);
+      // A short lookahead examined everything up to `latest`. Otherwise stop
+      // before the first event left unsent; skipped ones before it are done.
+      const unsent = (at: number) =>
+        examined.find((row) => row.sequence > at && !superseded.has(row.sequence));
+      const cursorBefore = (at: number) => {
+        const next = unsent(at);
+        return next !== undefined
+          ? next.sequence - 1
+          : examined.length < lookahead
+            ? latest.events
+            : examined.at(-1)!.sequence;
+      };
       // Size the batch from stored sizes before reading, so a run of large
       // events is never loaded only to be cut; the first always travels.
       const budget = 64 * 1024 - 4096;
@@ -486,8 +561,8 @@ const make = Effect.gen(function* () {
         planned += listed[take]!.bytes;
         take++;
       }
-      if (take < listed.length) eventsCursor = listed[take]!.sequence - 1;
       const candidates = listed.slice(0, take);
+      let eventsCursor = cursorBefore(candidates.at(-1)?.sequence ?? after.events);
       const events: Array<Schema.Json> = [];
       const eventThreads: Array<ThreadId> = [];
       const eventSequences: Array<number> = [];
@@ -1556,6 +1631,16 @@ const make = Effect.gen(function* () {
       Effect.orDie,
     );
 
+  const entityEventCount: ThreadReplication["Service"]["entityEventCount"] = (threadId) =>
+    sql<{ readonly count: number }>`SELECT COUNT(DISTINCT CASE
+        WHEN event_type IN ${sql.in(COALESCED_EVENT_TYPES)} AND json_type(payload_json, '$.id') = 'text'
+        THEN json_array(event_type, json_extract(payload_json, '$.id')) ELSE event_id END) AS count
+      FROM orchestration_events
+      WHERE stream_id = ${threadId} AND aggregate_kind = 'thread' AND application_event_version = 2`.pipe(
+      Effect.map((rows) => rows[0]?.count ?? 0),
+      Effect.orDie,
+    );
+
   const sourceProject: ThreadReplication["Service"]["sourceProject"] = (threadId) =>
     Effect.gen(function* () {
       const row = (yield* ownerRows([threadId])).get(threadId);
@@ -1592,6 +1677,7 @@ const make = Effect.gen(function* () {
     claimedBy,
     unpairedOwners,
     eventCount,
+    entityEventCount,
     sourceProject,
     projectSource: (projectId) => projectSourceOf(projectId).pipe(Effect.orDie),
     localProject: (source) => localProject(source).pipe(Effect.orDie),

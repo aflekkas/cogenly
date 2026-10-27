@@ -23,6 +23,12 @@ they skip T3 imports (`ReplayedCommandIds.ts`), so a replica never starts
 work. Batches follow the sender's own sequence with durable per-peer cursors,
 like shared state, and stay under 256 KiB.
 
+A batch skips an update event that a later one for the same entity replaces
+(`replicationCoalescing.ts`), so a replica's log is a subsequence of the
+owner's that projects to the same state. Each entity's first event still
+travels, because rows and turn-item positions are allocated on first sight.
+Never count or compare a replica's events against its owner's one to one.
+
 Metadata that is not an event (owner, epoch, filing, the project's portable
 identity) replicates through `thread_replication_meta_log`, filled by triggers.
 Project ids are machine-local: a receiver maps the owner's checkout to its own
@@ -73,7 +79,10 @@ A move is a two-phase handoff driven by the current owner S:
 1. S checks that the thread is idle (no run, pending request, subagent or
    outbox effect) and fences it in the same transaction (`handoff_json`).
 2. S pushes the thread's events and idempotency receipts, then asks the target T
-   to commit with its last event id, event count and attachment ids. Receipt
+   to commit with its last event id, event counts and attachment ids. The
+   entity count, which counts each coalesced entity once, survives skipped
+   updates; the exact count is sent only when nothing could be skipped, for
+   older targets. Receipt
    transfer has its own capability check; an older target refuses the move.
 3. T refuses if it has a gap, unreadable events or lacks the repository.
    Otherwise it copies the attachments and atomically takes ownership at epoch + 1

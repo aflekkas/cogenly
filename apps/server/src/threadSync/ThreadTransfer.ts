@@ -323,6 +323,8 @@ const make = Effect.gen(function* () {
     yield* sendThread(threadId, hopTo(yield* topology, target));
     const last = yield* lastEvent(threadId);
     yield* copyReceipts(threadId, target, epoch);
+    const eventCount = yield* replication.eventCount(threadId);
+    const entityEventCount = yield* replication.entityEventCount(threadId);
     return yield* routing.callMachine(
       target,
       ThreadHandoffCommit,
@@ -333,7 +335,10 @@ const make = Effect.gen(function* () {
         epoch,
         repository,
         lastEventId: last === undefined ? null : EventId.make(last.event_id),
-        eventCount: yield* replication.eventCount(threadId),
+        // Equal counts mean no update was superseded, so an older target's
+        // exact count still holds; otherwise only the entity count does.
+        ...(eventCount === entityEventCount ? { eventCount } : {}),
+        entityEventCount,
         attachmentIds: yield* threadAttachmentIds(threadId),
       },
       "10 minutes",
@@ -976,9 +981,15 @@ const make = Effect.gen(function* () {
         }
         // The last event alone misses a gap, such as an event this machine
         // could not apply; taking the thread then would make the gap its log.
+        // Replication skips superseded updates, so this copy may hold fewer
+        // events than the owner but never fewer entities. An older owner
+        // sends only eventCount, and may hold fewer events than this copy when
+        // it received them from a newer machine.
         if (
-          payload.eventCount !== undefined &&
-          (yield* replication.eventCount(payload.threadId)) !== payload.eventCount
+          payload.entityEventCount !== undefined
+            ? (yield* replication.entityEventCount(payload.threadId)) !== payload.entityEventCount
+            : payload.eventCount !== undefined &&
+              (yield* replication.eventCount(payload.threadId)) < payload.eventCount
         )
           return yield* behind;
         const held =

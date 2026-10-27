@@ -1,7 +1,11 @@
 import { describe, expect, it } from "@effect/vitest";
 import {
   EventId,
+  MessageId,
+  NodeId,
   ProjectLabelId,
+  ProviderThreadId,
+  ProviderTurnId,
   THREAD_REPLICATION_BATCH_BYTES,
   type OrchestrationV2DomainEvent,
   ThreadId,
@@ -71,6 +75,66 @@ it.live(
       yield* caller.routing.refreshDelegated(laptop.environmentId, threadId);
       expect((yield* caller.projections.getThreadProjection(threadId)).messages).toHaveLength(300);
     }),
+);
+
+it.live("streaming updates replicate as their latest state and project the same", () =>
+  Effect.gen(function* () {
+    const hub = yield* start("coalesce-hub", "cloud-server");
+    const laptop = yield* start("coalesce-laptop", "computer");
+    yield* pair(hub, laptop);
+    const at = yield* DateTime.now;
+    const streamed = (id: string, text: string) => {
+      const event = message(`event:${id}:${text.length}`, at, text);
+      return {
+        ...event,
+        payload: { ...event.payload, id: MessageId.make(`message:${id}`), streaming: true },
+      } as OrchestrationV2DomainEvent;
+    };
+    const turn = (step: number, usedTokens?: number): OrchestrationV2DomainEvent => ({
+      id: EventId.make(`event:turn:${step}`),
+      type: "provider-turn.updated",
+      threadId,
+      occurredAt: at,
+      payload: {
+        id: ProviderTurnId.make("provider-turn:coalesce"),
+        providerThreadId: ProviderThreadId.make("provider-thread:coalesce"),
+        nodeId: NodeId.make("node:coalesce"),
+        runAttemptId: null,
+        nativeTurnRef: null,
+        ordinal: 1,
+        status: "running",
+        startedAt: at,
+        completedAt: null,
+        ...(usedTokens === undefined
+          ? {}
+          : { tokenUsage: { usedTokens, updatedAt: DateTime.formatIso(at) } }),
+      },
+    });
+    // Two messages stream side by side, so batches cut through both chains.
+    const events: Array<OrchestrationV2DomainEvent> = [thread("event:created", at)];
+    for (let step = 1; step <= 120; step++) {
+      events.push(streamed("one", "a".repeat(step)), streamed("two", "b".repeat(step)));
+      // The last usage report arrives mid-stream; later snapshots omit it.
+      events.push(turn(step, step === 60 ? 600 : step === 30 ? 300 : undefined));
+    }
+    yield* laptop.sink.write({ events });
+    yield* laptop.sync.sync(hub.environmentId);
+
+    const owner = yield* laptop.projections.getThreadProjection(threadId);
+    const replica = yield* hub.projections.getThreadProjection(threadId);
+    expect(replica.messages).toEqual(owner.messages);
+    expect(replica.messages.map((entry) => entry.text.length)).toEqual([120, 120]);
+    expect(replica.providerTurns).toEqual(owner.providerTurns);
+    expect(replica.providerTurns[0]?.tokenUsage?.usedTokens).toBe(600);
+    expect(replica.thread.updatedAt).toEqual(owner.thread.updatedAt);
+    const sent = yield* hub.replication.eventCount(threadId);
+    expect(sent).toBeLessThan(events.length / 4);
+    expect(yield* laptop.replication.eventCount(threadId)).toBe(events.length);
+    // The count a handoff compares holds on both sides.
+    expect(yield* hub.replication.entityEventCount(threadId)).toBe(
+      yield* laptop.replication.entityEventCount(threadId),
+    );
+  }),
 );
 
 describe("thread replication across builds", () => {
