@@ -179,8 +179,16 @@ export const makePriorityLock = (burst = 8) => {
         else if (granted) releaseUnsafe();
       });
     });
-  return { take, release: Effect.sync(releaseUnsafe) };
+  return { take, release: Effect.sync(releaseUnsafe), releaseUnsafe };
 };
+
+/**
+ * Runs a callback once a worker connection has replied to every statement
+ * sent to it. A reader statement cannot be cancelled: an interrupted caller
+ * (a timed-out health probe, say) stops waiting, but the worker keeps running
+ * it, and anything sent next queues behind it unseen by the priority lock.
+ */
+const whenIdle = new WeakMap<Connection, (callback: () => void) => void>();
 
 export class UnsupportedNodeSqliteVersionError extends Schema.TaggedError<UnsupportedNodeSqliteVersionError>()(
   "UnsupportedNodeSqliteVersionError",
@@ -478,6 +486,10 @@ const makeWorker = Effect.fnUntraced(function* (
       number,
       { readonly endsTransaction: boolean; readonly resume: (reply: WorkerReply) => void }
     >();
+    const idle: Array<() => void> = [];
+    const settle = () => {
+      if (pending.size === 0) for (const callback of idle.splice(0)) callback();
+    };
     const stop = (message: string) => {
       if (stoppedMessage !== undefined) return;
       stoppedMessage = message;
@@ -497,6 +509,7 @@ const makeWorker = Effect.fnUntraced(function* (
         );
       }
       pending.clear();
+      settle();
     };
     worker.on("message", (reply: WorkerReply | WorkerStartup | { readonly type: "busy" }) => {
       if ("type" in reply && reply.type === "busy") {
@@ -514,6 +527,7 @@ const makeWorker = Effect.fnUntraced(function* (
       pending.delete(reply.id);
       if (pending.size === 0) worker.unref();
       request.resume(reply);
+      settle();
     });
     worker.on("error", (cause) =>
       stop(`Database ${writable ? "writer" : "reader"} failed: ${cause.message}`),
@@ -597,6 +611,10 @@ const makeWorker = Effect.fnUntraced(function* (
       executeStream(_sql, _params) {
         return Stream.die(new UnsupportedNodeSqliteOperationError());
       },
+    });
+    whenIdle.set(connection, (callback) => {
+      if (pending.size === 0) callback();
+      else idle.push(callback);
     });
     current = { worker, connection, started };
     return current;
@@ -1084,6 +1102,13 @@ const make = Effect.fn("makeWithDatabase")(function* (
       const start = clock.monotonicTimeNanosUnsafe();
       const interactive = Context.get(fiber.context, Interactive);
       if (interactive) pressure.interactiveAt = clock.currentTimeMillisUnsafe();
+      let leased: Connection | undefined;
+      // The lock passes on only once the connection has finished what it was sent.
+      const release = Effect.sync(() => {
+        const afterIdle = leased === undefined ? undefined : whenIdle.get(leased);
+        if (afterIdle === undefined) target.lock.releaseUnsafe();
+        else afterIdle(target.lock.releaseUnsafe);
+      });
       return Effect.flatMap(
         Effect.tap(restore(target.lock.take(interactive)), () => {
           const pending = fiber.getRef(TransactionAcquire);
@@ -1095,9 +1120,9 @@ const make = Effect.fn("makeWithDatabase")(function* (
             fiber.getRef(Statement.SpanPropagationEnabled)
           )
             annotateAcquired(fiber, sample);
-          return Scope.addFinalizer(scope, target.lock.release);
+          return Scope.addFinalizer(scope, release);
         }),
-        () => target.acquire,
+        () => Effect.map(target.acquire, (connection) => (leased = connection)),
       );
     }),
   );
