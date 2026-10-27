@@ -1014,6 +1014,14 @@ it.effect.each(smokeCases)(
         const payload = yield* decodeToolsListPayload(bodyText.match(/\{.*\}/s)![0]);
         const tools = payload.result.tools;
         const toolNames = tools.map((tool) => tool.name);
+        // Both ordinary and image-tool registrations advertise compact schemas.
+        for (const tool of tools) {
+          const schema = JSON.stringify(tool.inputSchema);
+          expect(schema, tool.name).not.toContain('"additionalProperties":true');
+          expect(schema, tool.name).not.toContain(String(Number.MAX_SAFE_INTEGER));
+          expect(schema, tool.name).not.toContain(String(Number.MIN_SAFE_INTEGER));
+        }
+
         expect(toolNames).toContain("worktree_handoff");
         expect(toolNames).toContain("worktree_status");
         // The worktree registration merges alongside the other toolkits rather
