@@ -32,11 +32,11 @@ export function SettingsGroup({
         boxed &&
           divided &&
           "[&>*+*]:border-t [&>*+*]:border-border/50 [&>[data-slot=settings-row]]:rounded-none",
-        // A collapsed `AnimatedHeight` row draws no separator of its own, and as
-        // the first row it leaves none on the row below it either.
+        // An empty or emptying `AnimatedHeight` row draws no separator of its
+        // own, and as the first row it leaves none on the row below it either.
         boxed &&
           divided &&
-          "[&>[data-slot=animated-height]:has(>:empty)]:border-t-transparent [&>[data-slot=animated-height]:first-child:has(>:empty)+*]:border-t-transparent",
+          "[&>[data-slot=animated-height][data-empty]]:border-t-transparent [&>[data-slot=animated-height]:first-child[data-empty]+*]:border-t-transparent",
         className,
       )}
     />

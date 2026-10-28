@@ -109,6 +109,7 @@ import {
   SettingsNumberField,
   SettingsRow,
   SettingsSection,
+  SettingsVersion,
 } from "./settingsLayout";
 import { Trash2Icon } from "lucide-react";
 import { searchableSetting } from "./settingsSearch";
@@ -214,7 +215,7 @@ function AboutVersionTitle() {
   return (
     <span className="inline-flex items-baseline gap-2">
       <span>Version</span>
-      <code className="text-2xs font-medium text-muted-foreground">{APP_VERSION}</code>
+      <SettingsVersion>{APP_VERSION}</SettingsVersion>
     </span>
   );
 }

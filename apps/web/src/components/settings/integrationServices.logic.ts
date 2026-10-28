@@ -11,6 +11,8 @@ import {
   type IntegrationTestResult,
 } from "@cogenly/contracts";
 
+import type { SettingsStatusTone } from "./SettingsStatus";
+
 const isOAuthFailure = Schema.is(IntegrationOAuthFailure);
 
 const REASON_TEXT: Readonly<Record<IntegrationError["reason"], string>> = {
@@ -66,7 +68,7 @@ export function testResultToolsText(result: IntegrationTestResult): string {
 }
 
 export interface IntegrationStatusView {
-  readonly tone: "success" | "error" | "warning" | "neutral";
+  readonly tone: SettingsStatusTone;
   readonly label: string;
   readonly reason: string | null;
   readonly toolCount: number | null;
@@ -164,7 +166,8 @@ export function integrationStatus(
       ...checked,
     };
   }
-  return { tone: "neutral", label: "Not checked", reason: null, toolCount: null };
+  // On but unknown: informational, so it never reads as Off.
+  return { tone: "info", label: "Not checked", reason: null, toolCount: null };
 }
 
 export function scopeLabel(

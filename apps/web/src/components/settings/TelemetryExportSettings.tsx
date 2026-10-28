@@ -32,7 +32,7 @@ function endpointStatus(
   check: EndpointCheck | undefined,
 ): { readonly label: string; readonly tone: SettingsStatusTone } {
   if (url === "") return { label: "Off", tone: "neutral" };
-  if (check?.url !== url) return { label: "Not checked", tone: "neutral" };
+  if (check?.url !== url) return { label: "Not checked", tone: "info" };
   const { result } = check;
   if (result === null) return { label: "Checking…", tone: "neutral" };
   switch (result._tag) {

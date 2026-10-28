@@ -16,9 +16,11 @@ export function settingsMotionTiming(duration: keyof typeof DURATION_FALLBACK_MS
   };
 }
 
-export function prefersReducedMotion(): boolean {
-  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-}
+/**
+ * Reduced motion from the OS setting or Appearance's Reduce motion, read when
+ * a scripted motion starts. Reduced keeps the opacity fade and drops height.
+ */
+export { readReducedMotion as prefersReducedMotion } from "../../appearancePreferences";
 
 /** False in environments without Web Animations (tests). */
 export function canAnimate(element: Element): boolean {

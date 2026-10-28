@@ -207,6 +207,40 @@ export function useSidebarLayout(): SidebarLayout {
 }
 
 const REDUCED_MOTION_QUERY = /prefers-reduced-motion\s*:\s*(reduce|no-preference)/i;
+const REDUCED_MOTION_MEDIA = "(prefers-reduced-motion: reduce)";
+/** The OS answer, unpatched once installAppearancePreferences has run. */
+let systemMatchMedia: ((query: string) => MediaQueryList) | undefined;
+
+function systemReducedMotionList(): MediaQueryList | null {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return null;
+  return (systemMatchMedia ?? window.matchMedia.bind(window))(REDUCED_MOTION_MEDIA);
+}
+
+/** Reduced motion from the OS setting or the app's own Reduce motion preference. */
+export function readReducedMotion(): boolean {
+  return (
+    readAppearancePreferences().motion === "reduce" || systemReducedMotionList()?.matches === true
+  );
+}
+
+function subscribeReducedMotion(listener: () => void) {
+  const unsubscribe = subscribe(listener);
+  const system = systemReducedMotionList();
+  system?.addEventListener("change", listener);
+  return () => {
+    unsubscribe();
+    system?.removeEventListener("change", listener);
+  };
+}
+
+/**
+ * `readReducedMotion`, live: re-renders when either the OS setting or the
+ * Appearance toggle changes. For motion chosen while rendering; imperative
+ * motion reads `readReducedMotion()` when it starts.
+ */
+export function useReducedMotion(): boolean {
+  return useSyncExternalStore(subscribeReducedMotion, readReducedMotion, () => false);
+}
 
 /**
  * Applies the stored preferences and makes script motion checks honor the
@@ -219,6 +253,7 @@ export function installAppearancePreferences() {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
   applyToDocument(readAppearancePreferences());
   const nativeMatchMedia = window.matchMedia.bind(window);
+  systemMatchMedia = nativeMatchMedia;
   window.matchMedia = (query: string) => {
     const match = REDUCED_MOTION_QUERY.exec(query);
     if (match && readAppearancePreferences().motion === "reduce") {

@@ -4,7 +4,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { ChevronRightIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
-import { useMediaQuery } from "~/hooks/useMediaQuery";
+import { useReducedMotion } from "~/appearancePreferences";
 import { cn } from "~/lib/utils";
 import {
   disclosureDuration,
@@ -113,7 +113,6 @@ export function DisclosureTrigger({
   });
 }
 
-const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 /** Longest disclosure motion (--motion-duration-base); a close that never fires transitionend still unmounts after it. */
 const DISCLOSURE_MOTION_MS = 220;
 
@@ -143,7 +142,7 @@ export function DisclosurePanel({
   onExitComplete?: (() => void) | undefined;
   children: ReactNode;
 }) {
-  const reducedMotion = useMediaQuery(REDUCED_MOTION);
+  const reducedMotion = useReducedMotion();
   const [state, setState] = useState(() => initialDisclosurePanelState(open, appear));
   const held = useLastPresent(open ? children : null);
   if (state.open !== open) setState(reconcileDisclosurePanel(state, open));

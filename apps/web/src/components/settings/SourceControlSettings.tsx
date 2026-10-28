@@ -46,6 +46,7 @@ import {
   SettingsRowContent,
   SettingsSearchTarget,
   SettingsSection,
+  SettingsVersion,
   useSearchTargetFold,
 } from "./settingsLayout";
 import { SettingsStatusBadge, SettingsStatusText, type SettingsStatusTone } from "./SettingsStatus";
@@ -254,9 +255,7 @@ function DiscoveryItemRow({
       }
       titleActions={
         <>
-          {version ? (
-            <code className="min-w-0 truncate text-xs text-muted-foreground">{version}</code>
-          ) : null}
+          {version ? <SettingsVersion>{version}</SettingsVersion> : null}
           {authStatus?.badge ? (
             <SettingsStatusBadge tone={authStatus.badge}>{authStatus.label}</SettingsStatusBadge>
           ) : null}

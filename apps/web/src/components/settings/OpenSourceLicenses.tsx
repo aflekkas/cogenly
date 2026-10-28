@@ -19,6 +19,7 @@ import {
   SettingsRow,
   SettingsSection,
   SettingsToolbar,
+  SettingsVersion,
 } from "./settingsLayout";
 
 type LicenseManifestState =
@@ -71,11 +72,7 @@ function LicenseNoticeRow({
       <SettingsDenseRow
         disclosure={{ open, onOpenChange }}
         title={entry.name}
-        titleActions={
-          entry.version ? (
-            <code className="text-xs text-muted-foreground">{entry.version}</code>
-          ) : null
-        }
+        titleActions={entry.version ? <SettingsVersion>{entry.version}</SettingsVersion> : null}
         meta={`${entry.license} · ${formatLicenseBundles(entry.bundles)}`}
         control={
           entry.sourceUrl ? (

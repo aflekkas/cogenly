@@ -45,6 +45,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useOptionalSettingsScope } from "./SettingsScopeContext";
 import { MachineScopeMenu, SettingsScopeSentence } from "./SettingsScopeSentence";
 import { selectMachineLocalSettingsTargets } from "./scopedSettings";
+import { prefersReducedMotion } from "./settingsMotion";
 import { compactPathHint } from "./settingsText.logic";
 
 const EMPTY_SETTING_KEYS: readonly (keyof ServerSettings)[] = [];
@@ -87,7 +88,7 @@ function SettingsSearchTargetProvider({
 }
 
 function scrollAndFocusSettingsTarget(target: HTMLElement, highlight = true): void {
-  const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reducedMotion = prefersReducedMotion();
   const markedScrollTarget =
     typeof target.querySelector === "function"
       ? target.querySelector<HTMLElement>(":scope > [data-settings-scroll-target]")
@@ -99,12 +100,12 @@ function scrollAndFocusSettingsTarget(target: HTMLElement, highlight = true): vo
       : target);
 
   scrollTarget.scrollIntoView({
-    behavior: prefersReducedMotion ? "auto" : "smooth",
+    behavior: reducedMotion ? "auto" : "smooth",
     block: "center",
   });
   target.focus({ preventScroll: true });
   target.classList.remove("settings-search-target-pulse");
-  if (!highlight || prefersReducedMotion) return;
+  if (!highlight || reducedMotion) return;
   void target.offsetWidth;
   target.classList.add("settings-search-target-pulse");
   // The class also suppresses the focus outline (the pulse is the destination
@@ -467,6 +468,14 @@ export function SettingsPageMessage({ children }: { children: ReactNode }) {
       {children}
     </p>
   );
+}
+
+/**
+ * A version number beside a title (the app, a provider, a CLI, a package):
+ * 12px monospace in the meta color. A long one truncates before the title does.
+ */
+export function SettingsVersion({ children }: { children: ReactNode }) {
+  return <code className="min-w-0 truncate text-xs text-muted-foreground">{children}</code>;
 }
 
 /**

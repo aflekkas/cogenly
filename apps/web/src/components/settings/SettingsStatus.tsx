@@ -10,8 +10,9 @@ import { Badge } from "../ui/badge";
  * - `success`: online, connected, passing, signed in.
  * - `warning`: needs attention, expiring, partly working.
  * - `error`: failing, disconnected by an error, blocked.
- * - `info`: a neutral fact worth noticing (default, merges into).
- * - `neutral`: off, offline, disabled, not checked yet.
+ * - `info`: a neutral fact worth noticing (default, merges into), or
+ *   something that is on but not checked yet.
+ * - `neutral`: off, offline, disabled.
  */
 export type SettingsStatusTone = "success" | "warning" | "error" | "info" | "neutral";
 

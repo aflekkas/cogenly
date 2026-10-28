@@ -1,10 +1,35 @@
-import { describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   appearanceRootAttributes,
   DEFAULT_APPEARANCE_PREFERENCES,
   parseAppearancePreferences,
+  readReducedMotion,
 } from "./appearancePreferences";
+
+describe("readReducedMotion", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const stubWindow = (motion: "system" | "reduce", systemReduces: boolean) =>
+    vi.stubGlobal("window", {
+      localStorage: { getItem: () => JSON.stringify({ motion }) },
+      matchMedia: () => ({ matches: systemReduces }),
+    });
+
+  it("follows the app's Reduce motion while the OS asks for full motion", () => {
+    stubWindow("reduce", false);
+    expect(readReducedMotion()).toBe(true);
+  });
+
+  it("follows the OS setting when the app follows the system", () => {
+    stubWindow("system", true);
+    expect(readReducedMotion()).toBe(true);
+    stubWindow("system", false);
+    expect(readReducedMotion()).toBe(false);
+  });
+});
 
 describe("parseAppearancePreferences", () => {
   it("defaults when nothing is stored or the value is not JSON", () => {

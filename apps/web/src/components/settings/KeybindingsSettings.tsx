@@ -31,6 +31,7 @@ import {
   squashAtomCommandFailure,
 } from "@cogenly/client-runtime/state/runtime";
 
+import { requestConfirmDialog } from "../../confirmDialog";
 import { isElectron } from "../../env";
 import { formatShortcutLabel } from "../../keybindings";
 import { cn } from "../../lib/utils";
@@ -1292,8 +1293,15 @@ export function KeybindingsSettingsPanel() {
         )
       )
         return;
-      setSavingCommand(row.command);
       void (async () => {
+        const message = `Remove ${formatShortcutLabel(row.binding.shortcut)} for ${row.label}?${
+          connectedEnvironments.length > 1 ? "\nIt is removed on every connected machine." : ""
+        }`;
+        const confirmed =
+          (await requestConfirmDialog(message, { variant: "destructive" })) ??
+          window.confirm(message);
+        if (!confirmed) return;
+        setSavingCommand(row.command);
         const results = await Promise.all(
           connectedEnvironments.map((target) =>
             removeKeybindingMutation({

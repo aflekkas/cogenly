@@ -65,7 +65,7 @@ export function BranchNamingSettings() {
           </SettingsField>
         }
       />
-      {/* The mode's own row glides in and out instead of mounting with a jump. */}
+      {/* Each mode's own row closes as the next one opens, instead of swapping with a jump. */}
       <AnimatedHeight>
         {settings.branchNamingMode === "static" ? (
           <SettingsRow
@@ -107,6 +107,8 @@ export function BranchNamingSettings() {
             }
           />
         ) : null}
+      </AnimatedHeight>
+      <AnimatedHeight>
         {settings.branchNamingMode === "custom" ? (
           <SettingsRow
             serverScoped

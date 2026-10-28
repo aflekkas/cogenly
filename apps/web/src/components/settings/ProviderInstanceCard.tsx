@@ -57,6 +57,7 @@ import {
   SettingsField,
   SettingsRow,
   SettingsSection,
+  SettingsVersion,
 } from "./settingsLayout";
 import { SettingsGroup } from "./SettingsGroup";
 import { SettingsStatusBadge, SettingsStatusDot, type SettingsStatusTone } from "./SettingsStatus";
@@ -754,9 +755,7 @@ export function ProviderInstanceCard({
     />
   );
 
-  const versionCodeNode = versionLabel ? (
-    <code className="text-xs text-muted-foreground">{versionLabel}</code>
-  ) : null;
+  const versionCodeNode = versionLabel ? <SettingsVersion>{versionLabel}</SettingsVersion> : null;
 
   // Every status line leads with the shared settings tone dot, so providers
   // read like integrations and machines.
@@ -920,9 +919,7 @@ export function ProviderInstanceCard({
             <span className="max-w-full shrink-0 truncate text-sm font-medium text-foreground">
               {displayName}
             </span>
-            {versionLabel ? (
-              <code className="min-w-0 truncate text-xs text-muted-foreground">{versionLabel}</code>
-            ) : null}
+            {versionCodeNode}
             {versionAdvisoryNode}
           </>
         }
