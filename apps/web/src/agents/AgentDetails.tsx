@@ -214,7 +214,7 @@ export function InlineEditor({
         <Button type="button" size="xs" variant="ghost" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" size="xs" disabled={!canSave}>
+        <Button type="submit" size="xs" disabled={!canSave} aria-busy={pending || undefined}>
           {saveLabel}
         </Button>
       </div>

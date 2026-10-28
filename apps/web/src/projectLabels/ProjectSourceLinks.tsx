@@ -76,7 +76,7 @@ export function ProjectOwnerSuggestion({
   return (
     <AnimatedHeight>
       {owner === undefined ? null : (
-        <div className="flex flex-wrap items-center gap-2 py-1 text-xs text-muted-foreground reveal-motion">
+        <div className="flex flex-wrap items-center gap-2 py-1 text-xs text-muted-foreground">
           <GitHubIcon aria-hidden />
           <span>Link to {owner}?</span>
           <Button

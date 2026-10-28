@@ -124,7 +124,7 @@ function TelemetryExportForm() {
     <SettingsSection
       title="OpenTelemetry export"
       id="telemetry-export"
-      footer="Sends traces, metrics, and logs to an OTLP HTTP receiver. Changes apply after a server restart, and environment variables override them."
+      footer="Sends traces, metrics and logs to an OTLP HTTP receiver. Changes apply after a server restart, and environment variables override them."
     >
       {/* The rows sit inside the form, so it draws the card's row separators. */}
       <form

@@ -679,13 +679,20 @@ export function integrationsCheck(input: {
       );
     }
   }
-  return check(
-    "integrations",
-    items.length === 0
-      ? `${plural(enabled.length, "integration")} working`
-      : `${items.length} of ${plural(enabled.length, "integration")} need attention`,
-    items,
-  );
+  return check("integrations", integrationsSummary(enabled.length, items), items);
+}
+
+/** The check's line in the badge's vocabulary: failing for errors, needs attention for sign-ins. */
+function integrationsSummary(enabled: number, items: ReadonlyArray<MachineHealthItem>): string {
+  const failing = items.filter((entry) => entry.status === "fail").length;
+  const warning = items.length - failing;
+  const needs = (count: number) => (count === 1 ? "needs" : "need");
+  if (failing > 0 && warning > 0)
+    return `${failing} failing, ${warning} ${needs(warning)} attention`;
+  const of = `of ${plural(enabled, "integration")}`;
+  if (failing > 0) return `${failing} ${of} ${failing === 1 ? "is" : "are"} failing`;
+  if (warning > 0) return `${warning} ${of} ${needs(warning)} attention`;
+  return `${plural(enabled, "integration")} working`;
 }
 
 // ---------------------------------------------------------------------------

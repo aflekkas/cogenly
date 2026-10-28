@@ -174,7 +174,7 @@ const BACKGROUND_ACTIVITY_PROFILE_OPTION_LABELS: Record<BackgroundActivityProfil
 };
 
 const BACKGROUND_ACTIVITY_PROFILE_DESCRIPTIONS: Record<BackgroundActivityProfile, string> = {
-  balanced: "Pauses probes for idle clients, locked hosts, or low power mode.",
+  balanced: "Pauses probes for idle clients, locked hosts or low power mode.",
   performance: "Allows scoped background probes while any subscribed client remains connected.",
   "battery-saver": "Also pauses background probes when the host or client is on battery.",
 };
@@ -952,7 +952,7 @@ export function AppearanceSettingsPanel() {
       <SettingsSection id="appearance" title="Theme">
         <SettingsRow
           {...searchableSetting("color-scheme")}
-          description="Light, dark, or match your system."
+          description="Light, dark or match your system."
           resetAction={
             appearanceMode !== DEFAULT_APPEARANCE_MODE ? (
               <SettingResetButton

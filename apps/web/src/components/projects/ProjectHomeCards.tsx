@@ -352,7 +352,7 @@ export function SourcesCard(props: {
       })}
       <AnimatedHeight>
         {linking ? (
-          <div className="reveal-motion px-1 pt-1 pb-1">
+          <div className="p-1">
             <ProjectSourceLinkField
               environmentId={environmentId}
               label={label}

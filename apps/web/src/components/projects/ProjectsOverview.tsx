@@ -12,7 +12,7 @@ import {
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, ProjectLabelId } from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { FolderIcon, FolderPlusIcon, MoreHorizontalIcon } from "lucide-react";
+import { FolderIcon, MoreHorizontalIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAgents } from "../../agents/agentsClient";
@@ -211,7 +211,6 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
         footer="Optional. Group the repositories, chats and agents of a bigger effort; a single repository doesn't need one."
         headerAction={
           <SettingsSectionAction
-            icon={FolderPlusIcon}
             disabled={createEnvironmentId === null || !canCreate}
             onClick={createProject}
           >

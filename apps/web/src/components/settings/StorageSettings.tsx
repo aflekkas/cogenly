@@ -302,13 +302,15 @@ function CleanupSection() {
       counts: report
         ? `${report.counts.removed} removed, ${report.counts.kept} kept${report.counts.failed > 0 ? `, ${report.counts.failed} failed` : ""}`
         : "",
+      // A meta line, unpunctuated like the Last run counts below, which also
+      // carry what failed.
       description: report
-        ? `Last ran ${formatRelativeTimeLabel(report.finishedAt)}${report.spaceMeasurement === "volume-change" && report.bytesFreed > 0 ? ` and freed ${formatBytes(report.bytesFreed)}.` : "."}${report.counts.failed > 0 ? ` ${report.counts.failed} ${report.counts.failed === 1 ? "item" : "items"} couldn't be removed.` : ""}`
+        ? `Last ran ${formatRelativeTimeLabel(report.finishedAt)}${report.spaceMeasurement === "volume-change" && report.bytesFreed > 0 ? ` and freed ${formatBytes(report.bytesFreed)}` : ""}`
         : query?.failed
-          ? "Couldn't load the last run."
+          ? "Couldn't load the last run"
           : query?.loading
             ? "Loading the last run…"
-            : "Cleanup hasn't run yet.",
+            : "Cleanup hasn't run yet",
     };
   });
   const deleteNow = async (dryRun: boolean) => {

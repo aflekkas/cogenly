@@ -1991,7 +1991,7 @@ function EmptyRemoteEnvironments({
       icon={<ChevronsLeftRightEllipsisIcon />}
       label={
         cloudEnabled
-          ? "Connect another Cogenly machine by its address, over SSH, or through Cogenly Connect."
+          ? "Connect another Cogenly machine by its address, over SSH or through Cogenly Connect."
           : "Connect another Cogenly machine by its address or over SSH."
       }
       action={
@@ -2708,7 +2708,7 @@ export function ConnectionsSettings() {
       }
       // Fail closed: no mounted confirm host means no removal.
       const confirmed = await requestConfirmDialog(
-        `Remove ${environment.label} from this device?\nThis forgets its pairing, credentials, and cached threads here. Switch it off instead to keep it saved.`,
+        `Remove ${environment.label} from this device?\nThis forgets its pairing, credentials and cached threads here. Switch it off instead to keep it saved.`,
         { variant: "destructive" },
       );
       if (confirmed === true) await removeSavedBackend(environment);

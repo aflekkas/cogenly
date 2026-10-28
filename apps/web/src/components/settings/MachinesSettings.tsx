@@ -189,9 +189,7 @@ function MachinesSection({
       {...searchableSetting("machines")}
       title="Your machines"
       headerAction={
-        canPair ? (
-          <SettingsSectionAction onClick={onAdd}>Add a machine</SettingsSectionAction>
-        ) : null
+        canPair ? <SettingsSectionAction onClick={onAdd}>Add machine</SettingsSectionAction> : null
       }
     >
       {environment === null ? (
@@ -595,7 +593,7 @@ function AddMachineDialog({
     >
       <DialogPopup className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Add a machine</DialogTitle>
+          <DialogTitle>Add machine</DialogTitle>
           <DialogDescription>{TAILSCALE_SENTENCE}</DialogDescription>
         </DialogHeader>
         <DialogPanel>{body}</DialogPanel>

@@ -9,14 +9,42 @@ import { cn } from "~/lib/utils";
 
 // One disabled look for the bordered variants (default, outline): no fill, a
 // muted label and the resting border, instead of fading. Faded, a disabled
-// primary reads as a grey slab and a disabled outline as enabled. Every other
-// variant fades (the base's opacity, which skips these two).
+// primary reads as a grey slab and a disabled outline as enabled. A button
+// disabled only while its own request runs (aria-busy) keeps its look and
+// dims, so a pending submit doesn't flip to an outline and back. The base's
+// `interactive` transition fades between the states.
 const DISABLED_SURFACE =
-  "disabled:border-border disabled:bg-transparent dark:disabled:bg-transparent dark:aria-disabled:bg-transparent disabled:text-muted-foreground disabled:[--control-icon-color:currentColor] aria-disabled:border-border aria-disabled:bg-transparent aria-disabled:text-muted-foreground aria-disabled:shadow-none aria-disabled:[--control-icon-color:currentColor]";
+  "not-aria-busy:disabled:border-border not-aria-busy:disabled:bg-transparent dark:not-aria-busy:disabled:bg-transparent not-aria-busy:disabled:text-muted-foreground not-aria-busy:disabled:[--control-icon-color:currentColor] not-aria-busy:aria-disabled:border-border not-aria-busy:aria-disabled:bg-transparent dark:not-aria-busy:aria-disabled:bg-transparent not-aria-busy:aria-disabled:text-muted-foreground not-aria-busy:aria-disabled:shadow-none not-aria-busy:aria-disabled:[--control-icon-color:currentColor] aria-busy:disabled:opacity-64 aria-busy:aria-disabled:opacity-64";
+
+// Every other variant fades when disabled. A compound variant rather than a
+// base rule keyed on data-variant, so buttonVariants() outside Button (toast
+// and menu actions) gets exactly one disabled treatment.
+const FADED_DISABLED_VARIANTS = [
+  "brand",
+  "destructive",
+  "destructive-outline",
+  "ghost",
+  "ghost-muted",
+  "ghost-destructive",
+  "glass",
+  "link",
+  "media-close",
+  "media-solid",
+  "media-navigation",
+  "overlay",
+  "secondary",
+  "warning-outline",
+] as const;
 
 const buttonVariants = cva(
-  "[--control-icon-color:currentColor] [&_svg]:-mx-0.5 relative inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-[var(--control-radius)] border font-medium text-base outline-none interactive [&:not([aria-haspopup]):not(:disabled):not([aria-disabled=true])]:will-change-[scale] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--control-radius)-1px)] pointer-coarse:after:absolute pointer-coarse:after:size-full pointer-coarse:after:min-h-11 pointer-coarse:after:min-w-11 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none not-data-[variant=default]:not-data-[variant=outline]:disabled:opacity-64 aria-disabled:cursor-not-allowed not-data-[variant=default]:not-data-[variant=outline]:aria-disabled:opacity-64 sm:text-sm [&_svg:not([class*='text-'])]:text-[var(--control-icon-color)] [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+  "[--control-icon-color:currentColor] [&_svg]:-mx-0.5 relative inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-[var(--control-radius)] border font-medium text-base outline-none interactive [&:not([aria-haspopup]):not(:disabled):not([aria-disabled=true])]:will-change-[scale] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--control-radius)-1px)] pointer-coarse:after:absolute pointer-coarse:after:size-full pointer-coarse:after:min-h-11 pointer-coarse:after:min-w-11 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none aria-disabled:cursor-not-allowed sm:text-sm [&_svg:not([class*='text-'])]:text-[var(--control-icon-color)] [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {
+    compoundVariants: [
+      {
+        variant: [...FADED_DISABLED_VARIANTS],
+        className: "disabled:opacity-64 aria-disabled:opacity-64",
+      },
+    ],
     defaultVariants: {
       size: "default",
       variant: "default",

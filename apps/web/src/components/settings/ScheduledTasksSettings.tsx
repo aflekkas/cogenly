@@ -465,7 +465,7 @@ function ScheduledTasksEmpty({ view, hasTasks }: { view: TaskListView; hasTasks:
   ) : (
     <SettingsListEmpty
       icon={<Clock3Icon />}
-      label="Run a prompt on a schedule, from a webhook, or when Work changes."
+      label="Run a prompt on a schedule, from a webhook or when Work changes."
       action={
         view.onCreate ? (
           <Button size="xs" variant="outline" onClick={view.onCreate}>
@@ -1254,7 +1254,7 @@ function ScheduledTaskEditorDialog({
       !projects.some((project) => project.id === selectedProjectId) ||
       selection === null
     ) {
-      reportFailure("Scheduled task is incomplete", "Add a title, prompt, repository, and model.");
+      reportFailure("Scheduled task is incomplete", "Add a title, prompt, repository and model.");
       return;
     }
     if (draft.scheduleMode === "event" && draft.agentId === null) {
@@ -1356,8 +1356,7 @@ function ScheduledTaskEditorDialog({
         <DialogHeader>
           <DialogTitle>{draft.editingId ? "Edit task" : "New task"}</DialogTitle>
           <DialogDescription>
-            Runs a prompt on a schedule, when a webhook is called, or when something happens in
-            Work.
+            Runs a prompt on a schedule, when a webhook is called or when something happens in Work.
           </DialogDescription>
         </DialogHeader>
 

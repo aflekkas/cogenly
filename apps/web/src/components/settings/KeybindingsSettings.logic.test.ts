@@ -304,6 +304,13 @@ describe("KeybindingsSettings.logic", () => {
     ).toEqual(["mod+enter", "mod+alt+enter"]);
   });
 
+  it("lists rows in the order of the labels people read", () => {
+    const labels = buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS, "").map((row) =>
+      commandLabel(row.command),
+    );
+    expect(labels).toEqual(labels.toSorted((left, right) => left.localeCompare(right)));
+  });
+
   it("summarizes when clauses in plain words, falling back to the expression", () => {
     const summarize = (expression: string) => {
       const parsed = parseWhenExpressionDraft(expression);

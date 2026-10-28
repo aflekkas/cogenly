@@ -1062,7 +1062,7 @@ export function CodexManagedRuntimeFields({
       />
       <SettingsRow
         title="CODEX_HOME path"
-        description="Shared Codex config, sessions, and state."
+        description="Shared Codex config, sessions and state."
         control={
           <SettingsField>
             <Input

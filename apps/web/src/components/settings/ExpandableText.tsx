@@ -13,8 +13,8 @@ type ExpandPhase = "collapsed" | "opening" | "open" | "closing";
  * shrinks the height between the clamp and the full text (base token, both
  * ways), like a long message's "Show full message" in the timeline; the clamp
  * comes back only once the text has closed. Reduced motion swaps at once and
- * fades the text in. While clamped, a pretty-printed JSON payload's opening
- * brackets share its first line, so the preview shows content.
+ * fades the text in. A pretty-printed JSON payload's opening brackets share
+ * its first line, clamped or open, so the preview shows content.
  */
 export function ExpandableText({
   text,
@@ -90,8 +90,8 @@ export function ExpandableText({
           canExpand && phase === "collapsed" ? collapsedClassName : null,
         )}
       >
-        {/* The preview swaps in on the click either way, like the clamp's height. */}
-        {canExpand && !expanded ? clampedPreviewText(text) : text}
+        {/* One string in both states, so only the clamp changes and lines only grow below. */}
+        {canExpand ? clampedPreviewText(text) : text}
       </div>
       {canExpand ? (
         <InlineButton

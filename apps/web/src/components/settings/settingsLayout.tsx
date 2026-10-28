@@ -473,9 +473,25 @@ export function SettingsPageMessage({ children }: { children: ReactNode }) {
 /**
  * A version number beside a title (the app, a provider, a CLI, a package):
  * 12px monospace in the meta color. A long one truncates before the title does.
+ * `full` shows the raw version output on hover when the label shortens it.
  */
-export function SettingsVersion({ children }: { children: ReactNode }) {
-  return <code className="min-w-0 truncate text-xs text-muted-foreground">{children}</code>;
+export function SettingsVersion({
+  children,
+  full,
+}: {
+  children: ReactNode;
+  full?: string | undefined;
+}) {
+  const code = <code className="min-w-0 truncate text-xs text-muted-foreground">{children}</code>;
+  if (!full) return code;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={code} />
+      <TooltipPopup side="top" variant="code">
+        {full}
+      </TooltipPopup>
+    </Tooltip>
+  );
 }
 
 /**

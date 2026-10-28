@@ -30,7 +30,7 @@ export const pairMachinesFailure = (error: DesktopAppControl.DesktopAppControlEr
     ? new OrchestratorMcpFailure({
         code: "capability_denied",
         message:
-          "machine_pair runs through the Cogenly desktop app on the computer this agent runs on, and none answered here. Ask the user to open the desktop app and try again, or to choose Add a machine in Settings → Machines.",
+          "machine_pair runs through the Cogenly desktop app on the computer this agent runs on, and none answered here. Ask the user to open the desktop app and try again, or to choose Add machine in Settings → Machines.",
       })
     : addEnvironmentFailure(error);
 

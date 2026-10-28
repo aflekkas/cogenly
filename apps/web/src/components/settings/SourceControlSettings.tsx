@@ -51,6 +51,7 @@ import {
 } from "./settingsLayout";
 import { SettingsStatusBadge, SettingsStatusText, type SettingsStatusTone } from "./SettingsStatus";
 import { durationToSeconds, normalizeIntervalSeconds } from "./SettingsPanels.logic";
+import { cliVersionLabel } from "./settingsText.logic";
 import { searchableSetting, sourceControlHostSettingsSearchId } from "./settingsSearch";
 import { PullRequestGlyph } from "~/components/changeRequestIcons";
 import { sourceControlClients } from "@cogenly/client-runtime/source-control-clients";
@@ -255,7 +256,9 @@ function DiscoveryItemRow({
       }
       titleActions={
         <>
-          {version ? <SettingsVersion>{version}</SettingsVersion> : null}
+          {version ? (
+            <SettingsVersion full={version.trim()}>{cliVersionLabel(version)}</SettingsVersion>
+          ) : null}
           {authStatus?.badge ? (
             <SettingsStatusBadge tone={authStatus.badge}>{authStatus.label}</SettingsStatusBadge>
           ) : null}

@@ -402,7 +402,12 @@ export function FactEditorDialog(props: {
         </DialogPanel>
         <DialogFooter>
           <DialogClose render={<Button variant="ghost" />}>Cancel</DialogClose>
-          <Button type="submit" form="fact-editor" disabled={!canSave}>
+          <Button
+            type="submit"
+            form="fact-editor"
+            disabled={!canSave}
+            aria-busy={saving || undefined}
+          >
             {props.saveLabel}
           </Button>
         </DialogFooter>

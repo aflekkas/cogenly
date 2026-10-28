@@ -987,7 +987,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "add-machine",
-    title: "Add a machine",
+    title: "Add machine",
     to: "/settings/machines",
     targetId: "machines",
     searchTerms: ["pair new computer laptop server tailscale sign in https link sync"],

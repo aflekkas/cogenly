@@ -101,9 +101,10 @@ describe("healthHeadline", () => {
     checks,
   });
 
-  it("leads with failures, then warnings", () => {
+  it("counts failures, then warnings", () => {
+    expect(healthHeadline(report([check("fail"), check("fail")]))).toBe("2 checks are failing");
     expect(healthHeadline(report([check("warn"), check("fail"), check("fail")]))).toBe(
-      "2 checks are failing",
+      "2 failing, 1 needs attention",
     );
     expect(healthHeadline(report([check("ok"), check("warn")]))).toBe("1 check needs attention");
     expect(healthHeadline(report([check("ok"), check("unknown")]))).toBe("Everything is working");

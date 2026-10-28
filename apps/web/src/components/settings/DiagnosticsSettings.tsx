@@ -72,6 +72,7 @@ import {
   SettingsListMeta,
 } from "./SettingsList";
 import { groupRepeatedEntries } from "./settingsList.logic";
+import { readableLogMessage } from "./settingsText.logic";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { TelemetryExportSettings } from "./TelemetryExportSettings";
@@ -339,6 +340,7 @@ function DiagnosticsDetail(props: {
   return (
     <ExpandableText
       {...props}
+      text={readableLogMessage(props.text)}
       className="pt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]"
     />
   );

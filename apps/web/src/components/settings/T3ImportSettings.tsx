@@ -491,7 +491,7 @@ function ProjectOption({
           </span>
         </span>
         <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-          {empty ? "Nothing to import" : pluralize(project.threadCount, "thread")}
+          {pluralize(project.threadCount, "thread")}
         </span>
       </label>
     </li>

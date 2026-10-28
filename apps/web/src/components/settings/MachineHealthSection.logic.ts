@@ -72,6 +72,9 @@ export function partitionHealthChecks(checks: ReadonlyArray<MachineHealthCheck>)
 export function healthHeadline(report: MachineHealthReport): string {
   const failing = report.checks.filter((check) => check.status === "fail").length;
   const warning = report.checks.filter((check) => check.status === "warn").length;
+  if (failing > 0 && warning > 0) {
+    return `${failing} failing, ${warning} ${warning === 1 ? "needs" : "need"} attention`;
+  }
   if (failing > 0) {
     return failing === 1 ? "1 check is failing" : `${failing} checks are failing`;
   }

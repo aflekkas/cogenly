@@ -146,8 +146,8 @@ machines a private, encrypted link only you can use. Cogenly walks you through
 it; you don't need a terminal or the `cogenly` command on a Mac.
 
 Connect this client to both machines first (Settings → Connections). Then open
-Settings → Machines on the always-on machine and choose Add a machine, or run
-Add a machine from the command palette. Pick the machine to add, and follow the
+Settings → Machines on the always-on machine and choose Add machine, or run
+Add machine from the command palette. Pick the machine to add, and follow the
 checklist for each machine until both are ready:
 
 - **Install Tailscale.** On Linux with passwordless `sudo`, Cogenly installs

@@ -45,15 +45,19 @@ function MeasuredHeight({
     readonly isClipping: boolean;
   }>({ height: null, isClipping: false });
 
+  const { height, isClipping } = heightState;
+  // Unclips if transitionend never fires. Each new target height restarts the
+  // timer, so a resize mid-motion still gets its full transition. A clipping
+  // state always has a measured height.
   useEffect(() => {
-    if (!heightState.isClipping) return;
+    if (!isClipping || height === null) return;
     const timeoutId = window.setTimeout(() => {
       setHeightState((currentState) =>
         currentState.isClipping ? { ...currentState, isClipping: false } : currentState,
       );
     }, HEIGHT_TRANSITION_FALLBACK_MS);
     return () => window.clearTimeout(timeoutId);
-  }, [heightState.height, heightState.isClipping]);
+  }, [height, isClipping]);
 
   useLayoutEffect(() => {
     if (holdHeight) return;

@@ -104,7 +104,12 @@ export function ApprovalDecision({
         </ul>
       )}
       <div className="mt-1 flex items-center gap-1.5">
-        <Button size="xs" disabled={pending || !canWrite} onClick={() => void decide("approve")}>
+        <Button
+          size="xs"
+          disabled={pending || !canWrite}
+          aria-busy={pending || undefined}
+          onClick={() => void decide("approve")}
+        >
           Approve
         </Button>
         <Button

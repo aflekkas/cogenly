@@ -1020,7 +1020,7 @@ export function ResourceTelemetryDiagnostics({
           <SettingsRowContent
             className="rounded-none border-b border-border/60"
             title="System footprint"
-            description="Live native counters for the server, providers, terminals, desktop processes, and the monitor itself."
+            description="Live native counters for the server, providers, terminals, desktop processes and the monitor itself."
             status={
               snapshot ? `Sampling every ${formatSampleInterval(snapshot.sampleIntervalMs)}` : null
             }
@@ -1181,7 +1181,7 @@ export function ResourceTelemetryDiagnostics({
               <SettingsGroup variant="inset" divided={false} className="mt-2">
                 <SettingsRowContent
                   title="Desktop host not connected"
-                  description="Power, idle, lock, and thermal state come from the desktop app. Process telemetry still runs in this browser."
+                  description="Power, idle, lock and thermal state come from the desktop app. Process telemetry still runs in this browser."
                 />
               </SettingsGroup>
             )}

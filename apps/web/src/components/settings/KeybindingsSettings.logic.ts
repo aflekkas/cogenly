@@ -265,8 +265,13 @@ export function buildKeybindingRows(
       : row;
   });
 
-  // A stable sort keeps one command's bindings in config order, main one first.
-  rowsWithConflicts.sort((left, right) => left.command.localeCompare(right.command));
+  // Rows read in label order, the names people scan for. A stable sort keeps
+  // one command's bindings in config order, main one first.
+  rowsWithConflicts.sort(
+    (left, right) =>
+      commandLabel(left.command).localeCompare(commandLabel(right.command)) ||
+      left.command.localeCompare(right.command),
+  );
 
   if (normalizedQuery.length === 0) {
     return rowsWithConflicts;
@@ -355,7 +360,7 @@ export function buildKeybindingCommandOptions(
 
 /** Labels the generated "Area: action" form can't produce. Sentence case, like the rest of settings. */
 const COMMAND_LABELS: Partial<Record<KeybindingCommand, string>> = {
-  "composer.sendAlternate": "Composer: send with the other of queue or steer",
+  "composer.sendAlternate": "Composer: send the other way (queue or steer)",
   "composer.sendAndNewThread": "Composer: send and start a new thread",
   "composer.sendBackground": "Composer: start in background",
   "thread.steerQueuedMessage": "Queue: send first queued message now",
