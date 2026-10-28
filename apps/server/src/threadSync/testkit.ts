@@ -12,6 +12,8 @@ import {
   ProjectLabelError,
   ThreadId,
   ThreadDelegatedRead,
+  ThreadReplicationApply,
+  ThreadReplicationError,
   type ServerProvider,
 } from "@cogenly/contracts";
 import * as Deferred from "effect/Deferred";
@@ -94,6 +96,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
   lifecycle?: {
     readonly resources?: import("@cogenly/contracts").MachineResourcesSnapshot;
     readonly legacyDelegation?: boolean;
+    readonly refuseBulkReplication?: boolean;
     readonly afterLaunch?: () => Effect.Effect<void>;
     readonly git?: Git.GitVcsDriver["Service"];
     readonly checkoutRoot?: () => Effect.Effect<string>;
@@ -529,9 +532,15 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
             Layer.succeed(PeerChannels.PeerChannels, {
               ...channels,
               register: (channel, handler) =>
-                lifecycle?.legacyDelegation === true && channel.name === ThreadDelegatedRead.name
-                  ? Effect.void
-                  : channels.register(channel, handler),
+                lifecycle?.refuseBulkReplication === true &&
+                channel.name === ThreadReplicationApply.name
+                  ? channels.register(ThreadReplicationApply, () =>
+                      Effect.fail(new ThreadReplicationError({ reason: "storage" })),
+                    )
+                  : lifecycle?.legacyDelegation === true &&
+                      channel.name === ThreadDelegatedRead.name
+                    ? Effect.void
+                    : channels.register(channel, handler),
             }),
           ),
         ),
