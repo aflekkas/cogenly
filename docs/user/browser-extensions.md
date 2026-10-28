@@ -14,7 +14,9 @@ The same menus can turn an extension off, remove it, and open its popup or optio
 
 ## Agents
 
-Agents can install, list, turn off and remove extensions themselves, and open an extension's popup or options page as a tab they can click through. Ask in plain words, for example "install uBlock Origin Lite in my Work profile".
+Agents can install, list, turn off and remove extensions themselves. They can open a popup or side panel for a website tab, click an extension's toolbar action, and open its options page. Ask in plain words, for example "open this extension's side panel for the current page".
+
+With `browser_extension_open`, pass the website's `tabId` and choose `page: "popup"`, `"sidePanel"`, or `"action"`. The website must be a server browser tab in the extension's profile. Options pages open with `page: "options"`.
 
 ## Where extensions run
 
@@ -28,9 +30,11 @@ An extension that fails to load is skipped so browsing can continue. The extensi
 
 The extension list belongs to each machine. A paired machine keeps its own list.
 
-## Popups open as tabs
+## Popups and side panels
 
-Cogenly's browser has no extension toolbar. An extension's popup opens as a normal tab instead, so a popup that acts on "the current page" sees itself rather than the page you meant. Extensions whose toolbar button runs an action without showing a popup can't be triggered.
+Extension popups and side panels stream into the browser panel beside their host website. Toolbar actions run against that host, including actions that have no popup. Closing the host also closes its extension surfaces.
+
+Agent-opened popups stay open while the agent switches focus. Some extensions require a fallback page whose behavior differs from a native popup; Cogenly shows a notice when that happens. Options pages and popup pages opened directly from the extension menus remain ordinary tabs.
 
 ## Passwords
 

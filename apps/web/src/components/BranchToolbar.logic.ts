@@ -82,6 +82,8 @@ export function shouldShowComposerContextStrip(input: {
   hasActiveProject: boolean;
   isGitRepo: boolean;
   showEnvironmentIndicator: boolean;
+  /** The strip names the chat's project, beside the machine. */
+  showProject: boolean;
   /**
    * Another paired machine runs the thread. The strip is where that machine is
    * named, so it stays up in active threads too.
@@ -93,7 +95,10 @@ export function shouldShowComposerContextStrip(input: {
   return (
     input.hasActiveProject &&
     (input.isDraftHeroState || input.persistInActiveThreads || input.runsOnOtherMachine) &&
-    (input.isGitRepo || input.showEnvironmentIndicator || input.hostsRestingComposerControls)
+    (input.isGitRepo ||
+      input.showEnvironmentIndicator ||
+      input.showProject ||
+      input.hostsRestingComposerControls)
   );
 }
 

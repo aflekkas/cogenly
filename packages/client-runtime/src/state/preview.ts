@@ -85,6 +85,18 @@ export function createPreviewEnvironmentAtoms<R, E>(
       label: "environment-data:browser:extensions-list",
       tag: WS_METHODS.browserExtensionsList,
     }),
+    extensionsSubscribe: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:browser:extensions-subscribe",
+      tag: WS_METHODS.browserExtensionsSubscribe,
+    }),
+    extensionReload: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:browser:extension-reload",
+      tag: WS_METHODS.browserExtensionReload,
+    }),
+    extensionOpenSurface: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:browser:extension-open-surface",
+      tag: WS_METHODS.browserExtensionOpenSurface,
+    }),
     extensionInstall: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:browser:extension-install",
       tag: WS_METHODS.browserExtensionInstall,

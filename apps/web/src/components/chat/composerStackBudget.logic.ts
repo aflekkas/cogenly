@@ -116,6 +116,50 @@ export function foldNotices(
   };
 }
 
+/**
+ * Trays whose list can fold to their header, in folding order: the stack folds
+ * background work first and the user's own queue last. Questions and approvals
+ * wait on the user, so they are not here: they never fold.
+ */
+export const COMPOSER_TRAY_FOLD_RANK = {
+  "background-work": 1,
+  tasks: 2,
+  queue: 3,
+} as const;
+
+export type ComposerTrayId = keyof typeof COMPOSER_TRAY_FOLD_RANK;
+
+export interface ComposerStackNotice {
+  readonly priority?: "urgent" | "activity" | "notice" | undefined;
+  readonly variant: string;
+}
+
+/**
+ * How far above the composer a notice sits within its stack: 0 is the front
+ * bar, nearest the composer. Running activity leads, then severity.
+ */
+export function composerNoticeDistance(notice: ComposerStackNotice): number {
+  if (notice.priority === "activity") return 0;
+  if (notice.priority === "urgent" || notice.variant === "error" || notice.variant === "warning") {
+    return 1;
+  }
+  return 2;
+}
+
+/**
+ * Splits notices that wait on the user's decision (approvals, limit recovery)
+ * from the rest. Urgent ones get their own stack below the queue and tasks,
+ * nearest the composer; the rest stack above the queue.
+ */
+export function partitionUrgentNotices<T extends ComposerStackNotice>(
+  notices: ReadonlyArray<T>,
+): { readonly urgent: ReadonlyArray<T>; readonly rest: ReadonlyArray<T> } {
+  const urgent: T[] = [];
+  const rest: T[] = [];
+  for (const notice of notices) (notice.priority === "urgent" ? urgent : rest).push(notice);
+  return { urgent, rest };
+}
+
 export function sameFolds(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
   return a.size === b.size && [...a].every((id) => b.has(id));
 }

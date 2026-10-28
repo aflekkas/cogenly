@@ -3,8 +3,8 @@
  * Chromium extensions installed into a browser profile. Each environment owns
  * its list per profile: the files sit unpacked under
  * `<stateDir>/browser-extensions/<profile>/<id>/<version>`, next to a
- * `registry.json`, and the server browser and the desktop panel load the
- * enabled ones from there (see `ServerBrowser`). Profiles are per client and
+ * `registry.json`, and full server Chrome loads the enabled ones from there
+ * and streams to web and desktop clients (see `ServerBrowser`). Profiles are per client and
  * do not sync between machines, so neither does this list.
  *
  * Installs come only from the Chrome Web Store, verified as Chrome verifies
@@ -17,6 +17,9 @@ import {
   type BrowserExtensionInstallResult,
   type BrowserExtensionPage,
   type BrowserExtensionRemoveInput,
+  type BrowserExtensionReloadInput,
+  type BrowserExtensionOpenSurfaceInput,
+  type BrowserExtensionOpenSurfaceResult,
   type BrowserExtensionsListInput,
   type BrowserExtensionsListResult,
   type BrowserExtensionSource,
@@ -32,6 +35,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
@@ -77,6 +81,9 @@ const StoredExtension = Schema.Struct({
   ]),
   permissions: Schema.Array(Schema.String),
   hostPermissions: Schema.Array(Schema.String),
+  icon: Schema.optional(Schema.String),
+  hasAction: Schema.optional(Schema.Boolean),
+  sidePanelPage: Schema.optional(Schema.String),
   popupPage: Schema.optional(Schema.String),
   optionsPage: Schema.optional(Schema.String),
   installedAt: Schema.String,
@@ -107,6 +114,11 @@ export interface LoadableExtension {
   readonly path: string;
 }
 
+// The broker supplies agent identity internally; toolbar RPCs use the wire input unchanged.
+type SurfaceOpenInput = BrowserExtensionOpenSurfaceInput & {
+  readonly agentSessionId?: string | undefined;
+};
+
 export class BrowserExtensions extends Context.Service<
   BrowserExtensions,
   {
@@ -117,6 +129,22 @@ export class BrowserExtensions extends Context.Service<
     readonly install: (
       input: BrowserExtensionInstallInput,
     ) => Effect.Effect<BrowserExtensionInstallResult, BrowserExtensionError>;
+    readonly reload: (
+      input: BrowserExtensionReloadInput,
+    ) => Effect.Effect<BrowserExtensionInstallResult, BrowserExtensionError>;
+    readonly openSurface: (
+      input: SurfaceOpenInput,
+    ) => Effect.Effect<BrowserExtensionOpenSurfaceResult, BrowserExtensionError>;
+    readonly registerSurfaceOpener: (
+      open: (
+        input: SurfaceOpenInput & { readonly profileId: string },
+        extension: BrowserExtension,
+      ) => Effect.Effect<BrowserExtensionOpenSurfaceResult, BrowserExtensionError>,
+    ) => Effect.Effect<void, never, Scope.Scope>;
+    readonly changes: Stream.Stream<string>;
+    readonly subscribe: (
+      input: BrowserExtensionsListInput,
+    ) => Stream.Stream<BrowserExtensionsListResult, BrowserExtensionError>;
     readonly remove: (
       input: BrowserExtensionRemoveInput,
     ) => Effect.Effect<BrowserExtensionsListResult, BrowserExtensionError>;
@@ -125,7 +153,7 @@ export class BrowserExtensions extends Context.Service<
     ) => Effect.Effect<BrowserExtension, BrowserExtensionError>;
     /** The enabled extensions a profile's browser loads. */
     readonly loadable: (profileId: string) => Effect.Effect<ReadonlyArray<LoadableExtension>>;
-    /** Registers the browser adapter so installs finish after their load attempt. */
+    /** Registers the browser adapter; the application scope owns background load attempts. */
     readonly registerLoader: (
       load: (profileId: string) => Effect.Effect<void>,
     ) => Effect.Effect<void, never, Scope.Scope>;
@@ -149,7 +177,10 @@ const publicExtension = ({
   directory: _directory,
   generatedKey: _key,
   ...extension
-}: StoredExtension) => extension as BrowserExtension;
+}: StoredExtension) => ({
+  ...extension,
+  hasAction: extension.hasAction ?? Boolean(extension.popupPage),
+});
 
 export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(function* (options: {
   readonly rootDir: string;
@@ -160,14 +191,34 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
   // One change at a time per environment: installs are rare and touch shared registry files.
   const gate = yield* Semaphore.make(1);
   let loader: ((profileId: string) => Effect.Effect<void>) | undefined;
-  const loadErrors = new Map<string, string>();
+  let loaderScope: Scope.Scope | undefined;
+  let surfaceOpener:
+    | Parameters<BrowserExtensions["Service"]["registerSurfaceOpener"]>[0]
+    | undefined;
+  const loadGate = yield* Semaphore.make(1);
+  const changes = yield* PubSub.unbounded<string>();
+  const loadResults = new Map<string, string | undefined>();
+  const loading = new Set<string>();
+  const loadRevisions = new Map<string, number>();
+  const cleanupIds = new Map<string, Set<string>>();
   const extensionPath = (profileId: string, extension: StoredExtension) =>
     path.join(profileDir(profileId), extension.id, extension.directory);
   const withLoadError = (profileId: string, stored: StoredExtension): BrowserExtension => {
-    const error = stored.enabled ? loadErrors.get(extensionPath(profileId, stored)) : undefined;
+    const error = stored.enabled ? loadResults.get(extensionPath(profileId, stored)) : undefined;
     return {
       ...publicExtension(stored),
-      ...(error ? { loadError: `${stored.name}: ${error}` } : {}),
+      state: !stored.enabled
+        ? "disabled"
+        : error
+          ? "failed"
+          : loadResults.has(extensionPath(profileId, stored))
+            ? "loaded"
+            : loading.has(extensionPath(profileId, stored))
+              ? "installing"
+              : "pending",
+      ...(error
+        ? { error: `${stored.name}: ${error}`, loadError: `${stored.name}: ${error}` }
+        : {}),
     };
   };
 
@@ -190,7 +241,22 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
   const readRegistry = (profileId: string) =>
     fs.readFileString(registryPath(profileId)).pipe(
       Effect.flatMap(decodeRegistry),
-      Effect.map((registry) => registry.extensions),
+      Effect.flatMap((registry) =>
+        Effect.forEach(registry.extensions, (stored) => {
+          if (stored.hasAction !== undefined) return Effect.succeed(stored);
+          // Older registries predate toolbar metadata. Read the installed copy,
+          // without starting Chrome or changing the registry during a list read.
+          return readManifest(extensionPath(profileId, stored)).pipe(
+            Effect.map(({ summary, icon }) => ({
+              ...stored,
+              hasAction: summary.hasAction,
+              ...(icon ? { icon } : {}),
+              ...(summary.sidePanelPage ? { sidePanelPage: summary.sidePanelPage } : {}),
+            })),
+            Effect.orElseSucceed(() => stored),
+          );
+        }),
+      ),
       Effect.catchCause(() => Effect.succeed<ReadonlyArray<StoredExtension>>([])),
     );
 
@@ -283,7 +349,32 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
             cause instanceof ExtensionManifestError ? cause.message : "manifest.json is invalid.",
           ),
       });
-      return { manifest, summary };
+      let icon: string | undefined;
+      for (const candidate of summary.iconPaths) {
+        const target = path.resolve(root, candidate);
+        const mime = (
+          {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+            ".ico": "image/x-icon",
+            ".svg": "image/svg+xml",
+          } as Readonly<Record<string, string>>
+        )[path.extname(target).toLowerCase()];
+        if (mime && target.startsWith(`${root}${path.sep}`)) {
+          icon = yield* Effect.gen(function* () {
+            const info = yield* fs.stat(target);
+            if (info.type !== "File" || info.size > 12_288) return undefined;
+            const bytes = yield* fs.readFile(target);
+            const url = `data:${mime};base64,${Buffer.from(bytes).toString("base64")}`;
+            return url.length <= 16_384 ? url : undefined;
+          }).pipe(Effect.orElseSucceed(() => undefined));
+          if (icon) break;
+        }
+      }
+      return { manifest, summary, icon };
     });
 
   /** Pins the unpacked copy's ID to `publicKey` by writing it as the manifest `key`. */
@@ -379,6 +470,7 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
 
   const install = Effect.fn("BrowserExtensions.install")(function* (
     input: BrowserExtensionInstallInput,
+    reloading?: StoredExtension,
   ) {
     const profileId = yield* resolveProfile(input.profileId);
     const webStoreId = webStoreExtensionId(input.source);
@@ -418,7 +510,27 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       if (info.type !== "Directory") return yield* fail(`${folder} is not a folder.`);
       yield* copyFolder(folder, unpacked);
       const { manifest, summary } = yield* readManifest(unpacked);
-      if (summary.key) {
+      if (reloading) {
+        // A source edit cannot change the identity (and storage) of a reload.
+        const publicKey = yield* Effect.try({
+          try: () =>
+            reloading.generatedKey
+              ? NodeCrypto.createPublicKey(reloading.generatedKey).export({
+                  format: "der",
+                  type: "spki",
+                })
+              : Buffer.from(summary.key ?? "", "base64"),
+          catch: () => fail("Could not recover the extension's key for reload."),
+        });
+        if (publicKey.length === 0 || extensionIdFromPublicKey(publicKey) !== reloading.id) {
+          return yield* fail(
+            "The source manifest key must match the installed extension to reload it.",
+          );
+        }
+        yield* writeManifestKey(unpacked, manifest, publicKey);
+        id = reloading.id;
+        generatedKey = reloading.generatedKey;
+      } else if (summary.key) {
         const publicKey = yield* Effect.try({
           try: () => Buffer.from(summary.key ?? "", "base64"),
           catch: () => fail("manifest.json has an invalid key."),
@@ -447,7 +559,7 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       source = { type: "folder", path: folder };
     }
 
-    const { summary } = yield* readManifest(unpacked);
+    const { summary, icon } = yield* readManifest(unpacked);
     const now = yield* Clock.currentTimeMillis;
     // A fresh directory per install, so a host that loaded the old one sees a new path to load.
     const directory = `${summary.version}-${NodeCrypto.randomUUID()}`;
@@ -463,13 +575,16 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       version: summary.version,
       description: summary.description,
       manifestVersion: summary.manifestVersion,
-      enabled: true,
+      enabled: reloading?.enabled ?? true,
       source,
       permissions: summary.permissions,
       hostPermissions: summary.hostPermissions,
+      hasAction: summary.hasAction,
+      ...(icon ? { icon } : {}),
+      ...(summary.sidePanelPage ? { sidePanelPage: summary.sidePanelPage } : {}),
       ...(summary.popupPage ? { popupPage: summary.popupPage } : {}),
       ...(summary.optionsPage ? { optionsPage: summary.optionsPage } : {}),
-      installedAt: DateTime.formatIso(DateTime.makeUnsafe(now)),
+      installedAt: reloading?.installedAt ?? DateTime.formatIso(DateTime.makeUnsafe(now)),
       directory,
       ...(generatedKey ? { generatedKey } : {}),
     };
@@ -478,8 +593,7 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       stored,
     ]);
 
-    if (loader) yield* loader(profileId);
-    yield* removeOldVersions(profileId, id, directory);
+    yield* publishAndLoad(profileId, stored.enabled, id);
     return {
       profileId,
       extension: withLoadError(profileId, stored),
@@ -488,9 +602,29 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
     } satisfies BrowserExtensionInstallResult;
   }, Effect.scoped);
 
+  const reload = Effect.fn("BrowserExtensions.reload")(function* (
+    input: BrowserExtensionReloadInput,
+  ) {
+    const profileId = yield* resolveProfile(input.profileId);
+    const extension = (yield* readRegistry(profileId)).find((entry) => entry.id === input.id);
+    if (!extension) return yield* fail(`Extension ${input.id} is not installed in this profile.`);
+    if (extension.source.type !== "folder")
+      return yield* fail(
+        "Only unpacked folder extensions can be reloaded. Reinstall a Web Store extension to update it.",
+      );
+    return yield* install({ profileId, source: extension.source.path }, extension);
+  });
+
   const removeOldVersions = (profileId: string, id: string, keep: string | null) =>
     Effect.gen(function* () {
       const extensionDir = path.join(profileDir(profileId), id);
+      for (const directory of loadResults.keys()) {
+        if (
+          directory.startsWith(`${extensionDir}${path.sep}`) &&
+          directory !== (keep === null ? null : path.join(extensionDir, keep))
+        )
+          loadResults.delete(directory);
+      }
       if (keep === null) {
         yield* fs.remove(extensionDir, { recursive: true, force: true });
         return;
@@ -520,8 +654,7 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       extensions.filter((extension) => extension.id !== input.id),
     );
 
-    if (loader) yield* loader(profileId);
-    yield* removeOldVersions(profileId, input.id, null);
+    yield* publishAndLoad(profileId, true, input.id);
     return yield* listOf(profileId);
   });
 
@@ -532,14 +665,13 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
     const extensions = yield* readRegistry(profileId);
     const current = extensions.find((extension) => extension.id === input.id);
     if (!current) return yield* fail(`Extension ${input.id} is not installed in this profile.`);
+    if (current.enabled === input.enabled) return withLoadError(profileId, current);
     const next = { ...current, enabled: input.enabled };
-    if (current.enabled !== input.enabled) {
-      yield* writeRegistry(
-        profileId,
-        extensions.map((extension) => (extension.id === input.id ? next : extension)),
-      );
-    }
-    if (loader) yield* loader(profileId);
+    yield* writeRegistry(
+      profileId,
+      extensions.map((extension) => (extension.id === input.id ? next : extension)),
+    );
+    yield* publishAndLoad(profileId);
     return withLoadError(profileId, next);
   });
 
@@ -548,6 +680,11 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
     readonly id: string;
     readonly page: BrowserExtensionPage;
   }) {
+    if (input.page === "sidePanel" || input.page === "action") {
+      return yield* fail(
+        "Use openSurface to click the toolbar action or open a side panel on a host tab.",
+      );
+    }
     const profileId = yield* resolveProfile(input.profileId);
     const extension = (yield* readRegistry(profileId)).find((entry) => entry.id === input.id);
     if (!extension) {
@@ -562,7 +699,7 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
     }
     if (input.page === "popup" && !extension.popupPage) {
       return yield* fail(
-        `${extension.name} has no popup: its toolbar button runs code instead of opening a page, and Cogenly's browser has no extension toolbar to click.${extension.optionsPage ? " Open its options page instead." : ""}`,
+        `${extension.name} has no popup page. Use browser_extension_open with page action to click its toolbar button.${extension.optionsPage ? " Open its options page instead." : ""}`,
       );
     }
     if (input.page === "options" && !extension.optionsPage) {
@@ -589,34 +726,140 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       ),
     );
 
+  /** Publish once, then load outside the mutation permit so Chrome's download cannot block the registry. */
+  const publishAndLoad = Effect.fnUntraced(function* (
+    profileId: string,
+    shouldLoad = true,
+    cleanId?: string,
+  ) {
+    const revision = (loadRevisions.get(profileId) ?? 0) + 1;
+    loadRevisions.set(profileId, revision);
+    if (cleanId) {
+      const ids = cleanupIds.get(profileId) ?? new Set<string>();
+      ids.add(cleanId);
+      cleanupIds.set(profileId, ids);
+    }
+    const load = shouldLoad ? loader : undefined;
+    const pending = load
+      ? (yield* loadable(profileId)).filter((extension) => !loadResults.has(extension.path))
+      : [];
+    for (const extension of pending) loading.add(extension.path);
+    const attempt = Effect.gen(function* () {
+      if (load) yield* load(profileId);
+      if (cleanupIds.has(profileId)) {
+        const cleanup = Effect.gen(function* () {
+          if (loadRevisions.get(profileId) !== revision) return;
+          const registry = yield* readRegistry(profileId);
+          for (const id of cleanupIds.get(profileId) ?? []) {
+            const current = registry.find((entry) => entry.id === id);
+            yield* removeOldVersions(profileId, id, current?.directory ?? null);
+          }
+          cleanupIds.delete(profileId);
+        });
+        // Background cleanup shares the mutation permit so a reload cannot publish
+        // a new version between reading the registry and deleting old directories.
+        // Synchronous cleanup already runs inside the caller's mutation permit.
+        yield* loader && loaderScope ? gate.withPermit(cleanup) : cleanup;
+      }
+    }).pipe(
+      Effect.ensuring(
+        Effect.gen(function* () {
+          let changed = false;
+          for (const extension of pending) {
+            loading.delete(extension.path);
+            if (!loadResults.has(extension.path)) changed = true;
+          }
+          if (changed) yield* PubSub.publish(changes, profileId);
+        }),
+      ),
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Extension background load failed.", { profileId, cause }),
+      ),
+    );
+    yield* PubSub.publish(changes, profileId);
+    if (loader && loaderScope) yield* Effect.forkIn(loadGate.withPermit(attempt), loaderScope);
+    else yield* attempt;
+  });
+
   const serialized = <A, E>(effect: Effect.Effect<A, E>) => gate.withPermit(effect);
 
   return BrowserExtensions.of({
     list: (input) =>
-      serialized(
+      Effect.gen(function* () {
+        const profileId = yield* resolveProfile(input.profileId);
+        return yield* listOf(profileId);
+      }),
+    install: (input) => serialized(install(input)),
+    reload: (input) => serialized(reload(input)),
+    openSurface: (input) =>
+      Effect.gen(function* () {
+        const profileId = yield* resolveProfile(input.profileId);
+        const extension = (yield* listOf(profileId)).extensions.find(
+          (entry) => entry.id === input.id,
+        );
+        if (!extension)
+          return yield* fail(`Extension ${input.id} is not installed in profile ${profileId}.`);
+        if (!extension.enabled)
+          return yield* fail(
+            `${extension.name} is turned off. Turn it on with browser_extension_toggle first.`,
+          );
+        if (extension.loadError) return yield* fail(extension.loadError);
+        if (!surfaceOpener)
+          return yield* fail(
+            "Extension surfaces require the server Chrome runtime. Open a server browser tab in this profile first.",
+          );
+        return yield* surfaceOpener({ ...input, profileId }, extension);
+      }),
+    registerSurfaceOpener: (open) =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          surfaceOpener = open;
+        }),
+        () =>
+          Effect.sync(() => {
+            if (surfaceOpener === open) surfaceOpener = undefined;
+          }),
+      ),
+    changes: Stream.fromPubSub(changes),
+    subscribe: (input) =>
+      Stream.unwrap(
         Effect.gen(function* () {
           const profileId = yield* resolveProfile(input.profileId);
-          return yield* listOf(profileId);
+          // Subscribe before reading so a concurrent mutation cannot be missed.
+          // Registry writes rename atomically; reads need no mutation permit, so
+          // subscribers can see installing while the loader is still working.
+          const subscription = yield* PubSub.subscribe(changes);
+          return Stream.concat(
+            Stream.fromEffect(listOf(profileId)),
+            Stream.fromSubscription(subscription).pipe(
+              Stream.filter((changedProfileId) => changedProfileId === profileId),
+              Stream.mapEffect(() => listOf(profileId)),
+            ),
+          ).pipe(Stream.changesWith((a, b) => JSON.stringify(a) === JSON.stringify(b)));
         }),
       ),
-    install: (input) => serialized(install(input)),
     remove: (input) => serialized(remove(input)),
     toggle: (input) => serialized(toggle(input)),
     loadable,
     registerLoader: (load) =>
       Effect.acquireRelease(
-        Effect.sync(() => {
+        Effect.gen(function* () {
+          loaderScope = yield* Effect.scope;
           loader = load;
         }),
         () =>
           Effect.sync(() => {
-            if (loader === load) loader = undefined;
+            if (loader === load) {
+              loader = undefined;
+              loaderScope = undefined;
+            }
           }),
       ),
-    reportLoad: (_profileId, directory, error) =>
-      Effect.sync(() => {
-        if (error) loadErrors.set(directory, error);
-        else loadErrors.delete(directory);
+    reportLoad: (profileId, directory, error) =>
+      Effect.gen(function* () {
+        const changed = !loadResults.has(directory) || loadResults.get(directory) !== error;
+        loadResults.set(directory, error);
+        if (changed) yield* PubSub.publish(changes, profileId);
       }),
     pageUrl,
   });

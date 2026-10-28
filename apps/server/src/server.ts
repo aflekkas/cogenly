@@ -1,3 +1,4 @@
+import * as MachineResources from "./resourceTelemetry/MachineResources.ts";
 import * as RepositoryHandoff from "./threadSync/RepositoryHandoff.ts";
 import * as RepoMcpTrust from "./integrations/RepoMcpTrust.ts";
 import * as ReadOnlySandbox from "./terminal/ReadOnlySandbox.ts";
@@ -702,7 +703,12 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   layerMachineSetup,
   layerMachineHealth,
   // Fix stops runs and runs tasks, so it sits with the orchestration services below.
-  MachineHealthFixes.layer.pipe(Layer.provide(layerMachineHealth)),
+  // Its automatic round shares the alerts' state and scheduler instances.
+  MachineHealthFixes.layer.pipe(
+    Layer.provide(layerMachineHealth),
+    Layer.provide(HealthAlertsState.layer),
+    Layer.provide(Scheduler.layer),
+  ),
   // Universal settings follow the user to paired machines.
   SettingsSync.layer.pipe(
     Layer.provide(SharedState.layer),
@@ -794,6 +800,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.provideMerge(layerSourceControlProviderRegistry),
   Layer.provideMerge(layerGit),
   Layer.provideMerge(layerVcs),
+  Layer.provideMerge(MachineResources.layer.pipe(Layer.provide(HostResources.layer))),
   Layer.provideMerge(Layer.mergeAll(layerTerminal, layerPreview, layerDevice, layerComputerUse)),
   Layer.provideMerge(layerPersistence),
   // Both read a user-owned file out of the state directory and stream changes
