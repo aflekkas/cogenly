@@ -1,3 +1,4 @@
+import { MachineResourcesSnapshot } from "./resourceTelemetry.ts";
 import * as Schema from "effect/Schema";
 
 import {
@@ -128,6 +129,7 @@ export const MachineHealthCheck = Schema.Struct({
 export type MachineHealthCheck = typeof MachineHealthCheck.Type;
 
 export const MachineHealthReport = Schema.Struct({
+  resources: Schema.optional(MachineResourcesSnapshot),
   environmentId: EnvironmentId,
   machineName: TrimmedNonEmptyString,
   status: MachineHealthStatus,
@@ -269,7 +271,7 @@ export type MachineHealthAlertsSnapshot = typeof MachineHealthAlertsSnapshot.Typ
 export const MachineHealthRead = makePeerChannel({
   name: "health.report.v1",
   scope: AuthSyncReplicateScope,
-  payload: Schema.Struct({}),
+  payload: Schema.Struct({ includeResources: Schema.optionalKey(Schema.Boolean) }),
   success: MachineHealthReport,
   error: MachineHealthError,
 });

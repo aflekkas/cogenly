@@ -1,3 +1,5 @@
+import { forkParked } from "../serverActivation.ts";
+import * as MachineResources from "../resourceTelemetry/MachineResources.ts";
 import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
 /**
  * ThreadLaunchRouting: starting a new thread on another paired machine. The
@@ -35,7 +37,7 @@ import {
   ThreadScheduleRun,
   ThreadRemoteError,
 } from "@cogenly/contracts";
-import { exportBundle, importBundle } from "./repositoryBundle.ts";
+import { exportBundle, importBundle, withFullBundleFallback } from "./repositoryBundle.ts";
 import * as ScheduledTasks from "../scheduledTasks/ScheduledTaskService.ts";
 import * as AgentService from "../agents/AgentService.ts";
 import * as SharedSync from "../sync/SharedSync.ts";
@@ -54,6 +56,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import type * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 
@@ -135,6 +138,7 @@ const make = Effect.gen(function* () {
   const self = replication.environmentId;
   const routing = yield* ThreadRouting.ThreadRouting;
   const providers = yield* Effect.serviceOption(ProviderRegistry.ProviderRegistry);
+  const resources = yield* Effect.serviceOption(MachineResources.MachineResources);
   const orchestrator = yield* Effect.serviceOption(Orchestrator.OrchestratorV2);
   const scheduler = yield* Scheduler.Scheduler;
   const crypto = yield* Crypto.Crypto;
@@ -306,13 +310,17 @@ const make = Effect.gen(function* () {
       ? Effect.succeed(Option.none())
       : routing
           .callMachine(machine, ThreadMachineCatalog, { target: machine }, "30 seconds")
-          .pipe(Effect.map((result) => Option.some(result.providers))),
+          .pipe(Effect.map((result) => Option.some(result))),
   );
   yield* channels.register(ThreadMachineCatalog, (payload) =>
     payload.target === self
-      ? Option.isNone(providers)
-        ? Effect.succeed({ providers: [] })
-        : providers.value.getProviders.pipe(Effect.map((providers) => ({ providers })))
+      ? Effect.gen(function* () {
+          return {
+            providers: Option.isNone(providers) ? [] : yield* providers.value.getProviders,
+            ...(Option.isNone(resources) ? {} : { resources: yield* resources.value.read }),
+            repositoryTransfer: "remote-delta-v1" as const,
+          };
+        })
       : routing.callMachine(payload.target, ThreadMachineCatalog, payload, "30 seconds"),
   );
 
@@ -505,6 +513,33 @@ const make = Effect.gen(function* () {
       creationSource: input.creationSource,
     });
 
+  const deltaCapabilities = new Map<EnvironmentId, boolean>();
+  let capabilityGeneration = 0;
+  // Machine changes include peer reconnects and advertised version changes.
+  yield* machines.subscribe.pipe(
+    Stream.runForEach(() =>
+      Effect.sync(() => {
+        capabilityGeneration++;
+        deltaCapabilities.clear();
+      }),
+    ),
+    forkParked,
+  );
+  const supportsDelta = (machine: EnvironmentId) =>
+    Effect.gen(function* () {
+      const cached = deltaCapabilities.get(machine);
+      if (cached !== undefined) return cached;
+      const generation = capabilityGeneration;
+      const supported = yield* registry.catalog(machine).pipe(
+        Effect.map(
+          (catalog) => Option.getOrUndefined(catalog)?.repositoryTransfer === "remote-delta-v1",
+        ),
+        Effect.orElseSucceed(() => false),
+      );
+      if (generation === capabilityGeneration) deltaCapabilities.set(machine, supported);
+      return supported;
+    });
+
   yield* registry.register((machine, input) =>
     Effect.gen(function* () {
       if (machine === self) return Option.none();
@@ -523,28 +558,36 @@ const make = Effect.gen(function* () {
           detail: `Only a new thread can start on ${name}.`,
         });
       const project = yield* portableProject(input, name);
-      const bundle =
-        input.repositorySource === undefined
-          ? undefined
-          : yield* exportBundle(input.repositorySource.cwd, input.repositorySource.revision).pipe(
-              Effect.provideContext(context),
-            );
+      const remoteDelta =
+        input.repositorySource === undefined ? false : yield* supportsDelta(machine);
       const files = yield* readAttachmentFiles(input.initialMessage?.attachments ?? []).pipe(
         Effect.provideContext(context),
       );
       const priority = input.subagent !== undefined && input.threadId !== undefined;
       if (priority) yield* routing.refreshDelegated(machine, input.threadId!);
       if (input.fork !== undefined) yield* pushHistory(yield* nextHop(view, machine), name);
-      const result = yield* callTarget(view, {
-        target: machine,
-        ...(priority ? { priority: true } : {}),
-        commandId: input.commandId,
-        ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
-        project,
-        launch: portableLaunch(input, strategy),
-        ...(bundle === undefined ? {} : { bundle }),
-        files,
-      });
+      const result = yield* withFullBundleFallback(remoteDelta, (useDelta) =>
+        Effect.gen(function* () {
+          const bundle =
+            input.repositorySource === undefined
+              ? undefined
+              : yield* exportBundle(
+                  input.repositorySource.cwd,
+                  input.repositorySource.revision,
+                  useDelta,
+                ).pipe(Effect.provideContext(context));
+          return yield* callTarget(view, {
+            target: machine,
+            ...(priority ? { priority: true } : {}),
+            commandId: input.commandId,
+            ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
+            project,
+            launch: portableLaunch(input, strategy),
+            ...(bundle === undefined ? {} : { bundle }),
+            files,
+          });
+        }),
+      );
       const projection = yield* Effect.gen(function* () {
         if (priority) yield* routing.refreshDelegated(machine, result.threadId);
         return yield* projections.getThreadProjection(result.threadId);
@@ -796,14 +839,19 @@ const make = Effect.gen(function* () {
           reason: "needs-repository",
           detail: "The result is available; clone its repository here to receive its branch.",
         });
-      const result = yield* routing.callMachine(
-        owner.owner,
-        ThreadTaskBranch,
-        { target: owner.owner, threadId },
-        LAUNCH_TIMEOUT,
-      );
-      yield* importBundle(project.value.workspaceRoot, result.bundle, result.branch).pipe(
-        Effect.provideContext(context),
+      const result = yield* withFullBundleFallback(true, (remoteDelta) =>
+        Effect.gen(function* () {
+          const result = yield* routing.callMachine(
+            owner.owner,
+            ThreadTaskBranch,
+            { target: owner.owner, threadId, remoteDelta },
+            LAUNCH_TIMEOUT,
+          );
+          yield* importBundle(project.value.workspaceRoot, result.bundle, result.branch).pipe(
+            Effect.provideContext(context),
+          );
+          return result;
+        }),
       );
       if (copiedResults.size >= 256) copiedResults.delete(copiedResults.keys().next().value!);
       copiedResults.set(key, result.branch);
@@ -828,9 +876,7 @@ const make = Effect.gen(function* () {
         return yield* new ThreadRemoteError({ reason: "needs-repository" });
       if (
         thread.runs.some((run) =>
-          ["queued", "preparing", "starting", "running", "waiting", "finalizing"].includes(
-            run.status,
-          ),
+          ["queued", "preparing", "starting", "running", "waiting"].includes(run.status),
         )
       )
         return yield* new ThreadRemoteError({
@@ -843,9 +889,11 @@ const make = Effect.gen(function* () {
         .pipe(Effect.mapError(() => new ThreadRemoteError({ reason: "needs-repository" })));
       return {
         branch: thread.thread.branch,
-        bundle: yield* exportBundle(thread.thread.worktreePath, commit.commitSha).pipe(
-          Effect.provideContext(context),
-        ),
+        bundle: yield* exportBundle(
+          thread.thread.worktreePath,
+          commit.commitSha,
+          payload.remoteDelta === true,
+        ).pipe(Effect.provideContext(context)),
       };
     }),
   );
