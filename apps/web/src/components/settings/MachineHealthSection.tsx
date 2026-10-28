@@ -548,7 +548,8 @@ function HealthActionButton({
     <Button
       size="sm"
       variant={primary ? "default" : "outline"}
-      disabled={!permitted || busy}
+      disabled={!permitted}
+      busy={busy}
       aria-label={`${action.label}: ${subject}`}
       onClick={async () => {
         setBusy(true);
@@ -999,7 +1000,8 @@ function TestAlertRow({
     <Button
       size="sm"
       variant="outline"
-      disabled={blocked !== null || busy}
+      disabled={blocked !== null}
+      busy={busy}
       onClick={() => void send()}
     >
       {busy ? <Spinner /> : null}

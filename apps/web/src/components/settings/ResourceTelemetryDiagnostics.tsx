@@ -55,6 +55,7 @@ import {
   resourceHistoryBarHeight,
   resourceHistoryCpuScaleMax,
   resourceMonitorUnavailableText,
+  resourceMonitorRecovery,
   shouldShowResourceMonitorRetry,
   visibleResourceTelemetryProcesses,
 } from "./ResourceTelemetryDiagnostics.logic";
@@ -806,16 +807,22 @@ function AttributionTable({ entries }: { entries: ReadonlyArray<ResourceAttribut
  * collapse to one status row with Retry, followed by `fallback`, the server's own process
  * sampling, so the page never shows the same processes twice or a wall of empty tables.
  * When that sampling failed too (`fallbackUnavailableReasons`), the status row says so
- * once and `fallback` stays hidden.
+ * once and `fallback` stays hidden, so the row's one action re-samples it as well.
  */
 export function ResourceTelemetryDiagnostics({
   environmentId,
   fallback,
   fallbackUnavailableReasons,
+  fallbackRefreshing,
+  onRefreshFallback,
 }: {
   environmentId: EnvironmentId | null;
   fallback: ReactNode;
   fallbackUnavailableReasons: ReadonlyArray<string> | null;
+  /** Whether the server's process samplers are re-sampling, for the combined recovery action. */
+  fallbackRefreshing: boolean;
+  /** Re-samples both of the server's process samplers. */
+  onRefreshFallback: () => void;
 }) {
   const [windowMs, setWindowMs] = useState(15 * 60_000);
   const selectedWindow =
@@ -976,6 +983,19 @@ export function ResourceTelemetryDiagnostics({
       telemetry.error ??
       (snapshot ? Option.getOrNull(snapshot.health.native.lastError) : null) ??
       "The monitor stopped.";
+    const recovery = resourceMonitorRecovery({
+      canRestartMonitor: canMaintainEnvironment,
+      samplersHidden: fallbackUnavailableReasons !== null,
+    });
+    const recovering = isRetrying || (recovery?.refreshesSamplers === true && fallbackRefreshing);
+    const recover = () => {
+      if (!recovery) return;
+      if (recovery.refreshesSamplers) {
+        onRefreshFallback();
+        if (!recovery.restartsMonitor) telemetry.refresh();
+      }
+      if (recovery.restartsMonitor) retryCollector();
+    };
     return (
       <>
         <SettingsSection title="Resource monitor">
@@ -983,9 +1003,9 @@ export function ResourceTelemetryDiagnostics({
             title="The detailed monitor isn't running"
             description={resourceMonitorUnavailableText(reason, fallbackUnavailableReasons)}
             control={
-              canMaintainEnvironment ? (
-                <Button size="sm" variant="outline" disabled={isRetrying} onClick={retryCollector}>
-                  {isRetrying ? "Retrying…" : "Retry"}
+              recovery ? (
+                <Button size="sm" variant="outline" busy={recovering} onClick={recover}>
+                  {recovering ? "Retrying…" : "Retry"}
                 </Button>
               ) : undefined
             }
@@ -1110,7 +1130,7 @@ export function ResourceTelemetryDiagnostics({
         variant="plain"
         headerAction={
           collectorNeedsRetry ? (
-            <Button size="xs" variant="ghost-muted" disabled={isRetrying} onClick={retryCollector}>
+            <Button size="xs" variant="ghost-muted" busy={isRetrying} onClick={retryCollector}>
               <RefreshIcon size="xs" refreshing={isRetrying} />
               Retry monitor
             </Button>

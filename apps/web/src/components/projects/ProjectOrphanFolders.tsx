@@ -272,6 +272,7 @@ function EnvironmentOrphanFolders(props: {
                       size="sm"
                       variant="outline"
                       disabled={!canAdopt || action !== null}
+                      busy={action === "adopt"}
                       title={canAdopt ? undefined : NO_PERMISSION}
                       onClick={() => void run(folder, "adopt")}
                     >

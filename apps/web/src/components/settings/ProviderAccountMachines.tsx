@@ -175,12 +175,7 @@ function ProviderAccountMachineRow({
               {signedIn ? "Change account" : "Sign in"}
             </Button>
             {signedIn && (row.targetEnvironmentId || provider.auth.canLogout !== false) ? (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={signingOut}
-                onClick={() => void signOut()}
-              >
+              <Button size="sm" variant="outline" busy={signingOut} onClick={() => void signOut()}>
                 {signingOut ? "Signing out" : "Sign out"}
               </Button>
             ) : null}

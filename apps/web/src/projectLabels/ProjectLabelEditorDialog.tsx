@@ -271,7 +271,8 @@ export function ProjectLabelEditorDialog(props: {
             type="submit"
             form="project-label-editor"
             size="sm"
-            disabled={saving || trimmedName.length === 0}
+            disabled={trimmedName.length === 0}
+            busy={saving}
           >
             {label ? "Save" : "Create project"}
           </Button>

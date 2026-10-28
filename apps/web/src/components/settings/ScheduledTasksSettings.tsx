@@ -997,7 +997,7 @@ function WebhookDeliveriesDialog({
             <Button
               variant="outline"
               size="sm"
-              disabled={deliveriesQuery.isPending}
+              busy={deliveriesQuery.isPending}
               onClick={deliveriesQuery.refresh}
             >
               Refresh
@@ -1087,7 +1087,8 @@ function WebhookEndpointField({
           size="sm"
           variant="outline"
           type="button"
-          disabled={rotating || !canRotate}
+          disabled={!canRotate}
+          busy={rotating}
           onClick={() => void rotateUrl()}
         >
           Rotate
@@ -1861,7 +1862,8 @@ function ScheduledTaskEditorDialog({
           </DialogClose>
           <Button
             size="sm"
-            disabled={!canOperate || saving || editingTaskMissing || !connected || !tasksQuery.data}
+            disabled={!canOperate || editingTaskMissing || !connected || !tasksQuery.data}
+            busy={saving}
             onClick={() => void submit()}
           >
             {draft.editingId ? "Save task" : "Create task"}

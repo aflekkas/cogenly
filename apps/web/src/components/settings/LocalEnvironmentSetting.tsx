@@ -81,7 +81,7 @@ export function LocalEnvironmentSetting() {
             </AlertDialogClose>
             <Button
               variant={enabled ? "destructive" : "default"}
-              disabled={isUpdating}
+              busy={isUpdating}
               onClick={() => void applyChange()}
             >
               {isUpdating ? (

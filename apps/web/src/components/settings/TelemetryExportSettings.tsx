@@ -238,7 +238,7 @@ function TelemetryExportForm() {
               >
                 Discard
               </Button>
-              <Button type="submit" size="sm" disabled={saving}>
+              <Button type="submit" size="sm" busy={saving}>
                 {saving ? "Saving…" : "Save"}
               </Button>
             </div>

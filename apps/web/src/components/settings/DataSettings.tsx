@@ -242,7 +242,8 @@ function DataSettingsPanel({
           control={
             <Button
               size="sm"
-              disabled={disabledReason !== null || include.size === 0 || running}
+              disabled={disabledReason !== null || include.size === 0}
+              busy={running}
               onClick={() => void run()}
             >
               {running ? "Exporting…" : "Export"}
@@ -308,7 +309,7 @@ function DataSettingsPanel({
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={validation === "running"}
+                        busy={validation === "running"}
                         onClick={() => void validate(entry.path)}
                       >
                         {validation === "running" ? "Checking…" : "Check"}

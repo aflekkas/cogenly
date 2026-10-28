@@ -441,6 +441,7 @@ function CodeStep({
               disabled={
                 disabled || step.interaction.fields.some((field) => !values[field.name]?.trim())
               }
+              busy={step.submitting}
             >
               {step.submitting ? <Spinner size="sm" /> : null}
               {step.submitting ? "Sending code" : "Continue"}
@@ -480,7 +481,8 @@ function CallbackForm({ flow }: { readonly flow: ProviderSignInFlowState }) {
           type="submit"
           size="sm"
           variant="outline"
-          disabled={flow.local.responding || !flow.canManage || !value.trim()}
+          disabled={!flow.canManage || !value.trim()}
+          busy={flow.local.responding}
         >
           Continue
         </Button>

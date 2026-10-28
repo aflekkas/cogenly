@@ -194,7 +194,8 @@ export function AgentStartWork({
                 </Button>
                 <Button
                   type="submit"
-                  disabled={pending || !canWrite || !projectId || !title.trim() || !prompt.trim()}
+                  disabled={!canWrite || !projectId || !title.trim() || !prompt.trim()}
+                  busy={pending}
                 >
                   {pending ? "Starting…" : "Start Work"}
                 </Button>

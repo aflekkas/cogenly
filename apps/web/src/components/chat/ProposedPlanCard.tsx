@@ -273,7 +273,8 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
             <Button
               size="sm"
               onClick={() => void handleSaveToWorkspace()}
-              disabled={!canWriteFiles || isSavingToWorkspace}
+              disabled={!canWriteFiles}
+              busy={isSavingToWorkspace}
             >
               {isSavingToWorkspace ? "Saving..." : "Save"}
             </Button>

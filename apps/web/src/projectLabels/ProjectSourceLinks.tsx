@@ -243,7 +243,8 @@ export function ProjectSourceLinkField(props: {
           type="submit"
           size="sm"
           variant="outline"
-          disabled={!canLink || linking || parsed === null || duplicate}
+          disabled={!canLink || parsed === null || duplicate}
+          busy={linking}
         >
           <GitHubIcon aria-hidden />
           Link

@@ -130,7 +130,12 @@ export function GitHubTokenSettings({
                 Remove
               </Button>
             ) : null}
-            <Button type="submit" size="sm" disabled={!normalizedHost || !draft.trim() || saving}>
+            <Button
+              type="submit"
+              size="sm"
+              disabled={!normalizedHost || !draft.trim()}
+              busy={saving}
+            >
               Save
             </Button>
           </div>

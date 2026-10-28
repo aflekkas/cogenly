@@ -139,14 +139,14 @@ function relationText(machine: MachineInfo, list: MachineListResult): string {
 
 /**
  * Settings → Machines: the viewed machine's pairing, every machine it knows
- * about, and Add a machine, which walks both machines through Tailscale and
+ * about, and Add machine, which walks both machines through Tailscale and
  * pairs them. Unpair is the way back out.
  */
 export function MachinesSettingsPanel({
   addRequested,
   onAddOpened,
 }: {
-  /** A link asked for Add a machine, such as the command palette's; `onAddOpened` consumes it. */
+  /** A link asked for Add machine, such as the command palette's; `onAddOpened` consumes it. */
   readonly addRequested: boolean;
   readonly onAddOpened: () => void;
 }) {
@@ -602,7 +602,7 @@ function AddMachineDialog({
             Cancel
           </DialogClose>
           {hub !== null && spoke !== null ? (
-            <Button disabled={!bothReady || !canPair || pairing} onClick={() => void pairNow()}>
+            <Button disabled={!bothReady || !canPair} busy={pairing} onClick={() => void pairNow()}>
               {pairing ? <Spinner /> : null}
               {pairing ? `Pairing ${spoke.label}…` : `Pair ${spoke.label} with ${hubName}`}
             </Button>
@@ -766,7 +766,8 @@ function SetupStepRow({
               {step.action !== null ? (
                 <Button
                   size="sm"
-                  disabled={!canRun || starting}
+                  disabled={!canRun}
+                  busy={starting}
                   aria-label={`${step.action} on ${name}`}
                   onClick={() => void start()}
                 >

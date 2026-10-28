@@ -10,7 +10,7 @@ import { cn } from "~/lib/utils";
 // One disabled look for the bordered variants (default, outline): no fill, a
 // muted label and the resting border, instead of fading. Faded, a disabled
 // primary reads as a grey slab and a disabled outline as enabled. A button
-// disabled only while its own request runs (aria-busy) keeps its look and
+// disabled only while its own request runs (`busy`, aria-busy) keeps its look and
 // dims, so a pending submit doesn't flip to an outline and back. The base's
 // `interactive` transition fades between the states.
 const DISABLED_SURFACE =
@@ -133,9 +133,14 @@ type ButtonSize = NonNullable<VariantProps<typeof buttonVariants>["size"]>;
 interface ButtonProps extends useRender.ComponentProps<"button"> {
   variant?: ButtonVariant;
   size?: ButtonSize;
+  /**
+   * Its own request is running: disables the button and sets `aria-busy`, so it
+   * keeps its look and dims instead of taking the "unavailable" disabled look.
+   */
+  busy?: boolean;
 }
 
-function Button({ className, variant, size, render, ...props }: ButtonProps) {
+function Button({ className, variant, size, render, busy = false, ...props }: ButtonProps) {
   const typeValue: React.ButtonHTMLAttributes<HTMLButtonElement>["type"] = render
     ? undefined
     : "button";
@@ -150,7 +155,10 @@ function Button({ className, variant, size, render, ...props }: ButtonProps) {
 
   return useRender({
     defaultTagName: "button",
-    props: mergeProps<"button">(defaultProps, props),
+    props: mergeProps<"button">(
+      defaultProps,
+      busy ? { ...props, disabled: true, "aria-busy": true } : props,
+    ),
     render,
   });
 }

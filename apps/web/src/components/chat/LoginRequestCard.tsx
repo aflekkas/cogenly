@@ -216,7 +216,7 @@ export function PendingLoginRequestForm(props: {
           >
             Skip
           </Button>
-          <Button type="submit" size="sm" disabled={submitting || problem !== null}>
+          <Button type="submit" size="sm" disabled={problem !== null} busy={submitting}>
             {updating ? "Update" : "Submit"}
           </Button>
         </div>

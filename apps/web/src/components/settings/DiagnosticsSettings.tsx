@@ -49,6 +49,7 @@ import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { Button } from "../ui/button";
+import { DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
 import { MorphIcon } from "~/components/MorphIcon";
 import { ScrollArea } from "../ui/scroll-area";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
@@ -316,6 +317,40 @@ function TraceId({ traceId }: { traceId: string }) {
       </Tooltip>
       <CopyButton label="Copy full trace ID" size="icon-micro" target="trace ID" value={traceId} />
     </span>
+  );
+}
+
+/**
+ * Every occurrence folded into a repeated list row, newest first, each with its
+ * own time and trace ID so one of them can still be found in the trace files.
+ */
+function RepeatedOccurrences({
+  occurrences,
+}: {
+  occurrences: ReadonlyArray<{
+    readonly key: string;
+    readonly at: DateTime.Utc;
+    readonly traceId: string;
+  }>;
+}) {
+  const [open, setOpen] = useState(false);
+  if (occurrences.length < 2) return null;
+  return (
+    <div className="pt-1">
+      <DisclosureTrigger variant="quiet" open={open} onClick={() => setOpen((value) => !value)}>
+        {`${formatCount(occurrences.length)} occurrences`}
+      </DisclosureTrigger>
+      <DisclosurePanel open={open}>
+        <ul className="grid gap-0.5 pt-1 text-xs text-muted-foreground">
+          {occurrences.map((occurrence) => (
+            <li key={occurrence.key} className="flex min-w-0 items-center gap-2">
+              <span className="shrink-0 tabular-nums">{formatRelative(occurrence.at)}</span>
+              <TraceId traceId={occurrence.traceId} />
+            </li>
+          ))}
+        </ul>
+      </DisclosurePanel>
+    </div>
   );
 }
 
@@ -1362,7 +1397,7 @@ export function DiagnosticsSettingsPanel() {
               data.latestFailures,
               (failure) => `${failure.name}\n${failure.cause}`,
             )}
-            renderItem={({ entry: failure, count }) => (
+            renderItem={({ entry: failure, count, occurrences }) => (
               <SettingsListItem
                 key={`${failure.traceId}:${failure.spanId}`}
                 title={<TruncatedName value={failure.name} />}
@@ -1375,6 +1410,13 @@ export function DiagnosticsSettingsPanel() {
                 }
               >
                 <DiagnosticsDetail text={failure.cause} />
+                <RepeatedOccurrences
+                  occurrences={occurrences.map((occurrence) => ({
+                    key: `${occurrence.traceId}:${occurrence.spanId}`,
+                    at: occurrence.endedAt,
+                    traceId: occurrence.traceId,
+                  }))}
+                />
               </SettingsListItem>
             )}
           />
@@ -1395,7 +1437,7 @@ export function DiagnosticsSettingsPanel() {
               data.latestWarningAndErrorLogs,
               (event) => `${event.level}\n${event.spanName}\n${event.message}`,
             )}
-            renderItem={({ entry: event, count }) => {
+            renderItem={({ entry: event, count, occurrences }) => {
               const level = logLevelStatus(event.level);
               return (
                 <SettingsListItem
@@ -1416,6 +1458,13 @@ export function DiagnosticsSettingsPanel() {
                     text={event.message}
                     collapsedClassName="line-clamp-2"
                     expandLabel="Show full message"
+                  />
+                  <RepeatedOccurrences
+                    occurrences={occurrences.map((occurrence) => ({
+                      key: `${occurrence.traceId}:${occurrence.spanId}:${DateTime.formatIso(occurrence.seenAt)}`,
+                      at: occurrence.seenAt,
+                      traceId: occurrence.traceId,
+                    }))}
                   />
                 </SettingsListItem>
               );
@@ -1441,6 +1490,11 @@ export function DiagnosticsSettingsPanel() {
         environmentId={environmentId}
         fallback={serverProcessSections}
         fallbackUnavailableReasons={samplingUnavailableReasons}
+        fallbackRefreshing={isProcessPending || isResourcePending}
+        onRefreshFallback={() => {
+          refreshProcesses();
+          refreshResources();
+        }}
       />
 
       <FoldedSettingsSection

@@ -846,7 +846,7 @@ export function ProviderInstanceCard({
               size="xs"
               variant="outline"
               className="w-full"
-              disabled={isUpdating}
+              busy={isUpdating}
               onClick={onRunVersionAction}
             >
               {isUpdating ? <Spinner /> : <DownloadIcon />}

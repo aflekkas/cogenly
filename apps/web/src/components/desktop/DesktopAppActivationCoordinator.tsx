@@ -92,7 +92,7 @@ export function DesktopAppActivationCoordinator() {
     },
   );
 
-  // `machine_pair`: the same command as Settings → Machines → Add a machine, so
+  // `machine_pair`: the same command as Settings → Machines → Add machine, so
   // the join code stays inside it. The agent hears the outcome; the user gets a toast.
   const pairRequested = useEffectEvent(
     (request: Extract<DesktopAppRendererRequest, { type: "pair-machines" }>) =>

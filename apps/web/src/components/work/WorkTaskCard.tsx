@@ -492,7 +492,8 @@ function WorkTaskEditor(props: {
       <div className="flex items-center gap-1.5">
         <Button
           size="compact"
-          disabled={props.busy || brief.trim().length === 0}
+          disabled={brief.trim().length === 0}
+          busy={props.busy}
           onClick={() =>
             props.onApprove({
               choice,

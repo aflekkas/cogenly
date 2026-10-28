@@ -347,7 +347,8 @@ function AboutVersionSection() {
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={buttonDisabled || isUpdateActionPending}
+                  disabled={buttonDisabled}
+                  busy={isUpdateActionPending}
                   onClick={handleButtonClick}
                 >
                   {buttonLabel}

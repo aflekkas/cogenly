@@ -1,6 +1,36 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { resourceMonitorUnavailableText } from "./ResourceTelemetryDiagnostics.logic";
+import {
+  resourceMonitorRecovery,
+  resourceMonitorUnavailableText,
+} from "./ResourceTelemetryDiagnostics.logic";
+
+describe("resourceMonitorRecovery", () => {
+  it("only restarts the monitor while the server's sampling shows its own refresh", () => {
+    expect(resourceMonitorRecovery({ canRestartMonitor: true, samplersHidden: false })).toEqual({
+      restartsMonitor: true,
+      refreshesSamplers: false,
+    });
+  });
+
+  it("also refreshes both samplers once their sections are folded into the row", () => {
+    expect(resourceMonitorRecovery({ canRestartMonitor: true, samplersHidden: true })).toEqual({
+      restartsMonitor: true,
+      refreshesSamplers: true,
+    });
+  });
+
+  it("still lets a viewer who can't restart the monitor re-sample hidden samplers", () => {
+    expect(resourceMonitorRecovery({ canRestartMonitor: false, samplersHidden: true })).toEqual({
+      restartsMonitor: false,
+      refreshesSamplers: true,
+    });
+  });
+
+  it("offers nothing when neither applies", () => {
+    expect(resourceMonitorRecovery({ canRestartMonitor: false, samplersHidden: false })).toBeNull();
+  });
+});
 
 describe("resourceMonitorUnavailableText", () => {
   it("keeps the monitor's reason alone while process sampling works", () => {

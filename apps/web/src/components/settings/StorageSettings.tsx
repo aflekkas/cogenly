@@ -362,7 +362,8 @@ function CleanupSection() {
     <Button
       variant="outline"
       size="sm"
-      disabled={pending || !allowed}
+      disabled={!allowed}
+      busy={pending}
       onClick={() => void deleteNow(!previewOpen)}
     >
       {pending

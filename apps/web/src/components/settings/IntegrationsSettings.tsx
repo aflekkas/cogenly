@@ -774,6 +774,7 @@ function DeviceIntegrationControls({
               size="sm"
               variant="outline"
               disabled={!environmentId || pending !== null || busy}
+              busy={pending === `update-${tool}`}
               onClick={() => {
                 if (!environmentId) return;
                 setUpdateError(null);
@@ -798,6 +799,7 @@ function DeviceIntegrationControls({
               size="sm"
               variant="outline"
               disabled={!environmentId || pending !== null || busy}
+              busy={pending === "check"}
               onClick={() => {
                 if (!environmentId) return;
                 setPending("check");
@@ -875,6 +877,7 @@ function DeviceIntegrationControls({
                 size="sm"
                 variant="outline"
                 disabled={!environmentId || !enabled || busy || pending !== null}
+                busy={pending === "check"}
                 onClick={() => {
                   if (!environmentId) return;
                   setPending("check");
@@ -1430,7 +1433,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
           <AlertDialogFooter>
             <AlertDialogClose
               disabled={profileRemovalInFlight}
-              render={<Button variant="outline" disabled={profileRemovalInFlight} />}
+              render={<Button variant="outline" busy={profileRemovalInFlight} />}
             >
               Cancel
             </AlertDialogClose>

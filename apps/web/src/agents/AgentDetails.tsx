@@ -116,7 +116,7 @@ export function DailyCapRow({
               onChange={(event) => setValue(event.target.value)}
             />
           </label>
-          <Button type="submit" size="xs" className="self-end" disabled={pending || !valid}>
+          <Button type="submit" size="xs" className="self-end" disabled={!valid} busy={pending}>
             Save
           </Button>
         </form>
@@ -428,7 +428,8 @@ export function TriggerForm({
         <Button
           type="submit"
           size="xs"
-          disabled={pending || saving || !title.trim() || !prompt.trim()}
+          disabled={pending || !title.trim() || !prompt.trim()}
+          busy={saving}
         >
           Save trigger
         </Button>

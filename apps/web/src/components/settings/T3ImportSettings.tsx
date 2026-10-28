@@ -231,7 +231,7 @@ export function T3ImportFlowView({
     requestError,
   } = flow;
   const cancelButton = (
-    <Button size="sm" variant="outline" disabled={cancelling} onClick={() => void flow.stopJob()}>
+    <Button size="sm" variant="outline" busy={cancelling} onClick={() => void flow.stopJob()}>
       {cancelling ? "Stopping…" : "Cancel"}
     </Button>
   );
@@ -309,6 +309,7 @@ export function T3ImportFlowView({
             <Button
               size="sm"
               disabled={busy || selection.size === 0}
+              busy={pending === "scan"}
               onClick={() => void flow.startScan()}
             >
               {pending === "scan" ? (
@@ -570,6 +571,7 @@ function StageSection({
                   <Button
                     size="sm"
                     disabled={busy || summarizeT3ImportReport(view.report).nothingToImport}
+                    busy={pending === "run"}
                     onClick={() => onImport(view.report)}
                   >
                     {pending === "run" ? (

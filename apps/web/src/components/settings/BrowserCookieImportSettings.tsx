@@ -104,6 +104,7 @@ function CookieImportRow({ environmentId }: { environmentId: EnvironmentId | nul
           size="sm"
           aria-expanded={open}
           disabled={!canImport || busy}
+          busy={!open && busy}
           onClick={async () => {
             if (open) {
               setOpen(false);
@@ -221,7 +222,8 @@ function CookieImportRow({ environmentId }: { environmentId: EnvironmentId | nul
                 </Button>
                 <Button
                   size="sm"
-                  disabled={busy || !canImport || !report?.dryRun || report.available === 0}
+                  disabled={!canImport || !report?.dryRun || report.available === 0}
+                  busy={busy}
                   onClick={() => void importCookies(false)}
                 >
                   {busy ? "Working…" : "Import"}

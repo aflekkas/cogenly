@@ -178,7 +178,8 @@ export function DeviceHostEditor({
                 type="button"
                 size="sm"
                 variant="outline"
-                disabled={busy || checking || !valid}
+                disabled={busy || !valid}
+                busy={checking}
                 onClick={() => {
                   if (Option.isSome(input)) void testConnection(input.value);
                 }}
@@ -243,7 +244,7 @@ export function DeviceHostEditor({
           <Button type="button" variant="ghost" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" disabled={busy || checking || !valid || !draft.label.trim()}>
+          <Button type="submit" disabled={checking || !valid || !draft.label.trim()} busy={busy}>
             {busy ? <Spinner size="xs" /> : null} Save host
           </Button>
         </DialogFooter>

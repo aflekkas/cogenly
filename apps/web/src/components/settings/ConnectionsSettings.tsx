@@ -1230,7 +1230,8 @@ const AuthorizedClientsActions = memo(function AuthorizedClientsActions({
               Cancel
             </Button>
             <Button
-              disabled={isCreatingPairingLink || selectedScopes.length === 0}
+              disabled={selectedScopes.length === 0}
+              busy={isCreatingPairingLink}
               onClick={() => void handleCreatePairingLink()}
             >
               {isCreatingPairingLink ? "Creating…" : "Create link"}
@@ -2903,7 +2904,7 @@ export function ConnectionsSettings() {
       <Button
         variant="outline"
         className="w-full"
-        disabled={isAddingSavedBackend}
+        busy={isAddingSavedBackend}
         onClick={() => void handleAddSavedBackend()}
       >
         <PlusIcon className="size-3.5" />
@@ -3023,7 +3024,7 @@ export function ConnectionsSettings() {
         <Button
           variant="outline"
           className="w-full"
-          disabled={isAddingSavedBackend}
+          busy={isAddingSavedBackend}
           onClick={() => void handleAddSavedBackend()}
         >
           <PlusIcon className="size-3.5" />
@@ -3246,12 +3247,7 @@ export function ConnectionsSettings() {
             description="Couldn't load the WSL backend state."
             status={<span className="block text-destructive">{desktopWslError}</span>}
             control={
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={loadWslState}
-                disabled={isLoadingWslState}
-              >
+              <Button size="sm" variant="outline" onClick={loadWslState} busy={isLoadingWslState}>
                 {isLoadingWslState ? "Retrying…" : "Retry"}
               </Button>
             }
@@ -3683,11 +3679,8 @@ export function ConnectionsSettings() {
                 <Button
                   variant="default"
                   onClick={handleConfirmDesktopServerExposureChange}
-                  disabled={
-                    !canManageLocalBackend ||
-                    pendingDesktopServerExposureMode === null ||
-                    isUpdatingDesktopServerExposure
-                  }
+                  disabled={!canManageLocalBackend || pendingDesktopServerExposureMode === null}
+                  busy={isUpdatingDesktopServerExposure}
                 >
                   {isUpdatingDesktopServerExposure && <Spinner size="sm" />}
                   <span className="[text-box:trim-both_cap_alphabetic]">
@@ -3749,7 +3742,8 @@ export function ConnectionsSettings() {
                     <Button
                       variant="outline"
                       onClick={() => handleConfirmEnableWsl("wsl-only")}
-                      disabled={isUpdatingWslBackend || !canManageLocalBackend}
+                      disabled={!canManageLocalBackend}
+                      busy={isUpdatingWslBackend}
                     >
                       {isUpdatingWslBackend ? (
                         <>
@@ -3763,7 +3757,8 @@ export function ConnectionsSettings() {
                     <Button
                       variant="default"
                       onClick={() => handleConfirmEnableWsl("both")}
-                      disabled={isUpdatingWslBackend || !canManageLocalBackend}
+                      disabled={!canManageLocalBackend}
+                      busy={isUpdatingWslBackend}
                     >
                       {isUpdatingWslBackend ? (
                         <>
@@ -3784,7 +3779,8 @@ export function ConnectionsSettings() {
                         : "default"
                     }
                     onClick={handleConfirmWslChange}
-                    disabled={isUpdatingWslBackend || !canManageLocalBackend}
+                    disabled={!canManageLocalBackend}
+                    busy={isUpdatingWslBackend}
                   >
                     {isUpdatingWslBackend ? (
                       <>

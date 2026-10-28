@@ -53,7 +53,8 @@ export function ClerkUserProfileRefreshButton({
       size="sm"
       variant="outline"
       className={className}
-      disabled={disabled || isPending}
+      disabled={disabled}
+      busy={isPending}
       onClick={onClick}
     >
       <RefreshIcon aria-hidden="true" size="sm" refreshing={isPending} />

@@ -554,7 +554,7 @@ export function SourceControlSettingsPanel() {
     );
   // Rescan as a failed row's recovery step (`sm`) or an empty list's one action (`xs`).
   const rescanButton = (size: "sm" | "xs") => (
-    <Button size={size} variant="outline" onClick={handleScan} disabled={discovery.isPending}>
+    <Button size={size} variant="outline" onClick={handleScan} busy={discovery.isPending}>
       <RefreshIcon size="sm" refreshing={discovery.isPending} />
       Rescan
     </Button>

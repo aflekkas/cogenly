@@ -2195,7 +2195,7 @@ function TimelineHistoryControl(props: MessagesTimelineHistoryControls) {
           <Button
             size="xs"
             variant="outline"
-            disabled={props.loading}
+            busy={props.loading}
             aria-label="Load earlier turns"
             onClick={() => props.onLoadEarlier()}
           >

@@ -765,7 +765,8 @@ function KeybindingKeyControl({
       {isDirty ? (
         <Button
           size="sm"
-          disabled={isSaving || keyDraft.trim().length === 0 || !isWhenDraftValid}
+          disabled={keyDraft.trim().length === 0 || !isWhenDraftValid}
+          busy={isSaving}
           onClick={save}
         >
           {isSaving ? "Saving" : "Save"}
@@ -1148,7 +1149,7 @@ function NewKeybindingSettingsRow(props: NewKeybindingProps) {
       }
       control={
         <>
-          <Button size="sm" disabled={isSaving || !draft.canSave} onClick={draft.save}>
+          <Button size="sm" disabled={!draft.canSave} busy={isSaving} onClick={draft.save}>
             {isSaving ? "Saving" : "Save"}
           </Button>
           <NewKeybindingCancelIcon isSaving={isSaving} onCancel={onCancel} />

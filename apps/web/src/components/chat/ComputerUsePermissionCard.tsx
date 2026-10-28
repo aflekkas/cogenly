@@ -156,7 +156,7 @@ function PermissionPrompt({
         {hostAppNote ? <p className="text-sm text-muted-foreground">{hostAppNote}</p> : null}
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <Button disabled={!canRequest || pending} onClick={onRequest}>
+        <Button disabled={!canRequest} busy={pending} onClick={onRequest}>
           Open System Settings
         </Button>
       </div>

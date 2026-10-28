@@ -585,9 +585,7 @@ function DeviceHostList({
             <Button
               size="sm"
               variant="outline"
-              disabled={
-                busy || (canRetry ? retrying !== null : compact ? pending : progress !== null)
-              }
+              busy={canRetry && retrying === host.id}
               onClick={() => {
                 if (canRetry) retryHost(environmentId, host.id);
                 else void testConnection(host);

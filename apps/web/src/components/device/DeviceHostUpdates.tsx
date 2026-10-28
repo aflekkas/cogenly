@@ -59,6 +59,7 @@ export function DeviceHostUpdates({
                 size="compact"
                 variant="outline"
                 disabled={pending !== null}
+                busy={pending === host.id}
                 onClick={() => {
                   setPending(host.id);
                   void retry({ environmentId, input: { retryHostId: host.id } }).finally(() =>

@@ -96,7 +96,8 @@ function ComputerUsePermissionsRow({
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={!canRequest || pending}
+                      disabled={!canRequest}
+                      busy={pending}
                       aria-label={`Open System Settings for ${entry.title}`}
                       onClick={() => void request(entry.permission).then(onRequested)}
                     >
