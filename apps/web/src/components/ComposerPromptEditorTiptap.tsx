@@ -263,11 +263,12 @@ function resolvedThemeFromDocument(): "light" | "dark" {
 // ── Inline atom nodes (chips) ─────────────────────────────────────────────
 
 /**
- * Wraps an inline chip node view: keeps the caret and text selection out of the chip and
- * paints the editor's node selection over it.
+ * Wraps every inline chip node view: centers the chip on the text line the way a chip in a
+ * sent message sits, keeps the caret and text selection out of the chip, and paints the
+ * editor's node selection over it.
  */
 const CHIP_NODE_SELECTION_CLASS_NAME =
-  "relative inline-flex select-none items-center align-middle leading-none data-[composer-chip-selected]:after:pointer-events-none data-[composer-chip-selected]:after:absolute data-[composer-chip-selected]:after:inset-0 data-[composer-chip-selected]:after:rounded-sm data-[composer-chip-selected]:after:bg-[Highlight] data-[composer-chip-selected]:after:opacity-30 data-[composer-chip-selected]:after:content-['']";
+  "relative inline-flex min-w-0 max-w-full select-none items-center align-middle leading-none data-[composer-chip-selected]:after:pointer-events-none data-[composer-chip-selected]:after:absolute data-[composer-chip-selected]:after:inset-0 data-[composer-chip-selected]:after:rounded-chip data-[composer-chip-selected]:after:bg-[Highlight] data-[composer-chip-selected]:after:opacity-30 data-[composer-chip-selected]:after:content-['']";
 
 const ComposerMentionExtension = Node.create({
   name: "composer-mention",
@@ -471,7 +472,7 @@ function ComposerCitationNodeView({ node, editor, getPos }: NodeViewProps) {
   return (
     <NodeViewWrapper
       as="span"
-      className="inline-flex min-w-0 max-w-full select-none"
+      className={CHIP_NODE_SELECTION_CLASS_NAME}
       contentEditable={false}
       spellCheck={false}
       data-composer-citation-chip="true"
