@@ -111,6 +111,27 @@ describe("buildThreadActionMenuItems per thread kind", () => {
     ]);
   });
 
+  it("sets the recently used projects apart from the rest in the move menu", () => {
+    const move = buildThreadActionMenuItems(
+      stateFor("chat", {
+        folder: {
+          current: null,
+          removable: false,
+          options: [
+            { id: "spawn", name: "Spawn" },
+            { id: "bartr", name: "Bartr", startsGroup: true },
+          ],
+          canMove: true,
+        },
+      }),
+    ).find((item) => item.id === "move-folder");
+    expect(move?.children?.map((child) => [child.id, child.separatorBefore === true])).toEqual([
+      ["move-folder:spawn", false],
+      ["move-folder:bartr", true],
+      ["new-folder", true],
+    ]);
+  });
+
   it("keeps the reverse of each supported action", () => {
     const work = ids(
       buildThreadActionMenuItems(
