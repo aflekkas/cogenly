@@ -25,14 +25,17 @@ import {
 } from "react";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
-import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
+import { MachineGlyph } from "./MachineBadge";
 import { useProject, useThreadShell, useThreadShellsForProjectRefs } from "../state/entities";
+import { usePrimaryEnvironmentId } from "../state/environments";
 import {
   type EnvMode,
   type EnvironmentOption,
+  environmentOptionMachine,
   resolveContextStripLabelsCompact,
   resolveCurrentWorkspaceLabel,
   resolveEnvModeLabel,
+  resolveEnvironmentOptionName,
   resolveEnvironmentOptionTitle,
   resolveLockedWorkspaceLabel,
   resolvePreviousWorktreeLabel,
@@ -195,6 +198,7 @@ const RunContextSelector = memo(function RunContextSelector({
   onUsePreviousWorktree,
 }: RunContextSelectorProps) {
   const composerFloatingLayerProps = useComposerMenuProps();
+  const localEnvironmentId = usePrimaryEnvironmentId();
   const activeEnvironment = useMemo(
     () => availableEnvironments?.find((env) => env.environmentId === environmentId) ?? null,
     [availableEnvironments, environmentId],
@@ -255,15 +259,21 @@ const RunContextSelector = memo(function RunContextSelector({
               aria-hidden="true"
             />
           ) : (
-            <EnvironmentMachineIcon
-              kind={activeEnvironment?.machine ?? "server"}
-              className={isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0 mx-0!"}
+            <MachineGlyph
+              machine={
+                activeEnvironment === null
+                  ? null
+                  : environmentOptionMachine(activeEnvironment, localEnvironmentId)
+              }
+              className={isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 mx-0!"}
             />
           )}
         </TooltipTrigger>
         <TooltipPopup {...(isPanel ? {} : COMPOSER_CONTEXT_TOOLTIP)}>
           {autoEnvironmentLabel ??
-            (activeEnvironment ? resolveEnvironmentOptionTitle(activeEnvironment) : "Run on")}
+            (activeEnvironment
+              ? resolveEnvironmentOptionTitle(activeEnvironment, localEnvironmentId)
+              : "Run on")}
         </TooltipPopup>
       </Tooltip>
       {workspaceIcon}
@@ -276,7 +286,11 @@ const RunContextSelector = memo(function RunContextSelector({
       {icon}
       <ComposerContextLabel displayMode={displayMode}>
         {autoEnvironmentLabel ??
-          (showEnvironmentIndicator ? (activeEnvironment?.label ?? "Run on") : workspaceLabel)}
+          (showEnvironmentIndicator
+            ? activeEnvironment
+              ? resolveEnvironmentOptionName(activeEnvironment, localEnvironmentId)
+              : "Run on"
+            : workspaceLabel)}
       </ComposerContextLabel>
     </>
   );

@@ -19,7 +19,7 @@ import {
 import { avatarFaceProps } from "~/components/agents/face/agentAvatar.logic";
 import { AgentFace } from "~/components/agents/face";
 import { ProviderInstanceIcon } from "~/components/chat/ProviderInstanceIcon";
-import { EnvironmentMachineIcon } from "~/components/EnvironmentMachineIcon";
+import { MachineBadge } from "~/components/MachineBadge";
 import {
   SidebarDragLifecycle,
   SidebarSortSensor,
@@ -84,7 +84,8 @@ import { toggleCollapsedGroup } from "~/projectLabels/projectMeta.logic";
 import { deriveProviderInstanceEntries } from "~/providerInstances";
 import { agentsRpc } from "~/rpc/agents";
 import { useServerConfigs } from "~/state/entities";
-import { useEnvironmentIdentities, useEnvironmentMachines } from "~/state/environments";
+import { describeRemoteMachine } from "~/machines/machineBadge.logic";
+import { useRemoteMachine } from "~/machines/useRemoteMachine";
 import { formatRelativeTime } from "~/timestampFormat";
 import { takeAgentArrival } from "./agentArrivals";
 import { groupAgentsByProject, orderAgentsForList } from "./agentGroups.logic";
@@ -484,14 +485,19 @@ function AgentRow({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [pending, setPending] = useState(false);
   const since = formatRelativeTime(agent.updatedAt);
-  const identities = useEnvironmentIdentities();
-  const environmentLabel =
-    agent.ownerName ??
-    identities.find((entry) => entry.environmentId === (agent.ownerMachine ?? agent.environmentId))
-      ?.label ??
-    null;
-  const environmentMachine =
-    useEnvironmentMachines().get(agent.ownerMachine ?? agent.environmentId) ?? "server";
+  // The other machine that runs the agent, null on this computer. The agent's
+  // own record of its owner wins over what this client knows about it.
+  const lookedUpMachine = useRemoteMachine(
+    agent.ownerMachine ?? agent.environmentId,
+    agent.environmentId,
+  );
+  const remoteMachine =
+    lookedUpMachine === null
+      ? null
+      : {
+          name: agent.ownerName ?? lookedUpMachine.name,
+          online: agent.ownerOnline ?? lookedUpMachine.online,
+        };
   const configs = useServerConfigs();
   const providerEntry = useMemo(
     () =>
@@ -670,6 +676,8 @@ function AgentRow({
   const modelLabel = providerEntry
     ? `${providerEntry.displayName} · ${agent.modelSelection.model}`
     : agent.modelSelection.model;
+  const providerAvatarLabel =
+    remoteMachine === null ? modelLabel : `${modelLabel}. ${describeRemoteMachine(remoteMachine)}`;
   const sortItem = useSidebarSortableItem({
     id: agentContactKey(agent),
     sortable: sortable && renaming === null,
@@ -833,30 +841,17 @@ function AgentRow({
               >
                 <span className="min-w-0 truncate">{summary || status}</span>
               </SidebarCardLine>
-              {/* As on a Work card: the machine it runs on, then the provider
-              glyph, which names the model. */}
+              {/* As on a Work card: the provider glyph names the model, with a
+              cloud on its corner when another machine runs the agent. */}
               <SidebarCardLine line="meta" tone="faint" className="justify-end">
-                {environmentLabel ? (
-                  <span className="inline-flex min-w-0 max-w-24 items-center gap-1">
-                    <EnvironmentMachineIcon
-                      aria-hidden
-                      kind={environmentMachine}
-                      className="size-3 shrink-0"
-                    />
-                    <span className="truncate">
-                      {environmentLabel}
-                      {agent.ownerOnline === false ? " · Offline" : ""}
-                    </span>
-                  </span>
-                ) : null}
                 {providerEntry ? (
                   <Tooltip>
                     <TooltipTrigger
                       render={
                         <span
                           role="img"
-                          aria-label={`Model: ${modelLabel}`}
-                          className="inline-flex shrink-0 items-center"
+                          aria-label={`Model: ${providerAvatarLabel}`}
+                          className="relative inline-flex shrink-0 items-center"
                         />
                       }
                     >
@@ -867,10 +862,13 @@ function AgentRow({
                         showBadge={providerEntry.accentColor !== undefined}
                         size="sm"
                       />
+                      <MachineBadge placement="corner" surface="sidebar" machine={remoteMachine} />
                     </TooltipTrigger>
-                    <TooltipPopup side="top">{modelLabel}</TooltipPopup>
+                    <TooltipPopup side="top">{providerAvatarLabel}</TooltipPopup>
                   </Tooltip>
-                ) : null}
+                ) : (
+                  <MachineBadge placement="inline" machine={remoteMachine} />
+                )}
               </SidebarCardLine>
             </div>
           </div>
