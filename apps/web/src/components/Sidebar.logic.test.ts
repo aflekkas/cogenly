@@ -920,6 +920,20 @@ describe("resolveSidebarThreadStatus", () => {
     ).toBe("approval");
   });
 
+  it("reports a draft's launching thread as working until its first run arrives", () => {
+    expect(resolveSidebarThreadStatus({ ...idle, latestRun: null }, { launching: true })).toBe(
+      "working",
+    );
+    expect(resolveSidebarThreadStatus({ ...idle, latestRun: null })).toBe("ready");
+    // Once the server reports the run, its own state decides.
+    expect(
+      resolveSidebarThreadStatus(
+        { ...idle, runtime: { ...runtime, status: "failed" as const } },
+        { launching: true },
+      ),
+    ).toBe("failed");
+  });
+
   it("reports working for running and starting runtimes", () => {
     expect(resolveSidebarThreadStatus({ ...idle, runtime })).toBe("working");
     expect(
