@@ -189,7 +189,11 @@ export function SourceControlWritingSettingsSection() {
       <SettingsRow
         serverScoped
         settingKeys={["sourceControlWriterModelSelection"]}
-        controlWidth="wide"
+        // Only the model pair needs the wide split; the lone off switch sits
+        // on the trailing edge like its siblings.
+        controlWidth={
+          hasServerTargets && usesDedicatedModel && canEnableDedicatedModel ? "wide" : "default"
+        }
         {...searchableSetting("source-control-writer-model")}
         description="Writes commit messages, pull requests and branch names. Off uses the text generation model from Models."
         control={

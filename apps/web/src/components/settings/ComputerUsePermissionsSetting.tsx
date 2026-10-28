@@ -81,32 +81,33 @@ function ComputerUsePermissionsRow({
   return (
     <SettingsRow id="computer-use-permissions" title="macOS permissions" description={description}>
       {computerUseAvailable(status) ? (
-        // One line per grant, like a nested list: its name and status, then its action.
+        // One line per grant, like a nested list: its name, then its status
+        // and action on the trailing edge, where every settings status sits.
         <SettingsGroup variant="inset" className="mt-2">
           {status.permissions.map((entry) => (
             <div
               key={entry.permission}
               className="flex min-h-11 items-center justify-between gap-3 px-3 py-2 sm:px-4"
             >
-              <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                <span className="truncate text-sm text-foreground">{entry.title}</span>
+              <span className="min-w-0 truncate text-sm text-foreground">{entry.title}</span>
+              <span className="flex shrink-0 items-center gap-2">
                 {entry.grant === "granted" ? (
                   <SettingsStatusBadge tone="success">Granted</SettingsStatusBadge>
                 ) : (
-                  <SettingsStatusBadge tone="warning">Not granted</SettingsStatusBadge>
+                  <>
+                    <SettingsStatusBadge tone="warning">Not granted</SettingsStatusBadge>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!canRequest || pending}
+                      aria-label={`Open System Settings for ${entry.title}`}
+                      onClick={() => void request(entry.permission).then(onRequested)}
+                    >
+                      Open System Settings
+                    </Button>
+                  </>
                 )}
               </span>
-              {entry.grant === "granted" ? null : (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={!canRequest || pending}
-                  aria-label={`Open System Settings for ${entry.title}`}
-                  onClick={() => void request(entry.permission).then(onRequested)}
-                >
-                  Open System Settings
-                </Button>
-              )}
             </div>
           ))}
         </SettingsGroup>

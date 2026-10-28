@@ -66,7 +66,7 @@ describe("integrationStatus", () => {
           },
         },
       );
-      expect(view.label).toBe(status === "connected" ? "Connected" : "Error");
+      expect(view.label).toBe(status === "connected" ? "Connected" : "Failing");
       expect(view.toolCount).toBe(status === "connected" ? 7 : null);
       expect(view.reason).toBe(status === "error" ? "Latest server failure" : null);
     },
@@ -126,7 +126,7 @@ describe("integrationStatus", () => {
       ),
     ).toEqual({
       tone: "error",
-      label: "Error",
+      label: "Failing",
       reason: "The server could not be reached.",
       toolCount: null,
       checkedAt: "2026-10-01T00:00:00.000Z",
@@ -183,7 +183,7 @@ describe("display helpers", () => {
         summary({ managed: { state: "failed", version: "2.1.2", stderrTail: "Process exited" } }),
         runningTest,
       ),
-    ).toMatchObject({ label: "Error", tone: "error", reason: "Process exited" });
+    ).toMatchObject({ label: "Failing", tone: "error", reason: "Process exited" });
     expect(
       integrationStatus(
         summary({ managed: { state: "starting", version: "2.1.2", stderrTail: "" } }),

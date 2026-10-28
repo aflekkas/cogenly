@@ -3,9 +3,14 @@ import { DEFAULT_UNIFIED_SETTINGS } from "@cogenly/contracts/settings";
 import { readLocalApi } from "../../localApi";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { Button } from "../ui/button";
-import { DraftInput } from "../ui/draft-input";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { SettingResetButton, SettingsField, SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SettingResetButton,
+  SettingsField,
+  SettingsPathInput,
+  SettingsRow,
+  SettingsSection,
+} from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
@@ -58,10 +63,8 @@ export function ProjectFoldersSettings() {
         }
         control={
           <SettingsField>
-            <DraftInput
+            <SettingsPathInput
               size="sm"
-              // A long path clips in the field; hovering shows all of it.
-              title={settings.projectsRoot || undefined}
               value={settings.projectsRoot}
               onCommit={(next) => updateSettings({ projectsRoot: next })}
               placeholder={
@@ -97,9 +100,8 @@ export function ProjectFoldersSettings() {
         }
         control={
           <SettingsField>
-            <DraftInput
+            <SettingsPathInput
               size="sm"
-              title={settings.addProjectBaseDirectory || undefined}
               value={settings.addProjectBaseDirectory}
               onCommit={(next) => updateSettings({ addProjectBaseDirectory: next })}
               placeholder="~/"

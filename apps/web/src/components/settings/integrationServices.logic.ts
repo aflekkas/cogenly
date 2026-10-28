@@ -98,8 +98,8 @@ export interface IntegrationTest {
 
 /**
  * What a row shows: Connected, Needs sign-in (Sign in on this machine for an
- * account synced from another one), Error, or Off, worded like the composer's
- * Sources badges. Tests belong to one integration version and expire when a
+ * account synced from another one), Failing (as Machines words the same
+ * failure), or Off. Tests belong to one integration version and expire when a
  * subscription reports a newer server outcome. Both timestamps use the server
  * clock, so a client's clock cannot keep an old result alive.
  */
@@ -116,7 +116,7 @@ export function integrationStatus(
   if (managed?.state === "failed" || managed?.state === "missing_runtime") {
     return {
       tone: "error",
-      label: "Error",
+      label: "Failing",
       reason: summary.message ?? managed.message ?? (managed.stderrTail || null),
       toolCount: null,
     };
@@ -144,12 +144,12 @@ export function integrationStatus(
   if (test !== undefined) {
     return test.status === "connected"
       ? { tone: "success", label: "Connected", reason: null, toolCount: test.toolCount }
-      : { tone: "error", label: "Error", reason: testResultReason(test), toolCount: null };
+      : { tone: "error", label: "Failing", reason: testResultReason(test), toolCount: null };
   }
   if (summary.status === "error") {
     return {
       tone: "error",
-      label: "Error",
+      label: "Failing",
       reason: summary.message ?? null,
       toolCount: null,
       ...checked,

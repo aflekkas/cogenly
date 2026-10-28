@@ -22,8 +22,11 @@ function Switch({
       data-slot="switch"
       {...props}
     >
+      {/* Off in dark mode, a background-colored thumb is darker than the card
+          and the switch reads as disabled; the muted-foreground thumb keeps
+          off-but-enabled at 3:1. Light mode keeps the pale thumb on its grey track. */}
       <SwitchPrimitive.Thumb
-        className="pointer-events-none block size-[calc(var(--thumb-size)-2px)] shrink-0 origin-left in-[[role=switch]:active,[data-slot=label]:active,[data-slot=field-label]:active]:not-data-disabled:scale-x-110 in-[[role=switch]:active,[data-slot=label]:active,[data-slot=field-label]:active]:rounded-[var(--thumb-size)/calc(var(--thumb-size)*1.1)] rounded-(--thumb-size) bg-background shadow-sm/5 [transition:translate_var(--motion-duration-fast)_var(--ease-out),border-radius_var(--motion-duration-fast)_var(--ease-out),scale_100ms_100ms,transform-origin_var(--motion-duration-fast)] motion-reduce:transition-none data-checked:origin-right data-checked:translate-x-[calc(var(--thumb-size)-4px)]"
+        className="pointer-events-none block size-[calc(var(--thumb-size)-2px)] shrink-0 origin-left in-[[role=switch]:active,[data-slot=label]:active,[data-slot=field-label]:active]:not-data-disabled:scale-x-110 in-[[role=switch]:active,[data-slot=label]:active,[data-slot=field-label]:active]:rounded-[var(--thumb-size)/calc(var(--thumb-size)*1.1)] rounded-(--thumb-size) bg-background shadow-sm/5 [transition:translate_var(--motion-duration-fast)_var(--ease-out),background-color_var(--motion-duration-fast)_var(--ease-out),border-radius_var(--motion-duration-fast)_var(--ease-out),scale_100ms_100ms,transform-origin_var(--motion-duration-fast)] motion-reduce:transition-none dark:data-unchecked:bg-muted-foreground data-checked:origin-right data-checked:translate-x-[calc(var(--thumb-size)-4px)]"
         data-slot="switch-thumb"
       />
     </SwitchPrimitive.Root>

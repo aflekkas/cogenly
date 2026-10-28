@@ -907,9 +907,10 @@ function KeybindingSourceBadge({ source }: { source: KeybindingRow["source"] }) 
 }
 
 /**
- * The command label, its source badge and its when clause on one line where
- * they fit. In a narrow row the clause wraps under the label, and the label
- * wraps rather than truncating, since it is what tells related commands apart.
+ * The command label, its source badge and its when clause. A wide row keeps
+ * them on one line; below 44rem every clause takes its own line under the
+ * label, so neighbors share one rhythm instead of wrapping one by one. The
+ * label wraps rather than truncating, since it tells related commands apart.
  */
 function KeybindingRowTitle({
   row,
@@ -921,7 +922,7 @@ function KeybindingRowTitle({
   variables: ReadonlyArray<WhenVariableOption>;
 }) {
   return (
-    <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+    <span className="flex min-w-0 flex-col items-start gap-y-0.5 @min-[44rem]/settings-row:flex-row @min-[44rem]/settings-row:flex-wrap @min-[44rem]/settings-row:items-center @min-[44rem]/settings-row:gap-x-2">
       <Tooltip>
         <TooltipTrigger render={<span className="flex min-w-0 items-center gap-2" />}>
           <span className="min-w-0 wrap-break-word">{row.label}</span>

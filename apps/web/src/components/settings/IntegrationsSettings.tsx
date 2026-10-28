@@ -1237,7 +1237,10 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
       description="Each profile keeps its own cookies and sign-ins. Incognito is cleared when the app closes."
       control={
         <Menu onOpenChange={(open) => open && loadSources()}>
+          {/* Disabled on the trigger itself: Base UI's trigger props win over
+              the rendered Button's, which would leave the menu openable. */}
           <MenuTrigger
+            disabled={profileWritesDisabled || importInFlight}
             render={
               <Button
                 size="sm"
@@ -1345,6 +1348,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
               </span>
               <Menu>
                 <MenuTrigger
+                  disabled={profileWritesDisabled || importInFlight}
                   render={
                     <Button
                       size="icon-sm"

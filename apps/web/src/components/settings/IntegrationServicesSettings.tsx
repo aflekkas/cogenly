@@ -372,15 +372,9 @@ function IntegrationDetail({
         </Button>
       }
     >
+      {/* The badge leads the control slot, as a check's status does on Machines. */}
       <SettingsRow
-        title={
-          <span className="inline-flex items-center gap-2">
-            Status
-            <SettingsStatusBadge tone={status.tone}>
-              <span ref={statusRef}>{status.label}</span>
-            </SettingsStatusBadge>
-          </span>
-        }
+        title="Status"
         description={
           status.toolCount !== null
             ? status.toolCount === 1
@@ -389,17 +383,22 @@ function IntegrationDetail({
             : undefined
         }
         control={
-          needsReconnect ? (
-            <>
-              {testButton}
-              {reconnectButton}
-            </>
-          ) : (
-            <>
-              {reconnectButton}
-              {testButton}
-            </>
-          )
+          <>
+            <SettingsStatusBadge tone={status.tone}>
+              <span ref={statusRef}>{status.label}</span>
+            </SettingsStatusBadge>
+            {needsReconnect ? (
+              <>
+                {testButton}
+                {reconnectButton}
+              </>
+            ) : (
+              <>
+                {reconnectButton}
+                {testButton}
+              </>
+            )}
+          </>
         }
       >
         <AnimatedHeight>

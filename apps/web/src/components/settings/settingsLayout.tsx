@@ -15,7 +15,9 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -23,10 +25,12 @@ import {
   PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE,
   usePrimarySettingsAvailable,
 } from "../../hooks/useSettings";
+import { observeResize } from "../../lib/observeResize";
 import { cn } from "../../lib/utils";
 import { getRelativeTimeState } from "../../timestampFormat";
 import { PageContent } from "../PageContent";
 import { Button } from "../ui/button";
+import { DraftInput, type DraftInputProps } from "../ui/draft-input";
 import { RefreshIcon } from "../ui/refresh-icon";
 import { DisclosureChevron, DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
 import { Empty, EmptyContent, EmptyDescription, EmptyMedia } from "../ui/empty";
@@ -583,6 +587,43 @@ export function SettingsField({ children }: { children: ReactNode }) {
 }
 
 /**
+ * A folder path in a `SettingsField`. Outside editing, a long path shows its
+ * tail, the part that tells folders apart, and the tooltip shows all of it.
+ */
+export function SettingsPathInput({ value, ...props }: DraftInputProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  useLayoutEffect(() => {
+    const input = inputRef.current;
+    // Runs again for each saved path; an empty field has no tail to show.
+    if (!input || value === "") return;
+    let frame = 0;
+    const showTail = () => {
+      cancelAnimationFrame(frame);
+      // A frame later, after the browser's own blur reset of the scroll.
+      frame = requestAnimationFrame(() => {
+        if (input.ownerDocument.activeElement !== input) input.scrollLeft = input.scrollWidth;
+      });
+    };
+    showTail();
+    input.addEventListener("blur", showTail);
+    const stopObserving = observeResize(input, showTail);
+    return () => {
+      cancelAnimationFrame(frame);
+      input.removeEventListener("blur", showTail);
+      stopObserving();
+    };
+  }, [value]);
+  return (
+    <Tooltip disabled={value.trim() === ""}>
+      <TooltipTrigger delay={400} render={<span className="flex min-w-0 flex-1" />}>
+        <DraftInput {...props} ref={inputRef} value={value} />
+      </TooltipTrigger>
+      <TooltipPopup side="top">{value}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+/**
  * The muted label over a column of numbers or a stat: a table header, a
  * stat tile's caption. Sentence case, one size, never uppercase.
  */
@@ -647,7 +688,8 @@ export function SettingsNumberField({
           <NumberFieldIncrement aria-label={`Increase ${label}`} />
         </NumberFieldGroup>
       </NumberField>
-      <span className="text-xs text-muted-foreground">{unit}</span>
+      {/* One unit column ("seconds" is the widest), so steppers line up across rows. */}
+      <span className="min-w-12 text-xs text-muted-foreground">{unit}</span>
     </div>
   );
 }

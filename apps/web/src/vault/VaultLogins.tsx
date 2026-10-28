@@ -256,7 +256,7 @@ function VaultLoginDetail(props: {
                 disabled={disabled}
                 onClick={() => setAddingUsername(true)}
               >
-                Add
+                Add username
               </Button>
             ) : null}
             {/* One dialog edits the username, label and password alike. */}
@@ -385,7 +385,7 @@ function VaultLoginDetail(props: {
 }
 
 /**
- * The row's "Add" opened: one field that saves the username into a
+ * The row's "Add username" opened: one field that saves the username into a
  * password-only login. Escape or the cancel button folds it away again.
  */
 function AddUsernameForm(props: {

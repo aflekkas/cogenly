@@ -514,7 +514,7 @@ function StorageUsage({ environmentId, label }: { environmentId: EnvironmentId; 
       cancelled = true;
     };
   }, [environmentId, measure]);
-  // Said once under the card rather than on every "Shared" row.
+  // Said once under the card rather than on every "Shared, not counted" row.
   const anyShared =
     status?.complete === true &&
     status.categories.some((entry) => entry.bytes === null && entry.category in STORAGE_LABELS);
@@ -568,9 +568,11 @@ function StorageUsage({ environmentId, label }: { environmentId: EnvironmentId; 
             title="Conversation history"
             description="Cogenly's database. Cleanup never removes history."
             control={
-              <span className="text-sm tabular-nums">
-                {status.databaseBytes === null ? "Not measured" : formatBytes(status.databaseBytes)}
-              </span>
+              status.databaseBytes === null ? (
+                <span className="text-sm text-muted-foreground">Not measured</span>
+              ) : (
+                <span className="text-sm tabular-nums">{formatBytes(status.databaseBytes)}</span>
+              )
             }
           />
           {Object.entries(STORAGE_LABELS).map(([category, title]) => {
@@ -581,19 +583,24 @@ function StorageUsage({ environmentId, label }: { environmentId: EnvironmentId; 
             const files = usage
               ? `${usage.files.toLocaleString()} ${usage.files === 1 ? "file" : "files"}`
               : null;
+            // A size reads in the foreground; a row with no size says why, muted,
+            // so it never passes for a status among the sizes.
+            const unsized = !status.complete
+              ? "Not measured"
+              : shared
+                ? "Shared, not counted"
+                : null;
             return (
               <SettingsRow
                 key={category}
                 title={title}
                 description={files ?? undefined}
                 control={
-                  <span className="text-sm tabular-nums">
-                    {!status.complete
-                      ? "Not measured"
-                      : shared
-                        ? "Shared"
-                        : formatBytes(usage?.bytes ?? 0)}
-                  </span>
+                  unsized === null ? (
+                    <span className="text-sm tabular-nums">{formatBytes(usage?.bytes ?? 0)}</span>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">{unsized}</span>
+                  )
                 }
               />
             );

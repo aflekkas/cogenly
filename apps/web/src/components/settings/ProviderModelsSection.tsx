@@ -600,10 +600,9 @@ export function ProviderModelsSection({
           </InlineButton>
         ) : null}
       </SettingsToolbar>
-      <SettingsDenseList
-        ref={listRef}
-        className="scroll-fade-y max-h-64 overflow-y-auto lg:max-h-none"
-      >
+      {/* Never a scroller of its own: the filter shortens a long list, and the
+          page (or the detail pane) is the one thing that scrolls. */}
+      <SettingsDenseList ref={listRef}>
         {visibleModels.length === 0 ? (
           <SettingsEmpty
             icon={isFiltering ? <SearchIcon /> : <SparklesIcon />}
@@ -644,8 +643,8 @@ export function ProviderModelsSection({
 
       {canManageCustomModels ? (
         <DisclosurePanel open={isAdding}>
-          <div className="flex flex-col gap-2 px-3 py-3 sm:px-4">
-            <div className="flex flex-col gap-2 sm:flex-row">
+          <div className="@container flex flex-col gap-2 px-3 py-3 sm:px-4">
+            <div className="flex flex-col gap-2 @min-[24rem]:flex-row">
               <Input
                 id={`provider-instance-${instanceId}-custom-model`}
                 size="sm"

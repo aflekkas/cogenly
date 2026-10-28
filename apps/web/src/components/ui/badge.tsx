@@ -35,6 +35,8 @@ const badgeVariants = cva(
         outline:
           "border-input bg-background text-foreground dark:bg-input/32 [button&,a&]:hover:bg-accent/50 dark:[button&,a&]:hover:bg-input/48",
         secondary: "bg-secondary text-secondary-foreground [button&,a&]:hover:bg-secondary/90",
+        // A state that recedes (off, not checked): quieter than any tone.
+        muted: "bg-muted text-muted-foreground",
         success: "bg-success/8 text-success-foreground dark:bg-success/16",
         warning: "bg-warning/8 text-warning-foreground dark:bg-warning/16",
         // A label tinted from the --label color the consumer sets in style.

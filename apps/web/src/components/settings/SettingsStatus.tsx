@@ -20,7 +20,7 @@ const BADGE_VARIANTS = {
   warning: "warning",
   error: "error",
   info: "info",
-  neutral: "secondary",
+  neutral: "muted",
 } as const satisfies Record<SettingsStatusTone, ComponentProps<typeof Badge>["variant"]>;
 
 const DOT_CLASSES = {

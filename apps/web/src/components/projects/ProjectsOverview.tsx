@@ -105,12 +105,14 @@ function ProjectTile(props: {
   const { label } = props.entry;
   const menu = useProjectFolderMenu(props.entry, { ...props, onDeleted: () => {} });
   const description = label.description?.trim() || null;
-  // The summary moves under a description; the machines and last activity follow it.
+  // One meta line: the summary, machines and last activity. It sits under a
+  // description, or takes the description's place when there is none.
   const details = [
-    description ? props.summary : null,
+    props.summary,
     props.machinesLabel,
     props.lastActivityAt ? formatRelativeTimeLabel(props.lastActivityAt) : null,
   ].filter((part) => part !== null && part.length > 0);
+  const meta = details.length > 0 ? details.join(" · ") : undefined;
   return (
     <SettingsListItem
       onContextMenu={(event) => {
@@ -123,8 +125,8 @@ function ProjectTile(props: {
           {label.name}
         </span>
       }
-      description={description ?? props.summary}
-      status={details.length > 0 ? details.join(" · ") : undefined}
+      description={description ?? meta}
+      status={description ? meta : undefined}
       control={
         <>
           <Button
