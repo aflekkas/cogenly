@@ -23,10 +23,13 @@ const layerSetup = Layer.effectDiscard(
     if (tables[0]?.count === 0) yield* sql`PRAGMA auto_vacuum = INCREMENTAL;`;
     yield* sql`PRAGMA journal_mode = WAL;`;
     yield* runMigrations();
-    // Without sqlite_stat1 the planner guesses at index selectivity. 0x10012
-    // analyzes tables whose indexes lack stats or whose row count changed 10x,
-    // under a temporary analysis_limit. Otherwise it only checks table sizes.
-    yield* sql`PRAGMA optimize = 0x10012;`;
+    // Opening large databases must not analyze their tables. Old statistics also
+    // make a growing table look small enough to scan, so discard them and reload.
+    const statTables = yield* sql`SELECT 1 FROM sqlite_schema WHERE name = 'sqlite_stat1'`;
+    if (statTables.length > 0) {
+      yield* sql`DELETE FROM sqlite_stat1`;
+      yield* sql`ANALYZE sqlite_schema`;
+    }
   }),
 );
 

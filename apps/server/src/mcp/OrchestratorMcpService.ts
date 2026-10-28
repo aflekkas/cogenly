@@ -1,3 +1,7 @@
+import {
+  visibleThreadPullRequests,
+  normalizeThreadPullRequestKey,
+} from "@cogenly/shared/threadPullRequests";
 import * as MachineResources from "../resourceTelemetry/MachineResources.ts";
 import { assertRunOwnership } from "./runOwnership.ts";
 import { derivePendingBackgroundWork } from "@cogenly/shared/orchestrationV2PendingBackgroundWork";
@@ -728,6 +732,17 @@ function threadSnooze(
   };
 }
 
+function threadPullRequests(links: OrchestrationV2ThreadShell["pullRequests"]) {
+  return visibleThreadPullRequests(links ?? []).map((link) => ({
+    host: normalizeThreadPullRequestKey(link).host,
+    repository: link.repository,
+    number: link.number,
+    url: link.url,
+    source: link.source,
+    state: link.snapshot?.state ?? null,
+  }));
+}
+
 function listItemFromShell(
   shell: OrchestrationV2ThreadShell,
   nowMs: number,
@@ -746,6 +761,7 @@ function listItemFromShell(
     runtimeMode: shell.runtimeMode,
     interactionMode: shell.interactionMode,
     linkedPullRequest: shell.linkedPullRequest ?? null,
+    pullRequests: threadPullRequests(shell.pullRequests),
     ...threadSettlement(shell),
     ...threadSnooze(shell, nowMs),
     usageLimit: limitRecoveryStatus(shell, autoResumeByDefault, nowMs),
@@ -781,6 +797,7 @@ function threadDetail(
     runtimeMode: projection.thread.runtimeMode,
     interactionMode: projection.thread.interactionMode,
     linkedPullRequest: projection.thread.linkedPullRequest ?? null,
+    pullRequests: threadPullRequests(projection.thread.pullRequests),
     titleRegeneration:
       projection.thread.titleRegeneration === undefined ||
       projection.thread.titleRegeneration === null

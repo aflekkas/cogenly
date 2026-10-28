@@ -110,3 +110,36 @@ it.effect("settling a thread kills its agent command, the child and an escaped g
     Effect.scoped,
   ),
 );
+
+it.effect("deleting an attachment also removes its extracted text sidecar", () =>
+  Effect.gen(function* () {
+    const config = yield* ServerConfig.ServerConfig;
+    const fs = yield* FileSystem.FileSystem;
+    const cleanup = yield* ResourceCleanupService.ResourceCleanupService;
+    const id = "cleanup-00000000-0000-4000-8000-000000000001-docx";
+    const path = `${config.attachmentsDir}/${id}.docx`;
+    yield* fs.writeFileString(path, "binary document");
+    yield* fs.writeFileString(`${path}.txt`, "extracted text");
+    yield* fs.writeFileString(`${config.attachmentsDir}/keep.txt`, "other attachment");
+    yield* cleanup.cleanupAttachments([id]);
+    expect(yield* fs.exists(path)).toBe(false);
+    expect(yield* fs.exists(`${path}.txt`)).toBe(false);
+    expect(yield* fs.readFileString(`${config.attachmentsDir}/keep.txt`)).toBe("other attachment");
+  }).pipe(
+    Effect.provide(
+      ResourceCleanupService.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.mock(TerminalManager.TerminalManager)({}),
+            Layer.mock(PreviewManager.PreviewManager)({}),
+            Layer.mock(AgentProcesses.AgentProcesses)({}),
+          ),
+        ),
+        Layer.provideMerge(
+          ServerConfig.layerTest(process.cwd(), { prefix: "cogenly-sidecar-cleanup-" }),
+        ),
+        Layer.provideMerge(NodeServices.layer),
+      ),
+    ),
+  ),
+);

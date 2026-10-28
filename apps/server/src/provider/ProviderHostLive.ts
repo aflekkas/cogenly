@@ -10,7 +10,7 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-import { resolveAttachmentPath } from "../attachmentStore.ts";
+import { resolveAttachmentPath, resolveAttachmentTextPath } from "../attachmentStore.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as ServerConfig from "../config.ts";
@@ -42,6 +42,8 @@ export const layer = Layer.effect(
       shouldRunBackgroundWork: backgroundPolicy.shouldRunScopeWork,
       resolveAttachmentPath: (attachment) =>
         resolveAttachmentPath({ attachmentsDir: config.attachmentsDir, attachment }),
+      resolveAttachmentTextPath: (attachment) =>
+        resolveAttachmentTextPath({ attachmentsDir: config.attachmentsDir, attachment }),
       credentials: (namespace, bindingId) =>
         ProviderCredentialStore.make(namespace, bindingId).pipe(
           Effect.map((store) => ({

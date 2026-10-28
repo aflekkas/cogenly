@@ -45,6 +45,27 @@ const CLAUDE_TEST_MODEL_SELECTION = {
 } satisfies ModelSelection;
 
 describe("ClaudeAdapterV2 runtime query policy", () => {
+  it("pins lazy search in SDK settings without losing env or repo MCP isolation", () => {
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "lazy-tools",
+      resume: false,
+      cwd: "/workspace",
+      sdkSettings: { env: { OTHER: "kept", ENABLE_TOOL_SEARCH: "auto" } },
+      environment: { ENABLE_TOOL_SEARCH: "auto" },
+      toolSearchOverride: "true",
+      repoMcpServers: {},
+      repoMcpWaiting: ["untrusted"],
+    });
+    assert.deepInclude(options.settings, {
+      env: { OTHER: "kept", ENABLE_TOOL_SEARCH: "true" },
+      enableAllProjectMcpServers: false,
+      disabledMcpjsonServers: ["untrusted"],
+    });
+    assert.equal(options.env?.ENABLE_CLAUDEAI_MCP_SERVERS, "false");
+    assert.isTrue(options.strictMcpConfig);
+  });
+
   it.each([false, true])("requests thinking summaries with resume=%s", (resume) => {
     const options = ClaudeAdapterV2.makeClaudeQueryOptions({
       modelSelection: CLAUDE_TEST_MODEL_SELECTION,
@@ -294,7 +315,7 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     const append = chatAppend(true);
     assert.include(append, "<conversation_mode>");
     assert.include(append, "Look things up yourself with the cogenly terminal_run tool");
-    assert.include(append, "Use mcp__cogenly__terminal_run for every shell command");
+    assert.include(append, "Run every shell command with mcp__cogenly__terminal_run");
     assert.include(append, "work_task");
     assert.include(append, "image_search");
     assert.include(append, "<how_cogenly_works>");

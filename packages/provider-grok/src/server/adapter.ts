@@ -1241,6 +1241,9 @@ export const makeGrokAdapterV2 = Effect.fn("makeGrokAdapterV2")(function* (
           text: message.text,
           attachments: message.attachments,
           resolveAttachmentPath: providerHost.resolveAttachmentPath,
+          ...(providerHost.resolveAttachmentTextPath
+            ? { resolveAttachmentTextPath: providerHost.resolveAttachmentTextPath }
+            : {}),
         });
         if (text) blocks.push({ type: "text", text });
         if (host.initializeResult.agentCapabilities.image)

@@ -2,7 +2,7 @@ import type { ProviderUserInputAnswers, UserInputAttachments } from "@cogenly/co
 import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
-import { resolveAttachmentPath } from "../attachmentStore.ts";
+import { resolveAttachmentPath, resolveAttachmentTextPath } from "../attachmentStore.ts";
 class UserInputAttachmentError extends Schema.TaggedError<UserInputAttachmentError>()(
   "UserInputAttachmentError",
   {
@@ -46,8 +46,12 @@ export const appendUserInputAttachmentPaths = Effect.fn("appendUserInputAttachme
             issue: `Attachment '${attachment.name}' is no longer available. Attach it again.`,
           });
         }
+        const extracted = resolveAttachmentTextPath({
+          attachmentsDir: input.attachmentsDir,
+          attachment,
+        });
         references.push(
-          `Attached ${attachment.type} ${quoteReference(attachment.name)}: ${quoteReference(path)}`,
+          `Attached ${attachment.type} ${quoteReference(attachment.name)}: ${quoteReference(path)}${extracted ? `; extracted text: ${quoteReference(extracted)}` : ""}`,
         );
       }
       const answer = answers.get(questionId);

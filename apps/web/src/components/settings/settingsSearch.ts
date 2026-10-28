@@ -830,6 +830,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     environmentOnly: true,
   },
   {
+    id: "thread-title-instructions",
+    title: "Thread title instructions",
+    to: "/settings/new-threads",
+    searchTerms: ["title generation automatic custom instructions naming language regenerate"],
+  },
+  {
     id: "worktree-branch-naming",
     title: "Branch names",
     to: "/settings/source-control",

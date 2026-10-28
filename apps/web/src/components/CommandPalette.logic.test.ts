@@ -390,6 +390,44 @@ describe("buildProjectActionItems", () => {
 });
 
 describe("buildThreadActionItems", () => {
+  it("hides subagents and ranks word starts above recent mid-word matches", () => {
+    const items = buildThreadActionItems({
+      threads: [
+        makeThread({
+          id: ThreadId.make("mid"),
+          title: "Trust",
+          createdAt: "2026-03-25T00:00:00.000Z",
+        }),
+        makeThread({
+          id: ThreadId.make("word"),
+          title: "Learn Rust",
+          createdAt: "2026-03-01T00:00:00.000Z",
+        }),
+        makeThread({
+          id: ThreadId.make("child"),
+          title: "Rust",
+          lineage: { ...makeThread({}).lineage, relationshipToParent: "subagent" },
+        }),
+      ],
+      projectTitleById: new Map(),
+      sortOrder: "updated_at",
+      icon: null,
+      runThread: async () => undefined,
+    });
+    expect(items).toHaveLength(2);
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [],
+      query: "rust",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: items,
+    });
+    expect(groups.flatMap((group) => group.items.map((item) => item.title))).toEqual([
+      "Learn Rust",
+      "Trust",
+    ]);
+  });
+
   it("orders threads by most recent activity and formats timestamps from updatedAt", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-25T12:00:00.000Z"));

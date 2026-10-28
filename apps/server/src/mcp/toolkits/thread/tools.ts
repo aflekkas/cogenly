@@ -19,7 +19,6 @@ import {
   NonNegativeInt,
   ProjectId,
 } from "@cogenly/contracts";
-import { SNOOZE_PRESET_KEYS } from "@cogenly/shared/snooze";
 import * as Crypto from "effect/Crypto";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
@@ -32,7 +31,7 @@ import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
 const ThreadOrganizeTool = Tool.make("thread_organize", {
   description:
-    "Pin, archive, or mark a thread unread. Omit threadId for this thread. For a thread stopped on a usage limit (see usageLimit in thread_list or thread_read), dont_resume cancels its automatic continuation at the reset and resume_at_reset schedules it again. Snooze and settle have their own tools. Existing thread lifecycle rules apply.",
+    "Pin/archive/mark unread. threadId defaults here. For usageLimit stops, dont_resume cancels automatic reset continuation; resume_at_reset restores it. Snooze/settle use separate tools.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId),
     action: Schema.Literals([
@@ -70,7 +69,8 @@ const lifecycleTool = {
 };
 const ThreadSnoozeTool = Tool.make("thread_snooze", {
   ...lifecycleTool,
-  description: `Snooze a thread: hide it from the user's inbox until a time, as when they say "snooze this until tomorrow". Omit threadId for this thread. until is a preset (${SNOOZE_PRESET_KEYS.join(", ")}), limit_reset (until the usage limit the thread stopped on resets), an ISO time, or a short phrase such as "friday 2pm" or "in 2 days". Presets and phrases resolve in the user's time zone exactly as the snooze menu does. A snoozed thread wakes early when it asks for something, fails, or completes; snoozing this thread therefore lands when your turn completes (snoozesWhenTurnEnds=true). Quote the receipt instead of restating the time.`,
+  description:
+    "Hide from inbox until a preset (in_1h/in_3h/this_evening/tomorrow/next_week), limit_reset, ISO time or phrase in user time zone. threadId defaults here. Requests/failure/completion wake early; snoozing this thread lands after this turn. Quote receipt instead of restating time.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId),
     until: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
@@ -98,7 +98,7 @@ const ThreadUnsnoozeTool = Tool.make("thread_unsnooze", {
 const ThreadSettleTool = Tool.make("thread_settle", {
   ...lifecycleTool,
   description:
-    "Settle a thread: move it out of the active list once its work is done. Omit threadId for this thread. Settling this thread takes effect when your turn completes, returning settlesWhenTurnEnds=true; a turn that fails or is interrupted, or a queued message, leaves it active.",
+    "Move finished work out of active list. threadId defaults here. This thread settles at turn end; failure/interruption/queued input keeps it active (settlesWhenTurnEnds:true).",
   parameters: Schema.Struct({ threadId: Schema.optional(ThreadId) }),
   success: Schema.Struct({
     ...lifecycleReceipt,
@@ -191,7 +191,7 @@ const QueueClearTool = Tool.make("queue_clear", {
 const QueueSendAllTool = Tool.make("queue_send_all", {
   ...commandTool,
   description:
-    "Join every queued message, in queue order, into one message and send it now: as steering into the running turn when its provider can steer, otherwise as the next turn. Releases a held queue. Omit threadId for this thread.",
+    "Join queued messages in order and send now as steer if supported, otherwise next turn. Releases held queue. threadId defaults here.",
   parameters: Schema.Struct({ threadId: Schema.optional(ThreadId) }),
 }).annotate(Tool.Destructive, true);
 
@@ -237,7 +237,7 @@ const PendingRequestReadTool = Tool.make("pending_request_read", {
 const PendingRequestRespondTool = Tool.make("pending_request_respond", {
   ...commandTool,
   description:
-    "Answer a pending user-input request in a task you delegated, using the existing runtime response command. Questions in your own thread are for the user. This cannot approve a permission request.",
+    "Answer user-input in a delegated child; own-thread questions belong to the user. Cannot grant permissions.",
   parameters: Schema.Struct({ ...requestTarget, answers: ProviderUserInputAnswers }),
 })
   .annotate(Tool.Destructive, true)
@@ -260,7 +260,7 @@ const ThreadConfigurationTool = Tool.make("thread_configuration", {
 const ThreadConfigureTool = Tool.make("thread_configure", {
   ...commandTool,
   description:
-    "Set a thread's provider, model and options with the existing selection command. Omit threadId for this thread. This does not change permission modes. Use orchestrator_capabilities to choose a selection.",
+    "Set provider/model/options using orchestrator_capabilities; leaves permissions unchanged. threadId defaults here.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId),
     modelSelection: ModelSelection,
@@ -271,7 +271,7 @@ const transferResult = Schema.Struct({ sequence: NonNegativeInt, targetThreadId:
 const ThreadForkTool = Tool.make("thread_fork", {
   ...commandTool,
   description:
-    "Fork a conversation, leaving the original unchanged. Omit threadId for this thread. Use a stable clientRequestId across retries. Set machine to this, vps, auto, a machine name or ID to fork on a paired machine in the same repository, cloned there on demand. Cross-machine forks use a portable context handoff and the source's pushed branch/commit. If uncommitted or unpushed work is reported, tell the user and obtain their choice before retrying with allowLastPushed:true; those changes remain on the source. Omit sourcePoint to use the latest finished turn for a cross-machine fork. Acceptance does not start a provider turn.",
+    "Fork without changing source; threadId defaults here. Reuse clientRequestId on retries. machine selects a peer and clones on demand, using portable context and pushed commit. For uncommitted/unpushed work obtain user choice before allowLastPushed:true; work stays on source. Cross-machine sourcePoint defaults latest finished turn. Does not start a turn.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId),
     clientRequestId: Schema.optional(TrimmedNonEmptyString),
@@ -290,7 +290,7 @@ const ThreadForkTool = Tool.make("thread_fork", {
 const ThreadMergeBackTool = Tool.make("thread_merge_back", {
   ...commandTool,
   description:
-    "Merge context from a thread back to a related thread in the same project. Omit sourceThreadId to merge from this thread. Existing lineage and transfer rules apply.",
+    "Merge context into a related same-project thread under lineage/transfer rules. sourceThreadId defaults here.",
   parameters: Schema.Struct({
     sourceThreadId: Schema.optional(ThreadId),
     targetThreadId: ThreadId,
@@ -319,7 +319,7 @@ const ThreadTransfersTool = Tool.make("thread_transfers", {
 const ThreadSearchTool = Tool.make("thread_search", {
   ...commandTool,
   description:
-    "Search active thread titles and content with the app's existing bounded search. Each match carries a Markdown `link` to the thread; when you mention it to the user, write that link as is. Matches are limited to one project (projectId, else the calling thread's project) out of the global top matches, so this may return fewer than limit. A caller outside a Cogenly thread that omits projectId searches every project. No pagination or exhaustive-result guarantee.",
+    "Search active titles/content within projectId (default here). Filters global top matches, so may return fewer than limit; no exhaustive pagination. Outside callers omitting project search all. Use returned Markdown links.",
   parameters: Schema.Struct({
     ...OrchestrationSearchThreadsInput.fields,
     projectId: Schema.optional(ProjectId),
@@ -337,7 +337,7 @@ const ThreadSearchTool = Tool.make("thread_search", {
 const ScheduledTaskRunTool = Tool.make("run_scheduled_task_now", {
   ...commandTool,
   description:
-    "Run a scheduled task now through the existing scheduler. Requires a full-access/default caller. Each call is a new manual run; completion means dispatch/bookkeeping completed, not that the provider turn finished.",
+    "Dispatch one manual run (no retry key), requiring full-access/default. Completion confirms scheduler bookkeeping, not provider completion.",
   parameters: Schema.Struct({ taskId: ScheduledTaskId }),
   success: Schema.Struct({
     taskId: ScheduledTaskId,

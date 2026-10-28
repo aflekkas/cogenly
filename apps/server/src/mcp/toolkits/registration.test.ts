@@ -326,7 +326,8 @@ const ToolsListPayload = Schema.fromJsonString(
       tools: Schema.Array(
         Schema.Struct({
           name: Schema.String,
-          inputSchema: Schema.Struct({ type: Schema.optional(Schema.String) }),
+          inputSchema: Schema.Record(Schema.String, Schema.Unknown),
+          description: Schema.optional(Schema.String),
           annotations: Schema.optional(
             Schema.Struct({
               readOnlyHint: Schema.optional(Schema.Boolean),
@@ -534,7 +535,7 @@ const smokeCases = [
   },
   {
     toolkit: "html",
-    names: ["html_preview", "html_render"],
+    names: ["html_preview", "html_render", "html_guide"],
     tool: "html_render",
     args: {
       html: "<p>MCP smoke</p>",
@@ -547,6 +548,13 @@ const smokeCases = [
         height: 120,
       },
     },
+  },
+  {
+    toolkit: "htmlGuide",
+    names: [],
+    tool: "html_guide",
+    args: {},
+    expected: { guide: expect.stringContaining("window.cogenly.state") },
   },
   {
     // The html_state tools run through the real handler stack against the
@@ -1015,6 +1023,40 @@ it.effect.each(smokeCases)(
         const payload = yield* decodeToolsListPayload(bodyText.match(/\{.*\}/s)![0]);
         const tools = payload.result.tools;
         const toolNames = tools.map((tool) => tool.name);
+        const families = smokeCases
+          .filter((entry) => entry.names.length > 0)
+          .map((entry) => {
+            const family = tools.filter((tool) => entry.names.some((name) => name === tool.name));
+            return {
+              family: entry.toolkit,
+              schemas: family.reduce(
+                (sum, tool) => sum + Buffer.byteLength(JSON.stringify(tool.inputSchema)),
+                0,
+              ),
+              descriptions: family.reduce(
+                (sum, tool) => sum + Buffer.byteLength(tool.description ?? ""),
+                0,
+              ),
+            };
+          });
+        const breakdown = JSON.stringify(families);
+        expect(
+          families.reduce((sum, family) => sum + family.schemas, 0),
+          breakdown,
+        ).toBeLessThan(110_000);
+        expect(
+          families.reduce((sum, family) => sum + family.descriptions, 0),
+          breakdown,
+        ).toBeLessThan(45_000);
+
+        // Both ordinary and image-tool registrations advertise compact schemas.
+        for (const tool of tools) {
+          const schema = JSON.stringify(tool.inputSchema);
+          expect(schema, tool.name).not.toContain('"additionalProperties":true');
+          expect(schema, tool.name).not.toContain(String(Number.MAX_SAFE_INTEGER));
+          expect(schema, tool.name).not.toContain(String(Number.MIN_SAFE_INTEGER));
+        }
+
         expect(toolNames).toContain("worktree_handoff");
         expect(toolNames).toContain("worktree_status");
         // The worktree registration merges alongside the other toolkits rather

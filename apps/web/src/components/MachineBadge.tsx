@@ -79,7 +79,7 @@ export function MachineBadge(
       >
         <MachineCloud machine={machine} className="size-3" />
         {props.showName ? (
-          <span className={cn("min-w-0 truncate", !machine.online && "text-muted-foreground/70")}>
+          <span className={cn("min-w-0 truncate", !machine.online && "text-muted-foreground")}>
             {machine.name}
           </span>
         ) : null}
@@ -139,7 +139,7 @@ export function MachineChoice(props: {
         {machine === null ? LOCAL_MACHINE_LABEL : machine.name}
       </span>
       {machine !== null && !machine.online ? (
-        <span className="shrink-0 text-muted-foreground/70">offline</span>
+        <span className="shrink-0 text-muted-foreground">offline</span>
       ) : null}
     </span>
   );

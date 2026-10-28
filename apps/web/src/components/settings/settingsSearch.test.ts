@@ -420,3 +420,12 @@ describe("settings navigation", () => {
     }
   });
 });
+
+it.each(["thread title", "title generation", "regenerate", "title language"])(
+  "finds title instructions for %s",
+  (query) => {
+    expect(searchSettings(query)).toContainEqual(
+      expect.objectContaining({ id: "thread-title-instructions", to: "/settings/new-threads" }),
+    );
+  },
+);

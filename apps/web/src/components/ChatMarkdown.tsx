@@ -77,7 +77,7 @@ import {
   mediaMimeTypeFromExtension,
 } from "@cogenly/shared/filePreview";
 import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import React, {
   Children,
   Suspense,
@@ -205,7 +205,11 @@ import { serverEnvironment } from "../state/server";
 import { shellEnvironment } from "../state/shell";
 import { assetEnvironment } from "../state/assets";
 import { usePrimaryEnvironmentId } from "../state/environments";
-import { readEnvironmentScope, usePreparedConnection, useEnvironmentScope } from "../state/session";
+import {
+  readEnvironmentScope,
+  readPreparedConnection,
+  useEnvironmentScope,
+} from "../state/session";
 import { previewEnvironment } from "../state/preview";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
@@ -1008,7 +1012,7 @@ function MarkdownMermaidCodeBlock({
       }
     >
       {showDiagram ? (
-        <RenderErrorBoundary resetKeys={[code, theme]} fallback={children}>
+        <RenderErrorBoundary resetKeys={[code]} fallback={children}>
           <Suspense
             fallback={
               <div className="flex min-h-36 items-center justify-center text-xs text-muted-foreground">
@@ -1016,7 +1020,7 @@ function MarkdownMermaidCodeBlock({
               </div>
             }
           >
-            <MermaidDiagram source={code} theme={theme} onExpand={onExpand} />
+            <MermaidDiagram source={code} onExpand={onExpand} />
           </Suspense>
           {/* Find counts the source; a selected match here switches to it. */}
           {searching ? (
@@ -2211,6 +2215,20 @@ function areMarkdownFileLinkPropsEqual(
   );
 }
 
+// The config object changes with every provider status push and reconnect.
+// Markdown reads one label from it, and a string atom re-renders only when the
+// label itself changes, so those pushes don't re-render every visible reply.
+const markdownRevealLabelAtom = Atom.family((environmentId: EnvironmentId | null) =>
+  Atom.make((get): string | undefined => {
+    if (environmentId === null) return undefined;
+    const config = get(serverEnvironment.configValueAtom(environmentId));
+    if (config?.shellRevealInFileManager !== true) return undefined;
+    return config.shellRevealInFileManagerKind === undefined
+      ? revealInFileExplorerLabelForOs(config.environment.platform.os)
+      : revealInFileExplorerLabelForKind(config.shellRevealInFileManagerKind);
+  }).pipe(Atom.withLabel("markdown-reveal-label")),
+);
+
 /** Runs a file action from a chip or its menu and reports a failure as a toast. */
 function runMarkdownFileAction(
   action: () => Promise<AtomCommandResult<unknown, unknown> | void>,
@@ -2388,7 +2406,6 @@ function useChatMarkdownState({
   const canOperateHost = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const canOperatePreview = useEnvironmentScope(environmentId, AuthPreviewOperateScope);
   const canUseShellActions = canOperateHost && environmentId !== null;
-  const preparedConnection = usePreparedConnection(environmentId);
   const openMarkdownMedia = useCallback(
     (source: string, resolvedFilePath?: string, clickedImage?: HTMLImageElement | null) => {
       const requestId = ++mediaRequestId.current;
@@ -2397,8 +2414,10 @@ function useChatMarkdownState({
         resolvedFilePath,
         cwd,
         threadRef,
+        // Read at click time: a reconnect replaces the prepared connection, and
+        // subscribing would re-render every visible reply.
         httpBaseUrl:
-          preparedConnection._tag === "Some" ? preparedConnection.value.httpBaseUrl : undefined,
+          environmentId === null ? undefined : readPreparedConnection(environmentId)?.httpBaseUrl,
         createAssetUrl,
         onOpenFile: threadRef
           ? (path) => useRightPanelStore.getState().openFile(threadRef, path)
@@ -2429,19 +2448,13 @@ function useChatMarkdownState({
         },
       );
     },
-    [createAssetUrl, cwd, expandMedia, preparedConnection, threadRef],
+    [createAssetUrl, cwd, environmentId, expandMedia, threadRef],
   );
-  const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
   const projects = useProjects();
   const revealInFileManager = useAtomCommand(shellEnvironment.revealInFileManager, {
     reportFailure: false,
   });
-  const revealInFileManagerLabel =
-    environmentId !== null && serverConfig?.shellRevealInFileManager === true
-      ? serverConfig.shellRevealInFileManagerKind === undefined
-        ? revealInFileExplorerLabelForOs(serverConfig.environment.platform.os)
-        : revealInFileExplorerLabelForKind(serverConfig.shellRevealInFileManagerKind)
-      : undefined;
+  const revealInFileManagerLabel = useAtomValue(markdownRevealLabelAtom(environmentId));
   const revealFileInFileManager = useCallback(
     (filePath: string) => {
       if (environmentId === null) {
@@ -2561,7 +2574,8 @@ function useChatMarkdownState({
   );
   const openMarkdownFileInPreview = useCallback(
     (path: string) => {
-      if (!threadRef || !canOperatePreview || preparedConnection._tag === "None") {
+      const preparedConnection = threadRef ? readPreparedConnection(threadRef.environmentId) : null;
+      if (!threadRef || !canOperatePreview || preparedConnection === null) {
         return Promise.resolve(
           AsyncResult.failure<void, BrowserPreviewUnavailableError>(
             Cause.fail(
@@ -2576,18 +2590,19 @@ function useChatMarkdownState({
         threadRef,
         filePath: path,
         workspaceRoot: cwd,
-        httpBaseUrl: preparedConnection.value.httpBaseUrl,
+        httpBaseUrl: preparedConnection.httpBaseUrl,
         createAssetUrl,
         openPreview,
       });
     },
-    [canOperatePreview, createAssetUrl, cwd, openPreview, preparedConnection, threadRef],
+    [canOperatePreview, createAssetUrl, cwd, openPreview, threadRef],
   );
   // Signs a one-off download URL on the machine that holds the file, so a remote
   // client gets the server's copy rather than a path on its own disk.
   const downloadMarkdownFile = useCallback(
     async (filePath: string) => {
-      if (!threadRef || preparedConnection._tag === "None") {
+      const preparedConnection = threadRef ? readPreparedConnection(threadRef.environmentId) : null;
+      if (!threadRef || preparedConnection === null) {
         throw new Error("The machine is not connected.");
       }
       if (!readEnvironmentScope(threadRef.environmentId, AuthFilesystemReadScope)) {
@@ -2605,7 +2620,7 @@ function useChatMarkdownState({
         },
       });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-      const url = resolveAssetUrl(preparedConnection.value.httpBaseUrl, result.value.relativeUrl);
+      const url = resolveAssetUrl(preparedConnection.httpBaseUrl, result.value.relativeUrl);
       if (url === null) throw new Error("The machine returned an invalid file URL.");
       // The browser streams the signed URL straight to disk. Desktop would hand a
       // cross-origin link to the system browser, so it saves a Blob instead.
@@ -2621,7 +2636,7 @@ function useChatMarkdownState({
       anchor.click();
       if (href !== url) setTimeout(() => URL.revokeObjectURL(href), 30_000);
     },
-    [createAssetUrl, preparedConnection, threadRef],
+    [createAssetUrl, threadRef],
   );
   const findWorkspaceBasenameMatch = useCallback(
     async (workspaceRelativePath: string) => {
@@ -2795,9 +2810,7 @@ function useChatMarkdownState({
       openMarkdownMedia,
       projects,
       resolvedTheme,
-      serverConfig,
       skills,
-      text,
       threadRef,
     }),
     [
@@ -2825,9 +2838,7 @@ function useChatMarkdownState({
       openMarkdownMedia,
       projects,
       resolvedTheme,
-      serverConfig,
       skills,
-      text,
       threadRef,
     ],
   );
@@ -2844,6 +2855,10 @@ function useChatMarkdownState({
 const ChatMarkdownRendererContext = React.createContext<
   ReturnType<typeof useChatMarkdownState>["componentState"]
 >(null!);
+
+// The markdown source changes on every streamed delta. Only the renderers that
+// slice it by node offset read it, so it sits apart from the renderer context.
+const ChatMarkdownTextContext = React.createContext("");
 
 // Screen readers take a heading's level from its tag, which would let a `#` in a
 // message outrank the heading placed above it. Override only the exposed level:
@@ -2941,18 +2956,19 @@ const CHAT_MARKDOWN_COMPONENTS = {
     );
   },
   li: function MarkdownListItem({ node, children, ...props }) {
-    const { text, skills } = use(ChatMarkdownRendererContext);
-    const listItemStart = node?.position?.start.offset;
-    const markerOffset =
-      typeof listItemStart === "number" ? findTaskListMarkerOffset(text, listItemStart) : null;
+    const { skills } = use(ChatMarkdownRendererContext);
+    // The checkbox finds its marker from this offset when toggled, so list items
+    // don't read the source text. remark-gfm marks task items with this class.
+    const isTaskItem = String(props.className ?? "").includes("task-list-item");
     return (
-      <li {...props} data-task-marker-offset={markerOffset ?? undefined}>
+      <li {...props} data-list-item-offset={isTaskItem ? node?.position?.start.offset : undefined}>
         {renderSkillInlineMarkdownChildren(children, skills)}
       </li>
     );
   },
   input: function MarkdownInput({ node: _node, type, checked, disabled: _disabled, ...props }) {
     const { onTaskListChange } = use(ChatMarkdownRendererContext);
+    const text = use(ChatMarkdownTextContext);
     if (type !== "checkbox") return <input {...props} type={type} disabled={_disabled} readOnly />;
     // The checkbox keeps a hidden native input beside it, which the clipboard serializer reads.
     if (!onTaskListChange)
@@ -2966,8 +2982,10 @@ const CHAT_MARKDOWN_COMPONENTS = {
         onCheckedChange={(next, details) => {
           const target = details.event.target;
           const item = target instanceof Element ? target.closest("li") : null;
-          const markerOffset = Number(item?.dataset.taskMarkerOffset);
-          if (!Number.isSafeInteger(markerOffset)) return;
+          const listItemStart = Number(item?.dataset.listItemOffset);
+          if (!Number.isSafeInteger(listItemStart)) return;
+          const markerOffset = findTaskListMarkerOffset(text, listItemStart);
+          if (markerOffset === null) return;
           onTaskListChange({ markerOffset, checked: next });
         }}
       />
@@ -2987,12 +3005,11 @@ const CHAT_MARKDOWN_COMPONENTS = {
       linkTargetPreference,
       openExternalLinkInPreview,
       projects,
-      serverConfig,
       fileLinkChip,
       renderContextReference,
       threadLinkChips,
-      text,
     } = use(ChatMarkdownRendererContext);
+    const text = use(ChatMarkdownTextContext);
     const citation = href ? parseAssistantCitationHref(href) : null;
     if (citation) return <AssistantCitationChip citation={citation} />;
     // A thread link names a thread in this message's environment and opens it in the app.
@@ -3411,9 +3428,10 @@ const CHAT_MARKDOWN_COMPONENTS = {
     return <MarkdownDetails open={detailsOpen}>{children}</MarkdownDetails>;
   },
   pre: function MarkdownPre({ node, children, ...props }) {
-    const { resolvedTheme, diffThemeName, expandMedia, isStreaming, onRunShellCommand, text } = use(
+    const { resolvedTheme, diffThemeName, expandMedia, isStreaming, onRunShellCommand } = use(
       ChatMarkdownRendererContext,
     );
+    const text = use(ChatMarkdownTextContext);
     const codeBlock = extractCodeBlock(children);
     if (!codeBlock) {
       return <pre {...props}>{children}</pre>;
@@ -3523,24 +3541,26 @@ function ChatMarkdown({
       onCopy={handleCopy}
     >
       <ChatMarkdownRendererContext value={componentState}>
-        <ReactMarkdown
-          remarkPlugins={remarkPlugins}
-          rehypePlugins={
-            // A pull request body keeps its author's own image layout.
-            parseRawHtml
-              ? galleries
-                ? CHAT_MARKDOWN_GALLERY_REHYPE_PLUGINS
-                : CHAT_MARKDOWN_RENDER_REHYPE_PLUGINS
-              : galleries
-                ? CHAT_MARKDOWN_LITERAL_HTML_GALLERY_REHYPE_PLUGINS
-                : CHAT_MARKDOWN_LITERAL_HTML_REHYPE_PLUGINS
-          }
-          skipHtml={false}
-          components={CHAT_MARKDOWN_COMPONENTS}
-          urlTransform={markdownUrlTransform}
-        >
-          {renderedText}
-        </ReactMarkdown>
+        <ChatMarkdownTextContext value={text}>
+          <ReactMarkdown
+            remarkPlugins={remarkPlugins}
+            rehypePlugins={
+              // A pull request body keeps its author's own image layout.
+              parseRawHtml
+                ? galleries
+                  ? CHAT_MARKDOWN_GALLERY_REHYPE_PLUGINS
+                  : CHAT_MARKDOWN_RENDER_REHYPE_PLUGINS
+                : galleries
+                  ? CHAT_MARKDOWN_LITERAL_HTML_GALLERY_REHYPE_PLUGINS
+                  : CHAT_MARKDOWN_LITERAL_HTML_REHYPE_PLUGINS
+            }
+            skipHtml={false}
+            components={CHAT_MARKDOWN_COMPONENTS}
+            urlTransform={markdownUrlTransform}
+          >
+            {renderedText}
+          </ReactMarkdown>
+        </ChatMarkdownTextContext>
       </ChatMarkdownRendererContext>
       <OverlayPresence when={localMediaPreview}>
         {(localMediaPreview) => (

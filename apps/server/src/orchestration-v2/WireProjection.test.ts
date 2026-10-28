@@ -1,4 +1,8 @@
 import {
+  type OrchestrationV2DomainEvent,
+  type OrchestrationV2ThreadStreamItem,
+  CheckpointId,
+  CheckpointScopeId,
   MessageId,
   ContextHandoffId,
   ProviderThreadId,
@@ -18,6 +22,7 @@ import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 
 import {
+  makeLiveBodyDeduper,
   projectTurnItemForWire,
   projectTurnItemForDetail,
   projectDomainEventForWire,
@@ -28,6 +33,14 @@ import { MAX_TOOL_OUTPUT_IMAGES, toolOutputImages } from "@cogenly/shared/toolOu
 const decodeTurnItem = Schema.decodeUnknownSync(OrchestrationV2TurnItem);
 const encodeTurnItemJson = Schema.encodeSync(OrchestrationV2TurnItemJson);
 const decodeTurnItemJson = Schema.decodeUnknownSync(OrchestrationV2TurnItemJson);
+
+const turnItemCodecs = [
+  OrchestrationV2TurnItemJson,
+  Schema.toCodecJson(OrchestrationV2TurnItem),
+].map((codec) => ({
+  encode: Schema.encodeSync(codec),
+  decode: Schema.decodeUnknownSync(codec),
+}));
 
 const base = {
   id: TurnItemId.make("tool-1"),
@@ -400,4 +413,132 @@ describe("orchestration V2 wire projection", () => {
     };
     expect(projectTurnItemForWire({ ...base, output })).not.toHaveProperty("output");
   });
+});
+
+describe("live body deduper", () => {
+  const at = base.updatedAt;
+  const messageId = MessageId.make("message-live");
+  const event = (
+    sequence: number,
+    rest: Pick<OrchestrationV2DomainEvent, "type" | "payload">,
+  ): Extract<OrchestrationV2ThreadStreamItem, { kind: "event" }> => ({
+    kind: "event",
+    sequence,
+    event: {
+      id: EventId.make(`event-${sequence}`),
+      threadId: base.threadId,
+      occurredAt: at,
+      ...rest,
+    } as OrchestrationV2DomainEvent,
+  });
+  const message = (sequence: number, text: string) =>
+    event(sequence, {
+      type: "message.updated",
+      payload: {
+        id: messageId,
+        threadId: base.threadId,
+        runId: null,
+        nodeId: null,
+        role: "assistant",
+        text,
+        attachments: [],
+        streaming: true,
+        createdBy: "agent",
+        creationSource: "provider",
+        createdAt: at,
+        updatedAt: at,
+      },
+    });
+  const reply = (sequence: number, text: string) =>
+    event(sequence, {
+      type: "turn-item.updated",
+      payload: {
+        ...base,
+        status: "running",
+        type: "assistant_message",
+        messageId,
+        text,
+        streaming: true,
+      },
+    });
+  const payloadOf = (item: OrchestrationV2ThreadStreamItem) =>
+    item.kind === "event" ? item.event.payload : undefined;
+
+  it("blanks a reply only after delivering the matching message", () => {
+    const delivered = [message(1, "a"), reply(2, "a"), message(3, "ab"), reply(4, "ab")].map(
+      makeLiveBodyDeduper(),
+    );
+
+    expect(
+      delivered.map((item) => [item.kind === "event" && item.sequence, payloadOf(item)]),
+    ).toEqual([
+      [1, message(1, "a").event.payload],
+      [2, { ...reply(2, "a").event.payload, text: "", textOmitted: true }],
+      [3, message(3, "ab").event.payload],
+      [4, { ...reply(4, "ab").event.payload, text: "", textOmitted: true }],
+    ]);
+  });
+
+  it("ships a reply whole when its message arrives after it", () => {
+    const first = reply(1, "a");
+    expect([first, message(2, "a")].map(makeLiveBodyDeduper())[0]).toBe(first);
+  });
+  it("sends unmatched, evicted, and previous-subscription bodies whole", () => {
+    const dedupe = makeLiveBodyDeduper();
+    dedupe(message(1, "a"));
+    expect(payloadOf(dedupe(reply(2, "changed")))).toEqual(reply(2, "changed").event.payload);
+    for (let index = 0; index < 33; index++) {
+      const next = message(index + 3, "a");
+      if (next.event.type !== "message.updated") throw new Error("message fixture");
+      dedupe({
+        ...next,
+        event: {
+          ...next.event,
+          payload: { ...next.event.payload, id: MessageId.make(`other-${index}`) },
+        },
+      });
+    }
+    const original = reply(40, "a");
+    expect(dedupe(original)).toBe(original);
+    expect(makeLiveBodyDeduper()(original)).toBe(original);
+  });
+});
+
+it("preserves omitted body markers in both runtime and explicit JSON turn-item codecs", () => {
+  const items = [
+    {
+      ...base,
+      type: "assistant_message",
+      messageId: MessageId.make("m"),
+      text: "",
+      textOmitted: true,
+      streaming: false,
+    },
+    {
+      ...base,
+      type: "checkpoint",
+      checkpointId: CheckpointId.make("c"),
+      scopeId: CheckpointScopeId.make("s"),
+      files: [],
+      filesOmitted: true,
+    },
+    {
+      ...base,
+      type: "subagent",
+      subagentId: NodeId.make("task"),
+      origin: "app_owned",
+      driver: ProviderDriverKind.make("codex"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      childThreadId: null,
+      prompt: "",
+      result: null,
+      promptOmitted: true,
+      resultOmitted: true,
+    },
+  ].map((item) => decodeTurnItem(item));
+  for (const item of items) {
+    for (const codec of turnItemCodecs) {
+      expect(codec.decode(JSON.parse(JSON.stringify(codec.encode(item))))).toEqual(item);
+    }
+  }
 });

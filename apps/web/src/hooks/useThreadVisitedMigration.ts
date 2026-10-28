@@ -1,7 +1,7 @@
 import { scopeThreadRef, scopedThreadKey } from "@cogenly/client-runtime/environment";
 import { useEffect } from "react";
 
-import { useThreadShells } from "../state/entities";
+import { useQuietThreadShells } from "../state/entities";
 import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useUiStateStore } from "../uiStateStore";
@@ -20,7 +20,7 @@ const migratedThreadKeys = new Set<string>();
  * this cannot clobber progress made elsewhere.
  */
 export function useThreadVisitedMigration(): void {
-  const threads = useThreadShells();
+  const threads = useQuietThreadShells();
   const visitThreadMutation = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
   useEffect(() => {
     for (const thread of threads) {

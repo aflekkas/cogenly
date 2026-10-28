@@ -144,6 +144,7 @@ import { useClientSettings } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
+import { useNowSecond } from "../hooks/useNowSecond";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import {
   useEnvironmentIdentities,
@@ -151,7 +152,7 @@ import {
   useEnvironmentConnectionPhases,
   usePrimaryEnvironmentId,
 } from "../state/environments";
-import { readThreadShell, useProjects, useThreadShells } from "../state/entities";
+import { readThreadShell, useProjects, useQuietThreadShells } from "../state/entities";
 import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../state/server";
 import { threadEnvironment } from "../state/threads";
 import { useThreadSearch } from "../state/queries";
@@ -456,14 +457,9 @@ function settledTimeLabel(thread: SidebarThreadSummary): string {
 // Self-ticking so only this span re-renders each second, not the whole row.
 function WorkingDuration(props: { startedAt: string | null }) {
   const startedMs = props.startedAt !== null ? Date.parse(props.startedAt) : Number.NaN;
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (Number.isNaN(startedMs)) return;
-    const id = window.setInterval(() => setTick((tick) => tick + 1), 1_000);
-    return () => window.clearInterval(id);
-  }, [startedMs]);
+  const nowMs = useNowSecond(!Number.isNaN(startedMs));
   if (Number.isNaN(startedMs)) return null;
-  return <span className="tabular-nums">{formatWorkingDurationLabel(Date.now() - startedMs)}</span>;
+  return <span className="tabular-nums">{formatWorkingDurationLabel(nowMs - startedMs)}</span>;
 }
 
 // The stack's chips take the card's fill so the overlap reads as a cut: the
@@ -1528,7 +1524,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           icon: "working" as const,
           // No shimmer: a label that animates forever is noise in a sidebar
           // full of them (and repaints every vsync on high-refresh displays).
-          className: "text-info",
+          className: "text-info-foreground",
         }
       : status === "waiting"
         ? {
@@ -1554,25 +1550,25 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ? {
                   label: "Limited",
                   icon: "failed" as const,
-                  className: "text-warning",
+                  className: "text-warning-foreground",
                 }
               : status === "failed"
                 ? {
                     label: "Failed",
                     icon: "failed" as const,
-                    className: "text-error",
+                    className: "text-error-foreground",
                   }
                 : isWoke
                   ? {
                       label: "Woke",
                       icon: "woke" as const,
-                      className: "text-warning",
+                      className: "text-warning-foreground",
                     }
                   : isUnread
                     ? {
                         label: "Done",
                         icon: "done" as const,
-                        className: "text-success",
+                        className: "text-success-foreground",
                       }
                     : null;
   const isWokeStatus = topStatus?.icon === "woke";
@@ -2505,7 +2501,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
 
 export default function Sidebar() {
   const projects = useProjects();
-  const threads = useThreadShells();
+  const threads = useQuietThreadShells();
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   // AppSidebarLayout shows the navigation rail beside this sidebar on wider

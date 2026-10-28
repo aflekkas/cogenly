@@ -110,7 +110,8 @@ const make = Effect.gen(function* () {
         LEFT JOIN facts f ON m.kind = 'fact' AND f.id = m.id
         LEFT JOIN commitments c ON m.kind = 'commitment' AND c.id = m.id
         WHERE (m.thread_id IS NULL OR (t.thread_id IS NOT NULL AND t.deleted_at IS NULL AND t.archived_at IS NULL
-          AND p.project_id IS NOT NULL AND p.deleted_at IS NULL))
+          AND p.project_id IS NOT NULL AND p.deleted_at IS NULL
+          AND json_extract(t.payload_json, '$.lineage.relationshipToParent') IS NOT 'subagent'))
         AND (? IS NULL OR
           (m.kind IN ('thread', 'pr') AND t.project_id IN (SELECT value FROM json_each(?))) OR
           (m.kind = 'agent' AND a.agent_id = ?) OR

@@ -1936,6 +1936,9 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
           text: message.text,
           attachments: message.attachments,
           resolveAttachmentPath: providerHost.resolveAttachmentPath,
+          ...(providerHost.resolveAttachmentTextPath
+            ? { resolveAttachmentTextPath: providerHost.resolveAttachmentTextPath }
+            : {}),
         });
         if (text) parts.push({ type: "text", text });
         for (const attachment of message.attachments)

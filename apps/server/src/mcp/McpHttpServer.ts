@@ -39,6 +39,7 @@ import * as HtmlRender from "../htmlRender/HtmlRender.ts";
 import * as VisualState from "../htmlRender/VisualState.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import { advertisedJsonSchema } from "./advertisedJsonSchema.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
@@ -578,7 +579,7 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
     tool: new McpSchema.Tool({
       name: tool.name,
       description: Tool.getDescription(tool),
-      inputSchema: Tool.getJsonSchema(tool),
+      inputSchema: advertisedJsonSchema(tool),
       annotations: {
         ...Context.getOption(tool.annotations, Tool.Title).pipe(
           Option.map((title) => ({ title })),
@@ -770,7 +771,7 @@ const registerImageTool = <T extends Tool.Any, E, R>(
       tool: new McpSchema.Tool({
         name: tool.name,
         description: Tool.getDescription(tool),
-        inputSchema: Tool.getJsonSchema(tool),
+        inputSchema: advertisedJsonSchema(tool),
         annotations: {
           ...Context.getOption(tool.annotations, Tool.Title).pipe(
             Option.map((title) => ({ title })),
@@ -918,6 +919,39 @@ const withJsonResults = <Tools extends Record<string, Tool.Any>>(
     ),
   ) as unknown as Toolkit.Toolkit<Tools>;
 
+/** Substitute compact inputs at registration, leaving handlers and result codecs intact. */
+const withAdvertisedSchemas = Effect.fn("McpHttpServer.withAdvertisedSchemas")(function* <
+  Tools extends Record<string, Tool.Any>,
+  A,
+  E,
+  R,
+>(toolkit: Toolkit.Toolkit<Tools>, registration: Effect.Effect<A, E, R>) {
+  const server = yield* McpServer.McpServer;
+  const tools: Record<string, Tool.Any> = toolkit.tools;
+  return yield* registration.pipe(
+    Effect.provideService(
+      McpServer.McpServer,
+      McpServer.McpServer.of({
+        ...server,
+        addTool: (options) => {
+          const tool = tools[options.tool.name];
+          return server.addTool(
+            tool === undefined
+              ? options
+              : {
+                  ...options,
+                  tool: new McpSchema.Tool({
+                    ...options.tool,
+                    inputSchema: advertisedJsonSchema(tool),
+                  }),
+                },
+          );
+        },
+      }),
+    ),
+  );
+});
+
 /**
  * `McpServer.toolkit` for handlers that declared their access (see
  * `McpToolAccess`). Every toolkit on `/mcp` registers through this.
@@ -933,7 +967,9 @@ export const toolkitRegistration = <Tools extends Record<string, Tool.Any>, EX, 
 ) => {
   for (const tool of Object.values(toolkit.tools))
     agentToolReads.set(tool.name, Context.get(tool.annotations, Tool.Readonly));
-  const registration = McpServer.toolkit(withJsonResults(toolkit));
+  const registration = Layer.effectDiscard(
+    withAdvertisedSchemas(toolkit, McpServer.registerToolkit(withJsonResults(toolkit))),
+  ).pipe(Layer.provide(McpServer.McpServer.layer));
   // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off - the auth middleware provides it per request.
   const registered = registration as Layer.Layer<
     never,

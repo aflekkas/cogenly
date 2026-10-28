@@ -12,6 +12,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ProviderThreadId,
+  ProviderTurnId,
   ThreadId,
 } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
@@ -357,6 +358,7 @@ it.effect("ends a runless root turn's items when its node already ended", () =>
       providerInstanceId: parentProviderInstanceId,
       projection: {
         nodes: [root],
+        providerTurns: [],
         turnItems: [item("turn-item:command"), item("turn-item:reasoning")],
       } as never,
       status: "cancelled",
@@ -377,4 +379,73 @@ it.effect("ends a runless root turn's items when its node already ended", () =>
       ["turn-item.updated turn-item:reasoning"],
     );
   }),
+);
+
+it.effect.each(["completed", "failed", "interrupted", "cancelled"] as const)(
+  "ends runless provider turns as %s without replaying terminal or run-owned records",
+  (status) =>
+    Effect.gen(function* () {
+      const rootId = NodeId.make("root:runless");
+      const root = {
+        id: rootId,
+        threadId: childThreadId,
+        runId: null,
+        parentNodeId: null,
+        rootNodeId: rootId,
+        kind: "root_turn" as const,
+        status: "running" as const,
+        countsForRun: false,
+        providerThreadId: ProviderThreadId.make("provider-thread:runless"),
+        providerTurnId: ProviderTurnId.make("turn:runless"),
+        nativeItemRef: null,
+        runtimeRequestId: null,
+        checkpointScopeId: null,
+        startedAt: childCreatedAt,
+        completedAt: null,
+      };
+      const turn = {
+        id: ProviderTurnId.make("turn:runless"),
+        providerThreadId: ProviderThreadId.make("provider-thread:runless"),
+        nodeId: root.id,
+        runAttemptId: null,
+        nativeTurnRef: null,
+        ordinal: 1,
+        status: "running",
+        startedAt: childCreatedAt,
+        completedAt: null,
+      } as const;
+      const projection = {
+        nodes: [root],
+        turnItems: [],
+        providerTurns: [
+          turn,
+          { ...turn, id: ProviderTurnId.make("turn:ended"), status: "completed" as const },
+          {
+            ...turn,
+            id: ProviderTurnId.make("turn:owned"),
+            runAttemptId: RunAttemptId.make("attempt:owned"),
+          },
+          { ...turn, id: ProviderTurnId.make("turn:other"), nodeId: NodeId.make("other-root") },
+        ],
+      };
+      const input = {
+        threadId: childThreadId,
+        providerInstanceId: childProviderInstanceId,
+        projection,
+        status,
+        now: childCreatedAt,
+        emitted: [],
+        allocateEventId: () => Effect.succeed(EventId.make("event:provider-turn-ended")),
+      };
+      const events = yield* endRunlessRootTurns(input);
+      const turns = events.flatMap((event) =>
+        event.type === "provider-turn.updated" ? [event.payload] : [],
+      );
+      assert.deepEqual(turns, [{ ...turn, status, completedAt: childCreatedAt }]);
+      const repeated = yield* endRunlessRootTurns({
+        ...input,
+        emitted: events,
+      });
+      assert.isEmpty(repeated);
+    }),
 );

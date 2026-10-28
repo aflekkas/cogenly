@@ -14,6 +14,7 @@ import {
   resolveAttachmentPath,
 } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
+import * as DocumentText from "../provider/DocumentText.ts";
 
 export class AttachmentClaimError extends Schema.TaggedError<AttachmentClaimError>()(
   "AttachmentClaimError",
@@ -44,10 +45,19 @@ export const releaseClaimedAttachments = Effect.fn("AttachmentClaims.releaseClai
   function* (claimedPaths: ReadonlyArray<string>) {
     if (claimedPaths.length === 0) return;
     const fileSystem = yield* FileSystem.FileSystem;
-    yield* Effect.forEach(claimedPaths, (path) => fileSystem.remove(path).pipe(Effect.ignore), {
-      concurrency: 1,
-      discard: true,
-    }).pipe(Effect.uninterruptible);
+    yield* Effect.forEach(
+      claimedPaths,
+      (path) =>
+        Effect.forEach(
+          [path, `${path}.txt`],
+          (file) => fileSystem.remove(file, { force: true }).pipe(Effect.ignore),
+          { discard: true },
+        ),
+      {
+        concurrency: 1,
+        discard: true,
+      },
+    ).pipe(Effect.uninterruptible);
   },
 );
 
@@ -61,7 +71,7 @@ export const releaseClaimedAttachments = Effect.fn("AttachmentClaims.releaseClai
  */
 export const claimPendingAttachments = Effect.fn("AttachmentClaims.claimPendingAttachments")(
   function* (input: {
-    readonly threadId: string;
+    readonly threadId?: string | undefined;
     readonly attachments: ReadonlyArray<ChatAttachment>;
   }) {
     yield* validateAttachmentLimits(input.attachments);
@@ -73,19 +83,28 @@ export const claimPendingAttachments = Effect.fn("AttachmentClaims.claimPendingA
         message: "Duplicate attachment ids are not allowed.",
       });
     }
-    if (!input.attachments.some(attachmentIsPendingUpload)) {
+    if (input.attachments.length === 0)
       return { attachments: input.attachments, claimedPaths: [] } satisfies ClaimedAttachments;
-    }
     const serverConfig = yield* ServerConfig.ServerConfig;
     const fileSystem = yield* FileSystem.FileSystem;
+    const documents = yield* DocumentText.DocumentText;
     const claimedPaths: string[] = [];
     const attachments = yield* Effect.forEach(
       input.attachments,
       (attachment) =>
         Effect.gen(function* () {
           if (!attachmentIsPendingUpload(attachment)) {
+            const path = resolveAttachmentPath({
+              attachmentsDir: serverConfig.attachmentsDir,
+              attachment,
+            });
+            if (path) yield* documents.ensure(path);
             return attachment;
           }
+          if (input.threadId === undefined)
+            return yield* new AttachmentClaimError({
+              message: "Uploaded attachments need a thread id at launch.",
+            });
           const claim = planAttachmentClaim({
             attachmentsDir: serverConfig.attachmentsDir,
             threadId: input.threadId,
@@ -140,10 +159,12 @@ export const claimPendingAttachments = Effect.fn("AttachmentClaims.claimPendingA
             Effect.andThen(Effect.sync(() => claimedPaths.push(claim.finalPath))),
             Effect.uninterruptible,
           );
+          yield* documents.ensure(claim.finalPath);
           return normalized;
         }),
       { concurrency: 1 },
     ).pipe(Effect.onError(() => releaseClaimedAttachments(claimedPaths)));
     return { attachments, claimedPaths } satisfies ClaimedAttachments;
   },
+  Effect.provide(DocumentText.layer),
 );

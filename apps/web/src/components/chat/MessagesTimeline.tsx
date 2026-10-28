@@ -4,6 +4,7 @@ import { MarkdownFindContext, useFindRevealRef } from "./markdownFindContext";
 import { useChatCanvas } from "./ChatCanvasContext";
 import { useTimelineMinimapClearance } from "./useTimelineMinimapClearance";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
+import { useSecondTick } from "~/hooks/useNowSecond";
 import { DisclosureChevron } from "../ui/disclosure";
 import {
   WorkLogBlock,
@@ -2086,9 +2087,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
         className="flex h-full items-center justify-center ps-(--chat-lane-inset-start) pe-(--chat-lane-inset-end)"
         style={{ paddingBottom: contentInsetEndAdjustment }}
       >
-        <p className="text-sm text-muted-foreground/30">
-          Send a message to start the conversation.
-        </p>
+        <p className="text-sm text-muted-foreground">Send a message to start the conversation.</p>
       </div>
     );
   }
@@ -2216,8 +2215,17 @@ function keyExtractor(item: MessagesTimelineRow) {
   return item.id;
 }
 
+// LegendList estimates unmeasured rows from the running average size of their
+// type. One type for every assistant reply lets a few very long replies, or
+// one that is streaming, lift the estimate for short replies to thousands of
+// pixels. Rows then mount one at a time, each measurement shrinks the list
+// and mounts the next row in the same commit, and scrolling into unmeasured
+// history exceeds React's nested update limit. Doubling-length buckets keep
+// each average within about 2x of the rows it estimates.
 function getItemType(item: MessagesTimelineRow) {
-  return item.kind === "message" ? `message:${item.message.role}` : item.kind;
+  if (item.kind !== "message") return item.kind;
+  const lengthBucket = Math.max(0, Math.floor(Math.log2(item.message.text.length / 1000)));
+  return `message:${item.message.role}:${lengthBucket}`;
 }
 
 interface TimelinePositionState {
@@ -4297,16 +4305,17 @@ function WorkingTimer({ createdAt }: { createdAt: string }) {
   const textRef = useRef<HTMLSpanElement>(null);
   const initialText = formatWorkingTimerNow(createdAt);
 
+  const updateText = () => {
+    if (textRef.current) {
+      textRef.current.textContent = formatWorkingTimerNow(createdAt);
+    }
+  };
   useEffect(() => {
-    const updateText = () => {
-      if (textRef.current) {
-        textRef.current.textContent = formatWorkingTimerNow(createdAt);
-      }
-    };
-    updateText();
-    const id = setInterval(updateText, 1000);
-    return () => clearInterval(id);
+    if (textRef.current) {
+      textRef.current.textContent = formatWorkingTimerNow(createdAt);
+    }
   }, [createdAt]);
+  useSecondTick(true, updateText);
 
   return (
     <span ref={textRef} className="tabular-nums">

@@ -47,6 +47,8 @@ receives them on the environment's machine. Provider and model limits still
 apply, including images already in the conversation. A video attachment gives
 the agent a file path; it does not enable native video input.
 
+DOCX, XLSX, PPTX, ODT, EPUB, and Jupyter notebook attachments up to 16 MiB also give the agent an extracted text copy, capped at 1 MiB. The original file remains available.
+
 Uploads begin when you add an attachment. All uploads must finish before the
 message can send. Retry or remove a failed upload. On web and desktop, reloading
 before an upload finishes requires you to attach that file again.
@@ -348,6 +350,9 @@ styles, or images from neighboring files.
 On web and desktop, HTML and PDF files open as rendered pages. Switch an HTML
 file to source view to read its markup; a link to a specific line opens source
 automatically. HTML previews cannot access your Cogenly session.
+
+In the desktop app and on iPhone and iPad, a PDF opens with its own page, zoom,
+and find controls. Press Cmd+F (Ctrl+F) inside the PDF to search its text.
 
 The file viewer recognizes images, HTML, and PDF files by their filename extension,
 including filenames or folders containing `#` or `?`.

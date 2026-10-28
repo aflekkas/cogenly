@@ -10,10 +10,12 @@ import {
 describe("buildRuntimeInstructions", () => {
   it("requires explicit registration of every PR and stack layer", () => {
     const instructions = buildRuntimeInstructions({ harness: "Codex" });
-    expect(instructions).toContain("When the cogenly MCP server exposes link_pull_request");
-    expect(instructions).toContain("with the full PR URL immediately after creating a PR");
-    expect(instructions).toContain("For a stack, call it for every layer");
-    expect(instructions).toContain("call list_thread_pull_requests and link any PR");
+    expect(instructions).toContain("When link_pull_request is exposed");
+    expect(instructions).toContain(
+      "register every PR you create or work on immediately with its full URL",
+    );
+    expect(instructions).toContain("including every stack layer");
+    expect(instructions).toContain("list_thread_pull_requests and link missing work PRs");
   });
 
   it("keeps known model and effort metadata on one line", () => {
@@ -32,9 +34,7 @@ describe("buildRuntimeInstructions", () => {
       expect(instructions).toContain("<vault>");
       expect(instructions).toContain("vault_save");
       expect(instructions).toContain("vault_fill");
-      expect(instructions).toContain(
-        "Never ask for usernames, passwords, codes or other secrets in chat",
-      );
+      expect(instructions).toContain("Never expose secrets in chat/DOM output");
       expect(instructions).toContain("request_login");
       expect(instructions).toContain("saveToVault");
     }
@@ -59,21 +59,17 @@ describe("buildRuntimeInstructions", () => {
 describe("HOW_COGENLY_WORKS_INSTRUCTIONS", () => {
   it("explains chats, Work, agents, projects, and filing", () => {
     expect(HOW_COGENLY_WORKS_INSTRUCTIONS).toContain("<how_cogenly_works>");
-    expect(HOW_COGENLY_WORKS_INSTRUCTIONS).toContain("Chats are conversations");
-    expect(HOW_COGENLY_WORKS_INSTRUCTIONS).toContain("Work sessions change code");
-    expect(HOW_COGENLY_WORKS_INSTRUCTIONS).toContain("persistent assistants");
+    expect(HOW_COGENLY_WORKS_INSTRUCTIONS).toContain("Chats answer questions");
+    expect(HOW_COGENLY_WORKS_INSTRUCTIONS).toContain("Work changes one repository");
+    expect(HOW_COGENLY_WORKS_INSTRUCTIONS).toContain("Agents persist");
     expect(HOW_COGENLY_WORKS_INSTRUCTIONS).toContain("<projectsRoot>/<Project>/");
-    expect(HOW_COGENLY_WORKS_INSTRUCTIONS).toContain("moving a chat into a project forks it");
-    expect(HOW_COGENLY_WORKS_INSTRUCTIONS).toContain("cogenly MCP tools");
-    expect(HOW_COGENLY_WORKS_INSTRUCTIONS).toContain("Confirm first before bulk or destructive");
+    expect(HOW_COGENLY_WORKS_INSTRUCTIONS).toContain("Filing a chat forks it with history");
+    expect(HOW_COGENLY_WORKS_INSTRUCTIONS).toContain("Cogenly tools");
+    expect(HOW_COGENLY_WORKS_INSTRUCTIONS).toContain("confirm bulk/destructive changes");
   });
 
-  it("stays between 120 and 200 words", () => {
-    const words = HOW_COGENLY_WORKS_INSTRUCTIONS.replaceAll(/<[^>]+>/g, "")
-      .split(/\s+/)
-      .filter(Boolean);
-    expect(words.length).toBeGreaterThanOrEqual(120);
-    expect(words.length).toBeLessThanOrEqual(200);
+  it("keeps product guidance below its UTF-8 byte budget", () => {
+    expect(Buffer.byteLength(HOW_COGENLY_WORKS_INSTRUCTIONS)).toBeLessThan(750);
   });
 
   it("is included in the runtime instructions for every harness", () => {

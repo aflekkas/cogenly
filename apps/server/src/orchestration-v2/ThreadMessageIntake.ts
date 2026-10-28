@@ -189,10 +189,13 @@ export const launchThread = Effect.fn("ThreadMessageIntake.launchThread")(functi
 ) {
   const launches = yield* ThreadLaunch.ThreadLaunchService;
   yield* AttachmentClaims.validateAttachmentLimits(input.initialMessage?.attachments ?? []);
-  if (!input.initialMessage?.attachments.some(AttachmentClaims.attachmentIsPendingUpload)) {
+  if (!input.initialMessage?.attachments.length) {
     return yield* launches.launch(input);
   }
-  if (input.threadId === undefined) {
+  if (
+    input.threadId === undefined &&
+    input.initialMessage.attachments.some(AttachmentClaims.attachmentIsPendingUpload)
+  ) {
     return yield* new AttachmentClaims.AttachmentClaimError({
       message: "Uploaded attachments need a thread id at launch.",
     });

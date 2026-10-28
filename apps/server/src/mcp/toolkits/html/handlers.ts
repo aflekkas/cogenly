@@ -1,3 +1,9 @@
+import {
+  HTML_RENDER_KIT_GUIDE,
+  HTML_RENDER_LAYOUT_GUIDE,
+  HTML_RENDER_THEME_GUIDE,
+  HTML_RENDER_STATE_GUIDE,
+} from "@cogenly/shared/htmlRender";
 import { OrchestratorMcpFailure, VisualStateError } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -52,6 +58,16 @@ const toWireState = (state: {
 });
 
 const handlers = {
+  html_guide: McpToolAccess.readsAsCaller(() =>
+    Effect.succeed({
+      guide: [
+        HTML_RENDER_KIT_GUIDE,
+        HTML_RENDER_LAYOUT_GUIDE,
+        HTML_RENDER_THEME_GUIDE,
+        HTML_RENDER_STATE_GUIDE,
+      ].join("\n\n"),
+    }),
+  ),
   // The headless browser runs on the host and can open local files, so only
   // agents Cogenly launched, which already work on this machine, get it.
   html_preview: McpToolAccess.readsAsCaller((input) =>
@@ -125,6 +141,7 @@ export const layerPreview = McpToolAccess.toLayer(HtmlPreviewToolkit, {
 
 export const layerRender = McpToolAccess.toLayer(HtmlRenderToolkit, {
   html_render: handlers.html_render,
+  html_guide: handlers.html_guide,
 });
 
 export const layerState = McpToolAccess.toLayer(HtmlStateToolkit, {

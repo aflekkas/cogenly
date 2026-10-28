@@ -36,7 +36,7 @@ import {
   useServerConfigs,
   useThreadProjection,
   useThreadShell,
-  useThreadShells,
+  useQuietThreadShells,
 } from "~/state/entities";
 import { orchestrationEnvironment } from "~/state/orchestration";
 import { shellEnvironment } from "~/state/shell";
@@ -119,7 +119,7 @@ function useThreadDetailsModel(props: {
   );
   const shell = useThreadShell(ref);
   const projection = useThreadProjection(ref)?.projection ?? null;
-  const shells = useThreadShells();
+  const shells = useQuietThreadShells();
   const summary = useMemo(() => {
     const threads: ThreadAgentThreadInput[] = shells
       .filter((thread) => thread.environmentId === props.environmentId && thread.deletedAt === null)

@@ -1,3 +1,9 @@
+import { dedupeSnapshotBodies } from "@cogenly/shared/orchestrationV2DedupedBodies";
+import type { OrchestrationV2ThreadStreamItem } from "@cogenly/contracts";
+import {
+  withoutWorkspaceSnapshots,
+  workspaceRefreshProviders,
+} from "./provider/providerWorkspaceConfig.ts";
 import * as RepoMcpTrust from "./integrations/RepoMcpTrust.ts";
 import * as AccountConnections from "./accounts/AccountConnections.ts";
 import * as AccountAccess from "./accounts/AccountAccess.ts";
@@ -188,6 +194,7 @@ import {
   THREAD_HISTORY_SNAPSHOT_ROW_LIMIT,
 } from "./orchestration-v2/threadHistoryPaging.ts";
 import {
+  makeLiveBodyDeduper,
   projectDomainEventForWire,
   projectThreadProjectionForWire,
 } from "./orchestration-v2/WireProjection.ts";
@@ -660,8 +667,13 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
     readonly requestCompletionMarker?: boolean;
     readonly acceptBoundedSnapshot?: boolean;
     readonly acceptCompactTurnItems?: boolean;
+    readonly acceptDedupedBodies?: boolean;
   }) {
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
+    const dedupeBodies = input.acceptDedupedBodies === true;
+    // Replay, snapshot and coalesced live events share one delivery-local memory.
+    const withLiveDedupe = <E, R>(stream: Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>) =>
+      dedupeBodies ? Stream.suspend(() => Stream.map(stream, makeLiveBodyDeduper())) : stream;
     const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
 
     yield* Effect.annotateCurrentSpan({
@@ -760,15 +772,20 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
         ? buildBoundedThreadStreamSnapshot({
             ...snapshot,
             compactTurnItems: input.acceptCompactTurnItems === true,
+            dedupeBodies,
           })
         : {
             kind: "snapshot" as const,
             snapshotSequence,
-            projection: projectThreadProjectionForWire(snapshot.projection),
+            projection: dedupeBodies
+              ? dedupeSnapshotBodies(projectThreadProjectionForWire(snapshot.projection))
+              : projectThreadProjectionForWire(snapshot.projection),
           };
-      return Stream.concat(
-        Stream.concat(rpcInitialItems([snapshotItem]), completionMarker),
-        eventStreamFrom(snapshotSequence),
+      return withLiveDedupe(
+        Stream.concat(
+          Stream.concat(rpcInitialItems([snapshotItem]), completionMarker),
+          eventStreamFrom(snapshotSequence),
+        ),
       );
     });
 
@@ -843,9 +860,11 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
       if (plan.mode === "snapshot") {
         return yield* snapshotThenLive();
       }
-      return Stream.concat(
-        Stream.concat(rpcInitialItems(replay), completionMarker),
-        eventStreamFrom(highWater),
+      return withLiveDedupe(
+        Stream.concat(
+          Stream.concat(rpcInitialItems(replay), completionMarker),
+          eventStreamFrom(highWater),
+        ),
       );
     }
 
@@ -1256,13 +1275,19 @@ const makeWsRpcHandlers = (
         ),
       );
 
-    const loadServerConfig = (options: { readonly usageLimitsCommand: boolean }) =>
+    const loadServerConfig = (options: {
+      readonly usageLimitsCommand: boolean;
+      readonly workspaceSnapshotsOnDemand?: boolean;
+    }) =>
       Effect.gen(function* () {
         const keybindingsConfig = yield* keybindings.loadConfigState;
         const currentProviders = yield* providerRegistry.getProviders;
-        const providers = options.usageLimitsCommand
+        const commandProviders = options.usageLimitsCommand
           ? withUsageLimitsCommands(currentProviders)
           : currentProviders;
+        const providers = options.workspaceSnapshotsOnDemand
+          ? withoutWorkspaceSnapshots(commandProviders)
+          : commandProviders;
         const settings = ServerSettings.redactServerSettingsForClient(
           yield* serverSettings.getSettings,
         );
@@ -1966,7 +1991,13 @@ const makeWsRpcHandlers = (
               providers = yield* providerRegistry.refreshInstance(instance.instanceId);
             }
           }
-          return { providers };
+          if (input.workspaceSnapshotsOnDemand !== true) return { providers };
+          return {
+            providers: workspaceRefreshProviders(
+              input.usageLimitsCommand === true ? withUsageLimitsCommands(providers) : providers,
+              input,
+            ),
+          };
         }),
       [WS_METHODS.mcpAppsCallTool]: (input) => mcpAppRequests.callTool(input),
       [WS_METHODS.mcpAppsToolInfo]: (input) => mcpAppRequests.toolInfo(input),
@@ -2712,7 +2743,11 @@ const makeWsRpcHandlers = (
         Stream.unwrap(
           Effect.gen(function* () {
             const usageLimitsCommand = input.usageLimitsCommand === true;
-            const config = yield* loadServerConfig({ usageLimitsCommand });
+            const workspaceSnapshotsOnDemand = input.workspaceSnapshotsOnDemand === true;
+            const config = yield* loadServerConfig({
+              usageLimitsCommand,
+              workspaceSnapshotsOnDemand,
+            });
             const keybindingsUpdates = keybindings.streamChanges.pipe(
               Stream.map((event) => ({
                 version: 1 as const,
@@ -2724,9 +2759,14 @@ const makeWsRpcHandlers = (
               })),
             );
             const providerStatuses = providerRegistry.streamChanges.pipe(
-              Stream.map((providers) =>
-                usageLimitsCommand ? withUsageLimitsCommands(providers) : providers,
-              ),
+              Stream.map((providers) => {
+                const commandProviders = usageLimitsCommand
+                  ? withUsageLimitsCommands(providers)
+                  : providers;
+                return workspaceSnapshotsOnDemand
+                  ? withoutWorkspaceSnapshots(commandProviders)
+                  : commandProviders;
+              }),
               // Both sides replay their current value, so the first pairing normally
               // repeats the snapshot the client already holds. Compare against that
               // snapshot rather than dropping blindly: a refresh that landed between

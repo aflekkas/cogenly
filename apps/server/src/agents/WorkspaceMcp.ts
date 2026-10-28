@@ -78,7 +78,7 @@ const Work = Tool.make("start_agent_work", {
 const Trigger = Tool.make("propose_trigger", {
   ...shared,
   description:
-    "Propose a trigger for your own agent: an interval, a fixed time, an event, or a webhook. The owner must approve it; this never creates or enables a trigger directly.",
+    "Propose own-agent interval/time/event/webhook trigger for owner approval; never creates/enables directly.",
   parameters: Schema.Struct({
     title: ScheduledTaskUpsertInput.fields.title,
     prompt: ScheduledTaskUpsertInput.fields.prompt,
@@ -89,7 +89,7 @@ const Trigger = Tool.make("propose_trigger", {
 const EventTrigger = Tool.make("propose_event_trigger", {
   ...shared,
   description:
-    "Propose an event-driven trigger for your own agent (alias of propose_trigger). The owner must approve it; this never creates or enables a trigger directly.",
+    "Alias of propose_trigger for own-agent event proposals. Requires owner approval; never creates/enables directly.",
   parameters: Schema.Struct({
     title: ScheduledTaskUpsertInput.fields.title,
     prompt: ScheduledTaskUpsertInput.fields.prompt,
@@ -100,7 +100,7 @@ const EventTrigger = Tool.make("propose_event_trigger", {
 const UpdateProfile = Tool.make("update_own_profile", {
   ...shared,
   description:
-    "Update your own agent profile: name, face, responsibility, standing instructions, model, or fallbackChain (explicitly configured cross-provider instance + model pairs used when the primary hits a usage limit or is signed out; same-provider accounts are skipped). Applies immediately.",
+    "Immediately patch own name/face/responsibility/instructions/model/fallbackChain. Fallbacks are explicit cross-provider instance/model pairs for usage-limit/sign-out; same-provider accounts skipped.",
   parameters: AgentOwnProfileUpdateInput,
   success: AgentMutationResult,
 });

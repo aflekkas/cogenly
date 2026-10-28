@@ -13,7 +13,7 @@ import {
 
 const COGENLY_DEVICE_TOOL_INSTRUCTIONS = `## Cogenly devices
 
-The \`cogenly\` MCP server also exposes \`device_*\` tools for iOS Simulators and Android Emulators on this environment. For mobile verification, call \`device_list\`, then \`device_open\` so the user can watch the device in their Device panel; its result explains how to drive the device. Driving happens through the \`agent-device\` CLI, using the exact launcher path returned by \`device_open\`. Keep the host config and session flags returned by \`device_open\` on every command so concurrent devices stay independent: prefer \`agent-device snapshot -i\` refs over coordinates, and use \`device_screenshot\` when you need to see the screen. Prefer these tools and \`agent-device\` for opening and driving devices. Platform tools such as \`xcrun simctl\` and \`adb\` remain available for anything they do not cover, such as builds, logs, or port forwarding. If \`device_list\` fails, comes back empty, or reports a platform as unavailable, call \`device_setup_status\` and fix what it reports with \`device_setup\` or the terminal tool before telling the user devices do not work; relay the steps that need them, such as installing Xcode or the Android SDK.`;
+For mobile checks, device_list then device_open streams the device and returns driving instructions. Use its exact agent-device launcher/host config/session flags on every command for concurrent-device isolation. Prefer snapshot -i refs; device_screenshot for visuals. Prefer these tools for driving; simctl/adb for builds/logs/forwarding/uncovered operations. On list failure/empty/unavailable platforms, device_setup_status then fix via device_setup/terminal before reporting failure; relay Xcode/Android SDK prerequisites.`;
 
 export interface T3CodeToolAvailability {
   readonly browser: boolean;
@@ -42,7 +42,7 @@ const toolInstructions = (availability: boolean | T3CodeToolAvailability): strin
     tools.device ? COGENLY_DEVICE_TOOL_INSTRUCTIONS : "",
     tools.computer === undefined ? "" : cogenlyComputerUseInstructions(tools.computer).trim(),
     tools.terminal
-      ? "Use the cogenly MCP terminal_run tool for every shell command so the owner sees it live. Native shell tools are disabled. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. A command that may take more than about a minute, or may prompt (logins, cloud CLIs, installs, builds, test suites), runs with background=true and is polled with terminal_read, so the user's messages aren't blocked while it runs. Thread settlement kills these terminals and their children."
+      ? "Use cogenly terminal_run for all shell commands (visible to owner; native shell is disabled). background=true for servers, >1m or prompting commands (logins/installs/builds/tests); poll terminal_read to keep messages unblocked. terminal_write sends stdin; terminal_kill stops. Settlement kills terminals/children."
       : "",
   ]
     .filter(Boolean)
@@ -238,13 +238,42 @@ export function buildCodexAdditionalContext(
   toolsAvailable: boolean | T3CodeToolAvailability = true,
 ): Record<string, V2TurnStartParams__AdditionalContextEntry> {
   const tools = toolInstructions(toolsAvailable);
-  // Separate keys keep each value under Codex's per-entry token cap.
-  return {
-    cogenly_orchestration: { kind: "application", value: COGENLY_ORCHESTRATION_INSTRUCTIONS },
-    cogenly_runtime: {
-      kind: "application",
-      value: buildRuntimeInstructions({ harness: "Codex", ...runtime }),
-    },
-    ...(tools ? { cogenly_tools: { kind: "application", value: tools } } : {}),
-  };
+  return Object.fromEntries([
+    ...contextEntries("cogenly_orchestration", COGENLY_ORCHESTRATION_INSTRUCTIONS),
+    ...contextEntries(
+      "cogenly_runtime",
+      buildRuntimeInstructions({ harness: "Codex", ...runtime }),
+    ),
+    ...contextEntries("cogenly_tools", tools),
+  ]);
+}
+
+/** Codex silently truncates each value above 4,000 UTF-8 bytes. Split at paragraphs when possible. */
+function contextEntries(key: string, value: string) {
+  const chunks: Array<string> = [];
+  let chunk = "";
+  for (const paragraph of value.split(/(?<=\n\n)/)) {
+    if (Buffer.byteLength(chunk + paragraph) <= 3_800) {
+      chunk += paragraph;
+      continue;
+    }
+    if (chunk) chunks.push(chunk);
+    chunk = "";
+    // Code points keep multi-byte characters intact, even in unusually long runtime labels.
+    for (const character of paragraph) {
+      if (Buffer.byteLength(chunk + character) > 3_800) {
+        chunks.push(chunk);
+        chunk = "";
+      }
+      chunk += character;
+    }
+  }
+  if (chunk) chunks.push(chunk);
+  return chunks.map(
+    (value, index) =>
+      [
+        index === 0 ? key : `${key}_${index + 1}`,
+        { kind: "application", value } satisfies V2TurnStartParams__AdditionalContextEntry,
+      ] as const,
+  );
 }

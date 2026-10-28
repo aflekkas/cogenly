@@ -93,6 +93,18 @@ export function useThreadShells(enabled = true): ReadonlyArray<EnvironmentThread
   );
 }
 
+/**
+ * Every thread shell, holding each running thread's shell while only its
+ * streaming fields (`updatedAt`, item counts, latest message) change. For
+ * callers that arrange or filter threads; anything showing those fields live
+ * reads `useThreadShell` for that thread.
+ */
+export function useQuietThreadShells(enabled = true): ReadonlyArray<EnvironmentThreadShell> {
+  return useAtomValue(
+    enabled ? environmentThreadShells.quietThreadShellsAtom : EMPTY_THREAD_SHELLS_ATOM,
+  );
+}
+
 export function useAllEnvironmentShellsBootstrapped(): boolean {
   return useAtomValue(allEnvironmentShellsBootstrappedAtom);
 }

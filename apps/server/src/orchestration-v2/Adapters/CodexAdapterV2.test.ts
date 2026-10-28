@@ -530,12 +530,16 @@ describe("CodexAdapterV2 runtime policy", () => {
 
       assert.equal(params.collaborationMode?.mode, "default");
       assert.include(
-        params.additionalContext?.cogenly_orchestration?.value ?? "",
-        "Use `delegate_task`",
+        Object.values(params.additionalContext ?? {})
+          .map((entry) => entry.value)
+          .join(""),
+        "use `delegate_task`",
       );
       assert.include(
-        params.additionalContext?.cogenly_orchestration?.value ?? "",
-        "structured object, never as JSON text",
+        Object.values(params.additionalContext ?? {})
+          .map((entry) => entry.value)
+          .join(""),
+        "structured schedule, never JSON text",
       );
     }),
   );
@@ -563,17 +567,29 @@ describe("CodexAdapterV2 runtime policy", () => {
 
         const granted = yield* build(true);
         assert.include(
-          granted.additionalContext?.cogenly_tools?.value ?? "",
-          "Native shell tools are disabled",
+          Object.entries(granted.additionalContext ?? {})
+            .filter(([key]) => key.startsWith("cogenly_tools"))
+            .map(([, entry]) => entry.value)
+            .join(""),
+          "native shell is disabled",
         );
         // An explicit denial and a credential that never stated terminal
         // availability both keep the native shell, so the turn must not be
         // told to route commands through terminal tools instead.
         for (const params of [yield* build(false), yield* build()]) {
-          assert.notInclude(params.additionalContext?.cogenly_tools?.value ?? "", "terminal_run");
           assert.notInclude(
-            params.additionalContext?.cogenly_tools?.value ?? "",
-            "Native shell tools are disabled",
+            Object.entries(params.additionalContext ?? {})
+              .filter(([key]) => key.startsWith("cogenly_tools"))
+              .map(([, entry]) => entry.value)
+              .join(""),
+            "terminal_run",
+          );
+          assert.notInclude(
+            Object.entries(params.additionalContext ?? {})
+              .filter(([key]) => key.startsWith("cogenly_tools"))
+              .map(([, entry]) => entry.value)
+              .join(""),
+            "native shell is disabled",
           );
         }
       }),
@@ -622,7 +638,13 @@ describe("CodexAdapterV2 runtime policy", () => {
         params.collaborationMode?.settings.developer_instructions ?? "",
         "request_user_input",
       );
-      assert.include(params.additionalContext?.cogenly_tools?.value ?? "", "preview_status");
+      assert.include(
+        Object.entries(params.additionalContext ?? {})
+          .filter(([key]) => key.startsWith("cogenly_tools"))
+          .map(([, entry]) => entry.value)
+          .join(""),
+        "preview_status",
+      );
     }),
   );
 
@@ -696,7 +718,13 @@ describe("CodexAdapterV2 runtime policy", () => {
       assert.include(conversation, "work_task");
       assert.include(conversation, "image_search");
       assert.notInclude(conversation, "you cannot run commands");
-      assert.include(params.additionalContext?.cogenly_tools?.value ?? "", "terminal_run");
+      assert.include(
+        Object.entries(params.additionalContext ?? {})
+          .filter(([key]) => key.startsWith("cogenly_tools"))
+          .map(([, entry]) => entry.value)
+          .join(""),
+        "terminal_run",
+      );
     }),
   );
 
@@ -713,7 +741,13 @@ describe("CodexAdapterV2 runtime policy", () => {
       assert.include(conversation, "you cannot run commands");
       assert.include(conversation, "Start Work");
       assert.notInclude(conversation, "terminal_run");
-      assert.notInclude(params.additionalContext?.cogenly_tools?.value ?? "", "terminal_run");
+      assert.notInclude(
+        Object.entries(params.additionalContext ?? {})
+          .filter(([key]) => key.startsWith("cogenly_tools"))
+          .map(([, entry]) => entry.value)
+          .join(""),
+        "terminal_run",
+      );
     }),
   );
 

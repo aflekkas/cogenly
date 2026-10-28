@@ -35,7 +35,7 @@ const shared = {
 const Start = Tool.make("work_start", {
   ...shared,
   description:
-    "Start a normal coding Work session from this conversation in the chosen repository, with a concise approved scope and source link. Defaults to a new worktree when the repository uses git, else its checkout. Pass throughMessageId to hand off only the conversation up to that message. Reuse commandId when retrying. Agent identity comes from the calling thread.",
+    "Start approved coding scope in chosen repo with source link. Defaults to new Git worktree, otherwise checkout. throughMessageId bounds handoff; reuse commandId on retries. Identity comes from caller.",
   parameters: Schema.Struct({
     machine: Schema.optional(TrimmedNonEmptyString),
     commandId: WorkStartInput.fields.commandId,
@@ -68,7 +68,7 @@ const Propose = Tool.make("work_propose_handoff", {
 const Task = Tool.make("work_task", {
   ...shared,
   description:
-    "Hand a request that changes code, files or this machine, or that runs long, to a new Work task: a top-level coding thread the user can see and follow, with its own project or machine environment, shown as a task card in this chat. Do not use it for lookups the chat can run itself. It is not a subagent; the task runs on its own and its result comes back to this chat as a notification, so never poll it. mode=propose shows the card with Approve, Edit and Dismiss and starts nothing; mode=start launches at once. Use start only when the user explicitly asked for this action and it is unambiguous and low-risk, or clearly instructed destructive work such as uninstalling or deleting; otherwise propose. Pick targetProjectId from project_list when the work belongs to one of the user's projects; omit it for work on this machine itself, such as installing or uninstalling apps, which runs in No project. Write brief as complete instructions for the task agent: the goal, what to do, constraints, and what done looks like. Pass settleWhenDone=true for a self-contained task whose reported result is all the user needs (no PR or diff to review), so its Work thread settles once it completes instead of lingering; a failed task stays active. Omit modelSelection to use this chat's model. Reuse commandId when retrying.",
+    "Hand changes or long work to a top-level Work task, never chat lookups. Result notifies this chat; do not poll. start only for explicit, unambiguous low-risk work or explicitly requested destruction; otherwise propose shows an approval card. targetProjectId chooses a project, omitted means this machine/No project. brief must include goal, constraints and done criteria. settleWhenDone:true for results needing no PR/diff review (failures stay active). Model defaults to chat; reuse commandId on retries.",
   parameters: Schema.Struct({
     commandId: WorkStartInput.fields.commandId,
     machine: Schema.optional(TrimmedNonEmptyString),

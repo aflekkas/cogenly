@@ -7,6 +7,7 @@ import { defineProject, type TestProjectInlineConfiguration } from "vite-plus/te
 import "vite-plus/test/config";
 import { defineConfig, type Connect, type Plugin } from "vite-plus";
 import pkg from "./package.json" with { type: "json" };
+import pdfjsPkg from "pdfjs-dist/package.json" with { type: "json" };
 
 import {
   DEV_PROXIED_ORIGIN_PRESERVING_PREFIXES,
@@ -292,6 +293,18 @@ export default defineConfig(() => {
       emptyOutDir: true,
       manifest: true,
       sourcemap: buildSourcemap,
+      // pdf.js fetches its CMaps and fonts, and desktop's connect-src refuses data: URLs.
+      assetsInlineLimit: (file: string) => (/[/\\]pdfjs-dist[/\\]/.test(file) ? false : undefined),
+      rolldownOptions: {
+        output: {
+          // PDF.js resolves decoder modules and ICC data relative to wasmUrl, so
+          // they keep their own names in one directory per pdf.js version.
+          assetFileNames: (asset) =>
+            asset.originalFileNames.some((path) => /[/\\]pdfjs-dist[/\\]wasm[/\\]/.test(path))
+              ? `assets/pdfjs-${pdfjsPkg.version}/[name][extname]`
+              : "assets/[name]-[hash][extname]",
+        },
+      },
     },
     test: {
       projects: [defineProject(unitTestProject)],

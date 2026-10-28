@@ -25,7 +25,7 @@ const shared = {
 
 const ProjectFilesListTool = Tool.make("project_files_list", {
   description:
-    "List the files and folders in a Cogenly project folder: user references, briefs, and notes kept alongside the thread's repositories. Reads the calling thread's own folder, or the folder named by projectFolderId (for example one the user @-mentioned). Returns the folder's name and directory on disk plus project-relative paths with sizes and hashes. Pass prefix to scope the listing, e.g. `Resources/`. Read any file with project_file_read, or search filenames and contents with project_recall.",
+    "List project-relative files/folders with sizes/hashes and folder name/directory. Defaults to this thread's folder; projectFolderId selects another. prefix scopes the listing. Read with project_file_read; search with project_recall.",
   parameters: ProjectFilesListInput,
   success: ProjectFilesListResult,
   ...shared,
@@ -38,7 +38,7 @@ const ProjectFilesListTool = Tool.make("project_files_list", {
 
 const ProjectFileReadTool = Tool.make("project_file_read", {
   description:
-    "Read a file from the calling thread's Cogenly project folder, or the one named by projectFolderId, by project-relative path, e.g. `Resources/brief.md`. Returns paged text for text files and reports binary files (PDFs, images, archives) without their bytes. Find files with project_files_list or project_recall.",
+    "Read a project-relative file in this folder or projectFolderId. Text is paged; binaries report metadata without bytes. Discover via project_files_list/project_recall.",
   parameters: ProjectFileReadInput,
   success: ProjectLabelReadResourceResult,
   ...shared,
@@ -51,7 +51,7 @@ const ProjectFileReadTool = Tool.make("project_file_read", {
 
 const ProjectRecallTool = Tool.make("project_recall", {
   description:
-    "Search filenames and contents across the calling thread's Cogenly project files, or the folder named by projectFolderId, and return matching paths with snippets. Use it when the thread's project folder may hold relevant references, briefs, or notes; read the matches with project_file_read.",
+    "Search project filenames/content and return paths/snippets, here or projectFolderId. Use for references/briefs/notes; read matches with project_file_read.",
   parameters: ProjectRecallInput,
   success: ProjectRecallResult,
   ...shared,

@@ -66,7 +66,7 @@ const shared = {
 const EnvironmentReadTool = Tool.make("environment_read", {
   ...shared,
   description:
-    "Read this server's identity and selected preferences. The projects root, provider update checks and background activity belong to this machine; the rest are universal across paired machines. Provider/model availability is exposed by orchestrator_capabilities. Writing instructions are limited to 4,000 characters.",
+    "Read server identity/preferences. projectsRoot, update checks and background activity are machine-local; others sync. Catalog: orchestrator_capabilities. Writing text caps at 4,000 chars.",
   success: Schema.Struct({
     environmentId: ExecutionEnvironmentDescriptor.fields.environmentId,
     label: Schema.String,
@@ -80,7 +80,7 @@ const EnvironmentReadTool = Tool.make("environment_read", {
 const EnvironmentPreferencesTool = Tool.make("environment_preferences_update", {
   ...shared,
   description:
-    "Update selected preferences through normal settings persistence and notifications. Requires a live full-access/default calling thread. defaultThreadEnvMode, setModelEffortDefault, newWorktreesStartFromOrigin, enableAgentTerminals and sourceControlWritingStyle are universal: they reach every paired machine. The client-prefixed appearance, notifications, confirmation, composer, sidebar and diff preferences, and sharedKeybindings, are universal too. sharedKeybindings is the complete ordered list of { key, command, when? } rules; use mod for the platform modifier. enableProviderUpdateChecks, backgroundActivity and projectsRoot apply to this machine only. Omitted fields are preserved; empty customInstructions clears them. setModelEffortDefault sets the reasoning effort a model starts at ({ provider: instance id, model: slug, option: { id: the model's effort option id from orchestrator_capabilities, e.g. reasoningEffort or effort, value } }); option null restores the model's own default. projectsRoot sets where new project folders and their repositories go on this machine; empty restores the default, <Cogenly home>/projects. Existing project folders are not moved.",
+    "Update preferences; omitted fields stay. Requires full-access/default. Universal: thread defaults, model effort, worktree defaults, agent terminals, writing style, client preferences and keybindings. Machine-local: update checks, backgroundActivity, projectsRoot. Keybindings replace the ordered {key,command,when?} list; mod is the platform modifier. setModelEffortDefault uses {provider,model,option:{id,value}} from capabilities; option:null restores default. Empty customInstructions clears; empty projectsRoot restores <Cogenly home>/projects without moving existing folders.",
   parameters: Schema.Struct({
     ...UniversalClientPreferencePatch.fields,
     sharedKeybindings: ServerSettingsPatch.fields.sharedKeybindings,
@@ -99,7 +99,7 @@ const EnvironmentAddTool = Tool.make("environment_add", {
   ...shared,
   dependencies: [...shared.dependencies, DesktopAppControl.DesktopAppControl],
   description:
-    "Add the user's server to their Cogenly desktop app over SSH, with no clicks. Use it when the user asks to add or connect a server. The desktop connects to an SSH host from the user's SSH config, uses the Cogenly already installed there (starting its service if stopped, installing it otherwise), pairs, and saves it; the user sees progress in the app. Only works from an environment on the same computer as the desktop app. Requires a live full-access/default calling thread. Can take a few minutes.",
+    "Connect a server to the desktop over an SSH alias or user@host. Starts or installs Cogenly, pairs and saves it; may take minutes. Requires full-access/default and a desktop on this machine.",
   parameters: Schema.Struct({
     ssh: Schema.String.annotate({
       description: "SSH host alias from the user's SSH config (e.g. `myvps`), or user@host.",
@@ -126,14 +126,14 @@ const desktopCliCommandShared = {
 const CliCommandStatusTool = Tool.make("cli_command_status", {
   ...desktopCliCommandShared,
   description:
-    "Read whether the Cogenly desktop app's `cogenly` command line tool is on PATH on this computer: installed (where, and which app it runs), stale (its app moved or was removed), foreign (a `cogenly` Cogenly did not write is in the way), or not installed, plus whether ~/.local/bin is on the login shell's PATH. Only works from an environment on the same computer as the desktop app.",
+    "Read local desktop launcher status: installed, stale, foreign or missing, its app/path, ~/.local/bin login-PATH availability and recommendedLocation. Requires a desktop on this machine.",
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false);
 const CliCommandChangeTool = Tool.make("cli_command_change", {
   ...desktopCliCommandShared,
   description:
-    "Install or uninstall the Cogenly desktop app's `cogenly` command line tool, as Settings does. Install writes a small launcher to ~/.local/bin (location `user`), or on macOS to /usr/local/bin (location `system`), which shows the user macOS's administrator prompt; omit location to use the state's recommendedLocation. Install updates a stale launcher. Never overwrites or removes a `cogenly` Cogenly did not write. Uninstall removes every launcher Cogenly wrote. Requires a live full-access/default calling thread; tell the user before a `system` change, since it asks for their password.",
+    "Install/update or uninstall Cogenly-owned launchers only. Install defaults to recommendedLocation: user (~/.local/bin) or macOS system (/usr/local/bin, administrator prompt). Tell the user before system changes. Uninstall removes all owned launchers. Requires full-access/default.",
   parameters: Schema.Struct({
     action: Schema.Literals(["install", "uninstall"]),
     location: Schema.optionalKey(DesktopCliCommandLocation),
@@ -149,7 +149,7 @@ const MachineSecurityStatusTool = Tool.make("machine_security_status", {
     ChildProcessSpawner.ChildProcessSpawner,
   ],
   description:
-    "Read-only security posture of this machine: Cogenly's bind, non-loopback listeners, sshd password/root settings when readable, Tailscale Serve/Funnel, and host firewall when readable. Checks that cannot run without root report unknown, never pass.",
+    "Inspect bind/listeners, readable sshd/firewall settings and Tailscale Serve/Funnel. Checks needing root return unknown, never pass.",
   success: MachineSecurityStatus,
 })
   .annotate(Tool.Readonly, true)
@@ -158,7 +158,7 @@ const MachineHealthTool = Tool.make("machine_health", {
   ...shared,
   dependencies: [...shared.dependencies, MachineHealth.MachineHealth],
   description:
-    "Health of a Cogenly machine: server, database, disk, provider sign-ins, links to paired machines, sync, integrations, scheduled tasks, stuck runs, boot service, Tailscale Serve and the canary. Each check has a status (ok, warn, fail, unknown when it could not run), a summary and the items worth attention, with a suggested fix where there is one. Items with a fix (update-machine, stop-runs, run-now, retry-sync, setup-sandbox) are fixed with machine_health_fix, which runs on the machine that has them. With the machine's \"Fix problems automatically\" setting on (the default), it already applies retry-sync and stop-runs (sparing runs with a live session) on its own and only alerts when that fails. Omit environmentId for this machine; give a paired machine's (from machines_list) to read its report over the peer link. reachable false means that machine did not answer and the report describes what this one saw.",
+    'Read machine health and suggested fixes. Omit environmentId for this machine; paired IDs come from machines_list. reachable:false means the peer did not answer. Apply supported fixes (update-machine, stop-runs, run-now, retry-sync, setup-sandbox) with machine_health_fix on their owning machine. With "Fix problems automatically" on (the default), the machine already applies retry-sync and stop-runs (sparing live sessions) itself and only alerts on failure.',
   parameters: Schema.Struct({
     environmentId: Schema.optionalKey(
       EnvironmentId.annotate({
@@ -178,7 +178,7 @@ const MachineHealthFixTool = Tool.make("machine_health_fix", {
     MachineHealthFixes.MachineHealthFixes,
   ],
   description:
-    "Run the direct fix for machine_health items, on the machine they are on (a paired machine runs it over the peer link). Fixes by item `fix`: update-machine starts a supported background service update to match the newest paired machine, only when you request it; stop-runs (and legacy resume) stops the thread's stale turn and subagents and marks dead ones interrupted, even with no live provider session; run-now runs the scheduled task; discard-quarantined discards only held incoming changes for the named thread, preserving local data; retry-sync retries transient sync failures with the target machine; setup-sandbox installs bubblewrap with root or passwordless sudo, or returns the command to run. Items whose fix is sign-in or null come back `manual` (a sign-in provider the owner doesn't want on that machine can be turned off with action turn-off-provider): investigate those yourself with machine_health and the thread, integration or provider tools. Omit itemKeys to fix every item that has a direct fix except discard-quarantined, which requires the named item key. Run machine_health afterwards to see current health.",
+    "Apply machine_health fixes: update-machine (background service update to the newest paired version, only on request), stop-runs (legacy resume), run-now, retry-sync, setup-sandbox, or discard-quarantined. Omitted itemKeys fixes all actionable items except discard-quarantined, which needs its explicit key and preserves local data. Manual/sign-in items need investigation; action turn-off-provider turns off an unwanted sign-in provider on that machine only. Recheck machine_health afterward.",
   parameters: Schema.Struct({
     environmentId: Schema.optionalKey(
       EnvironmentId.annotate({
@@ -206,7 +206,7 @@ const StorageStatusTool = Tool.make("storage_status", {
   ...shared,
   dependencies: [...shared.dependencies, StorageCleanup.StorageCleanup],
   description:
-    "Read actual volume usage and available space, database file size, and file counts for agent and user worktrees, dependencies, dev data, browser artifacts, logs and backups. On APFS or reflink filesystems, per-category bytes are null because directory sizes overcount shared blocks. Does not follow symlinks.",
+    "Read volume/database usage and worktree/dependency/artifact/log/backup counts. APFS/reflink category bytes are null to avoid double-counting shared blocks. Does not follow symlinks.",
   success: StorageStatus,
 })
   .annotate(Tool.Readonly, true)
@@ -215,7 +215,7 @@ const StorageCleanupTool = Tool.make("storage_cleanup", {
   ...shared,
   dependencies: [...shared.dependencies, StorageCleanup.StorageCleanup],
   description:
-    "Preview or run this environment's configured storage cleanup. dryRun defaults to true and changes nothing; pass false to remove only eligible, safely preserved worktrees and expired artifacts/logs. Branches and checkpoints are kept. Kept entries explain blockers such as unsaved changes or running processes. Preview is advisory: execution rechecks safety.",
+    "Preview cleanup (dryRun:true default), or safely remove eligible worktrees/expired artifacts/logs. Keeps branches/checkpoints; reports blockers. Execution rechecks advisory preview safety.",
   parameters: Schema.Struct({ dryRun: Schema.optionalKey(Schema.Boolean) }),
   success: StorageCleanupReport,
 }).annotate(Tool.Destructive, true);

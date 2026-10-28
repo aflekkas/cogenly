@@ -1,5 +1,8 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as ServerSettings from "../serverSettings.ts";
+import * as ProjectConfigFileLoader from "../project/ProjectConfigFileLoader.ts";
 import * as Layer from "effect/Layer";
 import type { ProviderInstanceId } from "@cogenly/contracts";
 import type { ProviderTextGeneration } from "@cogenly/provider-core/server/textGeneration";
@@ -60,6 +63,8 @@ const resolveInstance = (
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const registry = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
+  const settings = yield* ServerSettings.ServerSettingsService;
+  const projectFiles = yield* ProjectConfigFileLoader.ProjectConfigFileLoader;
   const sourceControl = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
   return TextGeneration.of({
     generateWorkScopeSummary: (input) =>
@@ -150,11 +155,31 @@ export const make = Effect.gen(function* () {
                   sourceControl,
                 ),
               ));
-            return yield* textGeneration.generateThreadTitle({ ...input, linkedContext });
+            const projectFile = yield* projectFiles.load(input.cwd);
+            const instructions =
+              input.instructions ??
+              Option.getOrUndefined(projectFile)?.threadTitleInstructions ??
+              (yield* settings.getSettings.pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new TextGenerationError({
+                      operation: "generateThreadTitle",
+                      detail: "Could not read title instructions.",
+                      cause,
+                    }),
+                ),
+              )).threadTitleInstructions;
+            return yield* textGeneration.generateThreadTitle({
+              ...input,
+              linkedContext,
+              instructions,
+            });
           }),
         ),
       ),
   });
 });
 
-export const layer = Layer.effect(TextGeneration, make);
+export const layer = Layer.effect(TextGeneration, make).pipe(
+  Layer.provide(ProjectConfigFileLoader.layer),
+);

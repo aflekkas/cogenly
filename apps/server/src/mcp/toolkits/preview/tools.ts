@@ -102,7 +102,7 @@ const readonlyBrowserTool = <T extends Tool.Any>(tool: T): T =>
 
 const BrowserCookieSourcesTool = Tool.make("browser_cookie_sources", {
   description:
-    "List browsers and source profiles found on this environment's own machine. Cookie values are never returned. Imports stay on this machine, including on Linux servers.",
+    "List this machine's browsers/source profiles. Never returns cookie values; imports stay on this machine.",
   parameters: Tool.EmptyParams,
   success: Schema.Array(BrowserImportSource),
   failure: OrchestratorMcpFailure,
@@ -112,7 +112,7 @@ const BrowserCookieSourcesTool = Tool.make("browser_cookie_sources", {
   .annotate(Tool.Destructive, false);
 const BrowserImportCookiesTool = Tool.make("browser_import_cookies", {
   description:
-    "Reuse the owner's local browser sign-ins in a persistent Cogenly server-browser profile. Import only the domains needed for the task. Use browser_cookie_sources to choose sourceId and sourceProfileDirectory; dryRun previews counts. macOS may prompt for Keychain access; Safari needs Full Disk Access. Cookies never leave this environment or enter the vault. Open preview tabs with profileId set to the returned targetProfileId, then reload existing tabs to use the sign-ins. The desktop this server launched also receives them over local inherited pipes. No extra owner approval is needed.",
+    "Import needed domains from browser_cookie_sources into a persistent local profile; dryRun returns counts. macOS may need Keychain/Full Disk Access (Safari). Values stay on this machine, outside vault. Open with returned targetProfileId; reload existing tabs to apply. Same-machine desktop receives cookies privately. No extra approval.",
   parameters: Schema.Struct({
     ...BrowserCookieImportInput.fields,
     domains: Schema.Array(CookieDomain).check(Schema.isMinLength(1)),
@@ -124,7 +124,7 @@ const BrowserImportCookiesTool = Tool.make("browser_import_cookies", {
 
 const PreviewStatusTool = Tool.make("preview_status", {
   description:
-    "Report whether a collaborative browser tab is automation-capable. Server hosts report automation.connected and automation.state separately from visibility; a disconnected or unresponsive connection must not be treated as ready. Keep existing tabs open during automatic reconnect; never reload or recreate a signed-in tab to recover automation. The result includes its control owner, pending dialog, URL, title, profile, visibility, loading state, viewport mode, and measured CSS-pixel size. Visibility is advisory: never stop or ask the user to bring the panel into view because a tab reports visible=false. A notice or sessionMismatch=true means the tab is not the page the user sees or does not share their logins; read it before reporting what the page shows. Pass tabId to inspect a specific tab; omit it to use this agent session's current tab, or the tab the user is viewing when you have none. In the desktop app, sitePermissions lists the page's site permissions and a prompt waiting on the user (use preview_permission or ask the user to click Allow). Server hosts also list every tab in the thread (tabs) with its owner, including tabs the user opened, and the browser profiles preview_open accepts. You can read any listed tab. You can act on your own tabs and on tabs the user opened; acting on a tab whose owner is human takes control from the user, so read their tab first and act on it only when the task calls for it.",
+    "Read automation health, tab owners/dialogs/permissions, URLs/profiles, viewport and all thread tabs. automation.connected/state determine readiness; visible is advisory. Preserve tabs through reconnect. Read notice/sessionMismatch before reporting. Omitted tabId uses your tab or the user's visible tab. profiles feed preview_open; permissions use preview_permission.",
   parameters: PreviewAutomationTabTargetInput,
   success: PreviewAutomationStatus,
   failure: PreviewToolFailure,
@@ -138,7 +138,7 @@ const PreviewStatusTool = Tool.make("preview_status", {
 const PreviewOpenTool = browserTool(
   Tool.make("preview_open", {
     description:
-      "Initialize a collaborative browser tab and show it in the thread's browser panel, selected, in the user's profile so it shares their logins. A normal desktop open waits for panel attachment and usable automation, or returns a failure with the existing tabId for retry. Use open=false to keep a new tab in the background. Showing a background tab later streams the same page into the panel, preserving its login and page state. Pass tabId to reuse a specific existing tab, set reuseExistingTab=false to create another tab, or omit both to use this agent session's current tab. Parallel subagents sharing a provider session must each open with reuseExistingTab=false and pass their returned tabId on every call. Pass profileId (an id or name from preview_status profiles) to open under a browser profile and its saved logins; omit it for the user's default profile. Another agent session's tabs can be read but not operated.",
+      "Open/show a tab in the default user profile or profileId. Waits for usable automation; failure returns tabId to retry. open:false keeps background state for later display. tabId reuses one; reuseExistingTab:false creates another (required for parallel subagents sharing a session; keep their returned IDs). Other agent sessions' tabs are read-only.",
     parameters: PreviewAutomationOpenInput.mapFields(
       (fields) => ({
         ...fields,
@@ -160,7 +160,7 @@ const PreviewOpenTool = browserTool(
 const PreviewDialogTool = browserTool(
   Tool.make("preview_dialog", {
     description:
-      "Accept or dismiss the server browser dialog reported by preview_status. For a prompt, supply promptText when accepting. Works on this agent's own tabs and on tabs the user opened, taking control from the user if they are driving. Desktop hosts may not support this operation.",
+      "Accept/dismiss a server-tab dialog; promptText answers accepted prompts. May take control of user tabs. Desktop support varies.",
     parameters: PreviewAutomationDialogInput,
     success: Schema.Struct({ ...PreviewAutomationStatus.fields, ...presentationFields }),
     failure: PreviewToolFailure,
@@ -171,7 +171,7 @@ const PreviewDialogTool = browserTool(
 const PreviewNavigateTool = safeBrowserTool(
   Tool.make("preview_navigate", {
     description:
-      "Navigate a collaborative browser tab. Pass tabId to target a specific tab, plus {url:'https://example.com'} for a website or {target:{kind:'environment-port',port:5173}} for a dev server. Exactly one of url or target is required. Returns changes by default; output selects detail. Screenshots: preview_snapshot includeImage=true.",
+      "Navigate tabId using exactly one of url or target:{kind:'environment-port',port:5173}. Returns changes; output selects detail.",
     parameters: PreviewAutomationNavigateInput.mapFields(
       (fields) => ({
         ...fields,
@@ -206,7 +206,7 @@ const PreviewNavigateTool = safeBrowserTool(
 const PreviewResizeTool = safeBrowserTool(
   Tool.make("preview_resize", {
     description:
-      "Resize a collaborative browser tab, optionally selected by tabId. Use {mode:'fill'}, {mode:'freeform',width:1024,height:768}, or {mode:'preset',preset:'iphone-12-pro',orientation:'portrait'}. This changes CSS layout breakpoints without changing the desktop browser user agent.",
+      "Change CSS viewport, preserving desktop user agent: mode:fill, freeform+width/height, or preset+preset/orientation. tabId optional.",
     parameters: PreviewAutomationResizeInput,
     success: Schema.Struct({ ...PreviewAutomationResizeResult.fields, ...presentationFields }),
     failure: PreviewToolFailure,
@@ -219,7 +219,7 @@ const PreviewResizeTool = safeBrowserTool(
 const PreviewSetAppearanceTool = safeBrowserTool(
   Tool.make("preview_set_appearance", {
     description:
-      "Emulate prefers-color-scheme in a collaborative browser tab, optionally selected by tabId. Use {colorScheme:'dark'} or {colorScheme:'light'} to preview the page in that appearance, and {colorScheme:'system'} to clear the override and follow the OS appearance.",
+      "Emulate dark/light prefers-color-scheme; system clears override and follows OS. tabId optional.",
     parameters: PreviewAutomationSetColorSchemeInput,
     success: Schema.Struct({
       ...PreviewAutomationSetColorSchemeResult.fields,
@@ -235,7 +235,7 @@ const PreviewSetAppearanceTool = safeBrowserTool(
 const PreviewPermissionTool = safeBrowserTool(
   Tool.make("preview_permission", {
     description:
-      "Allow, block, or reset (ask) one site permission for a site in a collaborative browser tab, optionally selected by tabId, so a page that needs the camera, microphone, location, notifications, clipboard read, or MIDI works without waiting for the user to click Allow. Camera and microphone are separate permissions. Use it when preview_status or preview_snapshot reports a page waiting on a permission prompt, or when a page reports permission denied. Omit origin to decide for the origin the tab shows. You can decide for a site the user has not decided on, and your allow answers a prompt that is waiting; you cannot override a site the user explicitly blocked, and the call says so. In the headless server browser a site you allow gets a synthetic camera and microphone, and block behaves like ask (the page is denied). Returns the site's permissions afterward.",
+      "Allow/block/reset (ask) site permission; origin defaults to tab. Camera/mic are separate. Answers waiting prompts but cannot override explicit user blocks. Headless allowed camera/mic are synthetic; block behaves like ask (denied). Returns permissions.",
     parameters: PreviewAutomationPermissionInput,
     success: Schema.Struct({ ...SitePermissionsState.fields, ...presentationFields }),
     failure: PreviewToolFailure,
@@ -249,7 +249,7 @@ const PreviewPermissionTool = safeBrowserTool(
 export const PreviewSnapshotTool = safeBrowserTool(
   Tool.make("preview_snapshot", {
     description:
-      "Inspect a collaborative browser tab without taking control. If a new thread message cancels this call, retry it on the same tab; cancellation does not mean the browser connection or login was lost. Defaults to compact JSON elements with stable refs, roles, names, values, and states in the viewport. Target refs with locator=aria-ref=<ref>; refs survive snapshots but expire on navigation or control handoff. Use scope for a selector/ref subtree and viewportOnly=false for the document. output=full returns the accessibility tree and diagnostics; output=none skips inspection. output=changes compares with the last compact view in this session and scope, or returns the current view if no baseline exists. Diffs over about 1,000 tokens return only counts (summary), URL, title and errors; call preview_snapshot for the details. Use preview_extract for data and preview_evaluate for custom JSON. No screenshot is captured unless includeImage=true or save=true. Request includeImage=true for visual checks, canvas, images, or an empty/ambiguous structured view. Images are downscaled JPEG; save=true writes a PNG and returns screenshotPath for embedding in replies. Screenshot failure returns screenshotError alongside structured data. Pass tabId to read a particular tab, including the user's tab.",
+      "Read without control; default compact viewport refs use locator=aria-ref=<ref>, expiring on navigation/handoff. Cancelled by new input: retry same tab, login/connection intact. changes compares same session/scope baseline; large diffs return counts/URL/title/errors only. full adds tree/diagnostics, none skips inspection. includeImage:true captures JPEG; save:true writes reply PNG. screenshotError preserves structured results. tabId includes user tabs.",
     parameters: PreviewAutomationSnapshotInput,
     success: PreviewAutomationSnapshotResult,
     failure: PreviewToolFailure,
@@ -260,7 +260,7 @@ export const PreviewSnapshotTool = safeBrowserTool(
 const PreviewClickTool = browserTool(
   Tool.make("preview_click", {
     description:
-      "Click exactly one target in the tab selected by tabId, or this agent session's current tab when omitted. Prefer a Playwright locator; selector accepts legacy CSS; x and y must be supplied together. Set button=right for a context menu or clickCount=2 for a double-click; server browser tabs only. Returns what was clicked and its strategy, plus changes by default. Checkbox/radio clicks fall back to the input click only if their state did not change. CSS selector lists are supported; snapshot aria-ref and role/text locators must be used individually. Screenshots: preview_snapshot includeImage=true.",
+      "Click one locator (preferred), legacy CSS selector or x+y. button:right/clickCount:2 work on server tabs. Checkbox/radio fallback clicks only if state did not change. CSS lists allowed; aria-ref/role/text locators must be individual. Returns target/strategy and changes.",
     parameters: PreviewAutomationClickInput,
     success: PreviewActionResult,
     failure: PreviewToolFailure,
@@ -271,7 +271,7 @@ const PreviewClickTool = browserTool(
 const PreviewTypeTool = browserTool(
   Tool.make("preview_type", {
     description:
-      "Insert literal text into one input in the tab selected by tabId, or this agent session's current tab when omitted. Prefer a Playwright locator; set clear=true to replace existing text. Returns changes by default; output selects detail. Screenshots: preview_snapshot includeImage=true.",
+      "Type literal text in one input; clear:true replaces it. Prefer locator. Returns changes; output controls inspection.",
     parameters: PreviewAutomationTypeInput,
     success: PreviewActionResult,
     failure: PreviewToolFailure,
@@ -281,8 +281,7 @@ const PreviewTypeTool = browserTool(
 
 const PreviewHoverTool = safeBrowserTool(
   Tool.make("preview_hover", {
-    description:
-      "Move the mouse over exactly one target in the tab selected by tabId, or this agent session's current tab when omitted, to reveal hover menus and tooltips. Server browser tabs only. Returns changes by default; output selects detail. Screenshots: preview_snapshot includeImage=true.",
+    description: "Hover one target to reveal menus/tooltips (server tabs only). Returns changes.",
     parameters: PreviewAutomationHoverInput,
     success: PreviewActionResult,
     failure: PreviewToolFailure,
@@ -293,7 +292,7 @@ const PreviewHoverTool = safeBrowserTool(
 const PreviewSelectTool = browserTool(
   Tool.make("preview_select", {
     description:
-      "Choose options in one native <select> in the tab selected by tabId, or this agent session's current tab when omitted, by option value or visible label. Custom dropdowns are not <select>; click them open and click the option instead. Server browser tabs only. Returns changes by default; output selects detail. Screenshots: preview_snapshot includeImage=true.",
+      "Select native <select> options by value or label (server tabs only). For custom dropdowns click open then click an option. Returns changes.",
     parameters: PreviewAutomationSelectInput,
     success: Schema.Struct({
       ...PreviewAutomationSelectResult.fields,
@@ -306,8 +305,7 @@ const PreviewSelectTool = browserTool(
 
 const PreviewDragTool = browserTool(
   Tool.make("preview_drag", {
-    description:
-      "Drag one element onto another in the tab selected by tabId, or this agent session's current tab when omitted. Server browser tabs only. Returns changes by default; output selects detail. Screenshots: preview_snapshot includeImage=true.",
+    description: "Drag one element onto another (server tabs only). Returns changes.",
     parameters: PreviewAutomationDragInput,
     success: PreviewActionResult,
     failure: PreviewToolFailure,
@@ -318,7 +316,7 @@ const PreviewDragTool = browserTool(
 const PreviewUploadTool = browserTool(
   Tool.make("preview_upload", {
     description:
-      "Give files on the environment to the page in the tab selected by tabId, or this agent session's current tab when omitted. After clicking an upload control, preview_status reports the open fileChooser; call this with absolute paths to answer it, or with an empty list to cancel. Pass a locator for an <input type=file> to set its files without a picker. Server browser tabs only. Returns changes by default; output selects detail. Screenshots: preview_snapshot includeImage=true.",
+      "Supply environment-local absolute files to an open fileChooser, or [] to cancel. locator targets <input type=file> directly. Server tabs only; returns changes.",
     parameters: PreviewAutomationUploadInput,
     success: PreviewActionResult,
     failure: PreviewToolFailure,
@@ -328,8 +326,7 @@ const PreviewUploadTool = browserTool(
 
 const PreviewPressTool = browserTool(
   Tool.make("preview_press", {
-    description:
-      "Press one keyboard key in the tab selected by tabId, or this agent session's current tab when omitted. Examples: {key:'Enter'}, {key:'Escape'}, or {key:'a',modifiers:['Meta']}. Returns changes by default; output selects detail. Screenshots: preview_snapshot includeImage=true.",
+    description: "Press a key with optional modifiers, e.g. Enter or a + Meta. Returns changes.",
     parameters: PreviewAutomationPressInput,
     success: PreviewActionResult,
     failure: PreviewToolFailure,
@@ -340,7 +337,7 @@ const PreviewPressTool = browserTool(
 const PreviewScrollTool = safeBrowserTool(
   Tool.make("preview_scroll", {
     description:
-      "Scroll the tab selected by tabId, or this agent session's current tab when omitted. Positive deltaY scrolls down and positive deltaX scrolls right; a locator/selector targets a container. Returns changes by default; output selects detail. Screenshots: preview_snapshot includeImage=true.",
+      "Scroll; positive deltaY goes down, deltaX right. locator/selector targets a container. Returns changes.",
     parameters: PreviewAutomationScrollInput,
     success: PreviewActionResult,
     failure: PreviewToolFailure,
@@ -363,7 +360,7 @@ export const PreviewEvaluateResult = Schema.Struct({
 const PreviewExtractTool = browserTool(
   Tool.make("preview_extract", {
     description:
-      "Extract bounded JSON data by CSS selector without a snapshot or screenshot. Returns {value:{items,total,omitted}} with visible text and requested attributes. Use compact snapshots to find action refs; use extraction for lists, links, tables, and labels. Takes control like evaluate and is disabled after vault_fill. Use preview_evaluate for custom queries or a custom JSON shape.",
+      "Extract bounded CSS-selected JSON {value:{items,total,omitted}} with visible text/attributes. Use snapshots for action refs. Takes control like evaluate; disabled after vault_fill.",
     parameters: PreviewAutomationExtractInput,
     success: PreviewEvaluateResult,
     failure: PreviewToolFailure,
@@ -374,7 +371,7 @@ const PreviewExtractTool = browserTool(
 const PreviewEvaluateTool = browserTool(
   Tool.make("preview_evaluate", {
     description:
-      "Evaluate JavaScript in the tab selected by tabId, or this agent session's current tab when omitted. Acts like clicking: it works on your own tabs and on the user's tabs, and takes control from the user if they are driving. To read a tab without taking control, use preview_snapshot. Returns {value} with a serializable result up to 64 KB; the expression may mutate page state. Evaluation is disabled for the lifetime of a tab after vault_fill; use snapshots and focused actions there.",
+      "Run JavaScript and return serializable {value} up to 64KB; may mutate page and takes control. For passive reads use snapshot. Disabled for the tab lifetime after vault_fill.",
     parameters: PreviewAutomationEvaluateInput,
     success: PreviewEvaluateResult,
     failure: PreviewToolFailure,
@@ -385,7 +382,7 @@ const PreviewEvaluateTool = browserTool(
 const PreviewWaitForTool = readonlyBrowserTool(
   Tool.make("preview_wait_for", {
     description:
-      "Wait in the tab selected by tabId, or this agent session's current tab when omitted, until all supplied locator, selector, text, and URL conditions match. Returns changes by default; output selects detail. Screenshots: preview_snapshot includeImage=true.",
+      "Wait until every supplied locator/selector/text/URL condition matches. Returns changes.",
     parameters: PreviewAutomationWaitForInput,
     success: PreviewActionResult,
     failure: PreviewToolFailure,
@@ -395,8 +392,7 @@ const PreviewWaitForTool = readonlyBrowserTool(
 
 const PreviewRecordingStartTool = safeBrowserTool(
   Tool.make("preview_recording_start", {
-    description:
-      "Start recording the collaborative browser tab selected by tabId, or this agent session's current tab when omitted.",
+    description: "Start recording tabId, defaulting to your current tab.",
     parameters: PreviewAutomationTabTargetInput,
     success: Schema.Struct({ ...PreviewAutomationRecordingStatus.fields, ...presentationFields }),
     failure: PreviewToolFailure,
@@ -407,7 +403,7 @@ const PreviewRecordingStartTool = safeBrowserTool(
 const PreviewRecordingStopTool = safeBrowserTool(
   Tool.make("preview_recording_stop", {
     description:
-      "Stop recording the collaborative browser tab selected by tabId, or this agent session's current tab when omitted, and transfer the compressed recording once (up to 50 MiB) to an evidence file readable in this agent's environment. Returns its environment-local path after transfer succeeds.",
+      "Stop recording and transfer once (max 50MiB). Returns an environment-local evidence path after transfer succeeds.",
     parameters: PreviewAutomationTabTargetInput,
     success: Schema.Struct({ ...PreviewAutomationRecordingArtifact.fields, ...presentationFields }),
     failure: PreviewToolFailure,
@@ -416,11 +412,9 @@ const PreviewRecordingStopTool = safeBrowserTool(
 );
 
 const extensionDependencies = [...dependencies, BrowserExtensions.BrowserExtensions];
-const EXTENSION_HOSTS =
-  "Extensions run only in server full Chrome, per browser profile, streamed to web and desktop panels. Native Electron tabs, incognito and isolated agent tabs do not run extensions. Open a server tab in the extension profile first. Remote tabs run in their owning environment. Chrome storage is separate from native desktop storage. Changes restart the profile's server browser and close its tabs. Install returns installing promptly while Chrome loads in the background; browser_extensions_list and subscriptions report loaded or loadError without waiting on Chrome's download lock. Use browser_extension_reload for rebuilt folders. preview_* tools drive native extension popup and side-panel surfaces by their returned tabId. Open shadow roots appear in snapshots; closed shadow roots do not, so use screenshots or evaluate the host's exposed APIs. Desktop computer_* sees streamed extension surfaces as pixels; use preview_* for element access.";
-
 const BrowserExtensionsListTool = Tool.make("browser_extensions_list", {
-  description: `List the Chromium extensions installed in a browser profile (default: the user's default profile), with each one's version, whether it is on, its source, the API permissions and sites it can read and change, and its popup and options pages. ${EXTENSION_HOSTS}`,
+  description:
+    "List profile extensions with versions, enabled state, sources, permissions/sites, popup/options pages, and loaded or loadError (no Chrome launch or download-lock wait). Default profile is the user's. Extensions run only in Cogenly's full Chrome per profile, streamed into web and desktop panels with separate storage; open a server tab in the extension profile first. Native Electron, incognito and isolated tabs lack extensions; remote tabs run in their owning environment. Changes restart and close profile server tabs. Use browser_extension_reload for rebuilt unpacked folders. Snapshots see open shadow roots, not closed ones (use screenshots or the host's APIs); computer_* sees extension surfaces only as pixels.",
   parameters: BrowserExtensionsListInput,
   success: BrowserExtensionsListResult,
   failure: Schema.Union([BrowserExtensionError, OrchestratorMcpFailure]),
@@ -431,7 +425,8 @@ const BrowserExtensionsListTool = Tool.make("browser_extensions_list", {
   .annotate(Tool.Idempotent, true);
 
 const BrowserExtensionInstallTool = Tool.make("browser_extension_install", {
-  description: `Install or update a Chromium extension in a browser profile, turned on. source is a Chrome Web Store link (https://chromewebstore.google.com/detail/<name>/<id>), a bare 32-letter extension ID, or an absolute path to an unpacked extension folder on this environment's machine. Web Store packages are downloaded from Google and their CRX3 signatures verified (developer and Web Store) before anything unpacks; other sites are refused. Installing an installed ID again updates it to the current version. Extensions can read and change the pages they list, including pages where Cogenly fills vault passwords, so install only what the task needs. Use browser_extensions_list to see what it can access and browser_extension_open to use it. No extra owner approval is needed. ${EXTENSION_HOSTS}`,
+  description:
+    "Install/update an enabled extension from a verified Chrome Web Store URL/32-letter ID or local unpacked absolute path. Other remote sources refused. Returns installing at once while Chrome loads it in the background; browser_extensions_list then reports loaded or loadError, and browsing continues without a failed one. Extensions can access pages with vault fills; install only needed ones. Use browser_extensions_list for access/platform support; changes restart profile server tabs. No extra approval.",
   parameters: BrowserExtensionInstallInput,
   success: BrowserExtensionInstallResult,
   failure: Schema.Union([BrowserExtensionError, OrchestratorMcpFailure]),
@@ -451,7 +446,7 @@ const BrowserExtensionReloadTool = Tool.make("browser_extension_reload", {
 
 const BrowserExtensionToggleTool = Tool.make("browser_extension_toggle", {
   description:
-    "Turn an installed extension on or off in a browser profile without removing it or its data. Restarts that profile's server browser, closing its server-browser tabs.",
+    "Enable/disable a profile extension, retaining data. Restarts profile server tabs, closing them.",
   parameters: BrowserExtensionToggleInput,
   success: BrowserExtension,
   failure: Schema.Union([BrowserExtensionError, OrchestratorMcpFailure]),
@@ -462,7 +457,7 @@ const BrowserExtensionToggleTool = Tool.make("browser_extension_toggle", {
 
 const BrowserExtensionRemoveTool = Tool.make("browser_extension_remove", {
   description:
-    "Uninstall an extension from a browser profile and delete its files. Returns the remaining list. Restarts that profile's server browser, closing its server-browser tabs.",
+    "Uninstall/delete a profile extension; returns remaining extensions. Restarts and closes profile server tabs.",
   parameters: BrowserExtensionRemoveInput,
   success: BrowserExtensionsListResult,
   failure: Schema.Union([BrowserExtensionError, OrchestratorMcpFailure]),
@@ -471,7 +466,8 @@ const BrowserExtensionRemoveTool = Tool.make("browser_extension_remove", {
 
 const BrowserExtensionOpenTool = browserTool(
   Tool.make("browser_extension_open", {
-    description: `Use an installed extension on a host tab. For page "popup", "sidePanel", or "action", tabId identifies the host (default: current web tab); Cogenly clicks its toolbar action, respects popup versus onClicked versus openPanelOnActionClick, and returns hostTabId and surfaceTabId when a surface appears. Drive the surface with preview_snapshot/click/type/screenshot/evaluate using surfaceTabId. Reopening a side panel reuses its host's panel slot. Closing the host closes its surfaces. Fallback surface pages include a notice because active-tab semantics differ. For "options" or a path such as "dashboard.html", open a normal extension tab; tabId reuses an existing tab and open=false keeps a new tab in the background. ${EXTENSION_HOSTS}`,
+    description:
+      "Use an installed extension. For page popup, sidePanel or action, tabId is the host tab (default: current web tab); Cogenly clicks its toolbar action as Chrome would (popup, onClicked or openPanelOnActionClick) and returns hostTabId and surfaceTabId. Drive the surface with preview_* on surfaceTabId; a reopened side panel reuses its host's slot and closing the host closes its surfaces. Fallback surface pages carry a notice since active-tab semantics differ. options or a relative path (e.g. dashboard.html) opens a normal extension tab: tabId reuses a tab, open:false stays background. See browser_extensions_list for platform limits.",
     parameters: Schema.Struct({
       id: BrowserExtensionId,
       page: BrowserExtensionPage,

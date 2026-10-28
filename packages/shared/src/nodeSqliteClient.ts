@@ -22,6 +22,7 @@ import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as References from "effect/References";
 import * as Schema from "effect/Schema";
+import * as Scheduler from "effect/Scheduler";
 import * as Scope from "effect/Scope";
 import * as Context from "effect/Context";
 import * as Stream from "effect/Stream";
@@ -73,9 +74,10 @@ export interface SqliteClientConfig {
  * Set by `readOnly`. A top-level transaction started while it is true runs on
  * the reader worker when the client has one, and on the writer otherwise.
  */
-const ReadOnly = Context.Reference<boolean>("@cogenly/shared/nodeSqliteClient/ReadOnly", {
-  defaultValue: () => false,
-});
+const ReadOnly = Context.Reference<typeof Effect.interruptible | undefined>(
+  "@cogenly/shared/nodeSqliteClient/ReadOnly",
+  { defaultValue: () => undefined },
+);
 
 /**
  * Marks the SQL in `effect` as read-only. Wrap the whole transaction, as in
@@ -84,7 +86,9 @@ const ReadOnly = Context.Reference<boolean>("@cogenly/shared/nodeSqliteClient/Re
  * reader fails with "attempt to write a readonly database".
  */
 export const readOnly = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-  Effect.provideService(effect, ReadOnly, true);
+  Effect.uninterruptibleMask((restore) =>
+    restore(Effect.provideService(effect, ReadOnly, restore)),
+  );
 
 /** Interactive request context follows SQL through nested services. */
 const Interactive = Context.Reference<boolean>("@cogenly/shared/nodeSqliteClient/Interactive", {
@@ -127,10 +131,13 @@ const annotateAcquired = (fiber: Fiber.Fiber<unknown, unknown>, acquired: Acquir
  * connection before it makes the `sql.transaction` span current, so the acquire
  * leaves its result here and the transaction body puts it on the span.
  */
-const TransactionAcquire = Context.Reference<{ acquired?: Acquired } | undefined>(
-  "@cogenly/shared/nodeSqliteClient/TransactionAcquire",
-  { defaultValue: () => undefined },
-);
+const TransactionAcquire = Context.Reference<
+  | {
+      acquired?: Acquired;
+      restore: typeof Effect.interruptible | undefined;
+    }
+  | undefined
+>("@cogenly/shared/nodeSqliteClient/TransactionAcquire", { defaultValue: () => undefined });
 
 /**
  * A one-holder connection lock that hands over to interactive waiters first.
@@ -660,15 +667,21 @@ const makeWorker = Effect.fnUntraced(function* (
     } catch (cause) {
       return turnOff(undefined, String(cause));
     }
-    // SqlClient acquires transaction connections uninterruptibly. Startup has not
-    // begun a transaction, so cancellation can still release the acquired lease.
+    // Startup owns no running statement. Preserve the caller's cancellation
+    // policy, including masked shutdown finalizers that still need the worker.
     return Effect.flatMap(
-      Effect.interruptible(
-        Effect.timeoutOption(
-          Effect.promise(() => reader.started),
-          startupTimeout,
-        ),
-      ),
+      Effect.withFiber((fiber) => {
+        const restore =
+          Context.get(fiber.context, ReadOnly) ??
+          Context.get(fiber.context, TransactionAcquire)?.restore ??
+          identity;
+        return restore(
+          Effect.timeoutOption(
+            Effect.promise(() => reader.started),
+            startupTimeout,
+          ),
+        );
+      }),
       (startup): Effect.Effect<Connection | undefined> =>
         // Another acquire may have timed out and retired this worker while this one
         // waited; a late "ready" must not hand out a worker that is being terminated.
@@ -1109,9 +1122,10 @@ const make = Effect.fn("makeWithDatabase")(function* (
         if (afterIdle === undefined) target.lock.releaseUnsafe();
         else afterIdle(target.lock.releaseUnsafe);
       });
-      return Effect.flatMap(
-        Effect.tap(restore(target.lock.take(interactive)), () => {
-          const pending = fiber.getRef(TransactionAcquire);
+      const pending = fiber.getRef(TransactionAcquire);
+      const acquire = Effect.tap(
+        (pending?.restore ?? restore)(target.lock.take(interactive)),
+        () => {
           const sample = acquired(target, clock, start);
           observe(fiber, target.name, sample.lockWaitMs);
           if (pending !== undefined) pending.acquired = sample;
@@ -1121,7 +1135,11 @@ const make = Effect.fn("makeWithDatabase")(function* (
           )
             annotateAcquired(fiber, sample);
           return Scope.addFinalizer(scope, release);
-        }),
+        },
+      );
+      return Effect.flatMap(
+        // Install the release finalizer before a scheduler yield can interrupt us.
+        Effect.provideService(acquire, Scheduler.PreventSchedulerYield, true),
         () => Effect.map(target.acquire, (connection) => (leased = connection)),
       );
     }),
@@ -1150,15 +1168,20 @@ const make = Effect.fn("makeWithDatabase")(function* (
     // Each run gets its own holder, so a reused transaction Effect never
     // carries an earlier run's attributes.
     withTransaction: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-      Effect.suspend(() => {
-        const pending: { acquired?: Acquired } = {};
+      Effect.uninterruptibleMask((restore) => {
+        const pending: { acquired?: Acquired; restore: typeof Effect.interruptible | undefined } = {
+          restore,
+        };
         // The body runs with the `sql.transaction` span current. A nested
         // transaction acquires nothing, so its span gets no attributes.
         const body = Effect.withFiber<A, E, R>((fiber) => {
           annotateAcquired(fiber, pending.acquired);
+          pending.restore = undefined;
           return effect;
         });
-        return withTransaction(body).pipe(Effect.provideService(TransactionAcquire, pending));
+        return restore(
+          withTransaction(body).pipe(Effect.provideService(TransactionAcquire, pending)),
+        );
       }),
   });
 });

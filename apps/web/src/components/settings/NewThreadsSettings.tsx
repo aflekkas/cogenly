@@ -1,3 +1,4 @@
+import { ThreadTitleInstructionsSettings } from "./ThreadTitleInstructionsSettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 
 /**
@@ -6,5 +7,10 @@ import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
  * its Repository page.
  */
 export function NewThreadsSettingsPanel() {
-  return <ProjectDefaultsSettings category="new-threads" />;
+  return (
+    <>
+      <ProjectDefaultsSettings category="new-threads" />
+      <ThreadTitleInstructionsSettings />
+    </>
+  );
 }

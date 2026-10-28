@@ -196,7 +196,12 @@ import { useNewProject } from "../hooks/useNewProject";
 import { isScratchProject } from "@cogenly/client-runtime/state/projects";
 import { isPickableRepository } from "../projectLabels/projectMeta.logic";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
-import { useProjects, useServerConfigs, useThreadShells, waitForProject } from "../state/entities";
+import {
+  useProjects,
+  useServerConfigs,
+  useQuietThreadShells,
+  waitForProject,
+} from "../state/entities";
 import { useThreadSearch } from "../state/queries";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
@@ -808,7 +813,7 @@ function OpenCommandPaletteDialog(props: {
   const sidebarMode = useUiStateStore((store) => store.sidebarMode);
   const sidebarProjectFilter = useSidebarProjectFilter(sidebarMode);
   const agents = useAgents().agents;
-  const threads = useThreadShells();
+  const threads = useQuietThreadShells();
   const serverConfigs = useServerConfigs();
   const startWork = useStartWork();
   const repositoryNameOf = useRepositoryNames();

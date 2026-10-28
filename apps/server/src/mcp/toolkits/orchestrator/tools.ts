@@ -62,7 +62,7 @@ const ScheduledTaskResult = OrchestratorMcpScheduleTaskResult.mapFields((fields)
 
 const OrchestratorCapabilitiesTool = Tool.make("orchestrator_capabilities", {
   description:
-    "List the V2 provider instances and their current models from the same live catalog as the composer, including configured custom models, inherited runtime settings, and app-owned orchestration features available to this caller. Each subscription provider carries usage: state (available, exhausted, unknown), remainingPercent of its tightest window, each window's usedPercent and resetsAt, and stale when the reading is over 30 minutes old. machines lists each paired machine with optional cached resources (CPU cores, load, available memory, free disk and active work counts) for placement and pacing; an online one carries its own provider instances in catalog (or catalogError), the ids to pass to delegate_task or create_threads with that machine. For a separate top-level thread in a new or existing worktree, use thread_launch with workspaceStrategy.",
+    "Read the live provider/model catalog, custom models, inherited settings and available orchestration. Subscription usage includes state, tightest remainingPercent, window resets and stale (>30m). Paired machines carry optional cached resources (cores, load, memory, disk, active work) for placement and pacing; online ones carry their own catalog or catalogError; use their IDs with delegation/launch tools.",
   success: OrchestratorMcpCapabilitiesResult,
   failure: OrchestratorMcpFailure,
   failureMode: "return",
@@ -75,7 +75,7 @@ const OrchestratorCapabilitiesTool = Tool.make("orchestrator_capabilities", {
 
 export const DelegateTaskTool = Tool.make("delegate_task", {
   description:
-    "Needs an agent running inside a Cogenly thread. Delegate one task to a Cogenly-owned child agent/subagent of THIS thread and run it with only the supplied task prompt, without copying parent conversation history. Choose providers and models from orchestrator_capabilities, which uses the same live catalog as the composer. Prefer native subagent tools for same-provider work only when they support the chosen model. Use this for any model missing from the native tool, including same-provider work, for cross-provider work, or for explicitly Cogenly-owned child tasks. For every Cogenly delegated review round, call delegate_task again with the original brief, prior findings, responses, and unresolved objections in the task prompt. Track each round by its own taskId and use a distinct clientRequestId per round, stable across retries of that round. The childThreadId is backing storage, not the target for starting another delegated review round through thread_send. Set isolation to worktree for a separate checkout based on the parent local commit, with project setup completed before the child starts. Uncommitted edits are not copied; omitted isolation shares the parent checkout. Provider, model, model options (see orchestrator_capabilities), runtime mode, and interaction mode inherit unless target overrides them. All children run with full access; runtimeMode is a deprecated compatibility field. Prefer mode='async' for long work; mode='wait' blocks until completion, a blocking question, or timeout. If hasPendingQuestion, pass threadId=childThreadId to pending_request_list, pending_request_read (with requestId) and pending_request_respond, or ask the user; the task's completion still wakes this thread. timeoutMs on mode=wait is only the parent's wait budget and does not cancel the child. waitTimedOut on that wait call means the timeout fired; keep that taskId and read status on later task_status. An async child's completion wakes this thread through a notification, steered into active turns where supported or queued otherwise, so end the turn instead of polling or spawning watchers; use task_status only when the result is needed mid-turn.",
+    "Run a child with only the supplied prompt, no parent history. Choose catalog models via orchestrator_capabilities. isolation:worktree starts from the parent local commit with setup, excluding uncommitted edits; default shares checkout. Settings inherit unless overridden; children have full access (runtimeMode deprecated). Prefer async; completion notifies this parent. wait stops on result/question/timeout without cancelling: retain taskId on waitTimedOut. hasPendingQuestion: use pending_request_list/read/respond with childThreadId or ask the user. Follow orchestration rules for review rounds; task_status is for results needed mid-turn.",
   parameters: OrchestratorMcpDelegateTaskInput,
   success: OrchestratorMcpDelegateTaskResult,
   failure: OrchestratorMcpFailure,
@@ -88,7 +88,7 @@ export const DelegateTaskTool = Tool.make("delegate_task", {
 
 const TaskStatusTool = Tool.make("task_status", {
   description:
-    "Needs an agent running inside a Cogenly thread. Read a Cogenly-owned delegated task created by this parent thread. childRunId identifies the original delegated run. workState distinguishes working, waiting_for_children, and result_available; a completed turn with live nested work is not a completed task. summary is the final task result, including provider errors on failure, and remains stable after publication. hasPendingChildRuns reports later queued or executing turns in the backing child thread, even after the task is terminal; it does not reopen the task, and task_cancel stops those turns too. Turns held in a stopped queue wait for the user and do not count. latestTerminal* provides later non-monitor turn results. Reading a terminal result acknowledges its automatic parent delivery. For a remote worktree task, it also fetches its committed result branch into this machine's clone without force; branch names the received branch, or branchError explains why it remains on the target.",
+    "Read this parent's delegated task. workState distinguishes active work/nested children/result availability; summary is stable after publication. hasPendingChildRuns reports later queued/executing child turns (excluding stopped holds), without reopening terminal tasks; latestTerminal* reports later non-monitor results. Reading terminal results acknowledges delivery. Remote worktree results fetch without force into branch; branchError explains failures.",
   parameters: OrchestratorMcpTaskStatusInput,
   success: OrchestratorMcpDelegateTaskResult,
   failure: OrchestratorMcpFailure,
@@ -102,7 +102,7 @@ const TaskStatusTool = Tool.make("task_status", {
 
 const TaskCancelTool = Tool.make("task_cancel", {
   description:
-    "Needs an agent running inside a Cogenly thread. Stop a Cogenly-owned delegated task and dispose its automatic parent delivery. Its child thread stops like a user Stop: the running turn is interrupted, queued turns are held, pull request watches end, and the tasks it delegated stop too. This includes later child-thread runs, even after the task is terminal. A terminal task returns its existing status, and published task results remain available.",
+    "Stop a delegated task, its later child turns and descendants; hold queues, end PR watches and cancel automatic parent delivery. Terminal status and published results remain readable.",
   parameters: OrchestratorMcpTaskCancelInput,
   success: OrchestratorMcpTaskCancelResult,
   failure: OrchestratorMcpFailure,
@@ -114,7 +114,7 @@ const TaskCancelTool = Tool.make("task_cancel", {
 
 const WorkflowStopTool = Tool.make("workflow_stop", {
   description:
-    "Stop one running Claude workflow in a Cogenly thread. Use the workflow coordinator's subagentId returned by thread_read with view='activity'. Stops the whole workflow, including its phases and agents. Does not stop the parent thread or other workflows. Individual workflow phases and agents cannot be stopped separately.",
+    "Stop a whole Claude workflow by its activity-view subagentId, including phases/agents. Leaves parent/other workflows running; individual phases cannot stop separately.",
   parameters: OrchestrationV2StopWorkflowInput,
   success: Schema.Struct({}),
   failure: OrchestratorMcpFailure,
@@ -126,7 +126,7 @@ const WorkflowStopTool = Tool.make("workflow_stop", {
 
 export const ScheduleTaskTool = Tool.make("schedule_task", {
   description:
-    "Create persistent work in the app scheduler that runs even when no turn is active. Pass schedule as a STRUCTURED OBJECT, never JSON text. Timers: {type:'interval', everyMs:3600000} is hourly; {type:'fixed_time', timeOfDay:'09:00', weekdays:[1,2,3,4,5]} is weekday mornings; report the returned nextRunAt. Webhooks: {type:'webhook'} runs once per request to a generated URL. The run sees the request ONLY through prompt placeholders: {{body.path}} (e.g. {{body.action}}, {{body.release.tag_name}}), {{headers.name}}, {{query.name}}, {{body}}, or {{request}} (method, headers with credentials redacted, and body). For a sender that signs requests, first call request_secret so the user enters the secret privately (never ask for it in chat or invent one), then set signature with the returned secretRef, e.g. GitHub: {type:'webhook', signature:{header:'x-hub-signature-256', encoding:'hex', prefix:'sha256=', secretRef}}. The result's webhookUrl uses this MCP server's origin. For external senders, connect to Cogenly through your own reachable HTTPS proxy and share that URL; loopback addresses only work on this machine. The URL is shown only to callers allowed to run the task. Omit projectId for this thread's project. In this thread's project, runs post into THIS thread by default (bindToCurrentThread=true), which suits an orchestrator that sees every trigger, delegates work, and can dedupe against what is in flight; use false only when the user wants a fresh top-level thread per run. Elsewhere each run launches a fresh thread. Provider, model, and runtime settings inherit from this thread, or from the project default when there is no calling thread.",
+    "Create recurring or webhook work even while idle. Schedule is an object; see orchestration examples. Prompt placeholders expose {{body.path}}, {{headers.name}}, {{query.name}}, {{body}} or {{request}} (credentials redacted). Signed webhooks use a one-use request_secret secretRef in signature. webhookUrl uses this server origin and is visible only to authorized callers; external senders need reachable HTTPS. projectId defaults here; bindToCurrentThread defaults true here, false for another project. Provider/model/runtime inherit caller or project defaults. Report cadence/nextRunAt or webhookUrl.",
   parameters: OrchestratorMcpScheduleTaskInput,
   success: ScheduledTaskResult,
   failure: OrchestratorMcpFailure,
@@ -140,7 +140,7 @@ export const ScheduleTaskTool = Tool.make("schedule_task", {
 const ListScheduledTasksTool = Tool.make("list_scheduled_tasks", {
   parameters: OrchestratorMcpListScheduledTasksInput,
   description:
-    "List recurring scheduled tasks in a project (omit projectId for the calling thread's project, or every project when there is no calling thread), including their id, schedule, prompt, enabled state, bound thread, next run time, and last run status. Use the returned scheduledTaskId with update_scheduled_task or delete_scheduled_task.",
+    "List schedules, prompts, enabled/bound state, next run and last status. projectId defaults here, or all projects outside threads. Use IDs to update/delete.",
   success: Schema.Struct({ tasks: Schema.Array(ScheduledTaskResult) }),
   failure: OrchestratorMcpFailure,
   failureMode: "return",
@@ -153,7 +153,7 @@ const ListScheduledTasksTool = Tool.make("list_scheduled_tasks", {
 
 const UpdateScheduledTaskTool = Tool.make("update_scheduled_task", {
   description:
-    "Update an existing scheduled task by scheduledTaskId (from list_scheduled_tasks). Only the provided fields change; omit a field to leave it as-is. Use enabled=false to pause a task without deleting it. Set bindToCurrentThread to move the task between posting into this thread and launching a fresh thread per run.",
+    "Patch schedule fields by scheduledTaskId; omitted fields stay. enabled:false pauses. bindToCurrentThread switches between this thread and fresh runs.",
   parameters: OrchestratorMcpUpdateScheduledTaskInput,
   success: ScheduledTaskResult,
   failure: OrchestratorMcpFailure,
@@ -165,7 +165,7 @@ const UpdateScheduledTaskTool = Tool.make("update_scheduled_task", {
 
 const DeleteScheduledTaskTool = Tool.make("delete_scheduled_task", {
   description:
-    "Permanently delete a scheduled task by scheduledTaskId (from list_scheduled_tasks). The task stops running immediately. To keep it but stop runs, use update_scheduled_task with enabled=false instead.",
+    "Permanently delete and stop a scheduled task by ID. For reversible pause use update_scheduled_task enabled:false.",
   parameters: OrchestratorMcpDeleteScheduledTaskInput,
   success: OrchestratorMcpDeleteScheduledTaskResult,
   failure: OrchestratorMcpFailure,
@@ -177,7 +177,7 @@ const DeleteScheduledTaskTool = Tool.make("delete_scheduled_task", {
 
 const RequestSecretTool = Tool.make("request_secret", {
   description:
-    "Ask the user for a secret (a token, API key, signing secret, password) through a private card in this thread, and wait for them to answer. The value is kept by the app and NEVER returned to you or shown in the transcript. When saved, the result carries a secretRef: pass it to a tool that accepts one (e.g. schedule_task's signature.secretRef). It works once. For an account_connect pending connection, pass saveToAccount: {connectionId}; service, project, credential kind and use are fixed server-side, and the result returns account/credential ids instead of a secretRef. The tool wait is bounded; the card persists until answered or cancelled and its answer automatically notifies this thread. Say you are waiting on the card; do not ask the user to type continue. Never ask for secrets in chat, and never invent one.",
+    "Collect a secret privately, never returning its value. Pass the single-use secretRef to a consuming tool. For account_connect, saveToAccount:{connectionId} uses server-fixed service/scope and returns account/credential IDs instead. Cards persist after timeout and notify this thread on answer; follow vault waiting rules.",
   parameters: OrchestratorMcpRequestSecretInput,
   success: OrchestratorMcpRequestSecretResult,
   failure: OrchestratorMcpFailure,
@@ -189,7 +189,7 @@ const RequestSecretTool = Tool.make("request_secret", {
 
 const RequestLoginTool = Tool.make("request_login", {
   description:
-    "Ask the user to sign in to a site through a login card in this thread, and wait for them to answer. Use it when a page needs a login and vault_list has none for that site: never ask for usernames, passwords or codes in chat. The user's answer goes straight into the vault as a login allowed on that site; you never see it. When saved, sign in with vault_fill using the returned vaultItemId (username, password, and totp when asked for). If a stored login stops working (e.g. the password changed), call again with updateItemId to replace its secrets. declined means the user chose not to; continue without it rather than asking again unprompted. The tool wait is bounded but the card persists until answered or cancelled. Its answer automatically notifies this thread. Say you are waiting on the card; never ask the user to type continue.",
+    "Collect a missing/rejected site login via a private card into the vault. First check vault_list. Fill the returned vaultItemId; updateItemId replaces an existing login. Declined means continue without it. Cards persist after timeout and notify on answer; follow vault waiting rules.",
   parameters: OrchestratorMcpRequestLoginInput,
   success: OrchestratorMcpRequestLoginResult,
   failure: OrchestratorMcpFailure,
@@ -201,7 +201,7 @@ const RequestLoginTool = Tool.make("request_login", {
 
 export const CreateThreadsTool = Tool.make("create_threads", {
   description:
-    "Needs an agent running inside a Cogenly thread. Create one or more ORDINARY TOP-LEVEL Cogenly conversations. This is not delegation and does not create child agents/subagents. For delegated work, choose models from orchestrator_capabilities. Prefer native subagents only when they support the chosen model; otherwise call delegate_task, including for same-provider work. Use create_threads for a batch of separate top-level threads sharing this checkout. Prefer thread_launch for a single thread. Both require the user to request separate/new/top-level threads or conversations. Each entry may override provider, model, options, runtime mode, and interaction mode; omitted settings inherit. Project, branch, and worktree always inherit and cannot be overridden here. For independent implementation or a PR stack in its own worktree, use thread_launch with workspaceStrategy instead of asking the agent to create a worktree in its prompt.",
+    "Batch explicitly requested top-level conversations sharing this project/branch/worktree. Per-entry provider/model/options/modes inherit unless overridden. For a single conversation or separate checkout use thread_launch; for children use delegate_task.",
   parameters: OrchestratorMcpCreateThreadsInput,
   success: OrchestratorMcpCreateThreadsResult,
   failure: OrchestratorMcpFailure,
@@ -214,7 +214,7 @@ export const CreateThreadsTool = Tool.make("create_threads", {
 
 const ThreadListTool = Tool.make("thread_list", {
   description:
-    "List Cogenly threads in a project, newest first. Omit projectId for the calling thread's project. Filter by durable run status, title, or settled state (settled=true lists threads moved out of the active list), or snoozed state, and paginate with the returned cursor. A snoozed thread wakes early when it asks for something, fails, or completes. Each thread carries a Markdown `link`; when you mention it to the user, write that link as is. Cogenly opens it in the app and shows the thread's current title.",
+    "List project threads newest first, filtered by run/title/settled/snoozed state with cursor pagination. projectId defaults here. Snoozes wake on requests, failure or completion. Use each returned Markdown link when mentioning threads.",
   parameters: OrchestratorMcpThreadListInput,
   success: OrchestratorMcpThreadListResult,
   failure: OrchestratorMcpFailure,
@@ -228,7 +228,7 @@ const ThreadListTool = Tool.make("thread_list", {
 
 const ThreadReadTool = Tool.make("thread_read", {
   description:
-    "Read durable state and a paginated timeline from any Cogenly thread in this environment. The default messages view returns user messages, assistant messages, and proposed plans; activity returns all summarized timeline items. Without explicit paging a call returns at most 20 items at 2,000 characters each; pass limit/maxCharsPerItem and continue with afterPosition=nextPosition only when you need more. Reading an untruncated terminal assistant result from this parent thread's direct app-owned child acknowledges that child's automatic completion delivery. Recover long item text with itemId and textOffset=nextTextOffset until nextTextOffset is null; offsets count UTF-16 code units. The thread also reports its snooze state. Each thread carries a Markdown `link`; when you mention it to the user, write that link as is. Cogenly opens it in the app and shows the thread's current title.",
+    "Read state/timeline in this environment. messages (default) includes user/assistant/plans; activity includes all summaries. Defaults: 20 items, 2,000 chars/item. Page with afterPosition=nextPosition; recover text with itemId/textOffset=nextTextOffset (UTF-16) until null. Untruncated direct-child terminal results acknowledge delivery. Includes snooze and Markdown link.",
   parameters: OrchestratorMcpThreadReadInput,
   success: OrchestratorMcpThreadReadResult,
   failure: OrchestratorMcpFailure,
@@ -244,7 +244,7 @@ const ThreadReadTool = Tool.make("thread_read", {
 
 export const ThreadUpdateTool = Tool.make("thread_update", {
   description:
-    "Update metadata for a thread. Omit threadId to update this thread. Use action='rename' with title, action='regenerate_title' with no extra field, action='link_pull_request' with pullRequest, or action='unlink_pull_request'. Workspace and branch changes are intentionally not supported. clientRequestId makes retries idempotent.",
+    "Update thread metadata (threadId defaults here): rename+title, regenerate_title, link_pull_request+pullRequest or unlink_pull_request. No workspace/branch changes. Reuse clientRequestId on retries.",
   parameters: ThreadMetadataMcpUpdateInput,
   success: ThreadMetadataMcpUpdateResult,
   failure: OrchestratorMcpFailure,
@@ -256,12 +256,8 @@ export const ThreadUpdateTool = Tool.make("thread_update", {
   .annotate(Tool.Idempotent, false);
 
 const ThreadSendTool = Tool.make("thread_send", {
-  description: [
-    "Send to a Cogenly thread; the target cannot have broader permission modes than the caller. clientRequestId makes retries idempotent.",
-    "auto (recommended): steer an active, steerable target, start an idle thread, or queue otherwise.",
-    "steer: the target sees the message mid-turn, right away. Use for corrections and course changes needed now; it interrupts reasoning and can derail work if overused.",
-    "queue: run after the current turn without disturbing work. Use for new tasks or results that can wait; a busy target may not see it for a long time. restart: interrupt and restart the active turn.",
-  ].join("\n"),
+  description:
+    "Send to a thread with at most caller permissions. clientRequestId makes retries idempotent. mode:auto steers, starts idle, otherwise queues (recommended); steer interrupts for urgent corrections; queue waits until turn end; restart interrupts and restarts.",
   parameters: OrchestratorMcpThreadSendInput,
   success: OrchestratorMcpThreadSendResult,
   failure: OrchestratorMcpFailure,
@@ -274,7 +270,7 @@ const ThreadSendTool = Tool.make("thread_send", {
 
 const ThreadWaitTool = Tool.make("thread_wait", {
   description:
-    "Wait for a Cogenly thread run to reach a terminal durable state. Without runId, the latest run at call time is selected; an idle thread returns immediately. Timeout does not interrupt work, so call again or use thread_read/list after timedOut=true. Waiting reports status only and does not acknowledge a delegated result.",
+    "Wait for a durable terminal run (default latest; idle returns immediately). Timeout does not stop work; retry/read after timedOut. Status only, no delegated-result acknowledgment.",
   parameters: OrchestratorMcpThreadWaitInput,
   success: OrchestratorMcpThreadWaitResult,
   failure: OrchestratorMcpFailure,
@@ -288,7 +284,7 @@ const ThreadWaitTool = Tool.make("thread_wait", {
 
 const ThreadInterruptTool = Tool.make("thread_interrupt", {
   description:
-    "Request interruption of a running turn in any Cogenly thread in this environment. Without runId, the newest interruptible run is selected. Terminal runs and threads without an active turn return without another side effect. clientRequestId makes retries idempotent.",
+    "Interrupt the named run or newest interruptible run in a thread. Terminal/idle calls are harmless. Reuse clientRequestId on retries.",
   parameters: OrchestratorMcpThreadInterruptInput,
   success: OrchestratorMcpThreadInterruptResult,
   failure: OrchestratorMcpFailure,

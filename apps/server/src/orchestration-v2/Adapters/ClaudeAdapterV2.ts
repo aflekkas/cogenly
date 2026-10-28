@@ -1,3 +1,4 @@
+import { resolveClaudeToolSearchOverride } from "../../provider/Drivers/ClaudeToolSearch.ts";
 import * as RepoMcpTrust from "../../integrations/RepoMcpTrust.ts";
 import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
 import { claudeTaskOutputRoot, tailClaudeTaskOutput } from "./ClaudeTaskOutputTail.ts";
@@ -111,7 +112,7 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
-import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { resolveAttachmentPath, resolveAttachmentTextPath } from "../../attachmentStore.ts";
 import { resolveClaudeSdkExecutablePath } from "../../provider/Drivers/ClaudeExecutable.ts";
 import { planClaudeSkillDispatch } from "../../provider/Drivers/ClaudeSkillDispatch.ts";
 import { discoverClaudeSkills } from "../../provider/Drivers/ClaudeSkills.ts";
@@ -255,8 +256,14 @@ const CLAUDE_SCRIPT_EXTENSIONS = [".js", ".mjs", ".tsx", ".ts", ".jsx"];
 // mcp_set_servers once each server connected or hit its own 30 s timeout.
 const CLAUDE_MCP_REGISTRATION_TIMEOUT = "90 seconds";
 
+const CLAUDE_GROUP_WATCH_SCRIPT = [
+  "{ trap '' TERM; read -r _ <&3; kill -TERM 0; sleep 5; kill -KILL 0; } </dev/null >/dev/null 2>&1 &",
+  'exec "$@" 3<&-',
+].join("\n");
+
 /**
- * Starts the Claude CLI as the leader of its own process group. When the CLI
+ * Starts the Claude CLI as the leader of its own process group. A watcher reads
+ * a pipe only this server holds and stops the group when the server dies. When the CLI
  * exits it stops the MCP servers it started, but not their children: a
  * plugin's `bun run start` wrapper dies and its `bun server.ts` keeps running,
  * writing to a pipe nobody reads (#3089). Those stay in the CLI's group, so
@@ -268,14 +275,18 @@ const CLAUDE_MCP_REGISTRATION_TIMEOUT = "90 seconds";
  * before adding the tail to exit errors. Here stderr is dropped instead, so
  * exit errors carry only the code or signal.
  */
-function spawnClaudeProcessGroup(options: ClaudeSpawnOptions) {
-  const child = NodeChildProcess.spawn(options.command, options.args, {
-    cwd: options.cwd,
-    env: options.env,
-    signal: options.signal,
-    stdio: ["pipe", "pipe", "ignore"],
-    detached: true,
-  });
+export function spawnClaudeProcessGroup(options: ClaudeSpawnOptions) {
+  const child = NodeChildProcess.spawn(
+    "/bin/sh",
+    ["-c", CLAUDE_GROUP_WATCH_SCRIPT, "cogenly-claude", options.command, ...options.args],
+    {
+      cwd: options.cwd,
+      env: options.env,
+      signal: options.signal,
+      stdio: ["pipe", "pipe", "ignore", "pipe"],
+      detached: true,
+    },
+  );
   child.once("exit", () => {
     try {
       signalProcessGroup(child.pid ?? 0, "SIGKILL");
@@ -283,7 +294,8 @@ function spawnClaudeProcessGroup(options: ClaudeSpawnOptions) {
       // The group is already empty.
     }
   });
-  return child;
+  // The fourth descriptor makes Node type stdin/stdout as nullable; both are pipes.
+  return child as typeof child & ClaudeSpawnedProcess;
 }
 
 export const ClaudeProviderCapabilitiesV2 = {
@@ -1195,6 +1207,8 @@ export function makeClaudeQueryOptions(input: {
    */
   readonly repoMcpServers?: Readonly<Record<string, ClaudeRepoMcpServer>>;
   readonly repoMcpWaiting?: ReadonlyArray<string>;
+  /** SDK settings.env beats user settings.json env; process env alone does not. */
+  readonly toolSearchOverride?: "true";
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection);
   const {
@@ -1242,7 +1256,7 @@ export function makeClaudeQueryOptions(input: {
           ...(typeof querySettings === "object" && querySettings !== null ? querySettings : {}),
           autoCompactWindow: Number(input.settings.autoCompactWindow),
         } as ClaudeSdkSettings);
-  const effectiveQuerySettings =
+  const mcpQuerySettings =
     input.repoMcpWaiting === undefined
       ? compactedQuerySettings
       : {
@@ -1252,6 +1266,13 @@ export function makeClaudeQueryOptions(input: {
           enableAllProjectMcpServers: false,
           enabledMcpjsonServers: Object.keys(input.repoMcpServers ?? {}),
           disabledMcpjsonServers: [...input.repoMcpWaiting],
+        };
+  const effectiveQuerySettings =
+    input.toolSearchOverride === undefined || typeof mcpQuerySettings === "string"
+      ? mcpQuerySettings
+      : {
+          ...mcpQuerySettings,
+          env: { ...mcpQuerySettings?.env, ENABLE_TOOL_SEARCH: input.toolSearchOverride },
         };
   const repoMcpServers = input.repoMcpServers ?? {};
   const sessionMcpServers =
@@ -1324,7 +1345,7 @@ export function makeClaudeQueryOptions(input: {
           : "") +
         (!terminalTools
           ? ""
-          : "\nUse mcp__cogenly__terminal_run for every shell command so the owner sees it live. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. A command that may take more than about a minute, or may prompt (logins, cloud CLIs, installs, builds, test suites), runs with background=true and is polled with terminal_read, so the user's messages aren't blocked while it runs. Terminals and their children are killed when this thread settles."),
+          : "\nRun every shell command with mcp__cogenly__terminal_run so the owner sees it. Use background=true for servers or commands over about a minute or that may prompt (logins, installs, builds, tests); poll with terminal_read so messages stay unblocked. terminal_write sends stdin, terminal_kill stops. Settlement kills terminals and children."),
     },
     ...(Object.keys(extraArgs).length === 0 ? {} : { extraArgs }),
   };
@@ -1366,6 +1387,7 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__cogenly__terminal_read",
   "mcp__cogenly__terminal_list",
   "mcp__cogenly__html_preview",
+  "mcp__cogenly__html_guide",
   "mcp__cogenly__html_render",
   "mcp__cogenly__html_state_read",
   "mcp__cogenly__image_search",
@@ -1848,6 +1870,8 @@ const makeClaudeUserMessageWithAttachments = Effect.fnUntraced(function* (input:
     attachments: input.attachments,
     resolveAttachmentPath: (attachment) =>
       resolveAttachmentPath({ attachmentsDir: input.attachmentsDir, attachment }),
+    resolveAttachmentTextPath: (attachment) =>
+      resolveAttachmentTextPath({ attachmentsDir: input.attachmentsDir, attachment }),
   });
 
   const dispatch =
@@ -8772,7 +8796,16 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           );
           // Read when the process opens: worktrees and other machines get the
           // servers of whatever checkout they run in.
+          const toolSearchOverride = yield* resolveClaudeToolSearchOverride({
+            cwd: turnInput.runtimePolicy.cwd,
+            settings: adapterOptions.settings,
+            environment: adapterOptions.environment,
+          }).pipe(
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+            Effect.provideService(Path.Path, path),
+          );
           const queryOptions = makeClaudeQueryOptions({
+            ...(toolSearchOverride === undefined ? {} : { toolSearchOverride }),
             modelSelection: turnInput.modelSelection,
             nativeThreadId,
             resume: shouldResume,
