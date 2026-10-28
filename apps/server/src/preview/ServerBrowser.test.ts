@@ -61,6 +61,9 @@ const rig = (native = false, autoOpen = true, extensions = false) =>
     const connected = yield* Deferred.make<void>();
     const extensionReady = yield* Queue.unbounded<void>();
     let loader: ((profileId: string) => Effect.Effect<void>) | undefined;
+    let surfaceOpener:
+      | Parameters<Extensions.BrowserExtensions["Service"]["registerSurfaceOpener"]>[0]
+      | undefined;
     let titleAvailable = true;
     const permission = vi.fn<Channel.DesktopBrowserChannel["Service"]["permission"]>(() =>
       Effect.succeedSome({
@@ -109,12 +112,12 @@ const rig = (native = false, autoOpen = true, extensions = false) =>
       ariaSnapshot: vi.fn(async () => '- document "Signed in"'),
       close: vi.fn(async () => {}),
     });
-    const context = {
+    const context = Object.assign(new NodeEvents.EventEmitter(), {
       newPage: vi.fn(async () => page as unknown as Page),
       newCDPSession: async () => cdp,
       grantPermissions: async () => {},
       close: async () => {},
-    };
+    });
     vi.spyOn(ServerBrowserContexts.prototype, "contextFor").mockResolvedValue(
       context as unknown as BrowserContext,
     );
@@ -147,6 +150,28 @@ const rig = (native = false, autoOpen = true, extensions = false) =>
               loader = load;
             }),
           reportLoad: () => Effect.void,
+          registerSurfaceOpener: (open) =>
+            Effect.sync(() => {
+              surfaceOpener = open;
+            }),
+          openSurface: (input) =>
+            surfaceOpener!(
+              { ...input, profileId: input.profileId ?? "default" },
+              {
+                id: input.id,
+                name: "Extension",
+                version: "1.0.0",
+                description: "",
+                manifestVersion: 3,
+                hasAction: true,
+                enabled: true,
+                state: "loaded",
+                source: { type: "webStore" },
+                permissions: [],
+                hostPermissions: [],
+                installedAt: "2026-01-01",
+              },
+            ),
         }),
         Layer.mock(Channel.DesktopBrowserChannel)({
           available: true,
@@ -696,3 +721,26 @@ it("keeps Playwright launch transcripts out of agent errors", () => {
     "The server preview browser could not start: Browser closed unexpectedly.",
   );
 });
+
+it.effect("MCP toolbar actions explain native desktop and profile runtime gaps", () =>
+  Effect.gen(function* () {
+    const native = yield* rig(true);
+    const nativeError = yield* Effect.flip(
+      native.invoke<PreviewAutomationStatus>("extensionOpen", native.tabId, {
+        id: "a".repeat(32),
+        page: "popup",
+      }),
+    );
+    expect(nativeError.message).toContain("native desktop rendering");
+    expect(nativeError.message).toContain("preview_* for element access");
+    const server = yield* rig(false, true, true);
+    const profileError = yield* Effect.flip(
+      server.invoke<PreviewAutomationStatus>("extensionOpen", server.tabId, {
+        id: "a".repeat(32),
+        page: "sidePanel",
+        profileId: "work",
+      }),
+    );
+    expect(profileError.message).toContain("host tab must use the extension's browser profile");
+  }).pipe(Effect.scoped),
+);

@@ -520,3 +520,17 @@ export const ResourceTelemetryRetryResult = Schema.Struct({
   snapshot: ResourceTelemetrySnapshot,
 });
 export type ResourceTelemetryRetryResult = typeof ResourceTelemetryRetryResult.Type;
+
+/** Placement hints, sampled on the machine that owns the resources. */
+export const MachineResourcesSnapshot = Schema.Struct({
+  sampledAt: NonNegativeInt,
+  cpuCores: NonNegativeInt,
+  loadAverage1m: Schema.Number,
+  loadAverage5m: Schema.Number,
+  availableMemoryBytes: NonNegativeInt,
+  totalMemoryBytes: NonNegativeInt,
+  freeDiskBytes: Schema.optional(NonNegativeInt),
+  activeAgentRuns: Schema.optional(NonNegativeInt),
+  activeAgentTerminals: Schema.optional(NonNegativeInt),
+});
+export type MachineResourcesSnapshot = typeof MachineResourcesSnapshot.Type;
