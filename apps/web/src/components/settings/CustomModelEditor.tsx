@@ -296,7 +296,7 @@ export function CustomModelEditor({
     <SettingsGroup
       variant="inset"
       divided={false}
-      className="mx-2 mt-1 mb-2 flex flex-col gap-3 p-3"
+      className="mx-3 mb-3 flex flex-col gap-3 p-3 sm:mx-4"
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();

@@ -189,6 +189,7 @@ export function SourceControlWritingSettingsSection() {
       <SettingsRow
         serverScoped
         settingKeys={["sourceControlWriterModelSelection"]}
+        controlWidth="wide"
         {...searchableSetting("source-control-writer-model")}
         description="Writes commit messages, pull requests and branch names. Off uses the text generation model from Models."
         control={

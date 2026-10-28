@@ -11,10 +11,15 @@ import {
 } from "@cogenly/shared/thirdPartyLicenses";
 
 import { Button } from "../ui/button";
-import { DisclosureChevron } from "../ui/disclosure";
-import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
+import { DisclosurePanel } from "../ui/disclosure";
 import { SearchInput } from "../ui/search-input";
-import { SettingsEmpty, SettingsRow, SettingsSection, SettingsToolbar } from "./settingsLayout";
+import {
+  SettingsDenseRow,
+  SettingsEmpty,
+  SettingsRow,
+  SettingsSection,
+  SettingsToolbar,
+} from "./settingsLayout";
 
 type LicenseManifestState =
   | { readonly status: "loading" }
@@ -62,28 +67,20 @@ function LicenseNoticeRow({
   readonly onOpenChange: (open: boolean) => void;
 }) {
   return (
-    <Collapsible open={open} onOpenChange={onOpenChange}>
-      <article>
-        <div className="flex min-h-10 items-center interactive hover:bg-muted/35 sm:min-h-9">
-          <CollapsibleTrigger className="flex min-h-10 min-w-0 flex-1 items-center gap-2.5 rounded-md px-3 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:min-h-9 sm:px-4">
-            <DisclosureChevron />
-            {/* Narrow pages stack the license under the name instead of squeezing both. */}
-            <span className="flex min-w-0 flex-1 flex-col gap-0.5 @min-[36rem]/settings-page:flex-row @min-[36rem]/settings-page:items-baseline @min-[36rem]/settings-page:gap-4">
-              <span className="flex min-w-0 flex-1 items-baseline gap-2">
-                <span className="truncate font-medium text-foreground">{entry.name}</span>
-                {entry.version ? (
-                  <code className="shrink-0 text-xs text-muted-foreground">{entry.version}</code>
-                ) : null}
-              </span>
-              <span className="min-w-0 truncate text-xs text-muted-foreground @min-[36rem]/settings-page:max-w-[42%] @min-[36rem]/settings-page:shrink-0">
-                {entry.license} · {formatLicenseBundles(entry.bundles)}
-              </span>
-            </span>
-          </CollapsibleTrigger>
-          {entry.sourceUrl ? (
+    <article>
+      <SettingsDenseRow
+        disclosure={{ open, onOpenChange }}
+        title={entry.name}
+        titleActions={
+          entry.version ? (
+            <code className="text-xs text-muted-foreground">{entry.version}</code>
+          ) : null
+        }
+        meta={`${entry.license} · ${formatLicenseBundles(entry.bundles)}`}
+        control={
+          entry.sourceUrl ? (
             <Button
               aria-label={`View project source for ${entry.name}`}
-              className="me-3 shrink-0 sm:me-4"
               render={<a href={entry.sourceUrl} rel="noreferrer noopener" target="_blank" />}
               size="icon-micro"
               title="Project source"
@@ -91,19 +88,19 @@ function LicenseNoticeRow({
             >
               <ExternalLinkIcon aria-hidden className="size-3" />
             </Button>
-          ) : null}
+          ) : null
+        }
+      />
+      {/* Holds the notice while it folds away; closed notices never mount. */}
+      <DisclosurePanel open={open}>
+        {/* Indented to the name, past the row's inset and the chevron. */}
+        <div className="ps-7.5 pe-3 pt-1 pb-4 sm:ps-8.5 sm:pe-4">
+          <pre className="max-w-[76ch] whitespace-pre-wrap break-words font-mono text-xs/5 text-foreground/80">
+            {entry.noticeText}
+          </pre>
         </div>
-        <CollapsiblePanel>
-          {open ? (
-            <div className="px-9 pt-1 pb-4 sm:px-10">
-              <pre className="max-w-[76ch] whitespace-pre-wrap break-words font-mono text-xs/5 text-foreground/80">
-                {entry.noticeText}
-              </pre>
-            </div>
-          ) : null}
-        </CollapsiblePanel>
-      </article>
-    </Collapsible>
+      </DisclosurePanel>
+    </article>
   );
 }
 

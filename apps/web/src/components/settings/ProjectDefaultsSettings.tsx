@@ -86,6 +86,7 @@ export function ProjectDefaultsSettings({ category }: { category: "models" | "ne
     <SettingsRow
       serverScoped
       settingKeys={["defaultModelSelection"]}
+      controlWidth="wide"
       {...searchableSetting("default-model")}
       description="Used for new chats and threads. Automatic uses the first available model."
       // Until a model is picked, the picker shows the automatic fallback.

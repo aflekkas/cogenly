@@ -1,3 +1,21 @@
+/**
+ * Folds entries that share a key into one, kept at the position of the first
+ * (for a newest-first list, the latest), with how many there were.
+ */
+export function groupRepeatedEntries<T>(
+  entries: ReadonlyArray<T>,
+  keyOf: (entry: T) => string,
+): Array<{ readonly entry: T; readonly count: number }> {
+  const groups = new Map<string, { entry: T; count: number }>();
+  for (const entry of entries) {
+    const key = keyOf(entry);
+    const group = groups.get(key);
+    if (group) group.count += 1;
+    else groups.set(key, { entry, count: 1 });
+  }
+  return [...groups.values()];
+}
+
 /** Case-insensitive list search across the user-facing names and descriptions. */
 export function matchesSettingsListQuery(
   query: string,

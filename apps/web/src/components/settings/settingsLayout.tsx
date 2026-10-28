@@ -28,7 +28,7 @@ import { getRelativeTimeState } from "../../timestampFormat";
 import { PageContent } from "../PageContent";
 import { Button } from "../ui/button";
 import { RefreshIcon } from "../ui/refresh-icon";
-import { DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
+import { DisclosureChevron, DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
 import { Empty, EmptyContent, EmptyDescription, EmptyMedia } from "../ui/empty";
 import {
   NumberField,
@@ -147,15 +147,38 @@ export function SettingsSearchTarget({
  * `triggerVariant="field"` pickers. The model (first) takes the one settings
  * field width and the effort a fixed column after it, so the pickers line up
  * from row to row. Stacked, the model fills the row. The pickers render their
- * triggers directly, so the widths are set here on those children.
+ * triggers directly, so the widths are set here on those children. Their row
+ * passes `controlWidth="wide"`, so it stacks before the pair starves its text.
  */
 export function SettingsModelPickers({ children }: { children: ReactNode }) {
   return (
-    <div className="flex w-full min-w-0 items-center gap-2 *:min-w-0 *:first:flex-1 *:not-first:w-32 *:not-first:shrink-0 @min-[32rem]/settings-row:w-auto @min-[32rem]/settings-row:*:first:w-56 @min-[32rem]/settings-row:*:first:flex-none">
+    <div className="flex w-full min-w-0 items-center gap-2 *:min-w-0 *:first:flex-1 *:not-first:w-32 *:not-first:shrink-0 @min-[44rem]/settings-row:w-auto @min-[44rem]/settings-row:*:first:w-56 @min-[44rem]/settings-row:*:first:flex-none">
       {children}
     </div>
   );
 }
+
+/**
+ * Where a row puts its control beside its text instead of under it. A
+ * `default` control (one field, a switch, a button or two) sits beside the
+ * text from a 32rem row; a `wide` one (a model and its effort) waits for
+ * 44rem, so the description keeps a readable column. The classes are spelled
+ * out per width for Tailwind.
+ */
+const SETTINGS_ROW_SPLIT = {
+  default: {
+    grid: "@min-[32rem]/settings-row:grid @min-[32rem]/settings-row:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] @min-[32rem]/settings-row:items-center @min-[32rem]/settings-row:gap-8",
+    control: "@min-[32rem]/settings-row:w-auto @min-[32rem]/settings-row:justify-end",
+    inline: "@min-[32rem]/settings-row:w-auto",
+  },
+  wide: {
+    grid: "@min-[44rem]/settings-row:grid @min-[44rem]/settings-row:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] @min-[44rem]/settings-row:items-center @min-[44rem]/settings-row:gap-8",
+    control: "@min-[44rem]/settings-row:w-auto @min-[44rem]/settings-row:justify-end",
+    inline: "@min-[44rem]/settings-row:w-auto",
+  },
+} as const;
+
+type SettingsRowControlWidth = keyof typeof SETTINGS_ROW_SPLIT;
 
 /** Info affordance explaining how a setting interacts with the shared background policy. */
 export function PolicyTooltip({ children }: { readonly children: string }) {
@@ -440,30 +463,38 @@ export function SettingsPageMessage({ children }: { children: ReactNode }) {
 }
 
 /**
- * The one way settings fold content away: a quiet "Show ›" / "Hide" at the
- * trailing edge of a row or section header. `SettingsDisclosure` and
- * `FoldedSettingsSection` use it; a row that folds its own children (Machines'
- * "Other checks") passes it as the row's `control` over a `DisclosurePanel`.
+ * The one way settings fold content away: a quiet "Show ›" / "Hide" button
+ * at the trailing edge of a row or section header, as tall as the row
+ * actions beside it, with its chevron pulled onto their trailing edge.
+ * `SettingsDisclosure` and `FoldedSettingsSection` use it; a row that folds
+ * its own children (Machines' "Other checks") passes it as the row's
+ * `control` over a `DisclosurePanel`.
  */
 export function SettingsDisclosureToggle({
   open,
   onOpenChange,
   label,
+  children,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Names what folds, for assistive tech: "Show {label}". */
   label: string;
+  /** A visible name for the fold ("Details") in place of "Show" / "Hide". */
+  children?: ReactNode;
 }) {
   return (
-    <DisclosureTrigger
-      variant="quiet"
-      open={open}
+    <Button
+      size="sm"
+      variant="ghost-muted"
+      data-settings-disclosure-toggle
+      aria-expanded={open}
       aria-label={`${open ? "Hide" : "Show"} ${label}`}
       onClick={() => onOpenChange(!open)}
     >
-      {open ? "Hide" : "Show"}
-    </DisclosureTrigger>
+      {children ?? (open ? "Hide" : "Show")}
+      <DisclosureChevron open={open} />
+    </Button>
   );
 }
 
@@ -673,6 +704,7 @@ export function SettingsRow({
   serverScoped = false,
   settingKeys = EMPTY_SETTING_KEYS,
   interactive = false,
+  controlWidth = "default",
   children,
   className,
   ...rowProps
@@ -682,6 +714,7 @@ export function SettingsRow({
   status?: ReactNode;
   resetAction?: ReactNode;
   control?: ReactNode;
+  controlWidth?: SettingsRowControlWidth;
   serverScoped?: boolean;
   settingKeys?: readonly (keyof ServerSettings)[];
   interactive?: boolean;
@@ -727,13 +760,19 @@ export function SettingsRow({
           // Focusable so keyboard users can still reach the explanation.
           <span
             tabIndex={0}
-            className="flex w-full items-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring @min-[32rem]/settings-row:w-auto"
+            className={cn(
+              "flex w-full items-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+              SETTINGS_ROW_SPLIT[controlWidth].inline,
+            )}
           />
         }
       >
         <div
           inert
-          className="flex w-full items-center gap-2 opacity-50 @min-[32rem]/settings-row:w-auto"
+          className={cn(
+            "flex w-full items-center gap-2 opacity-50",
+            SETTINGS_ROW_SPLIT[controlWidth].inline,
+          )}
         >
           {control}
         </div>
@@ -767,6 +806,7 @@ export function SettingsRow({
       description={description}
       status={status}
       control={renderedControl}
+      controlWidth={controlWidth}
       interactive={interactive}
       className={className}
       titleActions={
@@ -796,6 +836,7 @@ export function SettingsRowContent({
   status,
   titleActions,
   control,
+  controlWidth = "default",
   children,
   interactive = false,
   className,
@@ -806,9 +847,12 @@ export function SettingsRowContent({
   status?: ReactNode;
   titleActions?: ReactNode;
   control?: ReactNode;
+  /** `wide` for a compound control (a model and its effort), which stacks under the text until 44rem. */
+  controlWidth?: SettingsRowControlWidth;
   interactive?: boolean;
   ref?: Ref<HTMLDivElement>;
 }) {
+  const split = SETTINGS_ROW_SPLIT[controlWidth];
   return (
     <div
       {...rowProps}
@@ -824,7 +868,7 @@ export function SettingsRowContent({
       {/* The control centres on the title and description, never on the
           children below them, so every row in a card places it alike and a
           fold opening under it moves nothing. */}
-      <div className="flex flex-col gap-3 @min-[32rem]/settings-row:grid @min-[32rem]/settings-row:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] @min-[32rem]/settings-row:items-center @min-[32rem]/settings-row:gap-8">
+      <div className={cn("flex flex-col gap-3", split.grid)}>
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex min-h-5 items-center gap-1.5">
             <h3 className="min-w-0 text-sm font-medium text-foreground">{title}</h3>
@@ -836,13 +880,86 @@ export function SettingsRowContent({
           {status ? <div className="pt-0.5 text-xs text-muted-foreground">{status}</div> : null}
         </div>
         {control ? (
-          <div className="flex w-full min-w-0 shrink-0 items-center gap-2 @min-[32rem]/settings-row:w-auto @min-[32rem]/settings-row:justify-end">
+          <div className={cn("flex w-full min-w-0 shrink-0 items-center gap-2", split.control)}>
             {control}
           </div>
         ) : null}
       </div>
       {children}
     </div>
+  );
+}
+
+/**
+ * A dense list entry, for long lists of like items where a full row per item
+ * would be too tall (a provider's models): the row's `text-sm` title, any
+ * tags after it, its muted `meta` on the same line, and the trailing
+ * controls. Meta truncates first, then the title; in a narrow row it moves
+ * under the title. With `disclosure` the text is the trigger of a fold the
+ * caller renders after the row in a `DisclosurePanel`. Divide a run of them
+ * with `SettingsDenseList`.
+ */
+export function SettingsDenseRow({
+  title,
+  meta,
+  titleActions,
+  control,
+  disclosure,
+  className,
+  ...rowProps
+}: Omit<ComponentPropsWithoutRef<"div">, "title"> & {
+  title: ReactNode;
+  meta?: ReactNode;
+  titleActions?: ReactNode;
+  control?: ReactNode;
+  disclosure?: { open: boolean; onOpenChange: (open: boolean) => void };
+}) {
+  const text = (
+    <span className="flex min-w-0 flex-1 flex-col @min-[28rem]/settings-dense-row:flex-row @min-[28rem]/settings-dense-row:items-baseline @min-[28rem]/settings-dense-row:gap-2">
+      <span className="flex max-w-full min-w-0 items-baseline gap-2 @min-[28rem]/settings-dense-row:shrink-0">
+        <span className="min-w-0 truncate text-sm font-medium text-foreground">{title}</span>
+        {titleActions ? (
+          <span className="flex shrink-0 items-center gap-1.5 self-center">{titleActions}</span>
+        ) : null}
+      </span>
+      {meta ? (
+        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{meta}</span>
+      ) : null}
+    </span>
+  );
+  return (
+    <div
+      {...rowProps}
+      data-slot="settings-dense-row"
+      className={cn("flex min-h-10 items-center gap-3 px-3 py-1.5 sm:px-4", className)}
+    >
+      {disclosure ? (
+        <DisclosureTrigger
+          chevron="start"
+          open={disclosure.open}
+          onClick={() => disclosure.onOpenChange(!disclosure.open)}
+          className="@container/settings-dense-row flex-1 self-stretch"
+        >
+          {text}
+        </DisclosureTrigger>
+      ) : (
+        <div className="@container/settings-dense-row flex min-w-0 flex-1">{text}</div>
+      )}
+      {control ? <div className="flex shrink-0 items-center gap-2">{control}</div> : null}
+    </div>
+  );
+}
+
+/** Divides consecutive `SettingsDenseRow`s like a card's rows; other children sit between them undivided. */
+export function SettingsDenseList({ className, ...props }: ComponentProps<"div">) {
+  return (
+    <div
+      {...props}
+      className={cn(
+        "[&>[data-slot=settings-dense-row]+[data-slot=settings-dense-row]]:border-t [&>[data-slot=settings-dense-row]+[data-slot=settings-dense-row]]:border-border/50",
+        className,
+      )}
+    />
   );
 }
 

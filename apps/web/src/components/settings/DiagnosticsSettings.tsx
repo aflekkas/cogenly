@@ -65,7 +65,13 @@ import {
   SettingsSection,
 } from "./settingsLayout";
 import { SettingsGroup } from "./SettingsGroup";
-import { SettingsList, SettingsListItem, SettingsListMeta } from "./SettingsList";
+import {
+  SettingsCappedList,
+  SettingsList,
+  SettingsListItem,
+  SettingsListMeta,
+} from "./SettingsList";
+import { groupRepeatedEntries } from "./settingsList.logic";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { TelemetryExportSettings } from "./TelemetryExportSettings";
@@ -1348,13 +1354,19 @@ export function DiagnosticsSettingsPanel() {
 
       <SettingsSection title="Latest failures">
         {data && data.latestFailures.length > 0 ? (
-          <SettingsList>
-            {data.latestFailures.map((failure) => (
+          <SettingsCappedList
+            noun="failures"
+            items={groupRepeatedEntries(
+              data.latestFailures,
+              (failure) => `${failure.name}\n${failure.cause}`,
+            )}
+            renderItem={({ entry: failure, count }) => (
               <SettingsListItem
                 key={`${failure.traceId}:${failure.spanId}`}
                 title={<TruncatedName value={failure.name} />}
                 status={
                   <SettingsListMeta>
+                    {count > 1 ? `${formatCount(count)} times` : null}
                     {`Took ${formatDuration(failure.durationMs)}`}
                     {formatRelative(failure.endedAt)}
                   </SettingsListMeta>
@@ -1362,8 +1374,8 @@ export function DiagnosticsSettingsPanel() {
               >
                 <DiagnosticsDetail text={failure.cause} />
               </SettingsListItem>
-            ))}
-          </SettingsList>
+            )}
+          />
         ) : (
           <EmptyRows
             icon={<TriangleAlertIcon />}
@@ -1375,8 +1387,13 @@ export function DiagnosticsSettingsPanel() {
 
       <SettingsSection title="Recent warnings and errors">
         {data && data.latestWarningAndErrorLogs.length > 0 ? (
-          <SettingsList>
-            {data.latestWarningAndErrorLogs.map((event) => {
+          <SettingsCappedList
+            noun="warnings and errors"
+            items={groupRepeatedEntries(
+              data.latestWarningAndErrorLogs,
+              (event) => `${event.level}\n${event.spanName}\n${event.message}`,
+            )}
+            renderItem={({ entry: event, count }) => {
               const level = logLevelStatus(event.level);
               return (
                 <SettingsListItem
@@ -1384,6 +1401,7 @@ export function DiagnosticsSettingsPanel() {
                   title={<TruncatedName value={event.spanName} />}
                   status={
                     <SettingsListMeta>
+                      {count > 1 ? `${formatCount(count)} times` : null}
                       {formatRelative(event.seenAt)}
                       <TraceId traceId={event.traceId} />
                     </SettingsListMeta>
@@ -1399,8 +1417,8 @@ export function DiagnosticsSettingsPanel() {
                   />
                 </SettingsListItem>
               );
-            })}
-          </SettingsList>
+            }}
+          />
         ) : (
           <EmptyRows
             icon={<ScrollTextIcon />}

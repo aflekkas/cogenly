@@ -105,6 +105,7 @@ function TextGenerationModelRow() {
     <SettingsRow
       serverScoped
       settingKeys={["textGenerationModelSelection"]}
+      controlWidth="wide"
       {...searchableSetting("text-generation-model")}
       description="Writes thread titles, greetings and other short text. Source control can pick its own."
       resetAction={

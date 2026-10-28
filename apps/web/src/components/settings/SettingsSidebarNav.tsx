@@ -31,7 +31,7 @@ import {
   Settings2Icon,
   SparklesIcon,
 } from "lucide-react";
-import { useLocation, useNavigate } from "@tanstack/react-router";
+import { useLocation, useRouter } from "@tanstack/react-router";
 
 import { cn } from "~/lib/utils";
 import { useLegacySidebarEnabled } from "../../hooks/useSettings";
@@ -45,6 +45,7 @@ import {
   sidebarRowClassName,
 } from "../sidebar/SidebarList";
 import { SidebarListColumn } from "../sidebar/SidebarListColumn";
+import { crossfadeModeSwitch } from "../sidebar/modes/modeSwitchMotion";
 import { SidebarSearchDock, type SidebarDockAction } from "../sidebar/SidebarSearchDock";
 import { sidebarListEdge, stepSearchResultIndex } from "../sidebar/sidebarListAnchor.logic";
 import { BadgeDot } from "../ui/badge-dot";
@@ -102,7 +103,7 @@ const SETTINGS_ICON_CLASS_NAME = "size-4 shrink-0 text-sidebar-muted-foreground"
 const NO_DOCK_ACTIONS: ReadonlyArray<SidebarDockAction> = [];
 
 export function SettingsSidebarNav({ pathname }: { pathname: string }) {
-  const navigate = useNavigate();
+  const router = useRouter();
   const currentHash = useLocation({ select: (location) => location.hash });
   const currentSearch = useLocation({ select: (location) => location.search });
   const scopeSearch = useMemo(() => validateSettingsScopeSearch(currentSearch), [currentSearch]);
@@ -193,21 +194,26 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isMobile, open, setOpen, setOpenMobile]);
 
-  // Picking a section selects its row the way picking a thread does: the row
-  // takes the selected fill at once and the page swaps, with no crossfade.
+  // Moving to another section crossfades the pane like a mode switch, opacity
+  // only: the old page holds until the new one commits (the settings layout
+  // settles the fade then), so a lazily loaded page never flashes blank. A
+  // jump within the page changes nothing to fade.
   const handleSectionClick = useCallback(
     (to: SettingsPath) => {
       if (isMobile) {
         setOpenMobile(false);
       }
-      void navigate({
-        to,
-        hash: "",
-        replace: true,
-        hashScrollIntoView: false,
+      const options = { to, hash: "", replace: true, hashScrollIntoView: false };
+      if (to === pathname.replace(/\/+$/, "")) {
+        void router.navigate(options);
+        return;
+      }
+      crossfadeModeSwitch(() => {
+        void router.navigate(options);
+        return true;
       });
     },
-    [isMobile, navigate, setOpenMobile],
+    [isMobile, pathname, router, setOpenMobile],
   );
   const clearSearch = useCallback(() => {
     setQuery("");
@@ -224,15 +230,23 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
         scrollToSettingsTarget(targetId);
         return;
       }
-      void navigate({
+      const options = {
         to: item.to,
         hash: targetId,
         replace: true,
         hashScrollIntoView: false,
         state: { settingsTargetHighlight: true },
+      };
+      if (item.to === pathname.replace(/\/+$/, "")) {
+        void router.navigate(options);
+        return;
+      }
+      crossfadeModeSwitch(() => {
+        void router.navigate(options);
+        return true;
       });
     },
-    [clearSearch, currentHash, isMobile, navigate, pathname, setOpenMobile],
+    [clearSearch, currentHash, isMobile, pathname, router, setOpenMobile],
   );
   const handleSearchKeyDown = useCallback(
     (event: KeyboardEvent<HTMLInputElement>) => {

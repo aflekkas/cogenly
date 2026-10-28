@@ -1907,6 +1907,12 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
     }
   }
 
+  /* The same pull for a settings fold's "Show ›" toggle (a ghost `sm` Button),
+     so its chevron ends on the edge row controls and header actions end on. */
+  [data-settings-disclosure-toggle]:last-child {
+    margin-inline-end: calc(var(--spacing) * -2.5 + 1px);
+  }
+
   .surface-subheader {
     @apply flex h-10 min-h-10 shrink-0 items-center border-b border-border/60 bg-background;
   }

@@ -8,7 +8,7 @@ import {
   SparklesIcon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   ProviderDriverKind,
   type ProviderInstanceId,
@@ -21,10 +21,12 @@ import {
   normalizeCustomModelSlug,
 } from "@cogenly/shared/model";
 
+import { requestConfirmDialog } from "../../confirmDialog";
 import { cn } from "../../lib/utils";
 import { sortModelsForProviderInstance } from "../../modelOrdering";
 import { MAX_CUSTOM_MODEL_LENGTH } from "../../modelSelection";
 import { Button, InlineButton } from "../ui/button";
+import { DisclosurePanel } from "../ui/disclosure";
 import { Input } from "../ui/input";
 import { SearchInput } from "../ui/search-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -33,9 +35,12 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { CustomModelEditor } from "./CustomModelEditor";
 import {
   SETTINGS_MICRO_LABEL_CLASSNAME,
+  SettingsDenseList,
+  SettingsDenseRow,
   SettingsEmpty,
   SettingsSection,
   SettingsSectionAction,
+  SettingsToolbar,
 } from "./settingsLayout";
 import { SettingsTag } from "./SettingsStatus";
 
@@ -337,8 +342,12 @@ export function ProviderModelsSection({
     setIsAdding(false);
   };
 
-  const handleRemove = (slug: string) => {
+  const handleRemove = async (slug: string) => {
     if (!canManageCustomModels) return;
+    const message = `Remove ${slug}?\nIt leaves the model picker and its options are lost.`;
+    const confirmed =
+      (await requestConfirmDialog(message, { variant: "destructive" })) ?? window.confirm(message);
+    if (!confirmed) return;
     if (editingSlug === slug) setEditingSlug(null);
     onChange(customModels.filter((entry) => entry.slug !== slug));
     onModelOrderChange(modelOrder.filter((model) => model !== slug));
@@ -386,7 +395,9 @@ export function ProviderModelsSection({
       readonly canMoveDown: boolean;
     },
   ) => (
-    <span className="flex shrink-0 items-center justify-end gap-0.5">
+    // At least as wide as a custom row's four buttons, so the effort pickers
+    // end on one edge across built-in and custom rows.
+    <span className="flex min-w-22 shrink-0 items-center justify-end gap-0.5">
       {!options.isHidden && !isFiltering ? (
         <>
           <Tooltip>
@@ -449,10 +460,10 @@ export function ProviderModelsSection({
               render={
                 <Button
                   size="icon-micro"
-                  variant="ghost-muted"
+                  variant="ghost-destructive"
                   disabled={!canManageCustomModels}
                   aria-label={`Remove ${model.slug}`}
-                  onClick={() => handleRemove(model.slug)}
+                  onClick={() => void handleRemove(model.slug)}
                 />
               }
             >
@@ -500,54 +511,44 @@ export function ProviderModelsSection({
     const canMoveUp =
       !isFiltering && previousModel !== undefined && groupOf(previousModel) === group;
     const canMoveDown = !isFiltering && nextModel !== undefined && groupOf(nextModel) === group;
-    const nameClassName = cn("text-xs", isHidden ? "text-muted-foreground" : "text-foreground/90");
+    const meta = [model.name !== model.slug ? model.slug : null, ...capLabels]
+      .filter((part) => part !== null)
+      .join(" · ");
 
     return (
-      <div
+      <SettingsDenseRow
         key={`${instanceId}:${model.slug}`}
         data-model-slug={model.slug}
-        className={cn(
-          // Actions column is at least wide enough for the four custom-row
-          // buttons so capability labels line up across built-in and custom rows.
-          "grid h-7 grid-cols-[minmax(0,1fr)_auto_minmax(5.5rem,auto)_auto] items-center gap-2 rounded-md px-2 transition-colors duration-(--motion-duration-fast) ease-out hover:bg-muted/30",
-          isHidden && "opacity-50",
-        )}
-      >
-        {/* The name keeps its width; the slug truncates first. */}
-        <span className="flex min-w-0 items-baseline gap-2">
-          <span className={cn(nameClassName, "max-w-full shrink-0 truncate")}>{model.name}</span>
-          {model.name !== model.slug ? (
-            <code className="min-w-0 truncate font-mono text-2xs text-muted-foreground/70">
-              {model.slug}
-            </code>
-          ) : null}
-          {model.isCustom ? <SettingsTag>Custom</SettingsTag> : null}
-        </span>
-        {/*
-          Always a grid item so the columns line up across rows; the text
-          itself drops out in a narrow list, where it would starve the name.
-        */}
-        <span className="flex items-center gap-1.5 text-2xs text-muted-foreground/70">
-          {capLabels.length > 0 ? (
-            <span className="hidden @min-[40rem]/model-list:inline">{capLabels.join(" · ")}</span>
-          ) : null}
-          {onEffortDefaultChange ? (
-            <ModelEffortDefaultSelect
-              model={model}
-              configured={effortDefaults?.[model.slug]}
-              disabled={!canWritePreferences}
-              onChange={(option) => onEffortDefaultChange(model.slug, option)}
-            />
-          ) : null}
-        </span>
-        {rowActions(model, { isHidden, canMoveUp, canMoveDown })}
-        {pickerSwitch(model, isHidden)}
-      </div>
+        // A hidden model reads as off, like a disabled row.
+        className={cn(isHidden && "opacity-50")}
+        title={model.name}
+        titleActions={model.isCustom ? <SettingsTag>Custom</SettingsTag> : null}
+        meta={meta}
+        control={
+          <>
+            {onEffortDefaultChange ? (
+              <ModelEffortDefaultSelect
+                model={model}
+                configured={effortDefaults?.[model.slug]}
+                disabled={!canWritePreferences}
+                onChange={(option) => onEffortDefaultChange(model.slug, option)}
+              />
+            ) : null}
+            {rowActions(model, { isHidden, canMoveUp, canMoveDown })}
+            {pickerSwitch(model, isHidden)}
+          </>
+        }
+      />
     );
   };
 
-  const groupLabel = (label: string, isFirst: boolean) => (
-    <div className={cn("px-2 pb-1.5", SETTINGS_MICRO_LABEL_CLASSNAME, isFirst ? "pt-1" : "pt-5")}>
+  const groupLabel = (label: string) => (
+    <div
+      className={cn(
+        "border-t border-border/50 px-3 pt-3 pb-1.5 first:border-t-0 sm:px-4",
+        SETTINGS_MICRO_LABEL_CLASSNAME,
+      )}
+    >
       {label}
     </div>
   );
@@ -564,120 +565,125 @@ export function ProviderModelsSection({
       }
       footer="Saved on this machine, so every device connected to it sees the same models."
     >
-      <div className="px-3 py-3 sm:px-4 lg:flex lg:h-full lg:min-h-0 lg:flex-col">
-        {/* Text actions without padding, so the toolbar's ends sit on the rows' edges. */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
-          {showFilter ? (
-            <SearchInput
-              value={filter}
-              onChange={(event) => setFilter(event.target.value)}
-              placeholder="Filter models"
-              frameClassName="w-56 max-w-full"
-              spellCheck={false}
-              aria-label="Filter models"
-              clearLabel="Clear model filter"
-              onClear={() => setFilter("")}
-            />
-          ) : null}
-          <span>
-            {models.length} model{models.length === 1 ? "" : "s"}
-            {hiddenCount > 0 ? ` · ${hiddenCount} hidden` : ""}
-          </span>
-          {builtInModels.length > 0 ? (
-            <InlineButton
-              tone="muted"
-              weight="normal"
-              className="ml-auto"
-              disabled={!canWritePreferences}
-              onClick={() =>
-                onHiddenModelsChange(
-                  nextHiddenModelsForBulkToggle(models, hiddenModels),
-                  builtInModels.map((model) => model.slug),
-                )
-              }
-            >
-              {allBuiltInModelsHidden ? "Show all in picker" : "Hide all from picker"}
-            </InlineButton>
-          ) : null}
-        </div>
-        <div
-          ref={listRef}
-          className="@container/model-list scroll-fade-y mt-2 -mx-2 max-h-64 overflow-y-auto lg:max-h-none lg:min-h-0 lg:flex-1"
-        >
-          {visibleModels.length === 0 ? (
-            <SettingsEmpty
-              icon={isFiltering ? <SearchIcon /> : <SparklesIcon />}
-              label={isFiltering ? "No models match." : "No models reported for this provider yet."}
-            />
-          ) : null}
-          {visibleModels.map((model, index) => {
-            const group = groupOf(model);
-            const previous = visibleModels[index - 1];
-            const startsGroup = previous === undefined || groupOf(previous) !== group;
-            const editingEntry =
-              canManageCustomModels && model.isCustom && editingSlug === model.slug
-                ? customModels.find((entry) => entry.slug === model.slug)
-                : undefined;
-            return (
-              <div key={`${instanceId}:${model.slug}:group`}>
-                {startsGroup && group === "hidden"
-                  ? groupLabel("Hidden from picker", index === 0)
-                  : null}
-                {renderRow(model)}
-                {editingEntry ? (
-                  <CustomModelEditor
-                    key={`${instanceId}:${model.slug}:editor`}
-                    instanceId={instanceId}
-                    driverKind={driverKind}
-                    entry={editingEntry}
-                    builtInModels={builtInModels}
-                    onSave={handleSaveEdit}
-                    onCancel={() => setEditingSlug(null)}
-                  />
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-
-        {!canManageCustomModels ? null : isAdding ? (
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-            <Input
-              id={`provider-instance-${instanceId}-custom-model`}
-              size="sm"
-              autoFocus
-              aria-label="Custom model slug"
-              value={input}
-              onChange={(event) => {
-                setInput(event.target.value);
-                if (error) setError(null);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  cancelAdd();
-                  return;
-                }
-                if (event.key !== "Enter") return;
-                event.preventDefault();
-                handleAdd();
-              }}
-              placeholder={driverKind ? CUSTOM_MODEL_PLACEHOLDER_BY_KIND[driverKind] : "model-slug"}
-              spellCheck={false}
-            />
-            <div className="flex shrink-0 gap-2">
-              <Button size="sm" variant="outline" onClick={handleAdd}>
-                Add
-              </Button>
-              <Button size="sm" variant="outline" onClick={cancelAdd}>
-                Cancel
-              </Button>
-            </div>
-          </div>
+      {/* Text actions without padding, so the toolbar's ends sit on the rows' edges. */}
+      <SettingsToolbar className="gap-x-3 text-xs text-muted-foreground">
+        {showFilter ? (
+          <SearchInput
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+            placeholder="Filter models"
+            frameClassName="w-56 max-w-full"
+            spellCheck={false}
+            aria-label="Filter models"
+            clearLabel="Clear model filter"
+            onClear={() => setFilter("")}
+          />
         ) : null}
+        <span>
+          {models.length} model{models.length === 1 ? "" : "s"}
+          {hiddenCount > 0 ? ` · ${hiddenCount} hidden` : ""}
+        </span>
+        {builtInModels.length > 0 ? (
+          <InlineButton
+            tone="muted"
+            weight="normal"
+            className="ml-auto"
+            disabled={!canWritePreferences}
+            onClick={() =>
+              onHiddenModelsChange(
+                nextHiddenModelsForBulkToggle(models, hiddenModels),
+                builtInModels.map((model) => model.slug),
+              )
+            }
+          >
+            {allBuiltInModelsHidden ? "Show all in picker" : "Hide all from picker"}
+          </InlineButton>
+        ) : null}
+      </SettingsToolbar>
+      <SettingsDenseList
+        ref={listRef}
+        className="scroll-fade-y max-h-64 overflow-y-auto lg:max-h-none"
+      >
+        {visibleModels.length === 0 ? (
+          <SettingsEmpty
+            icon={isFiltering ? <SearchIcon /> : <SparklesIcon />}
+            label={isFiltering ? "No models match." : "No models reported for this provider yet."}
+          />
+        ) : null}
+        {visibleModels.map((model, index) => {
+          const group = groupOf(model);
+          const previous = visibleModels[index - 1];
+          const startsGroup = previous === undefined || groupOf(previous) !== group;
+          const editingEntry =
+            canManageCustomModels && model.isCustom && editingSlug === model.slug
+              ? customModels.find((entry) => entry.slug === model.slug)
+              : undefined;
+          return (
+            <Fragment key={`${instanceId}:${model.slug}:group`}>
+              {startsGroup && group === "hidden" ? groupLabel("Hidden from picker") : null}
+              {renderRow(model)}
+              {canManageCustomModels && model.isCustom ? (
+                <DisclosurePanel open={editingEntry !== undefined}>
+                  {editingEntry ? (
+                    <CustomModelEditor
+                      key={`${instanceId}:${model.slug}:editor`}
+                      instanceId={instanceId}
+                      driverKind={driverKind}
+                      entry={editingEntry}
+                      builtInModels={builtInModels}
+                      onSave={handleSaveEdit}
+                      onCancel={() => setEditingSlug(null)}
+                    />
+                  ) : null}
+                </DisclosurePanel>
+              ) : null}
+            </Fragment>
+          );
+        })}
+      </SettingsDenseList>
 
-        {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
-      </div>
+      {canManageCustomModels ? (
+        <DisclosurePanel open={isAdding}>
+          <div className="flex flex-col gap-2 px-3 py-3 sm:px-4">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input
+                id={`provider-instance-${instanceId}-custom-model`}
+                size="sm"
+                autoFocus
+                aria-label="Custom model slug"
+                value={input}
+                onChange={(event) => {
+                  setInput(event.target.value);
+                  if (error) setError(null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    cancelAdd();
+                    return;
+                  }
+                  if (event.key !== "Enter") return;
+                  event.preventDefault();
+                  handleAdd();
+                }}
+                placeholder={
+                  driverKind ? CUSTOM_MODEL_PLACEHOLDER_BY_KIND[driverKind] : "model-slug"
+                }
+                spellCheck={false}
+              />
+              <div className="flex shrink-0 gap-2">
+                <Button size="sm" variant="outline" onClick={handleAdd}>
+                  Add
+                </Button>
+                <Button size="sm" variant="outline" onClick={cancelAdd}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+            {error ? <p className="text-xs text-destructive">{error}</p> : null}
+          </div>
+        </DisclosurePanel>
+      ) : null}
     </SettingsSection>
   );
 }

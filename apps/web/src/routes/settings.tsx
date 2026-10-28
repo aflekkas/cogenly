@@ -10,7 +10,10 @@ import { useLayoutEffect, type ReactNode } from "react";
 import { SettingsBreadcrumb } from "../components/settings/SettingsBreadcrumb";
 import { SidebarInset } from "../components/ui/sidebar";
 import { useNavigateToMainApp } from "../components/sidebar/mainAppLocation";
-import { settleModeSwitchMainPane } from "../components/sidebar/modes/modeSwitchMotion";
+import {
+  crossfadeModeSwitch,
+  settleModeSwitchMainPane,
+} from "../components/sidebar/modes/modeSwitchMotion";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { isElectron } from "../env";
 import { useEscapeToGoBack } from "../hooks/useNavigateBack";
@@ -58,6 +61,14 @@ function SettingsScopeBoundary({ pathname, children }: { pathname: string; child
   return children;
 }
 
+/** Settles a pending crossfade as the page it renders in mounts (before paint). */
+function SettleModeSwitchOnMount() {
+  useLayoutEffect(() => {
+    settleModeSwitchMainPane();
+  }, []);
+  return null;
+}
+
 function SettingsContentLayout() {
   const location = useLocation();
   const navigateToMainApp = useNavigateToMainApp();
@@ -68,12 +79,11 @@ function SettingsContentLayout() {
     : JSON.stringify(search);
   // The section's route, which changes only once its (lazily loaded) page
   // commits; until then the old page stays on screen. Hash and search changes
-  // within a section keep it. Its commit is the new frame of the crossfade
-  // into Settings (the rail's Settings button).
+  // within a section keep it. The page frame remounts on it and on the scope
+  // key, and that commit is the new frame of the crossfade into Settings (the
+  // rail's Settings button), to another section (the settings nav) or to
+  // another scope.
   const sectionRouteId = useChildMatches({ select: (matches) => matches[0]?.routeId });
-  useLayoutEffect(() => {
-    if (sectionRouteId !== undefined) settleModeSwitchMainPane();
-  }, [sectionRouteId]);
 
   return (
     // Clips vertically only, so content gliding past the pane's new left edge
@@ -88,6 +98,7 @@ function SettingsContentLayout() {
           {/* Every page shares this frame and its width; a new section starts
               its own scroller at the top. */}
           <SettingsPageContainer key={sectionRouteId}>
+            {sectionRouteId === undefined ? null : <SettleModeSwitchOnMount />}
             <SettingsScopeBoundary pathname={location.pathname}>
               <Outlet />
             </SettingsScopeBoundary>
@@ -107,14 +118,29 @@ function SettingsRouteLayout() {
       search={rawSearch}
       machinePage={MACHINE_SETTINGS_PATHS.has(pathname)}
       onChange={(next) => {
-        // Send every key so the retain middleware sees an explicit target.
-        void navigate({
-          to: pathname,
-          search: () => ({ machine: next.machine, repository: next.repository }),
-          hash: "",
-          resetScroll: false,
-          // A scope change filters the same page; back leaves the page instead.
-          replace: true,
+        const go = () => {
+          // Send every key so the retain middleware sees an explicit target.
+          void navigate({
+            to: pathname,
+            search: () => ({ machine: next.machine, repository: next.repository }),
+            hash: "",
+            resetScroll: false,
+            // A scope change filters the same page; back leaves the page instead.
+            replace: true,
+          });
+        };
+        // The page remounts for a new scope (a machine page only for a new
+        // machine), so that crossfades like a section switch.
+        const remounts =
+          next.machine !== rawSearch.machine ||
+          (!MACHINE_SETTINGS_PATHS.has(pathname) && next.repository !== rawSearch.repository);
+        if (!remounts) {
+          go();
+          return;
+        }
+        crossfadeModeSwitch(() => {
+          go();
+          return true;
         });
       }}
     >

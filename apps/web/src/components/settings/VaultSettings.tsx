@@ -322,30 +322,37 @@ function VaultItemRow(props: {
   return (
     <SettingsListItem
       title={display.title}
-      description={description || undefined}
+      description={
+        description || display.internalName ? (
+          <>
+            {description ? <span className="block">{description}</span> : null}
+            {display.internalName ? (
+              // The generated name agents use for it: kept findable on a line
+              // of its own, never the headline or a wrap in the facts below.
+              <span className="flex min-w-0 items-center gap-0.5">
+                <Tooltip>
+                  <TooltipTrigger
+                    delay={300}
+                    render={<span className="min-w-0 truncate font-mono" />}
+                  >
+                    {display.internalName}
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">{display.internalName}</TooltipPopup>
+                </Tooltip>
+                <CopyButton
+                  size="icon-micro"
+                  value={display.internalName}
+                  label="Copy item name"
+                  target="item name"
+                />
+              </span>
+            ) : null}
+          </>
+        ) : undefined
+      }
       status={
         <SettingsListMeta>
           <SettingsTag>{VAULT_TYPE_LABELS[item.type]}</SettingsTag>
-          {display.internalName ? (
-            // The generated name agents use for it: kept findable, never the headline.
-            <span className="flex min-w-0 items-center gap-0.5">
-              <Tooltip>
-                <TooltipTrigger
-                  delay={300}
-                  render={<span className="max-w-48 truncate font-mono" />}
-                >
-                  {display.internalName}
-                </TooltipTrigger>
-                <TooltipPopup side="top">{display.internalName}</TooltipPopup>
-              </Tooltip>
-              <CopyButton
-                size="icon-micro"
-                value={display.internalName}
-                label="Copy item name"
-                target="item name"
-              />
-            </span>
-          ) : null}
           {props.paired && item.portability === "machine" ? (
             <Tooltip>
               <TooltipTrigger delay={300} render={<SettingsTag />}>

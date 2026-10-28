@@ -24,7 +24,7 @@ import { PULL_REQUEST_MERGE_METHOD_LABELS } from "~/lib/pullRequestContext";
 import { useEnvironmentQuery } from "../../state/query";
 import { sourceControlEnvironment } from "../../state/sourceControl";
 import { Button } from "../ui/button";
-import { DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
+import { DisclosurePanel } from "../ui/disclosure";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Skeleton } from "../ui/skeleton";
 import { Switch } from "../ui/switch";
@@ -37,6 +37,7 @@ import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SourceControlWritingSettingsSection } from "./SourceControlWritingSettings";
 import {
   SettingResetButton,
+  SettingsDisclosureToggle,
   SettingsEmpty,
   SettingsField,
   SettingsNumberField,
@@ -273,14 +274,13 @@ function DiscoveryItemRow({
       }
       control={
         hasDetails ? (
-          <DisclosureTrigger
-            variant="quiet"
+          <SettingsDisclosureToggle
             open={isExpanded}
-            onClick={() => setIsExpanded(!isExpanded)}
-            aria-label={`${isExpanded ? "Hide" : "Show"} ${item.label} ${detailsLabel.toLowerCase()}`}
+            onOpenChange={setIsExpanded}
+            label={`${item.label} ${detailsLabel.toLowerCase()}`}
           >
             {detailsLabel}
-          </DisclosureTrigger>
+          </SettingsDisclosureToggle>
         ) : undefined
       }
     >

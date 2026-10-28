@@ -827,8 +827,9 @@ function WhenClauseControl({
   return (
     <Popover>
       <PopoverTrigger
-        // Shares the title line and gives way first; the full clause is in its tooltip.
-        render={<Button variant="ghost-muted" size="micro" className="min-w-0 shrink-100" />}
+        // Shares the title line or wraps under it, truncating only on a line of
+        // its own; the full clause is in its tooltip.
+        render={<Button variant="ghost-muted" size="micro" className="max-w-full min-w-0" />}
         title={summary ?? `when ${expression}`}
         aria-label={`Edit when clause for ${label}`}
       >
@@ -906,8 +907,9 @@ function KeybindingSourceBadge({ source }: { source: KeybindingRow["source"] }) 
 }
 
 /**
- * The command label, its source badge and its when clause on one line at every
- * width, so every row is one height; the clause truncates before the label does.
+ * The command label, its source badge and its when clause on one line where
+ * they fit. In a narrow row the clause wraps under the label, and the label
+ * wraps rather than truncating, since it is what tells related commands apart.
  */
 function KeybindingRowTitle({
   row,
@@ -919,10 +921,10 @@ function KeybindingRowTitle({
   variables: ReadonlyArray<WhenVariableOption>;
 }) {
   return (
-    <span className="flex min-w-0 items-center gap-2">
+    <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
       <Tooltip>
         <TooltipTrigger render={<span className="flex min-w-0 items-center gap-2" />}>
-          <span className="truncate">{row.label}</span>
+          <span className="min-w-0 wrap-break-word">{row.label}</span>
           <KeybindingSourceBadge source={row.source} />
         </TooltipTrigger>
         <TooltipPopup side="top">{row.command}</TooltipPopup>
