@@ -11,7 +11,7 @@ import { AppleIcon, AndroidIcon } from "../Icons";
 import { Spinner } from "../ui/spinner";
 import type { EnvironmentId, SshDeviceHostConfig } from "@cogenly/contracts";
 import { randomUUID } from "../../lib/utils";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { deviceEnvironment } from "../../state/device";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -151,6 +151,25 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
     },
     onRemove: (host: SshDeviceHostConfig) => void save(host, true),
   };
+  const addHostButton = (size: "sm" | "xs") => (
+    <Button
+      size={size}
+      variant="outline"
+      disabled={!canConfigure || busy || !props.environmentId || editing !== null}
+      onClick={() => {
+        setOriginalHost(null);
+        setEditing({ id: randomUUID(), label: "", target: "" });
+      }}
+    >
+      <PlusIcon /> Add host
+    </Button>
+  );
+  const foldedByMachine = hostEnvironments.length > 1 && groupedHosts === null;
+  // An empty list offers its one action in the empty state, not twice.
+  const showsEmptyAction =
+    props.environmentId !== null &&
+    !foldedByMachine &&
+    hostEnvironments.every((environment) => environment.hosts.length === 0);
   return (
     <SettingsRow
       id="device-hosts"
@@ -158,19 +177,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
       serverScoped
       settingKeys={["deviceHosts"]}
       description="Other machines with simulators or emulators. This machine connects to them over SSH and sets up the device tools."
-      control={
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!canConfigure || busy || !props.environmentId || editing !== null}
-          onClick={() => {
-            setOriginalHost(null);
-            setEditing({ id: randomUUID(), label: "", target: "" });
-          }}
-        >
-          <PlusIcon className="size-3.5" /> Add host
-        </Button>
-      }
+      control={showsEmptyAction ? null : addHostButton("sm")}
     >
       <div className="mt-2">
         {!props.environmentId ? (
@@ -179,7 +186,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
           </p>
         ) : (
           <>
-            {hostEnvironments.length > 1 && groupedHosts === null ? (
+            {foldedByMachine ? (
               <div className="space-y-2">
                 {hostEnvironments.map((environment) => (
                   <FoldedSettingsSection
@@ -213,6 +220,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
                 environments={hostEnvironments}
                 groups={groupedHosts ?? undefined}
                 compact={hostEnvironments.length > 1}
+                emptyAction={addHostButton("xs")}
                 {...listActions}
               />
             )}
@@ -240,6 +248,7 @@ function DeviceHostList({
   environments,
   groups,
   compact = false,
+  emptyAction,
   busy,
   onEdit,
   onRemove,
@@ -249,6 +258,8 @@ function DeviceHostList({
   environments: ReadonlyArray<DeviceHostEnvironment>;
   groups?: ReadonlyArray<DeviceHostGroup> | undefined;
   compact?: boolean;
+  /** The list's add action, shown in its empty state. */
+  emptyAction?: ReactNode;
   busy: boolean;
   onEdit: (host: SshDeviceHostConfig) => void;
   onRemove: (host: SshDeviceHostConfig) => void;
@@ -294,7 +305,11 @@ function DeviceHostList({
   if (rows.length === 0) {
     return (
       <SettingsGroup variant="inset" divided={false}>
-        <SettingsEmpty icon={<SmartphoneIcon />} label="No device hosts yet." />
+        <SettingsEmpty
+          icon={<SmartphoneIcon />}
+          label="No device hosts yet."
+          action={emptyAction}
+        />
       </SettingsGroup>
     );
   }

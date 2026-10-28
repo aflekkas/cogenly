@@ -39,7 +39,7 @@ import { useEnvironments } from "../../state/environments";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { SearchInput } from "../ui/search-input";
+import { SettingsListSearch } from "./SettingsList";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
 import { Kbd, KbdGroup } from "../ui/kbd";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -97,35 +97,6 @@ function KeybindingPill({ value }: { value: string }) {
         <Kbd key={key}>{keycapLabel(part, navigator.platform)}</Kbd>
       ))}
     </KbdGroup>
-  );
-}
-
-/** Filter box in the page toolbar: matches command names, command ids and keys. */
-function KeybindingsSearchInput({
-  query,
-  onChange,
-}: {
-  query: string;
-  onChange: (next: string) => void;
-}) {
-  return (
-    <SearchInput
-      frameClassName="basis-full sm:basis-0 sm:flex-1"
-      value={query}
-      onChange={(event) => onChange(event.currentTarget.value)}
-      onKeyDown={(event) => {
-        // The settings route treats an unhandled Escape as "go back";
-        // inside the search box it clears, then leaves the field.
-        if (event.key !== "Escape") return;
-        event.preventDefault();
-        if (query.length > 0) onChange("");
-        else event.currentTarget.blur();
-      }}
-      placeholder="Search keybindings"
-      aria-label="Search keybindings"
-      clearLabel="Clear keybinding search"
-      onClear={() => onChange("")}
-    />
   );
 }
 
@@ -922,7 +893,10 @@ function KeybindingRowTitle({
   variables: ReadonlyArray<WhenVariableOption>;
 }) {
   return (
-    <span className="flex min-w-0 flex-col items-start gap-y-0.5 @min-[44rem]/settings-row:flex-row @min-[44rem]/settings-row:flex-wrap @min-[44rem]/settings-row:items-center @min-[44rem]/settings-row:gap-x-2">
+    // On a line of its own the clause's text starts on the label's edge: the
+    // trigger is pulled back by its inline padding, so only its hover fill
+    // reaches past it.
+    <span className="flex min-w-0 flex-col items-start gap-y-0.5 [&>[data-slot=button]]:-ms-1.5 @min-[44rem]/settings-row:flex-row @min-[44rem]/settings-row:flex-wrap @min-[44rem]/settings-row:items-center @min-[44rem]/settings-row:gap-x-2 @min-[44rem]/settings-row:[&>[data-slot=button]]:ms-0">
       <Tooltip>
         <TooltipTrigger render={<span className="flex min-w-0 items-center gap-2" />}>
           <span className="min-w-0 wrap-break-word">{row.label}</span>
@@ -1394,7 +1368,8 @@ export function KeybindingsSettingsPanel() {
         }
       >
         <SettingsToolbar>
-          <KeybindingsSearchInput query={query} onChange={setQuery} />
+          {/* Matches command names, command ids and keys. */}
+          <SettingsListSearch label="Search keybindings" value={query} onValueChange={setQuery} />
         </SettingsToolbar>
       </SettingsSection>
 

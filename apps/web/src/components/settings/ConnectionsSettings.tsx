@@ -22,6 +22,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -1968,8 +1969,23 @@ function CloudLinkRow({
   return <ConfiguredCloudLinkRow canManageRelay={canManageRelay} />;
 }
 
-/** No action of its own: the section's Connect a machine sits right above it. */
-function EmptyRemoteEnvironments({ cloudEnabled = true }: { readonly cloudEnabled?: boolean }) {
+interface EmptyRemoteEnvironmentsActions {
+  readonly onConnect: () => void;
+  /** Whether the empty state is showing, so the section drops its header copy of Connect a machine. */
+  readonly onShownChange: (shown: boolean) => void;
+}
+
+/** Like every empty list, it carries the list's add action while it shows. */
+function EmptyRemoteEnvironments({
+  cloudEnabled = true,
+  onConnect,
+  onShownChange,
+}: EmptyRemoteEnvironmentsActions & { readonly cloudEnabled?: boolean }) {
+  // Before paint, so the header action never flashes beside this one.
+  useLayoutEffect(() => {
+    onShownChange(true);
+    return () => onShownChange(false);
+  }, [onShownChange]);
   return (
     <SettingsEmpty
       icon={<ChevronsLeftRightEllipsisIcon />}
@@ -1978,6 +1994,12 @@ function EmptyRemoteEnvironments({ cloudEnabled = true }: { readonly cloudEnable
           ? "Connect another Cogenly machine by its address, over SSH, or through Cogenly Connect."
           : "Connect another Cogenly machine by its address or over SSH."
       }
+      action={
+        <Button size="xs" variant="outline" onClick={onConnect}>
+          <PlusIcon />
+          Connect a machine
+        </Button>
+      }
     />
   );
 }
@@ -1985,7 +2007,8 @@ function EmptyRemoteEnvironments({ cloudEnabled = true }: { readonly cloudEnable
 function CloudRemoteEnvironmentRows({
   primaryEnvironmentId,
   savedEnvironments,
-}: {
+  ...emptyActions
+}: EmptyRemoteEnvironmentsActions & {
   readonly primaryEnvironmentId: EnvironmentId | null;
   readonly savedEnvironments: ReadonlyArray<EnvironmentPresentation>;
 }) {
@@ -1993,10 +2016,10 @@ function CloudRemoteEnvironmentRows({
     <CloudEnvironmentConnectRows
       primaryEnvironmentId={primaryEnvironmentId}
       savedEnvironments={savedEnvironments}
-      empty={<EmptyRemoteEnvironments />}
+      empty={<EmptyRemoteEnvironments {...emptyActions} />}
     />
   ) : savedEnvironments.length === 0 ? (
-    <EmptyRemoteEnvironments cloudEnabled={false} />
+    <EmptyRemoteEnvironments cloudEnabled={false} {...emptyActions} />
   ) : null;
 }
 
@@ -2139,6 +2162,8 @@ export function ConnectionsSettings() {
   const [addBackendDialogOpen, setAddBackendDialogOpen] = useState(false);
   // Set when the dialog adds a route to a saved machine instead of a new one.
   const [routeTarget, setRouteTarget] = useState<EnvironmentPresentation | null>(null);
+  // While the machine list is empty, its empty state offers Connect a machine instead of the header.
+  const [remoteListEmpty, setRemoteListEmpty] = useState(false);
   const [savedBackendMode, setSavedBackendMode] = useState<"remote" | "ssh">("remote");
   const [savedBackendHost, setSavedBackendHost] = useState("");
   const [savedBackendPairingCode, setSavedBackendPairingCode] = useState("");
@@ -3822,9 +3847,11 @@ export function ConnectionsSettings() {
                 }
               }}
             >
-              <DialogTrigger
-                render={<SettingsSectionAction>Connect a machine</SettingsSectionAction>}
-              />
+              {remoteListEmpty ? null : (
+                <DialogTrigger
+                  render={<SettingsSectionAction>Connect a machine</SettingsSectionAction>}
+                />
+              )}
               <DialogPopup className="max-h-[80dvh] sm:max-w-3xl">
                 <DialogHeader>
                   <DialogTitle>
@@ -3883,6 +3910,12 @@ export function ConnectionsSettings() {
         <CloudRemoteEnvironmentRows
           primaryEnvironmentId={primaryEnvironmentId}
           savedEnvironments={savedEnvironments}
+          onShownChange={setRemoteListEmpty}
+          onConnect={() => {
+            setRouteTarget(null);
+            setSavedBackendError(null);
+            setAddBackendDialogOpen(true);
+          }}
         />
       </SettingsSection>
       <RenameEnvironmentDialog

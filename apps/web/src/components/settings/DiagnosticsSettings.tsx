@@ -8,6 +8,7 @@ import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { AuthEnvironmentMaintainScope } from "@cogenly/contracts";
 import {
   ActivityIcon,
+  CircleCheckIcon,
   CpuIcon,
   FolderOpenIcon,
   HistoryIcon,
@@ -16,7 +17,6 @@ import {
   ScrollTextIcon,
   TerminalIcon,
   TimerIcon,
-  TriangleAlertIcon,
 } from "lucide-react";
 import { ChevronDown, ChevronRight } from "lucide";
 import {
@@ -1378,7 +1378,7 @@ export function DiagnosticsSettingsPanel() {
           />
         ) : (
           <EmptyRows
-            icon={<TriangleAlertIcon />}
+            icon={<CircleCheckIcon />}
             loading={isInitialLoading}
             label={isInitialLoading ? "Loading failures…" : "No failed spans found."}
           />

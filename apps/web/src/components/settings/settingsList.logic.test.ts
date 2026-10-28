@@ -1,8 +1,25 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { groupRepeatedEntries, matchesSettingsListQuery } from "./settingsList.logic";
+import {
+  groupRepeatedEntries,
+  matchesSettingsListQuery,
+  settingsSearchEscapeClears,
+} from "./settingsList.logic";
 
 describe("settings list search", () => {
+  it("Escape clears a query before it can leave Settings", () => {
+    const escape = { key: "Escape", isComposing: false };
+    expect(settingsSearchEscapeClears(escape, "deploy")).toBe(true);
+    expect(settingsSearchEscapeClears(escape, " ")).toBe(true);
+    // Nothing to clear: Escape goes on to the page.
+    expect(settingsSearchEscapeClears(escape, "")).toBe(false);
+  });
+
+  it("leaves other keys and an IME's Escape alone", () => {
+    expect(settingsSearchEscapeClears({ key: "Enter", isComposing: false }, "deploy")).toBe(false);
+    expect(settingsSearchEscapeClears({ key: "Escape", isComposing: true }, "deploy")).toBe(false);
+  });
+
   it("finds a name or description regardless of case and surrounding query whitespace", () => {
     expect(
       matchesSettingsListQuery("  deploy  ", ["Nightly release", "Deploy the web client"]),

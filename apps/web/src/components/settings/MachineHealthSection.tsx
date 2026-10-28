@@ -168,17 +168,13 @@ export function MachineHealthSections({
   );
 }
 
-function StatusBadge({ status }: { readonly status: MachineHealthStatus | "connecting" }) {
+function StatusBadge({ status }: { readonly status: MachineHealthStatus }) {
   const node = useStatusFade<HTMLSpanElement>(status);
   return (
     <span ref={node} className="flex">
-      {status === "connecting" ? (
-        <SettingsStatusBadge tone="neutral">Connecting…</SettingsStatusBadge>
-      ) : (
-        <SettingsStatusBadge tone={HEALTH_STATUS_TONES[status]}>
-          {HEALTH_STATUS_LABELS[status]}
-        </SettingsStatusBadge>
-      )}
+      <SettingsStatusBadge tone={HEALTH_STATUS_TONES[status]}>
+        {HEALTH_STATUS_LABELS[status]}
+      </SettingsStatusBadge>
     </span>
   );
 }
@@ -238,8 +234,6 @@ function MachineHealthSection({
     if (machine.online && !wasOnline.current) refreshReport();
     wasOnline.current = machine.online;
   }, [machine.online, refreshReport]);
-  const overall: MachineHealthStatus | "connecting" | null =
-    view._tag === "connecting" ? "connecting" : view._tag === "report" ? view.overall : null;
   const context: MachineHealthActionContext = {
     originEnvironmentId: machine.environmentId,
     originMachineName: machine.name,
@@ -249,11 +243,12 @@ function MachineHealthSection({
     supportsTurnOffProvider,
   };
 
+  // No overall badge in the header: the first row already says it ("1 check
+  // is failing", "Connecting to MacBook…"), right under it.
   return (
     <SettingsSection
       id={machineHealthAnchorId(machine.environmentId)}
       title={`${machine.name} health`}
-      headerAction={overall === null ? null : <StatusBadge status={overall} />}
     >
       {view._tag === "error" ? (
         <SettingsRow title={`Couldn't check ${machine.name}'s health`} description={query.error} />

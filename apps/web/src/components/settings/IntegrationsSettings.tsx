@@ -49,7 +49,7 @@ import { ScreenRotationIcon } from "~/browser/ScreenRotationIcon";
 import { AnimatedHeight } from "~/components/AnimatedHeight";
 import { resolveEnvironmentOptionLabel } from "~/components/BranchToolbar.logic";
 import { previewBridge } from "~/components/preview/previewBridge";
-import { cn, randomUUID } from "~/lib/utils";
+import { randomUUID } from "~/lib/utils";
 import { useEnvironments, usePrimaryEnvironment } from "~/state/environments";
 import { deviceEnvironment, useDeviceState } from "~/state/device";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
@@ -114,6 +114,7 @@ import {
 import {
   SettingsDisclosure,
   SettingsField,
+  SettingsInsetRow,
   SettingsUnavailableGroup,
   SettingResetButton,
   SettingsRow,
@@ -1311,21 +1312,14 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
           // A profile named "Default" already says it; the tag would only repeat it.
           const showDefaultTag = isDefault && profile.name.trim().toLowerCase() !== "default";
           return (
-            <div key={profile.id} className="flex min-h-11 items-center gap-3 px-3 py-2 sm:px-4">
-              <span className="flex min-w-0 flex-1 items-center gap-2">
-                {builtIn ? (
-                  // Dimmed here rather than on the table: a wrapper-level dim
-                  // stacks with the rename field's and the row menu button's
-                  // own, landing them near 0.41 while every other disabled
-                  // control in the block sits at 0.64.
-                  <span
-                    className={cn(
-                      "truncate text-sm text-foreground",
-                      profileWritesDisabled && "opacity-64",
-                    )}
-                  >
-                    {profile.name}
-                  </span>
+            // Outside the desktop app the unavailable group mutes the name like
+            // every other title in the block; the controls carry their own
+            // disabled look, so nothing here fades a second time.
+            <SettingsInsetRow
+              key={profile.id}
+              title={
+                builtIn ? (
+                  profile.name
                 ) : (
                   <SettingsField>
                     <DraftInput
@@ -1338,74 +1332,71 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                       onCommit={(next) => renameProfile(profile.id, next)}
                     />
                   </SettingsField>
-                )}
-                {/* Dimmed with the rest of the row, whose controls are all disabled. */}
-                {showDefaultTag ? (
-                  <span className={cn("flex", profileWritesDisabled && "opacity-64")}>
-                    <SettingsTag>Default</SettingsTag>
-                  </span>
-                ) : null}
-              </span>
-              <Menu>
-                <MenuTrigger
-                  disabled={profileWritesDisabled || importInFlight}
-                  render={
-                    <Button
-                      size="icon-sm"
-                      variant="ghost-muted"
-                      disabled={profileWritesDisabled || importInFlight}
-                      aria-label={`${profile.name} options`}
-                    />
-                  }
-                >
-                  <MoreVertical />
-                </MenuTrigger>
-                <MenuPopup align="end">
-                  <MenuItem
-                    disabled={!settingsHydrated || isDefault}
-                    onClick={() => {
-                      if (settingsHydrated) {
-                        updateSettings({ browserDefaultProfileId: profile.id });
-                      }
-                    }}
+                )
+              }
+              tag={showDefaultTag ? <SettingsTag>Default</SettingsTag> : null}
+              control={
+                <Menu>
+                  <MenuTrigger
+                    disabled={profileWritesDisabled || importInFlight}
+                    render={
+                      <Button
+                        size="icon-sm"
+                        variant="ghost-muted"
+                        disabled={profileWritesDisabled || importInFlight}
+                        aria-label={`${profile.name} options`}
+                      />
+                    }
                   >
-                    Set as default
-                  </MenuItem>
-                  <MenuItem
-                    disabled={!settingsHydrated || !removalAvailable}
-                    onClick={() => {
-                      // Clearing a server copy closes its open tabs, so it asks first.
-                      if (serverProfileData.environmentIds.length > 0) {
-                        setProfilePendingClear(profile);
-                      } else clearProfileData(profile.id, profile.name);
-                    }}
-                  >
-                    Clear cookies and cache
-                  </MenuItem>
-                  {builtIn ? null : (
+                    <MoreVertical />
+                  </MenuTrigger>
+                  <MenuPopup align="end">
                     <MenuItem
-                      variant="destructive"
-                      disabled={!settingsHydrated || !removalAvailable}
+                      disabled={!settingsHydrated || isDefault}
                       onClick={() => {
-                        if (settingsHydrated) setProfilePendingRemoval(profile);
+                        if (settingsHydrated) {
+                          updateSettings({ browserDefaultProfileId: profile.id });
+                        }
                       }}
                     >
-                      Remove profile and data
+                      Set as default
                     </MenuItem>
-                  )}
-                  {!removalAvailable ? (
-                    <>
-                      <MenuSeparator />
-                      <MenuItem disabled>
-                        {environmentsReady
-                          ? "Connect to a machine to clear profile data"
-                          : "Checking machines…"}
+                    <MenuItem
+                      disabled={!settingsHydrated || !removalAvailable}
+                      onClick={() => {
+                        // Clearing a server copy closes its open tabs, so it asks first.
+                        if (serverProfileData.environmentIds.length > 0) {
+                          setProfilePendingClear(profile);
+                        } else clearProfileData(profile.id, profile.name);
+                      }}
+                    >
+                      Clear cookies and cache
+                    </MenuItem>
+                    {builtIn ? null : (
+                      <MenuItem
+                        variant="destructive"
+                        disabled={!settingsHydrated || !removalAvailable}
+                        onClick={() => {
+                          if (settingsHydrated) setProfilePendingRemoval(profile);
+                        }}
+                      >
+                        Remove profile and data
                       </MenuItem>
-                    </>
-                  ) : null}
-                </MenuPopup>
-              </Menu>
-            </div>
+                    )}
+                    {!removalAvailable ? (
+                      <>
+                        <MenuSeparator />
+                        <MenuItem disabled>
+                          {environmentsReady
+                            ? "Connect to a machine to clear profile data"
+                            : "Checking machines…"}
+                        </MenuItem>
+                      </>
+                    ) : null}
+                  </MenuPopup>
+                </Menu>
+              }
+            />
           );
         })}
       </SettingsGroup>

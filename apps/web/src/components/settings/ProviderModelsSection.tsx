@@ -28,7 +28,6 @@ import { MAX_CUSTOM_MODEL_LENGTH } from "../../modelSelection";
 import { Button, InlineButton } from "../ui/button";
 import { DisclosurePanel } from "../ui/disclosure";
 import { Input } from "../ui/input";
-import { SearchInput } from "../ui/search-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -42,6 +41,7 @@ import {
   SettingsSectionAction,
   SettingsToolbar,
 } from "./settingsLayout";
+import { SettingsListSearch } from "./SettingsList";
 import { SettingsTag } from "./SettingsStatus";
 
 /**
@@ -568,15 +568,11 @@ export function ProviderModelsSection({
       {/* Text actions without padding, so the toolbar's ends sit on the rows' edges. */}
       <SettingsToolbar className="gap-x-3 text-xs text-muted-foreground">
         {showFilter ? (
-          <SearchInput
+          <SettingsListSearch
+            label="Filter models"
+            width="field"
             value={filter}
-            onChange={(event) => setFilter(event.target.value)}
-            placeholder="Filter models"
-            frameClassName="w-56 max-w-full"
-            spellCheck={false}
-            aria-label="Filter models"
-            clearLabel="Clear model filter"
-            onClear={() => setFilter("")}
+            onValueChange={setFilter}
           />
         ) : null}
         <span>

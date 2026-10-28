@@ -3,6 +3,7 @@ import { useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 
 import { cn } from "../../lib/utils";
 import { canAnimate, prefersReducedMotion, settingsMotionTiming } from "./settingsMotion";
+import { clampedPreviewText } from "./settingsText.logic";
 
 type ExpandPhase = "collapsed" | "opening" | "open" | "closing";
 
@@ -12,7 +13,8 @@ type ExpandPhase = "collapsed" | "opening" | "open" | "closing";
  * shrinks the height between the clamp and the full text (base token, both
  * ways), like a long message's "Show full message" in the timeline; the clamp
  * comes back only once the text has closed. Reduced motion swaps at once and
- * fades the text in.
+ * fades the text in. While clamped, a pretty-printed JSON payload's opening
+ * brackets share its first line, so the preview shows content.
  */
 export function ExpandableText({
   text,
@@ -88,13 +90,15 @@ export function ExpandableText({
           canExpand && phase === "collapsed" ? collapsedClassName : null,
         )}
       >
-        {text}
+        {/* The preview swaps in on the click either way, like the clamp's height. */}
+        {canExpand && !expanded ? clampedPreviewText(text) : text}
       </div>
       {canExpand ? (
         <InlineButton
           aria-expanded={expanded}
           aria-controls={textId}
           tone="muted"
+          weight="normal"
           className="mt-1"
           onClick={toggle}
         >

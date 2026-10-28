@@ -1,3 +1,4 @@
+import { ChevronDownIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import type { DeviceToolVersions as ToolVersions } from "@cogenly/contracts";
 import { InlineButton } from "~/components/ui/button";
@@ -36,7 +37,8 @@ export function DeviceToolVersions({
             ? `${label}: ${version ? `version ${version}` : selected ? "not installed" : "version unknown"}. Show details`
             : undefined
         }
-        render={<InlineButton tone="muted" />}
+        // Sits in a muted meta line: its weight, with a chevron for the popover.
+        render={<InlineButton tone="muted" weight="normal" />}
       >
         {kind
           ? version
@@ -47,6 +49,7 @@ export function DeviceToolVersions({
           : error
             ? "Versions unavailable"
             : "Versions"}
+        <ChevronDownIcon aria-hidden className="size-3" />
       </PopoverTrigger>
       <PopoverPopup align="end" width="md">
         <PopoverTitle>{kind ? label : "Device tools"}</PopoverTitle>

@@ -357,12 +357,11 @@ function IntegrationDetail({
           aria-label={`Remove ${integrationTitle(integration)}`}
           onClick={() =>
             void run(async () => {
-              if (
-                !(await requestConfirmDialog(
-                  `Remove ${integrationTitle(integration)}? Agents will no longer have access through this integration.`,
-                ))
-              )
-                return;
+              const message = `Remove ${integrationTitle(integration)}?\nAgents will no longer have access through this integration.`;
+              const confirmed =
+                (await requestConfirmDialog(message, { variant: "destructive" })) ??
+                window.confirm(message);
+              if (!confirmed) return;
               const result = await remove({ environmentId, input: { id: integration.id } });
               if (result._tag !== "Success" && !isAtomCommandInterrupted(result))
                 action.fail(integrationErrorText(squashAtomCommandFailure(result)));

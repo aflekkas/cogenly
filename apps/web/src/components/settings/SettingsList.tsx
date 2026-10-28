@@ -5,29 +5,47 @@ import { SearchInput } from "../ui/search-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { cn } from "../../lib/utils";
 import { SettingsDisclosureToggle, SettingsRowContent } from "./settingsLayout";
+import { settingsSearchEscapeClears } from "./settingsList.logic";
 
 export {
   SettingsEmpty as SettingsListEmpty,
   SettingsToolbar as SettingsListToolbar,
 } from "./settingsLayout";
 
+/**
+ * Every settings search box. Escape clears the query and stays on the page;
+ * on an empty box it reaches the page, which leaves Settings.
+ */
 export function SettingsListSearch({
   label,
+  placeholder = label,
+  width = "fill",
   value,
   onValueChange,
 }: {
   label: string;
+  /** Says what matches ("Search by package, version or license"); defaults to `label`. */
+  placeholder?: string;
+  /** `fill` takes the toolbar's free width; `field` is a `SettingsField` wide, beside a summary. */
+  width?: "fill" | "field";
   value: string;
   onValueChange: (value: string) => void;
 }) {
   return (
     <SearchInput
       size="sm"
-      frameClassName="min-w-40 flex-1"
+      frameClassName={width === "fill" ? "min-w-40 flex-1" : "w-56 max-w-full"}
       aria-label={label}
-      placeholder={label}
+      placeholder={placeholder}
+      spellCheck={false}
       value={value}
       onChange={(event) => onValueChange(event.currentTarget.value)}
+      onKeyDown={(event) => {
+        if (!settingsSearchEscapeClears(event.nativeEvent, value)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onValueChange("");
+      }}
       clearLabel={`Clear ${label.toLowerCase()}`}
       onClear={() => onValueChange("")}
     />

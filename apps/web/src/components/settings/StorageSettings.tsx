@@ -30,6 +30,7 @@ import {
   SettingsField,
   SettingsNote,
   SettingsNumberField,
+  SettingsPathText,
   SettingsRefreshAction,
   SettingsRow,
   SettingsSection,
@@ -549,10 +550,10 @@ function StorageUsage({ environmentId, label }: { environmentId: EnvironmentId; 
               key={volume.id}
               title="Disk"
               description={
-                // Long worktree paths truncate; the tooltip shows the whole one.
+                // Long worktree paths keep their tail; the tooltip shows the whole one.
                 <Tooltip>
-                  <TooltipTrigger delay={300} render={<span className="block truncate" />}>
-                    {volume.path}
+                  <TooltipTrigger delay={300} render={<span className="block min-w-0" />}>
+                    <SettingsPathText path={volume.path} />
                   </TooltipTrigger>
                   <TooltipPopup side="top">{volume.path}</TooltipPopup>
                 </Tooltip>

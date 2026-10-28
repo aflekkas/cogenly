@@ -45,6 +45,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useOptionalSettingsScope } from "./SettingsScopeContext";
 import { MachineScopeMenu, SettingsScopeSentence } from "./SettingsScopeSentence";
 import { selectMachineLocalSettingsTargets } from "./scopedSettings";
+import { compactPathHint } from "./settingsText.logic";
 
 const EMPTY_SETTING_KEYS: readonly (keyof ServerSettings)[] = [];
 
@@ -436,6 +437,8 @@ export function SettingsNote({
  * An empty list inside a card (settings, project cards): the `inline` `Empty`,
  * a glyph for what the list holds, one short muted sentence and one `xs`
  * action. Every empty list looks like this, including one nested in a row.
+ * An empty list's add action ("Add host", "New task") is that action, and
+ * the section header or row drops its own copy while the empty state shows.
  * Loading and failures are `SettingsRow`s with a title ("Loading memory…",
  * "Could not load memory") instead.
  */
@@ -589,8 +592,12 @@ export function SettingsField({ children }: { children: ReactNode }) {
 /**
  * A folder path in a `SettingsField`. Outside editing, a long path shows its
  * tail, the part that tells folders apart, and the tooltip shows all of it.
+ * A long default in `placeholder` is compacted around an ellipsis for the
+ * same reason, with the whole default in the tooltip.
  */
-export function SettingsPathInput({ value, ...props }: DraftInputProps) {
+export function SettingsPathInput({ value, placeholder, ...props }: DraftInputProps) {
+  const hint = placeholder === undefined ? undefined : compactPathHint(placeholder);
+  const fullText = value.trim() !== "" ? value : hint !== placeholder ? placeholder : undefined;
   const inputRef = useRef<HTMLInputElement>(null);
   useLayoutEffect(() => {
     const input = inputRef.current;
@@ -614,12 +621,32 @@ export function SettingsPathInput({ value, ...props }: DraftInputProps) {
     };
   }, [value]);
   return (
-    <Tooltip disabled={value.trim() === ""}>
+    <Tooltip disabled={fullText === undefined}>
       <TooltipTrigger delay={400} render={<span className="flex min-w-0 flex-1" />}>
-        <DraftInput {...props} ref={inputRef} value={value} />
+        <DraftInput
+          {...props}
+          {...(hint === undefined ? {} : { placeholder: hint })}
+          ref={inputRef}
+          value={value}
+        />
       </TooltipTrigger>
-      <TooltipPopup side="top">{value}</TooltipPopup>
+      <TooltipPopup side="top">{fullText}</TooltipPopup>
     </Tooltip>
+  );
+}
+
+/**
+ * A folder path as read-only text in a row: one line that, when it can't
+ * fit, drops its head behind an ellipsis and keeps the tail, the part that
+ * tells folders and volumes apart. Put the whole path in a tooltip or title.
+ */
+export function SettingsPathText({ path }: { path: string }) {
+  return (
+    // Right-to-left only so the ellipsis lands at the start; the path itself
+    // stays left-to-right inside the isolate.
+    <span dir="rtl" className="block min-w-0 truncate text-left">
+      <bdi dir="ltr">{path}</bdi>
+    </span>
   );
 }
 
@@ -664,14 +691,16 @@ export function SettingsNumberField({
   }
   const committed = save.onValueCommitted;
   return (
-    <div className="flex shrink-0 items-center gap-2">
+    // A `SettingsField` wide, so a stepper's edges line up with the selects
+    // and inputs in the rows around it.
+    <div className="flex w-56 max-w-full shrink-0 items-center gap-2">
       <NumberField
         value={committed ? draft : value}
         {...(min === undefined ? {} : { min })}
         {...(max === undefined ? {} : { max })}
         {...(step === undefined ? {} : { step })}
         size="sm"
-        className="w-32"
+        className="min-w-0 flex-1"
         onValueChange={committed ? setDraft : save.onValueChange}
         {...(committed
           ? {
@@ -709,8 +738,8 @@ export function SettingsUnavailableGroup({
         <InfoIcon className="mt-0.5 size-3.5 shrink-0 text-warning" />
         <p>{message}</p>
       </div>
-      {/* One disabled treatment: titles drop to the description's muted color. */}
-      <div className="[&_h3]:text-muted-foreground [&>*+*]:border-t [&>*+*]:border-border/50 [&>[data-slot=settings-row]]:rounded-none">
+      {/* One disabled treatment: titles, a row's or a nested list's, drop to the description's muted color. */}
+      <div className="[&_[data-slot=settings-inset-row-title]]:text-muted-foreground [&_h3]:text-muted-foreground [&>*+*]:border-t [&>*+*]:border-border/50 [&>[data-slot=settings-row]]:rounded-none">
         {children}
       </div>
     </div>
@@ -726,12 +755,14 @@ export function SettingsUnavailableGroup({
  * Keep descriptions short enough for one line where possible. Allow wrapping
  * for clarity or narrow screens instead of truncating or forcing no-wrap.
  *
- * Control sizing across settings follows three tiers so rows share a baseline:
+ * Control sizing across settings follows four tiers so rows share a baseline:
  * - Anything a row or list item offers at its trailing edge, or under its text
  *   as a recovery step (Fix, Retry, Revoke): `size="sm"` (Button, Select,
- *   Input, NumberField) or `icon-sm`. One action height inside every card.
- * - Section `headerAction`s, toolbar filters and an empty list's one action:
- *   quiet `xs` / `icon-xs` (`SettingsSectionAction`, `SettingsRefreshAction`).
+ *   Input, NumberField) or `icon-sm`, 28px. One action height inside every card.
+ * - A list's toolbar, the header row above its entries: `SettingsListSearch`
+ *   and `SettingsListFilter`, 32px, one step up from the rows they filter.
+ * - Section `headerAction`s and an empty list's one action: quiet `xs` /
+ *   `icon-xs` (`SettingsSectionAction`, `SettingsRefreshAction`).
  * - Inline affordances (reset arrows, info tooltips, table-cell buttons): `icon-micro`.
  * Statuses are a `SettingsStatusBadge` (or `SettingsStatusText` in a line of
  * text) and type labels a `SettingsTag`. Dialog footers keep the app-wide
@@ -996,15 +1027,19 @@ export function SettingsDenseRow({
  * One line of a short nested list inside a `SettingsGroup variant="inset"`
  * (a machine's macOS grants): its name, then its status and action on the
  * trailing edge, where every settings status sits. The inset group divides
- * consecutive rows.
+ * consecutive rows. A string title truncates; `tag` follows it, for a
+ * `SettingsTag` such as "Default".
  */
 export function SettingsInsetRow({
   title,
+  tag,
   control,
   className,
   ...rowProps
 }: Omit<ComponentPropsWithoutRef<"div">, "title"> & {
+  /** A name, or the field that renames it. */
   title: ReactNode;
+  tag?: ReactNode;
   control?: ReactNode;
 }) {
   return (
@@ -1016,7 +1051,13 @@ export function SettingsInsetRow({
         className,
       )}
     >
-      <span className="min-w-0 truncate text-sm text-foreground">{title}</span>
+      <span
+        data-slot="settings-inset-row-title"
+        className="flex min-w-0 flex-1 items-center gap-2 text-sm text-foreground"
+      >
+        {typeof title === "string" ? <span className="truncate">{title}</span> : title}
+        {tag}
+      </span>
       {control ? <span className="flex shrink-0 items-center gap-2">{control}</span> : null}
     </div>
   );

@@ -16,6 +16,18 @@ export function groupRepeatedEntries<T>(
   return [...groups.values()];
 }
 
+/**
+ * Whether a key press in a settings search clears its query. Escape clears a
+ * query first; with nothing to clear it bubbles to the page, where Settings
+ * treats it as "leave". Mid-composition Escape belongs to the IME.
+ */
+export function settingsSearchEscapeClears(
+  event: { readonly key: string; readonly isComposing: boolean },
+  query: string,
+): boolean {
+  return event.key === "Escape" && !event.isComposing && query !== "";
+}
+
 /** Case-insensitive list search across the user-facing names and descriptions. */
 export function matchesSettingsListQuery(
   query: string,

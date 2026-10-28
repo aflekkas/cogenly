@@ -83,7 +83,8 @@ export function SettingsStatusDot({ tone }: { readonly tone: SettingsStatusTone 
 
 /**
  * A fact about an item that isn't a status: its type, "Default", "This
- * device". Outlined so it never reads as health, the same size as a status.
+ * device". A quiet outline in the meta line's color, so it never reads as
+ * health or as a button, the same size as a status.
  */
 export function SettingsTag({
   children,
@@ -91,7 +92,7 @@ export function SettingsTag({
   ...props
 }: Omit<ComponentProps<typeof Badge>, "size" | "variant" | "className">) {
   return (
-    <Badge {...props} ref={ref} size="md" variant="outline">
+    <Badge {...props} ref={ref} size="md" variant="tag">
       {children}
     </Badge>
   );

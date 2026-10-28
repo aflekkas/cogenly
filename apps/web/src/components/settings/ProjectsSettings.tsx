@@ -5,9 +5,13 @@ import { useEffect } from "react";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ProjectSettingsPanel } from "./ProjectSettingsPanel";
-import { SettingsGroup } from "./SettingsGroup";
 import { SettingsList, SettingsListItem } from "./SettingsList";
-import { SettingsEmpty, SettingsPageMessage, useSettingsSearchTargetId } from "./settingsLayout";
+import {
+  SettingsEmpty,
+  SettingsPathText,
+  SettingsSection,
+  useSettingsSearchTargetId,
+} from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
 
@@ -54,57 +58,53 @@ export function ProjectsSettings() {
 function RepositoryList() {
   const { selectScope, search, groups } = useSettingsScope();
   return (
-    <div className="space-y-3">
-      <SettingsPageMessage>
-        Choose a repository to manage its name, icon, actions and checkouts.
-      </SettingsPageMessage>
-      <SettingsGroup>
-        {groups.length === 0 ? (
-          <SettingsEmpty
-            icon={<FolderGit2Icon />}
-            label="Repositories you add from the sidebar appear here."
-          />
-        ) : (
-          <SettingsList aria-label="Repositories">
-            {groups.map((group) => {
-              const open = () => selectScope({ ...search, repository: group.projectKey });
-              return (
-                <SettingsListItem
-                  key={group.projectKey}
-                  interactive
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`Open ${group.displayName}`}
-                  onClick={open}
-                  onKeyDown={(event) => {
-                    if (event.target !== event.currentTarget) return;
-                    if (event.key !== "Enter" && event.key !== " ") return;
-                    event.preventDefault();
-                    open();
-                  }}
-                  title={
-                    <span className="flex min-w-0 items-center gap-2">
-                      <ProjectFavicon project={group} className="size-4 shrink-0" />
-                      <span className="min-w-0 truncate">{group.displayName}</span>
-                    </span>
-                  }
-                  description={
-                    <Tooltip>
-                      <TooltipTrigger render={<span className="block truncate" />}>
-                        {group.workspaceRoot}
-                      </TooltipTrigger>
-                      <TooltipPopup>{group.workspaceRoot}</TooltipPopup>
-                    </Tooltip>
-                  }
-                  control={
-                    <ChevronRightIcon aria-hidden className="size-4 text-muted-foreground" />
-                  }
-                />
-              );
-            })}
-          </SettingsList>
-        )}
-      </SettingsGroup>
-    </div>
+    <SettingsSection
+      title="Repositories"
+      footer="Choose a repository to manage its name, icon, actions and checkouts."
+    >
+      {groups.length === 0 ? (
+        <SettingsEmpty
+          icon={<FolderGit2Icon />}
+          label="Repositories you add from the sidebar appear here."
+        />
+      ) : (
+        <SettingsList aria-label="Repositories">
+          {groups.map((group) => {
+            const open = () => selectScope({ ...search, repository: group.projectKey });
+            return (
+              <SettingsListItem
+                key={group.projectKey}
+                interactive
+                role="button"
+                tabIndex={0}
+                aria-label={`Open ${group.displayName}`}
+                onClick={open}
+                onKeyDown={(event) => {
+                  if (event.target !== event.currentTarget) return;
+                  if (event.key !== "Enter" && event.key !== " ") return;
+                  event.preventDefault();
+                  open();
+                }}
+                title={
+                  <span className="flex min-w-0 items-center gap-2">
+                    <ProjectFavicon project={group} className="size-4 shrink-0" />
+                    <span className="min-w-0 truncate">{group.displayName}</span>
+                  </span>
+                }
+                description={
+                  <Tooltip>
+                    <TooltipTrigger render={<span className="block min-w-0" />}>
+                      <SettingsPathText path={group.workspaceRoot} />
+                    </TooltipTrigger>
+                    <TooltipPopup>{group.workspaceRoot}</TooltipPopup>
+                  </Tooltip>
+                }
+                control={<ChevronRightIcon aria-hidden className="size-4 text-muted-foreground" />}
+              />
+            );
+          })}
+        </SettingsList>
+      )}
+    </SettingsSection>
   );
 }

@@ -462,10 +462,11 @@ function ProjectOption({
   const inert = disabled || empty;
   return (
     <li>
+      {/* Disabled mutes the text only; the checkbox carries its own disabled look. */}
       <label
         className={
           inert
-            ? "flex items-center gap-2.5 rounded-md py-1 text-sm opacity-64"
+            ? "flex items-center gap-2.5 rounded-md py-1 text-sm text-muted-foreground"
             : "flex cursor-pointer items-center gap-2.5 rounded-md py-1 text-sm"
         }
       >
@@ -478,7 +479,7 @@ function ProjectOption({
           <span className="flex items-center gap-1.5">
             <span className="truncate font-medium">{project.title}</span>
             {project.isScratch ? (
-              <SettingsTag>Files under No project</SettingsTag>
+              <SettingsTag>Loose files</SettingsTag>
             ) : project.existingProjectTitle ? (
               <SettingsStatusBadge tone="info">
                 Merges into {project.existingProjectTitle}

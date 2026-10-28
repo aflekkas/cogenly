@@ -12,7 +12,7 @@ import {
 
 import { Button } from "../ui/button";
 import { DisclosurePanel } from "../ui/disclosure";
-import { SearchInput } from "../ui/search-input";
+import { SettingsListSearch } from "./SettingsList";
 import {
   SettingsDenseRow,
   SettingsEmpty,
@@ -120,35 +120,6 @@ function LicenseCount({
   );
 }
 
-/** Filter box in the card toolbar: matches package names, versions, licenses and app parts. */
-function LicenseSearchInput({
-  query,
-  onQueryChange,
-}: {
-  query: string;
-  onQueryChange: (value: string) => void;
-}) {
-  return (
-    <SearchInput
-      aria-label="Search open-source licenses"
-      frameClassName="basis-full sm:basis-0 sm:flex-1"
-      onChange={(event) => onQueryChange(event.currentTarget.value)}
-      onKeyDown={(event) => {
-        // The settings route treats an unhandled Escape as "go back";
-        // inside the search box it clears, then leaves the field.
-        if (event.key !== "Escape") return;
-        event.preventDefault();
-        if (query.length > 0) onQueryChange("");
-        else event.currentTarget.blur();
-      }}
-      placeholder="Search by package, version or license"
-      value={query}
-      clearLabel="Clear license search"
-      onClear={() => onQueryChange("")}
-    />
-  );
-}
-
 function LicenseManifestError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <SettingsRow
@@ -213,7 +184,13 @@ function OpenSourceLicensesSection({ onRetry }: { readonly onRetry: () => void }
         {state.status === "ready" ? (
           <>
             <SettingsToolbar>
-              <LicenseSearchInput query={query} onQueryChange={setQuery} />
+              {/* Matches package names, versions, licenses and app parts. */}
+              <SettingsListSearch
+                label="Search open-source licenses"
+                placeholder="Search by package, version or license"
+                value={query}
+                onValueChange={setQuery}
+              />
             </SettingsToolbar>
             <div className="text-base sm:text-sm">
               {filteredEntries.length > 0 ? (

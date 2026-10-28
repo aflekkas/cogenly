@@ -35,6 +35,9 @@ const badgeVariants = cva(
         outline:
           "border-input bg-background text-foreground dark:bg-input/32 [button&,a&]:hover:bg-accent/50 dark:[button&,a&]:hover:bg-input/48",
         secondary: "bg-secondary text-secondary-foreground [button&,a&]:hover:bg-secondary/90",
+        // A fact about an item (its type, "Default"): a quiet outline at the meta
+        // text's color and weight, so it reads as neither a status nor a button.
+        tag: "border-border bg-transparent font-normal text-muted-foreground",
         // A state that recedes (off, not checked): quieter than any tone.
         muted: "bg-muted text-muted-foreground",
         success: "bg-success/8 text-success-foreground dark:bg-success/16",
