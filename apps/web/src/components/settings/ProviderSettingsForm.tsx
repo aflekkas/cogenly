@@ -24,7 +24,7 @@ import type { ProviderClientDefinition } from "@cogenly/provider-core/client";
 export type SettingsFormDefinition = Pick<ProviderClientDefinition, "settingsSchema"> & {
   readonly driverKind?: ProviderClientDefinition["driverKind"];
 };
-import { SettingsRow } from "./settingsLayout";
+import { SettingsField, SettingsRow } from "./settingsLayout";
 
 export interface ProviderSettingsFieldModel {
   readonly key: string;
@@ -271,14 +271,15 @@ function ProviderSettingsFieldRow({
           aria-describedby={descriptionId}
         />
       ) : field.control === "select" ? (
-        <ProviderSettingsSelect
-          field={field}
-          value={value}
-          inputId={inputId}
-          size="sm"
-          className="w-full max-w-full @min-[32rem]/settings-row:w-56"
-          onChange={onChange}
-        />
+        <SettingsField>
+          <ProviderSettingsSelect
+            field={field}
+            value={value}
+            inputId={inputId}
+            size="sm"
+            onChange={onChange}
+          />
+        </SettingsField>
       ) : field.control === "textarea" ? (
         <Textarea
           id={inputId}
@@ -292,30 +293,32 @@ function ProviderSettingsFieldRow({
           spellCheck={false}
         />
       ) : field.secret ? (
-        <SecretInput
-          id={inputId}
-          aria-describedby={descriptionId}
-          size="sm"
-          className="w-full max-w-full @min-[32rem]/settings-row:w-56"
-          configured={readProviderConfigString(value, field.key).length > 0}
-          value=""
-          onCommit={(next) => onChange(nextProviderConfigWithFieldValue(value, field, next))}
-        />
+        <SettingsField>
+          <SecretInput
+            id={inputId}
+            aria-describedby={descriptionId}
+            size="sm"
+            configured={readProviderConfigString(value, field.key).length > 0}
+            value=""
+            onCommit={(next) => onChange(nextProviderConfigWithFieldValue(value, field, next))}
+          />
+        </SettingsField>
       ) : (
-        <DraftInput
-          id={inputId}
-          aria-describedby={descriptionId}
-          size="sm"
-          className="w-full max-w-full @min-[32rem]/settings-row:w-56"
-          type={field.control === "password" ? "password" : undefined}
-          autoComplete={field.control === "password" ? "off" : undefined}
-          value={readProviderConfigString(value, field.key)}
-          placeholder={field.placeholder}
-          onCommit={(next) => {
-            onChange(nextProviderConfigWithFieldValue(value, field, next));
-          }}
-          spellCheck={false}
-        />
+        <SettingsField>
+          <DraftInput
+            id={inputId}
+            aria-describedby={descriptionId}
+            size="sm"
+            type={field.control === "password" ? "password" : undefined}
+            autoComplete={field.control === "password" ? "off" : undefined}
+            value={readProviderConfigString(value, field.key)}
+            placeholder={field.placeholder}
+            onCommit={(next) => {
+              onChange(nextProviderConfigWithFieldValue(value, field, next));
+            }}
+            spellCheck={false}
+          />
+        </SettingsField>
       );
 
     return (

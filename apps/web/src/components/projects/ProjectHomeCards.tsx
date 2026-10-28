@@ -325,6 +325,7 @@ export function SourcesCard(props: {
     >
       {links.length === 0 && !linking ? (
         <SettingsEmpty
+          icon={<LinkIcon />}
           label={
             org === null
               ? "Link a GitHub org or repository for agents to reach."

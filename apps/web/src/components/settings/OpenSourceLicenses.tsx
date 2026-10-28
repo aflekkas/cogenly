@@ -1,4 +1,4 @@
-import { ExternalLinkIcon } from "lucide-react";
+import { ExternalLinkIcon, SearchXIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -233,6 +233,7 @@ function OpenSourceLicensesSection({ onRetry }: { readonly onRetry: () => void }
                 })
               ) : (
                 <SettingsEmpty
+                  icon={<SearchXIcon />}
                   label="No licenses match this search."
                   action={
                     <Button size="xs" variant="outline" onClick={() => setQuery("")}>

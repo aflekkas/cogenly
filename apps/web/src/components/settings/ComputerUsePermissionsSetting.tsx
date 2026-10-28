@@ -2,7 +2,6 @@ import type { ComputerUseStatus, EnvironmentId } from "@cogenly/contracts";
 import { useEffect } from "react";
 
 import { AnimatedHeight } from "~/components/AnimatedHeight";
-import { PlatformStatus } from "~/components/device/DeviceSetup";
 import { Button } from "~/components/ui/button";
 
 import {
@@ -14,7 +13,9 @@ import {
   useComputerUseStatus,
   useRequestComputerUsePermission,
 } from "../../computerUse/useComputerUse";
+import { SettingsGroup } from "./SettingsGroup";
 import { SettingsRow } from "./settingsLayout";
+import { SettingsStatusBadge } from "./SettingsStatus";
 import { useSettingsScope } from "./SettingsScopeContext";
 
 const STALE_RETRY_MS = 1_500;
@@ -80,16 +81,21 @@ function ComputerUsePermissionsRow({
   return (
     <SettingsRow id="computer-use-permissions" title="macOS permissions" description={description}>
       {computerUseAvailable(status) ? (
-        // One subrow per grant: its state on the left, its action on the row's trailing edge.
-        <ul className="space-y-2 pt-1 pb-2">
+        // One line per grant, like a nested list: its name and status, then its action.
+        <SettingsGroup variant="inset" className="mt-2">
           {status.permissions.map((entry) => (
-            <li key={entry.permission} className="flex min-h-7 items-center justify-between gap-4">
-              <PlatformStatus
-                compact
-                platform={entry.title}
-                readyLabel="Granted"
-                status={{ ready: entry.grant === "granted", message: "Not granted" }}
-              />
+            <div
+              key={entry.permission}
+              className="flex min-h-11 items-center justify-between gap-3 px-3 py-2 sm:px-4"
+            >
+              <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="truncate text-sm text-foreground">{entry.title}</span>
+                {entry.grant === "granted" ? (
+                  <SettingsStatusBadge tone="success">Granted</SettingsStatusBadge>
+                ) : (
+                  <SettingsStatusBadge tone="warning">Not granted</SettingsStatusBadge>
+                )}
+              </span>
               {entry.grant === "granted" ? null : (
                 <Button
                   size="sm"
@@ -101,9 +107,9 @@ function ComputerUsePermissionsRow({
                   Open System Settings
                 </Button>
               )}
-            </li>
+            </div>
           ))}
-        </ul>
+        </SettingsGroup>
       ) : null}
     </SettingsRow>
   );

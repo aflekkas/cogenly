@@ -107,8 +107,8 @@ export function GitHubRoutingSettings({
             }}
           >
             <SelectTrigger
-              size="xs"
-              className="w-32"
+              size="sm"
+              className="w-40 sm:w-56"
               aria-label={`${environment.label} GitHub routing`}
             >
               <SelectValue />

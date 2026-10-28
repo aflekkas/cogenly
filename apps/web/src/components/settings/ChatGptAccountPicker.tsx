@@ -10,6 +10,7 @@ import {
   DialogFooter,
 } from "../ui/dialog";
 import { ChatGptConnectionButton } from "./ChatGptConnectionButton";
+import { SettingsGroup } from "./SettingsGroup";
 
 export function ChatGptAccountPicker({
   open,
@@ -50,19 +51,21 @@ export function ChatGptAccountPicker({
             value={selectedMethodId}
             onValueChange={(value) => setSelection(value)}
           >
-            {profiles.map((profile) => (
-              <label
-                key={profile.id}
-                className="flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-3 text-sm"
-              >
-                <Radio value={profile.id} />
-                <span className="min-w-0 break-all font-medium">{profile.name}</span>
+            <SettingsGroup variant="inset">
+              {profiles.map((profile) => (
+                <label
+                  key={profile.id}
+                  className="flex cursor-pointer items-center gap-3 px-3 py-3 text-sm"
+                >
+                  <Radio value={profile.id} />
+                  <span className="min-w-0 break-all font-medium">{profile.name}</span>
+                </label>
+              ))}
+              <label className="flex cursor-pointer items-center gap-3 px-3 py-3 text-sm">
+                <Radio value="chatgpt-change-account" />
+                <span className="font-medium">Use a different account</span>
               </label>
-            ))}
-            <label className="flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-3 text-sm">
-              <Radio value="chatgpt-change-account" />
-              <span className="font-medium">Use a different account</span>
-            </label>
+            </SettingsGroup>
           </RadioGroup>
         </div>
         <DialogFooter>

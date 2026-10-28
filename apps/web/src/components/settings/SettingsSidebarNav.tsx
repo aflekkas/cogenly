@@ -106,8 +106,15 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const currentHash = useLocation({ select: (location) => location.hash });
   const currentSearch = useLocation({ select: (location) => location.search });
   const scopeSearch = useMemo(() => validateSettingsScopeSearch(currentSearch), [currentSearch]);
-  // Detail pages (Repository, Open-source licenses) highlight their parent.
+  // Only the page itself takes the selected fill. A detail page (Repositories,
+  // Open-source licenses) has no row of its own, so its parent keeps a bright
+  // label without the fill; otherwise one row would read as selected on two
+  // different pages.
   const activeNavPath = settingsNavPathFor(pathname);
+  const normalizedPathname = pathname.replace(/\/+$/, "");
+  const onActiveNavPage =
+    activeNavPath !== null &&
+    (normalizedPathname === activeNavPath || normalizedPathname.startsWith(`${activeNavPath}/`));
   const { isMobile, setOpenMobile, open, setOpen } = useSidebar();
   const legacySidebarEnabled = useLegacySidebarEnabled();
   const navRailVisible = !isMobile && !legacySidebarEnabled;
@@ -360,13 +367,14 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                   : [<SidebarGroupHeader key={`group:${group.label}`} label={group.label} />]),
                 ...group.paths.map((to) => {
                   const Icon = SETTINGS_SECTION_ICONS[to];
-                  const isActive = to === activeNavPath;
+                  const isParent = to === activeNavPath;
+                  const isActive = isParent && onActiveNavPage;
                   const attention = attentionByPage.get(to) ?? null;
                   return (
                     <li key={to} className="list-none">
                       <button
                         type="button"
-                        aria-current={isActive ? "page" : undefined}
+                        aria-current={isActive ? "page" : isParent ? "location" : undefined}
                         aria-label={
                           attention === null
                             ? undefined
@@ -379,7 +387,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                         <span
                           className={cn(
                             "min-w-0 flex-1 truncate text-sm",
-                            isActive ? "text-foreground" : "text-foreground/80",
+                            isParent ? "text-foreground" : "text-foreground/80",
                           )}
                         >
                           {SETTINGS_SECTION_LABELS[to]}

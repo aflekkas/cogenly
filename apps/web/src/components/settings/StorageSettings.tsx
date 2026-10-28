@@ -22,18 +22,14 @@ import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 import { Input } from "../ui/input";
-import { Collapsible, CollapsiblePanel } from "../ui/collapsible";
+import { DisclosurePanel } from "../ui/disclosure";
 import { Switch } from "../ui/switch";
 import {
-  NumberField,
-  NumberFieldDecrement,
-  NumberFieldGroup,
-  NumberFieldIncrement,
-  NumberFieldInput,
-} from "../ui/number-field";
-import {
   SettingResetButton,
+  SettingsDisclosure,
+  SettingsField,
   SettingsNote,
+  SettingsNumberField,
   SettingsRefreshAction,
   SettingsRow,
   SettingsSection,
@@ -41,8 +37,6 @@ import {
 } from "./settingsLayout";
 import { DatabaseStorageNotice } from "./DatabaseStorageNotice";
 import { SettingsScopeNotice } from "./SettingsScopeNotice";
-import { FoldedSettingsSection } from "./FoldedSettingsSection";
-import { SettingsGroup } from "./SettingsGroup";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { searchableSetting } from "./settingsSearch";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
@@ -77,85 +71,76 @@ function WorktreesDirectoryRow() {
         ) : null
       }
       control={
-        <Input
-          key={`${scopeKey}:${settings.worktreesDirectory}`}
-          aria-label="Worktree location"
-          size="sm"
-          autoCapitalize="none"
-          spellCheck={false}
-          placeholder="Default"
-          defaultValue={settings.worktreesDirectory}
-          onChange={() => {
-            edited.current = true;
-          }}
-          onBlur={(event) => {
-            const value = event.target.value.trim();
-            if (edited.current && value !== settings.worktreesDirectory)
-              updateSettings({ worktreesDirectory: value });
-            edited.current = false;
-          }}
-        />
+        <SettingsField>
+          <Input
+            key={`${scopeKey}:${settings.worktreesDirectory}`}
+            aria-label="Worktree location"
+            size="sm"
+            autoCapitalize="none"
+            spellCheck={false}
+            placeholder="Default"
+            defaultValue={settings.worktreesDirectory}
+            onChange={() => {
+              edited.current = true;
+            }}
+            onBlur={(event) => {
+              const value = event.target.value.trim();
+              if (edited.current && value !== settings.worktreesDirectory)
+                updateSettings({ worktreesDirectory: value });
+              edited.current = false;
+            }}
+          />
+        </SettingsField>
       }
     />
   );
 }
 
+/**
+ * A rule's switch with its amount before it, shown while the rule is on. Every
+ * stepper on this page sits beside a switch, so they all end on one edge.
+ */
 function RetentionControl({
   label,
+  amountLabel = label,
+  unit = "days",
   value,
   onChange,
   minimum = 1,
+  maximum = 3650,
+  enabledValue = 8,
 }: {
+  /** Names the switch. */
   label: string;
+  /** Names the amount in the stepper's labels; defaults to `label`. */
+  amountLabel?: string;
+  unit?: string;
   value: number | null;
   onChange: (value: number | null) => void;
   minimum?: number;
+  maximum?: number;
+  /** The amount a rule starts with when it's switched on. */
+  enabledValue?: number;
 }) {
-  const [draft, setDraft] = useState(value);
-  const [savedValue, setSavedValue] = useState(value);
-  if (savedValue !== value) {
-    setSavedValue(value);
-    setDraft(value);
-  }
-
   return (
     <div className="flex items-center gap-3">
       {value !== null ? (
-        <NumberField
-          value={draft}
+        <SettingsNumberField
+          label={amountLabel}
+          unit={unit}
+          value={value}
           min={minimum}
-          max={3650}
-          step={1}
-          size="sm"
-          className="w-auto"
-          onValueChange={setDraft}
+          max={maximum}
           onValueCommitted={(next) => {
-            if (next === null) setDraft(value);
-            else {
-              const days = Math.min(3650, Math.max(minimum, Math.round(next)));
-              setDraft(days);
-              onChange(days);
-            }
+            const clamped = Math.min(maximum, Math.max(minimum, Math.round(next)));
+            if (clamped !== value) onChange(clamped);
           }}
-        >
-          <NumberFieldGroup>
-            <NumberFieldDecrement aria-label={`Decrease ${label}`} />
-            <NumberFieldInput
-              aria-label={`${label} in days`}
-              size={new Intl.NumberFormat().format(draft ?? value).length}
-              className="field-sizing-content w-auto min-w-[1ch] grow-0 text-right"
-            />
-            <span aria-hidden="true" className="self-center pr-2 text-xs">
-              days
-            </span>
-            <NumberFieldIncrement aria-label={`Increase ${label}`} />
-          </NumberFieldGroup>
-        </NumberField>
+        />
       ) : null}
       <Switch
         aria-label={label}
         checked={value !== null}
-        onCheckedChange={(enabled) => onChange(enabled ? 8 : null)}
+        onCheckedChange={(enabled) => onChange(enabled ? enabledValue : null)}
       />
     </div>
   );
@@ -369,102 +354,112 @@ function CleanupSection() {
       setPending(false);
     }
   };
+  const allowed = state.some((entry) => entry.allowed);
+  const runButton = (
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={pending || !allowed}
+      onClick={() => void deleteNow(!previewOpen)}
+    >
+      {pending
+        ? previewOpen
+          ? "Cleaning up…"
+          : "Checking…"
+        : !previewOpen
+          ? "Preview cleanup"
+          : "Clean up now"}
+    </Button>
+  );
+  const lastRuns = summaries.filter(({ report }) => report !== null);
+  const unsavedAgentWorktrees = summaries.reduce(
+    (total, { report }) => total + (report?.unsavedAgentWorktrees ?? 0),
+    0,
+  );
   return (
-    <SettingsSection id="storage-cleanup" title="Cleanup" variant="plain">
-      <SettingsGroup>
-        <SettingsRow
-          {...searchableSetting("storage-delete-now")}
-          description={
-            <span>
-              {!hasRules
-                ? "Remove what the rules below allow. Finished delegated tasks already clean up on their own."
-                : summaries.map(({ environment, label, description }) => (
-                    <span key={environment.environmentId} className="block">
-                      {supported.length > 1 ? `${label}: ` : ""}
-                      {description}
-                    </span>
-                  ))}
-            </span>
-          }
-          control={
-            <div className="flex gap-2">
-              {previewOpen && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={pending}
-                  onClick={() => setPreviewOpen(false)}
-                >
-                  Cancel
-                </Button>
-              )}
+    <SettingsSection id="storage-cleanup" title="Cleanup">
+      <SettingsRow
+        {...searchableSetting("storage-delete-now")}
+        description={
+          <span>
+            {!hasRules
+              ? "Remove what the rules below allow. Finished delegated tasks already clean up on their own."
+              : summaries.map(({ environment, label, description }) => (
+                  <span key={environment.environmentId} className="block">
+                    {supported.length > 1 ? `${label}: ` : ""}
+                    {description}
+                  </span>
+                ))}
+          </span>
+        }
+        control={
+          <>
+            {previewOpen && (
               <Button
                 variant="outline"
                 size="sm"
-                disabled={pending || !state.some((entry) => entry.allowed)}
-                onClick={() => void deleteNow(!previewOpen)}
+                disabled={pending}
+                onClick={() => setPreviewOpen(false)}
               >
-                {pending
-                  ? previewOpen
-                    ? "Cleaning up…"
-                    : "Checking…"
-                  : !previewOpen
-                    ? "Preview cleanup"
-                    : "Clean up now"}
+                Cancel
               </Button>
-            </div>
-          }
-        />
-      </SettingsGroup>
-      <Collapsible open={previewOpen}>
-        <CollapsiblePanel>
-          {previews !== null && (
-            <>
-              <SettingsNote>
-                Nothing is removed yet. Cleanup checks each item again before removing it and always
-                keeps branches and checkpoints. Sizes are estimates.
-              </SettingsNote>
-              {previews.some(({ report }) => (report.unsavedAgentWorktrees ?? 0) > 0) && (
-                <SettingsNote>
-                  {previews.reduce(
-                    (total, { report }) => total + (report.unsavedAgentWorktrees ?? 0),
-                    0,
-                  )}{" "}
-                  agent worktrees have unsaved changes, so they stay.
-                </SettingsNote>
-              )}
-              {previews.map(({ environmentId, report }) => (
-                <CleanupResults
-                  key={environmentId}
-                  report={report}
-                  environmentLabel={
-                    connectedEnvironments.find(
-                      (environment) => environment.environmentId === environmentId,
-                    )?.label
-                  }
-                />
-              ))}
-            </>
+            )}
+            {allowed ? (
+              runButton
+            ) : (
+              // A disabled button gets no hover, so a focusable wrapper carries the reason.
+              <Tooltip>
+                <TooltipTrigger render={<span tabIndex={0} className="inline-flex rounded-md" />}>
+                  {runButton}
+                </TooltipTrigger>
+                <TooltipPopup side="top">
+                  This connection doesn't have permission to run cleanup.
+                </TooltipPopup>
+              </Tooltip>
+            )}
+          </>
+        }
+      />
+      {/* The preview lists what "Clean up now" would remove, as rows of this card. */}
+      <DisclosurePanel open={previewOpen && previews !== null}>
+        <div className="[&>*+*]:border-t [&>*+*]:border-border/50">
+          <SettingsNote>
+            Nothing is removed yet. Cleanup checks each item again before removing it and always
+            keeps branches and checkpoints. Sizes are estimates.
+          </SettingsNote>
+          {previews?.some(({ report }) => (report.unsavedAgentWorktrees ?? 0) > 0) && (
+            <SettingsNote>
+              {previews.reduce(
+                (total, { report }) => total + (report.unsavedAgentWorktrees ?? 0),
+                0,
+              )}{" "}
+              agent worktrees have unsaved changes, so they stay.
+            </SettingsNote>
           )}
-        </CollapsiblePanel>
-      </Collapsible>
-      {summaries.some(({ report }) => (report?.unsavedAgentWorktrees ?? 0) > 0) && (
+          {previews?.map(({ environmentId, report }) => (
+            <CleanupResults
+              key={environmentId}
+              report={report}
+              environmentLabel={
+                connectedEnvironments.find(
+                  (environment) => environment.environmentId === environmentId,
+                )?.label
+              }
+            />
+          ))}
+        </div>
+      </DisclosurePanel>
+      {unsavedAgentWorktrees > 0 && (
         <SettingsNote>
-          {summaries.reduce((total, { report }) => total + (report?.unsavedAgentWorktrees ?? 0), 0)}{" "}
-          agent worktrees had unsaved changes, so they stayed.
+          {unsavedAgentWorktrees} agent worktrees had unsaved changes, so they stayed.
         </SettingsNote>
       )}
-      {summaries.some(({ report }) => report !== null) && (
-        <FoldedSettingsSection
-          id="storage-cleanup-last-run"
+      {lastRuns.length > 0 && (
+        <SettingsDisclosure
           title="Last run"
-          headerPlacement="inside"
-          summary={lastRunSummary(
-            summaries.filter(({ report }) => report !== null),
-            connectedEnvironments.length,
-          )}
+          summary={lastRunSummary(lastRuns, connectedEnvironments.length)}
         >
-          {summaries.map(
+          {lastRuns.map(
             ({ environment, label, report }) =>
               report && (
                 <CleanupResults
@@ -474,7 +469,7 @@ function CleanupSection() {
                 />
               ),
           )}
-        </FoldedSettingsSection>
+        </SettingsDisclosure>
       )}
     </SettingsSection>
   );
@@ -519,10 +514,19 @@ function StorageUsage({ environmentId, label }: { environmentId: EnvironmentId; 
       cancelled = true;
     };
   }, [environmentId, measure]);
+  // Said once under the card rather than on every "Shared" row.
+  const anyShared =
+    status?.complete === true &&
+    status.categories.some((entry) => entry.bytes === null && entry.category in STORAGE_LABELS);
   return (
     <SettingsSection
       id={`storage-usage-${environmentId}`}
       title={`Disk usage on ${label}`}
+      footer={
+        anyShared
+          ? "Shared files use the same disk space as their copies, so they aren't counted separately."
+          : undefined
+      }
       headerAction={
         <SettingsRefreshAction
           label="Measure disk usage again"
@@ -581,13 +585,7 @@ function StorageUsage({ environmentId, label }: { environmentId: EnvironmentId; 
               <SettingsRow
                 key={category}
                 title={title}
-                description={
-                  files === null
-                    ? undefined
-                    : shared
-                      ? `${files} · Shares disk space with its copies, so it isn't counted separately`
-                      : files
-                }
+                description={files ?? undefined}
                 control={
                   <span className="text-sm tabular-nums">
                     {!status.complete
@@ -754,46 +752,33 @@ export function StorageSettingsPanel() {
       </SettingsSection>
 
       <SettingsSection id="storage-backups" title="Backups">
-        <SettingsRow
-          title="Nightly backups"
-          description="Save a copy of the database, settings and secrets every night."
-          serverScoped
-          control={
-            <Switch
-              aria-label="Nightly backups"
-              checked={scopedSettings.automaticBackups.enabled}
-              onCheckedChange={(enabled) => updateSettings({ automaticBackups: { enabled } })}
-            />
-          }
-        />
+        {/* How many to keep sits beside the switch, like the day rules below. */}
         <SettingsRow
           {...searchableSetting("storage-backup-retention")}
-          title="Backups to keep"
-          description="The newest copies stay. Older ones are removed when cleanup runs."
+          title="Nightly backups"
+          description="Save a copy of the database, settings and secrets every night. Cleanup keeps the newest copies and removes older ones."
           serverScoped
           control={
-            <NumberField
-              value={scopedSettings.automaticBackups.retentionCount}
-              min={1}
-              max={30}
-              size="sm"
-              // The same footprint as the day steppers on this page.
-              className="w-32"
-              onValueCommitted={(value) => {
-                if (value !== null)
-                  updateSettings({
-                    automaticBackups: {
-                      retentionCount: Math.max(1, Math.min(30, Math.round(value))),
-                    },
-                  });
-              }}
-            >
-              <NumberFieldGroup>
-                <NumberFieldDecrement aria-label="Keep fewer backups" />
-                <NumberFieldInput aria-label="Backups to keep" />
-                <NumberFieldIncrement aria-label="Keep more backups" />
-              </NumberFieldGroup>
-            </NumberField>
+            <RetentionControl
+              label="Nightly backups"
+              amountLabel="backups to keep"
+              unit="copies"
+              value={
+                scopedSettings.automaticBackups.enabled
+                  ? scopedSettings.automaticBackups.retentionCount
+                  : null
+              }
+              maximum={30}
+              enabledValue={scopedSettings.automaticBackups.retentionCount}
+              onChange={(retentionCount) =>
+                updateSettings({
+                  automaticBackups:
+                    retentionCount === null
+                      ? { enabled: false }
+                      : { enabled: true, retentionCount },
+                })
+              }
+            />
           }
         />
       </SettingsSection>

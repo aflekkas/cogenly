@@ -1,6 +1,6 @@
 import { matchesSettingsListQuery } from "../settings/settingsList.logic";
 import { ProjectFoldersSettings } from "../settings/ProjectFoldersSettings";
-import { SettingsSection } from "../settings/settingsLayout";
+import { SettingsSection, SettingsSectionAction } from "../settings/settingsLayout";
 import {
   SettingsList,
   SettingsListItem,
@@ -128,14 +128,14 @@ function ProjectTile(props: {
       control={
         <>
           <Button
-            size="icon-xs"
+            size="icon-sm"
             variant="ghost-muted"
             aria-label={`Actions for ${label.name}`}
             onClick={(event) => menu.openMenuAtElement(event.currentTarget)}
           >
             <MoreHorizontalIcon />
           </Button>
-          <Button size="xs" variant="outline" onClick={props.onOpen}>
+          <Button size="sm" variant="outline" onClick={props.onOpen}>
             Open
           </Button>
         </>
@@ -208,15 +208,13 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
         title="Projects"
         footer="Optional. Group the repositories, chats and agents of a bigger effort; a single repository doesn't need one."
         headerAction={
-          <Button
-            size="xs"
-            variant="ghost-muted"
+          <SettingsSectionAction
+            icon={FolderPlusIcon}
             disabled={createEnvironmentId === null || !canCreate}
             onClick={createProject}
           >
-            <FolderPlusIcon />
             New project
-          </Button>
+          </SettingsSectionAction>
         }
       >
         <SettingsListToolbar>

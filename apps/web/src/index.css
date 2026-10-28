@@ -383,7 +383,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   /* Duty-cycled indicator animations: long holds with stepped ramps, so the
      compositor updates discrete frames instead of every vsync. */
   --animate-status-pulse: status-pulse 2s infinite;
-  --animate-status-ping: status-ping 2s infinite;
+  /* One burst, then held invisible: nothing keeps repainting after it. */
+  --animate-status-ping: status-ping 2s forwards;
   --color-warning-foreground: var(--warning-foreground);
   --color-warning: var(--warning);
   --color-warning-surface: var(--warning-surface);
@@ -1891,8 +1892,10 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
 
   /* A settings section header shares its card's content inset. A quiet last
      action has no border, so pull it out by its own padding: its label or
-     glyph then ends on the edge the rows' controls and status badges end on. */
-  [data-settings-header-actions] > [data-slot="button"][data-variant^="ghost"]:last-child {
+     glyph then ends on the edge the rows' controls and status badges end on.
+     Matches on the Button's variant and size, not its data-slot: a Button
+     rendered by a tooltip, popover or menu trigger carries the trigger's slot. */
+  [data-settings-header-actions] > [data-size][data-variant^="ghost"]:last-child {
     &[data-size="xs"] {
       margin-inline-end: calc(var(--spacing) * -2 + 1px);
     }

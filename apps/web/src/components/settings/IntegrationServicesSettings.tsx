@@ -10,12 +10,12 @@ import {
   type IntegrationId,
   type IntegrationSummary,
 } from "@cogenly/contracts";
-import { PlusIcon, Trash2Icon } from "lucide-react";
+import { BlocksIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 import { integrationSetupRequest, useConnectIntegration } from "~/hooks/useConnectIntegration";
 import { useStartAgentChat } from "~/hooks/useStartAgentChat";
 import { AnimatedHeight } from "~/components/AnimatedHeight";
-import { DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
+import { DisclosurePanel } from "../ui/disclosure";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
 import { integrationsRpc } from "../../rpc/integrations";
@@ -36,7 +36,7 @@ import {
   testResultReason,
   testResultToolsText,
 } from "./integrationServices.logic";
-import { SettingsStatusText } from "./SettingsStatus";
+import { SettingsStatusBadge, SettingsStatusText } from "./SettingsStatus";
 import { SettingsGroup } from "./SettingsGroup";
 import {
   SettingsMasterDetail,
@@ -53,7 +53,12 @@ import { integrationAttentionTone } from "./settingsAttention.logic";
 import { SettingsAttentionTitle } from "./SettingsAttentionTitle";
 import { Switch } from "../ui/switch";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { SettingsEmpty, SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SettingsDisclosureToggle,
+  SettingsEmpty,
+  SettingsRow,
+  SettingsSection,
+} from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 
 /**
@@ -99,7 +104,7 @@ export function IntegrationServicesSettings() {
         </SettingsGroup>
       ) : integrations.length === 0 ? (
         <SettingsGroup>
-          <SettingsEmpty label="No integrations yet." action={addButton} />
+          <SettingsEmpty icon={<BlocksIcon />} label="No integrations yet." action={addButton} />
         </SettingsGroup>
       ) : (
         <SettingsMasterDetail
@@ -164,11 +169,14 @@ function IntegrationListRow({
   const statusRef = useStatusFade<HTMLSpanElement>(status.label);
   const icon = integrationIcon(integration);
   const account = integrationAccountLabel(integration);
-  const attention = integrationAttentionTone(
+  const alertTone = integrationAttentionTone(
     useOpenMachineHealthAlerts(),
     environmentId,
     integration.name,
   );
+  // One signal per problem: a failing status line already says it, so the
+  // attention dot only marks an alert the status line doesn't show.
+  const attention = status.tone === "error" || status.tone === "warning" ? null : alertTone;
   const setEnabled = async (enabled: boolean) => {
     setPending(true);
     try {
@@ -318,26 +326,24 @@ function IntegrationDetail({
   const signInLabelRef = useStatusFade<HTMLSpanElement>(signInView.label);
   const reconnectDisabled = signInView.disabled || !canWrite || !canSignIn;
   const testDisabled = pending || !canTest || !integration.enabled;
-  const reconnectButton = (
-    <Button
-      size="sm"
-      variant={needsReconnect ? "outline" : "ghost"}
-      disabled={reconnectDisabled}
-      onClick={() => void run(reconnect, "sign_in")}
-    >
-      <span ref={signInLabelRef}>{signInView.label}</span>
-    </Button>
-  );
+  // A connected account has nothing to sign in to; the status badge says so.
+  const reconnectButton =
+    summary.status === "connected" ? null : (
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={reconnectDisabled}
+        onClick={() => void run(reconnect, "sign_in")}
+      >
+        <span ref={signInLabelRef}>{signInView.label}</span>
+      </Button>
+    );
   const testButton = (
-    <Button
-      size="sm"
-      variant={needsReconnect ? "ghost" : "outline"}
-      disabled={testDisabled}
-      onClick={() => void run(runTest)}
-    >
+    <Button size="sm" variant="outline" disabled={testDisabled} onClick={() => void run(runTest)}>
       Test
     </Button>
   );
+  const errorText = signInView.error || (!pending && status.reason);
   return (
     <SettingsSection
       title={integrationTitle(integration)}
@@ -367,42 +373,46 @@ function IntegrationDetail({
       }
     >
       <SettingsRow
-        title="Status"
+        title={
+          <span className="inline-flex items-center gap-2">
+            Status
+            <SettingsStatusBadge tone={status.tone}>
+              <span ref={statusRef}>{status.label}</span>
+            </SettingsStatusBadge>
+          </span>
+        }
         description={
-          <SettingsStatusText tone={status.tone}>
-            <span ref={statusRef}>{status.label}</span>
-            {status.toolCount !== null
-              ? ` · ${status.toolCount === 1 ? "1 tool" : `${status.toolCount} tools`}`
-              : null}
-          </SettingsStatusText>
+          status.toolCount !== null
+            ? status.toolCount === 1
+              ? "1 tool"
+              : `${status.toolCount} tools`
+            : undefined
         }
         control={
-          <div className="flex items-center justify-end gap-1">
-            {needsReconnect ? (
-              <>
-                {testButton}
-                {reconnectButton}
-              </>
-            ) : (
-              <>
-                {reconnectButton}
-                {testButton}
-              </>
-            )}
-          </div>
+          needsReconnect ? (
+            <>
+              {testButton}
+              {reconnectButton}
+            </>
+          ) : (
+            <>
+              {reconnectButton}
+              {testButton}
+            </>
+          )
         }
       >
         <AnimatedHeight>
-          {signInView.error || (!pending && status.reason) ? (
-            <p role="status" className="pt-2 pb-2 text-sm text-destructive">
+          {errorText ? (
+            <p role="status" className="pt-2 text-xs text-destructive">
               {signInView.error ?? error ?? status.reason}
             </p>
           ) : null}
         </AnimatedHeight>
-        {integration.setupNotes ? (
-          <SetupNotes text={integration.setupNotes} updatedAt={integration.setupNotesUpdatedAt} />
-        ) : null}
       </SettingsRow>
+      {integration.setupNotes ? (
+        <SetupNotesRow text={integration.setupNotes} updatedAt={integration.setupNotesUpdatedAt} />
+      ) : null}
       <IntegrationSignInRow environmentId={environmentId} integrationId={integration.id} />
       <SettingsRow
         title="Projects"
@@ -475,8 +485,8 @@ function IntegrationSignInRow({
   );
 }
 
-/** What the agent that set this account up created, and where. */
-function SetupNotes({
+/** What the agent that set this account up created, and where, folded under its own row. */
+function SetupNotesRow({
   text,
   updatedAt,
 }: {
@@ -485,24 +495,18 @@ function SetupNotes({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    // Set apart from the Status buttons above, like a section of its own.
-    <div className="mt-2 border-t border-border/65 pt-2.5 pb-3">
-      <DisclosureTrigger
-        open={open}
-        variant="quiet"
-        className="w-fit"
-        onClick={() => setOpen(!open)}
-      >
-        Setup notes
-      </DisclosureTrigger>
+    <SettingsRow
+      title="Setup notes"
+      description={
+        updatedAt
+          ? `Updated ${new Date(updatedAt).toLocaleString()}`
+          : "What the agent created while setting this up."
+      }
+      control={<SettingsDisclosureToggle open={open} onOpenChange={setOpen} label="setup notes" />}
+    >
       <DisclosurePanel open={open}>
-        <p className="pt-1 text-sm whitespace-pre-wrap text-muted-foreground">{text}</p>
-        {updatedAt ? (
-          <p className="pt-1 text-xs text-muted-foreground">
-            Updated {new Date(updatedAt).toLocaleString()}
-          </p>
-        ) : null}
+        <p className="pt-2 text-xs whitespace-pre-wrap text-muted-foreground">{text}</p>
       </DisclosurePanel>
-    </div>
+    </SettingsRow>
   );
 }

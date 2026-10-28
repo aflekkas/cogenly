@@ -5,7 +5,7 @@ import { AnimatedHeight } from "~/components/AnimatedHeight";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Textarea } from "../ui/textarea";
-import { SettingsRow, SettingResetButton } from "./settingsLayout";
+import { SettingsField, SettingsRow, SettingResetButton } from "./settingsLayout";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { searchableSetting } from "./settingsSearch";
 import { BRANCH_NAMING_MODE_LABELS as MODES } from "./settingValueLabels";
@@ -42,25 +42,27 @@ export function BranchNamingSettings() {
           ) : null
         }
         control={
-          <Select
-            value={settings.branchNamingMode}
-            onValueChange={(value) => {
-              if (BranchNamingMode.literals.includes(value as BranchNamingMode)) {
-                updateSettings({ branchNamingMode: value as BranchNamingMode });
-              }
-            }}
-          >
-            <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Branch names">
-              <SelectValue>{(value: BranchNamingMode) => MODES[value]}</SelectValue>
-            </SelectTrigger>
-            <SelectPopup align="end" alignItemWithTrigger={false}>
-              {BranchNamingMode.literals.map((mode) => (
-                <SelectItem key={mode} value={mode}>
-                  {MODES[mode]}
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
+          <SettingsField>
+            <Select
+              value={settings.branchNamingMode}
+              onValueChange={(value) => {
+                if (BranchNamingMode.literals.includes(value as BranchNamingMode)) {
+                  updateSettings({ branchNamingMode: value as BranchNamingMode });
+                }
+              }}
+            >
+              <SelectTrigger size="sm" aria-label="Branch names">
+                <SelectValue>{(value: BranchNamingMode) => MODES[value]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {BranchNamingMode.literals.map((mode) => (
+                  <SelectItem key={mode} value={mode}>
+                    {MODES[mode]}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          </SettingsField>
         }
       />
       {/* The mode's own row glides in and out instead of mounting with a jump. */}
@@ -82,25 +84,26 @@ export function BranchNamingSettings() {
               ) : null
             }
             control={
-              <Input
-                key={`${scopeKey}:${settings.branchNamePrefix}`}
-                aria-label="Branch prefix"
-                size="sm"
-                className="w-full sm:w-44"
-                autoCapitalize="none"
-                spellCheck={false}
-                onChange={() => {
-                  prefixEdited.current = true;
-                }}
-                placeholder="No prefix"
-                defaultValue={settings.branchNamePrefix}
-                onBlur={(event) => {
-                  const value = event.target.value.trim();
-                  if (prefixEdited.current && value !== settings.branchNamePrefix)
-                    updateSettings({ branchNamePrefix: value });
-                  prefixEdited.current = false;
-                }}
-              />
+              <SettingsField>
+                <Input
+                  key={`${scopeKey}:${settings.branchNamePrefix}`}
+                  aria-label="Branch prefix"
+                  size="sm"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  onChange={() => {
+                    prefixEdited.current = true;
+                  }}
+                  placeholder="No prefix"
+                  defaultValue={settings.branchNamePrefix}
+                  onBlur={(event) => {
+                    const value = event.target.value.trim();
+                    if (prefixEdited.current && value !== settings.branchNamePrefix)
+                      updateSettings({ branchNamePrefix: value });
+                    prefixEdited.current = false;
+                  }}
+                />
+              </SettingsField>
             }
           />
         ) : null}
@@ -119,7 +122,7 @@ export function BranchNamingSettings() {
               ) : null
             }
           >
-            <div className="mt-3 max-w-2xl pb-3.5">
+            <div className="mt-3 max-w-2xl">
               <Textarea
                 key={`${scopeKey}:${settings.branchNameInstructions}`}
                 aria-label="Branch naming instructions"

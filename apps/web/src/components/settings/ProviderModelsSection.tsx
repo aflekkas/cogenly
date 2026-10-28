@@ -1,6 +1,13 @@
 "use client";
 
-import { ArrowDownIcon, ArrowUpIcon, PencilIcon, PlusIcon, XIcon } from "lucide-react";
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  PencilIcon,
+  SearchIcon,
+  SparklesIcon,
+  XIcon,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ProviderDriverKind,
@@ -17,13 +24,20 @@ import {
 import { cn } from "../../lib/utils";
 import { sortModelsForProviderInstance } from "../../modelOrdering";
 import { MAX_CUSTOM_MODEL_LENGTH } from "../../modelSelection";
-import { Button } from "../ui/button";
+import { Button, InlineButton } from "../ui/button";
 import { Input } from "../ui/input";
 import { SearchInput } from "../ui/search-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { CustomModelEditor } from "./CustomModelEditor";
+import {
+  SETTINGS_MICRO_LABEL_CLASSNAME,
+  SettingsEmpty,
+  SettingsSection,
+  SettingsSectionAction,
+} from "./settingsLayout";
+import { SettingsTag } from "./SettingsStatus";
 
 /**
  * Placeholder text for the "add a custom model" input, keyed by driver
@@ -495,7 +509,7 @@ export function ProviderModelsSection({
         className={cn(
           // Actions column is at least wide enough for the four custom-row
           // buttons so capability labels line up across built-in and custom rows.
-          "grid h-7 grid-cols-[minmax(0,1fr)_auto_minmax(5.5rem,auto)_auto] items-center gap-2 rounded-md px-2 transition-colors hover:bg-muted/30",
+          "grid h-7 grid-cols-[minmax(0,1fr)_auto_minmax(5.5rem,auto)_auto] items-center gap-2 rounded-md px-2 transition-colors duration-(--motion-duration-fast) ease-out hover:bg-muted/30",
           isHidden && "opacity-50",
         )}
       >
@@ -507,9 +521,7 @@ export function ProviderModelsSection({
               {model.slug}
             </code>
           ) : null}
-          {model.isCustom ? (
-            <span className="text-2xs text-muted-foreground/70">custom</span>
-          ) : null}
+          {model.isCustom ? <SettingsTag>Custom</SettingsTag> : null}
         </span>
         {/*
           Always a grid item so the columns line up across rows; the text
@@ -535,32 +547,48 @@ export function ProviderModelsSection({
   };
 
   const groupLabel = (label: string, isFirst: boolean) => (
-    <div className={cn("px-2 pb-1.5 text-2xs text-muted-foreground", isFirst ? "pt-1" : "pt-5")}>
+    <div className={cn("px-2 pb-1.5", SETTINGS_MICRO_LABEL_CLASSNAME, isFirst ? "pt-1" : "pt-5")}>
       {label}
     </div>
   );
 
   return (
-    <div className="lg:flex lg:h-full lg:min-h-0 lg:flex-col">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        {showFilter ? (
-          <SearchInput
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
-            placeholder="Filter models"
-            frameClassName="w-56 max-w-full"
-            spellCheck={false}
-            aria-label="Filter models"
-            clearLabel="Clear model filter"
-            onClear={() => setFilter("")}
-          />
-        ) : null}
-        <div className="flex items-center gap-2">
+    <SettingsSection
+      title="Models"
+      headerAction={
+        canManageCustomModels ? (
+          <SettingsSectionAction onClick={() => setIsAdding(true)}>
+            Add custom model
+          </SettingsSectionAction>
+        ) : null
+      }
+      footer="Saved on this machine, so every device connected to it sees the same models."
+    >
+      <div className="px-3 py-3 sm:px-4 lg:flex lg:h-full lg:min-h-0 lg:flex-col">
+        {/* Text actions without padding, so the toolbar's ends sit on the rows' edges. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
+          {showFilter ? (
+            <SearchInput
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              placeholder="Filter models"
+              frameClassName="w-56 max-w-full"
+              spellCheck={false}
+              aria-label="Filter models"
+              clearLabel="Clear model filter"
+              onClear={() => setFilter("")}
+            />
+          ) : null}
+          <span>
+            {models.length} model{models.length === 1 ? "" : "s"}
+            {hiddenCount > 0 ? ` · ${hiddenCount} hidden` : ""}
+          </span>
           {builtInModels.length > 0 ? (
-            <Button
-              type="button"
-              size="xs"
-              variant="ghost-muted"
+            <InlineButton
+              tone="muted"
+              weight="normal"
+              className="ml-auto"
+              disabled={!canWritePreferences}
               onClick={() =>
                 onHiddenModelsChange(
                   nextHiddenModelsForBulkToggle(models, hiddenModels),
@@ -568,102 +596,88 @@ export function ProviderModelsSection({
                 )
               }
             >
-              {allBuiltInModelsHidden ? "Show all" : "Hide all"}
-            </Button>
+              {allBuiltInModelsHidden ? "Show all in picker" : "Hide all from picker"}
+            </InlineButton>
           ) : null}
-          <span className="text-xs text-muted-foreground">
-            {models.length} model{models.length === 1 ? "" : "s"}
-            {hiddenCount > 0 ? ` · ${hiddenCount} hidden` : ""}
-          </span>
         </div>
-        {!isAdding ? (
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost-muted"
-            className="ml-auto"
-            onClick={() => setIsAdding(true)}
-          >
-            <PlusIcon className="size-3" />
-            Add custom model
-          </Button>
-        ) : null}
-      </div>
-      <div
-        ref={listRef}
-        className="@container/model-list scroll-fade-y mt-2 -mx-2 max-h-64 overflow-y-auto lg:max-h-none lg:min-h-0 lg:flex-1"
-      >
-        {visibleModels.length === 0 ? (
-          <p className="px-2 py-2 text-xs text-muted-foreground">
-            {isFiltering ? "No models match." : "No models reported for this provider yet."}
-          </p>
-        ) : null}
-        {visibleModels.map((model, index) => {
-          const group = groupOf(model);
-          const previous = visibleModels[index - 1];
-          const startsGroup = previous === undefined || groupOf(previous) !== group;
-          const editingEntry =
-            canManageCustomModels && model.isCustom && editingSlug === model.slug
-              ? customModels.find((entry) => entry.slug === model.slug)
-              : undefined;
-          return (
-            <div key={`${instanceId}:${model.slug}:group`}>
-              {startsGroup && group === "hidden"
-                ? groupLabel("Hidden from picker", index === 0)
-                : null}
-              {renderRow(model)}
-              {editingEntry ? (
-                <CustomModelEditor
-                  key={`${instanceId}:${model.slug}:editor`}
-                  instanceId={instanceId}
-                  driverKind={driverKind}
-                  entry={editingEntry}
-                  builtInModels={builtInModels}
-                  onSave={handleSaveEdit}
-                  onCancel={() => setEditingSlug(null)}
-                />
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
+        <div
+          ref={listRef}
+          className="@container/model-list scroll-fade-y mt-2 -mx-2 max-h-64 overflow-y-auto lg:max-h-none lg:min-h-0 lg:flex-1"
+        >
+          {visibleModels.length === 0 ? (
+            <SettingsEmpty
+              icon={isFiltering ? <SearchIcon /> : <SparklesIcon />}
+              label={isFiltering ? "No models match." : "No models reported for this provider yet."}
+            />
+          ) : null}
+          {visibleModels.map((model, index) => {
+            const group = groupOf(model);
+            const previous = visibleModels[index - 1];
+            const startsGroup = previous === undefined || groupOf(previous) !== group;
+            const editingEntry =
+              canManageCustomModels && model.isCustom && editingSlug === model.slug
+                ? customModels.find((entry) => entry.slug === model.slug)
+                : undefined;
+            return (
+              <div key={`${instanceId}:${model.slug}:group`}>
+                {startsGroup && group === "hidden"
+                  ? groupLabel("Hidden from picker", index === 0)
+                  : null}
+                {renderRow(model)}
+                {editingEntry ? (
+                  <CustomModelEditor
+                    key={`${instanceId}:${model.slug}:editor`}
+                    instanceId={instanceId}
+                    driverKind={driverKind}
+                    entry={editingEntry}
+                    builtInModels={builtInModels}
+                    onSave={handleSaveEdit}
+                    onCancel={() => setEditingSlug(null)}
+                  />
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
 
-      {!canManageCustomModels ? null : isAdding ? (
-        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-          <Input
-            id={`provider-instance-${instanceId}-custom-model`}
-            size="sm"
-            autoFocus
-            value={input}
-            onChange={(event) => {
-              setInput(event.target.value);
-              if (error) setError(null);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
+        {!canManageCustomModels ? null : isAdding ? (
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+            <Input
+              id={`provider-instance-${instanceId}-custom-model`}
+              size="sm"
+              autoFocus
+              aria-label="Custom model slug"
+              value={input}
+              onChange={(event) => {
+                setInput(event.target.value);
+                if (error) setError(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  cancelAdd();
+                  return;
+                }
+                if (event.key !== "Enter") return;
                 event.preventDefault();
-                cancelAdd();
-                return;
-              }
-              if (event.key !== "Enter") return;
-              event.preventDefault();
-              handleAdd();
-            }}
-            placeholder={driverKind ? CUSTOM_MODEL_PLACEHOLDER_BY_KIND[driverKind] : "model-slug"}
-            spellCheck={false}
-          />
-          <div className="flex shrink-0 gap-2">
-            <Button size="sm" variant="outline" onClick={handleAdd}>
-              Add
-            </Button>
-            <Button size="sm" variant="ghost" onClick={cancelAdd}>
-              Cancel
-            </Button>
+                handleAdd();
+              }}
+              placeholder={driverKind ? CUSTOM_MODEL_PLACEHOLDER_BY_KIND[driverKind] : "model-slug"}
+              spellCheck={false}
+            />
+            <div className="flex shrink-0 gap-2">
+              <Button size="sm" variant="outline" onClick={handleAdd}>
+                Add
+              </Button>
+              <Button size="sm" variant="outline" onClick={cancelAdd}>
+                Cancel
+              </Button>
+            </div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
-    </div>
+        {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
+      </div>
+    </SettingsSection>
   );
 }

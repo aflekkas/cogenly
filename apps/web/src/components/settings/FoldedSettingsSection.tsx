@@ -1,10 +1,10 @@
 import { SettingsGroup } from "./SettingsGroup";
 import type { ReactNode } from "react";
 
-import { DisclosureChevron } from "../ui/disclosure";
-import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
+import { DisclosurePanel } from "../ui/disclosure";
 import {
   SettingsDisclosure,
+  SettingsDisclosureToggle,
   SettingsSectionHeader,
   useSearchTargetFold,
   useSettingsSearchTarget,
@@ -96,22 +96,24 @@ function OutsideFold({
   const [open, setOpen] = useSearchTargetFold(id, targetIds);
   return (
     <section id={id} ref={targetRef} tabIndex={-1} className="outline-none">
-      <Collapsible open={open} onOpenChange={setOpen}>
-        <div className="space-y-2.5">
-          <SettingsSectionHeader
-            title={
-              <CollapsibleTrigger className="flex min-h-7 items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
-                {title}
-                <DisclosureChevron />
-              </CollapsibleTrigger>
-            }
-            headerAction={control}
-          />
-          <CollapsiblePanel>
-            <SettingsGroup>{children}</SettingsGroup>
-          </CollapsiblePanel>
+      <SettingsSectionHeader
+        title={title}
+        headerAction={
+          <>
+            {control}
+            <SettingsDisclosureToggle
+              open={open}
+              onOpenChange={setOpen}
+              label={typeof title === "string" ? title.toLowerCase() : "section"}
+            />
+          </>
+        }
+      />
+      <DisclosurePanel open={open}>
+        <div className="pt-2.5">
+          <SettingsGroup>{children}</SettingsGroup>
         </div>
-      </Collapsible>
+      </DisclosurePanel>
     </section>
   );
 }

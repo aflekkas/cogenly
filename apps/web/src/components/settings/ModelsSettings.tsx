@@ -22,8 +22,8 @@ import { toastManager } from "../ui/toast";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
 import {
-  SETTINGS_PICKER_TRIGGER_CLASSNAME,
   SettingResetButton,
+  SettingsModelPickers,
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
@@ -125,7 +125,7 @@ function TextGenerationModelRow() {
         ) : !hasTextGenerationProvider ? (
           <span className="text-sm text-muted-foreground">No providers available</span>
         ) : (
-          <div className="flex flex-wrap items-center justify-end gap-1.5">
+          <SettingsModelPickers>
             <ProviderModelPicker
               environmentId={environmentId}
               activeInstanceId={textGenInstanceId}
@@ -133,7 +133,7 @@ function TextGenerationModelRow() {
               lockedProvider={null}
               instanceEntries={textGenerationModelInstanceEntries}
               modelOptionsByInstance={textGenerationModelOptionsByInstance}
-              triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+              triggerVariant="field"
               getModelDisabledReason={textGenerationModelDisabledReason}
               {...(environmentId
                 ? {
@@ -179,7 +179,7 @@ function TextGenerationModelRow() {
                 modelOptions={textGenModelOptions}
                 allowPromptInjectedEffort={false}
                 planModeEnabled={settings.planModeEnabled || selectsPlanAgent(textGenModelOptions)}
-                triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+                triggerVariant="field"
                 onModelOptionsChange={(nextOptions) => {
                   updateSettings({
                     textGenerationModelSelection: resolveAppModelSelectionState(
@@ -197,7 +197,7 @@ function TextGenerationModelRow() {
                 }}
               />
             ) : null}
-          </div>
+          </SettingsModelPickers>
         )
       }
     />

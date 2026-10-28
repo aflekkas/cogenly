@@ -33,6 +33,7 @@ import { useComposerDraftStore, DraftId } from "../../composerDraftStore";
 import { getProviderModelCapabilities } from "../../providerModels";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
+import { SelectButton } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   ComposerControl,
@@ -637,6 +638,7 @@ export const TraitsPicker = memo(function TraitsPicker({
   allowPromptInjectedEffort = true,
   planModeEnabled,
   triggerClassName,
+  triggerVariant = "composer",
   isComposerOwned,
   size = "sm",
   hidden = false,
@@ -647,6 +649,12 @@ export const TraitsPicker = memo(function TraitsPicker({
     size?: ComposerControlSize;
     hidden?: boolean;
     disabled?: boolean;
+    /**
+     * `composer` is the toolbar's borderless control; `field` is the bordered
+     * select look a form uses (Settings), sized `sm`. Width comes from
+     * `triggerClassName`.
+     */
+    triggerVariant?: "composer" | "field";
   }) {
   const composerFloatingLayerProps = useComposerMenuProps();
   const [isMenuOpen, setIsMenuOpen] = useComposerMenuState(hidden || disabled);
@@ -683,6 +691,21 @@ export const TraitsPicker = memo(function TraitsPicker({
     reportedModelSelection,
   });
   const isCodexStyle = provider === "codex";
+  const fieldTrigger =
+    triggerVariant === "field" ? (
+      <TooltipTrigger
+        render={
+          <MenuTrigger
+            render={<SelectButton size="sm" disabled={disabled} aria-label={triggerLabel} />}
+          />
+        }
+      >
+        <span className="flex min-w-0 items-center gap-1.5">
+          <ComposerControlIcon icon={BrainIcon} size="sm" />
+          <span className="min-w-0 truncate">{triggerLabel}</span>
+        </span>
+      </TooltipTrigger>
+    ) : null;
 
   return (
     <Menu
@@ -692,46 +715,51 @@ export const TraitsPicker = memo(function TraitsPicker({
       }}
     >
       <Tooltip>
-        <TooltipTrigger
-          render={
-            <MenuTrigger
-              render={
-                <ComposerControl
-                  disabled={disabled}
-                  aria-label={triggerLabel}
-                  data-composer-shortcut={isComposerOwned ? "composer.effort" : undefined}
-                  size={size}
-                  className={cn(
-                    isCodexStyle
-                      ? "min-w-0 max-w-40 shrink justify-start overflow-hidden whitespace-nowrap sm:max-w-48"
-                      : "shrink-0 whitespace-nowrap",
-                    triggerClassName,
-                  )}
-                />
-              }
-            />
-          }
-        >
-          {isCodexStyle ? (
-            // The label truncates itself; clipping the wrapper too would cut off
-            // the chevron, whose negative end margin overhangs the wrapper edge.
-            <span
-              className={cn("flex min-w-0 w-full items-center", composerControlGapClassName(size))}
-            >
-              <ComposerControlIcon icon={BrainIcon} size={size} />
-              <span data-composer-control-label className="min-w-0 truncate">
-                {triggerLabel}
+        {fieldTrigger ?? (
+          <TooltipTrigger
+            render={
+              <MenuTrigger
+                render={
+                  <ComposerControl
+                    disabled={disabled}
+                    aria-label={triggerLabel}
+                    data-composer-shortcut={isComposerOwned ? "composer.effort" : undefined}
+                    size={size}
+                    className={cn(
+                      isCodexStyle
+                        ? "min-w-0 max-w-40 shrink justify-start overflow-hidden whitespace-nowrap sm:max-w-48"
+                        : "shrink-0 whitespace-nowrap",
+                      triggerClassName,
+                    )}
+                  />
+                }
+              />
+            }
+          >
+            {isCodexStyle ? (
+              // The label truncates itself; clipping the wrapper too would cut off
+              // the chevron, whose negative end margin overhangs the wrapper edge.
+              <span
+                className={cn(
+                  "flex min-w-0 w-full items-center",
+                  composerControlGapClassName(size),
+                )}
+              >
+                <ComposerControlIcon icon={BrainIcon} size={size} />
+                <span data-composer-control-label className="min-w-0 truncate">
+                  {triggerLabel}
+                </span>
+                <ComposerControlChevron size={size} />
               </span>
-              <ComposerControlChevron size={size} />
-            </span>
-          ) : (
-            <>
-              <ComposerControlIcon icon={BrainIcon} size={size} />
-              <span data-composer-control-label>{triggerLabel}</span>
-              <ComposerControlChevron size={size} />
-            </>
-          )}
-        </TooltipTrigger>
+            ) : (
+              <>
+                <ComposerControlIcon icon={BrainIcon} size={size} />
+                <span data-composer-control-label>{triggerLabel}</span>
+                <ComposerControlChevron size={size} />
+              </>
+            )}
+          </TooltipTrigger>
+        )}
         <TooltipPopup side="top">{triggerLabel}</TooltipPopup>
       </Tooltip>
       <MenuPopup align="start" {...(isComposerOwned ? composerFloatingLayerProps : {})}>

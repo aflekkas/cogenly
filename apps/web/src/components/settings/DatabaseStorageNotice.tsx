@@ -47,7 +47,7 @@ export function DatabaseStorageNotice({
             >
               Copy command
             </CopyButton>
-            <Button variant="ghost" size="sm" onClick={() => setDismissed(true)}>
+            <Button variant="outline" size="sm" onClick={() => setDismissed(true)}>
               Dismiss
             </Button>
           </div>

@@ -6,6 +6,7 @@ import { AUTH_SCOPE_OPTIONS as PAIRING_SCOPE_OPTIONS } from "@cogenly/shared/aut
 import {
   ChevronsLeftRightEllipsisIcon,
   EllipsisIcon,
+  MonitorSmartphoneIcon,
   PencilIcon,
   PlusIcon,
   QrCodeIcon,
@@ -80,7 +81,9 @@ import {
 } from "./ConnectionsSettings.logic";
 import {
   SettingsDisclosure,
+  SETTINGS_MICRO_LABEL_CLASSNAME,
   SettingsEmpty,
+  SettingsField,
   SettingsNote,
   SettingsRow,
   SettingsSection,
@@ -97,7 +100,6 @@ import {
   environmentTransportLabel,
   formatDesktopSshTarget,
 } from "./EnvironmentRow";
-import { FoldedSettingsSection } from "./FoldedSettingsSection";
 import { LoadBalancingSettings } from "./LoadBalancingSettings";
 import { GitHubRoutingSettings } from "./GitHubRoutingSettings";
 import { Input } from "../ui/input";
@@ -142,7 +144,8 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Alert, AlertDescription } from "../ui/alert";
 import { SettingsStatusBadge, SettingsTag } from "./SettingsStatus";
 import { Button } from "../ui/button";
-import { DisclosureChevron } from "../ui/disclosure";
+import { DisclosureChevron, DisclosurePanel } from "../ui/disclosure";
+import { SettingsGroup } from "./SettingsGroup";
 import { AnimatedHeight } from "../AnimatedHeight";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { Textarea } from "../ui/textarea";
@@ -410,13 +413,13 @@ function sortDesktopPairingLinks(links: ReadonlyArray<ServerPairingLinkRecord>) 
   );
 }
 
-/** Closed-header summary for the Authorized clients fold. */
+/** Closed-row summary for the Devices with access fold. */
 function summarizeAuthorizedClients(
   sessions: ReadonlyArray<ServerClientSessionRecord>,
   links: ReadonlyArray<ServerPairingLinkRecord>,
 ): string {
   const parts = [
-    `${sessions.length} ${sessions.length === 1 ? "client" : "clients"}`,
+    `${sessions.length} ${sessions.length === 1 ? "device" : "devices"}`,
     links.length > 0
       ? `${links.length} ${links.length === 1 ? "pairing link" : "pairing links"}`
       : null,
@@ -718,12 +721,13 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
             <AccessScopeSummary scopes={pairingLink.scopes} label="Pairing link scopes" />
           </p>
           {!credential ? (
-            <p className="text-2xs text-muted-foreground/70">
+            <p className="text-xs text-muted-foreground">
               Create a new link to share from this client.
             </p>
           ) : shareablePairingUrl === null ? (
-            <p className="text-2xs text-muted-foreground/70">
-              Copy the token and pair from another client using this backend&apos;s reachable host.
+            <p className="text-xs text-muted-foreground">
+              Copy the code and pair from another client using this machine&apos;s reachable
+              address.
             </p>
           ) : null}
         </div>
@@ -789,7 +793,11 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
                   onClick={(event) => event.currentTarget.select()}
                 />
                 {isRevealValueUrl && isRevealValueQrShareable ? (
-                  <div className="flex justify-center rounded-xl border border-border/60 bg-muted/30 p-4">
+                  <SettingsGroup
+                    variant="inset"
+                    divided={false}
+                    className="flex justify-center p-4"
+                  >
                     <QRCodeSvg
                       value={revealValue}
                       size={132}
@@ -797,7 +805,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
                       marginSize={2}
                       title="Pairing link. Scan to open on another device"
                     />
-                  </div>
+                  </SettingsGroup>
                 ) : null}
               </DialogPanel>
               <DialogFooter variant="bare">
@@ -827,102 +835,112 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
           </Button>
         </div>
       </div>
-      {isQrPanelOpen && qrPairingUrl !== null ? (
-        <div
-          id={qrPanelId}
-          className="mt-3 flex flex-col gap-4 border-t border-border/50 pt-3 sm:flex-row sm:items-start sm:justify-between"
-        >
-          <div className="min-w-0 flex-1 space-y-3">
-            {endpointCopyOptions.length > 1 ? (
-              <div
-                className="space-y-1.5"
-                role="radiogroup"
-                aria-label="Endpoint the pairing QR code and URL use"
-              >
-                <p className="text-2xs text-muted-foreground/70">Reach this machine via</p>
-                {endpointCopyOptions.map((option) => {
-                  const isSelected = option.id === selectedQrOption?.id;
-                  return (
-                    <button
-                      key={option.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={isSelected}
-                      className={cn(
-                        "flex w-full items-baseline gap-2 rounded-lg border px-2.5 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                        isSelected
-                          ? "border-foreground/60 bg-muted/30"
-                          : "border-border/50 interactive hover:bg-muted/20",
-                      )}
-                      onClick={() => setQrEndpointId(option.id)}
-                    >
-                      <span
-                        className={cn(
-                          "text-xs font-medium",
-                          isSelected ? "text-foreground" : "text-muted-foreground",
-                        )}
-                      >
-                        {option.label}
-                      </span>
-                      <span className="min-w-0 truncate text-2xs text-muted-foreground/70">
-                        {option.detail}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-            <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/30 px-2.5 py-1.5">
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <code className="min-w-0 flex-1 truncate font-mono text-2xs text-muted-foreground">
-                      {qrPairingUrl}
-                    </code>
-                  }
-                />
-                <TooltipPopup side="top">{qrPairingUrl}</TooltipPopup>
-              </Tooltip>
-              <span className="shrink-0">
-                <CopyButton
-                  {...pairingCopyProps(qrPairingUrl, copyKindForUrl(qrPairingUrl))}
-                  label="Copy pairing link"
-                  size="xs"
-                  variant="ghost"
+      <DisclosurePanel open={isQrPanelOpen && qrPairingUrl !== null}>
+        {qrPairingUrl !== null ? (
+          <div
+            id={qrPanelId}
+            className="mt-3 flex flex-col gap-4 border-t border-border/50 pt-3 sm:flex-row sm:items-start sm:justify-between"
+          >
+            <div className="min-w-0 flex-1 space-y-3">
+              {endpointCopyOptions.length > 1 ? (
+                <div
+                  className="space-y-1.5"
+                  role="radiogroup"
+                  aria-label="Endpoint the pairing QR code and URL use"
                 >
-                  Copy link
-                </CopyButton>
-              </span>
+                  <p className={SETTINGS_MICRO_LABEL_CLASSNAME}>Reach this machine via</p>
+                  {endpointCopyOptions.map((option) => {
+                    const isSelected = option.id === selectedQrOption?.id;
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={isSelected}
+                        className={cn(
+                          "flex w-full items-baseline gap-2 rounded-lg border px-2.5 py-1.5 text-left outline-none transition-colors duration-(--motion-duration-fast) ease-out focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                          isSelected
+                            ? "border-foreground/60 bg-muted/30"
+                            : "border-border/50 interactive hover:bg-muted/20",
+                        )}
+                        onClick={() => setQrEndpointId(option.id)}
+                      >
+                        <span
+                          className={cn(
+                            "text-xs font-medium",
+                            isSelected ? "text-foreground" : "text-muted-foreground",
+                          )}
+                        >
+                          {option.label}
+                        </span>
+                        <span className="min-w-0 truncate text-xs text-muted-foreground">
+                          {option.detail}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+              <SettingsGroup
+                variant="inset"
+                divided={false}
+                className="flex items-center gap-2 px-2.5 py-1.5"
+              >
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <code className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+                        {qrPairingUrl}
+                      </code>
+                    }
+                  />
+                  <TooltipPopup side="top">{qrPairingUrl}</TooltipPopup>
+                </Tooltip>
+                <span className="shrink-0">
+                  <CopyButton
+                    {...pairingCopyProps(qrPairingUrl, copyKindForUrl(qrPairingUrl))}
+                    label="Copy pairing link"
+                    size="xs"
+                    variant="ghost"
+                  >
+                    Copy link
+                  </CopyButton>
+                </span>
+              </SettingsGroup>
+              <CopyButton
+                {...pairingCopyProps(credential ?? "", "code")}
+                label="Copy pairing code"
+                size="xs"
+                variant="ghost"
+              >
+                Copy code only
+              </CopyButton>
             </div>
-            <CopyButton
-              {...pairingCopyProps(credential ?? "", "code")}
-              label="Copy pairing code"
-              size="xs"
-              variant="ghost"
-            >
-              Copy code only
-            </CopyButton>
+            {canRenderQrForSelection ? (
+              <div className="w-fit shrink-0 self-center rounded-xl bg-white p-3 sm:self-start">
+                <QRCodeSvg
+                  value={qrPairingUrl}
+                  size={168}
+                  level="M"
+                  marginSize={1}
+                  title="Pairing link. Scan to open on another device"
+                />
+              </div>
+            ) : (
+              <SettingsGroup
+                variant="inset"
+                divided={false}
+                className="flex size-[192px] shrink-0 items-center justify-center self-center p-4 sm:self-start"
+              >
+                <p className="text-center text-xs text-muted-foreground">
+                  No QR for this endpoint. Another device scanning a loopback link would dial
+                  itself; copy the URL for use on this machine instead.
+                </p>
+              </SettingsGroup>
+            )}
           </div>
-          {canRenderQrForSelection ? (
-            <div className="w-fit shrink-0 self-center rounded-xl bg-white p-3 sm:self-start">
-              <QRCodeSvg
-                value={qrPairingUrl}
-                size={168}
-                level="M"
-                marginSize={1}
-                title="Pairing link. Scan to open on another device"
-              />
-            </div>
-          ) : (
-            <div className="flex size-[192px] shrink-0 items-center justify-center self-center rounded-xl border border-border/50 p-4 sm:self-start">
-              <p className="text-center text-2xs text-muted-foreground/70">
-                No QR for this endpoint. Another device scanning a loopback link would dial itself;
-                copy the URL for use on this machine instead.
-              </p>
-            </div>
-          )}
-        </div>
-      ) : null}
+        ) : null}
+      </DisclosurePanel>
     </div>
   );
 });
@@ -973,7 +991,7 @@ const ConnectedClientListRow = memo(function ConnectedClientListRow({
             <ConnectionStatusDot
               tooltipText={statusTooltip}
               dotClassName={isLive ? "bg-success" : "bg-muted-foreground/30"}
-              pingClassName={isLive ? "bg-success/60 duration-2000" : null}
+              pingClassName={isLive ? "bg-success/60" : null}
             />
             <h3 className="text-sm font-medium text-foreground">{primaryLabel}</h3>
             {clientSession.current ? <SettingsTag>This device</SettingsTag> : null}
@@ -1005,7 +1023,7 @@ const ConnectedClientListRow = memo(function ConnectedClientListRow({
   );
 });
 
-type AuthorizedClientsHeaderActionProps = {
+type AuthorizedClientsActionsProps = {
   onPairingLinkCreated: (result: AuthPairingCredentialResult) => void;
   clientSessions: ReadonlyArray<ServerClientSessionRecord> | null;
   isRevokingOtherClients: boolean;
@@ -1013,13 +1031,14 @@ type AuthorizedClientsHeaderActionProps = {
   delegatableScopes: ReadonlyArray<AuthEnvironmentScope>;
 };
 
-const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderAction({
+/** The Devices with access row's actions: revoke every other device, pair a new one. */
+const AuthorizedClientsActions = memo(function AuthorizedClientsActions({
   onPairingLinkCreated,
   clientSessions,
   isRevokingOtherClients,
   onRevokeOtherClients,
   delegatableScopes,
-}: AuthorizedClientsHeaderActionProps) {
+}: AuthorizedClientsActionsProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [pairingLabel, setPairingLabel] = useState("");
@@ -1068,22 +1087,25 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
   }, []);
 
   return (
-    <div className="flex items-center gap-2">
-      <Button
-        size="sm"
-        variant="destructive-outline"
-        disabled={isRevokingOtherClients || !canRevokeOtherClients(clientSessions)}
-        onClick={async () => {
-          // Fail closed: no mounted confirm host means nothing is revoked.
-          const confirmed = await requestConfirmDialog(
-            revokeOtherClientsConfirmation(clientSessions),
-            { variant: "destructive" },
-          );
-          if (confirmed === true) onRevokeOtherClients();
-        }}
-      >
-        {isRevokingOtherClients ? "Revoking…" : "Revoke all others"}
-      </Button>
+    <>
+      {/* Only offered while another device has access; alone, there is nothing to revoke. */}
+      {isRevokingOtherClients || canRevokeOtherClients(clientSessions) ? (
+        <Button
+          size="sm"
+          variant="destructive-outline"
+          disabled={isRevokingOtherClients}
+          onClick={async () => {
+            // Fail closed: no mounted confirm host means nothing is revoked.
+            const confirmed = await requestConfirmDialog(
+              revokeOtherClientsConfirmation(clientSessions),
+              { variant: "destructive" },
+            );
+            if (confirmed === true) onRevokeOtherClients();
+          }}
+        >
+          {isRevokingOtherClients ? "Revoking…" : "Revoke all others"}
+        </Button>
+      ) : null}
       <Dialog
         open={dialogOpen}
         onOpenChange={(open) => {
@@ -1098,7 +1120,7 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
       >
         <DialogTrigger
           render={
-            <Button size="sm" variant="default">
+            <Button size="sm" variant="outline">
               <PlusIcon />
               Pair a device
             </Button>
@@ -1166,12 +1188,12 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
                   </Button>
                 </div>
               </div>
-              <div className="divide-y divide-border/60 rounded-lg border border-input bg-muted/25">
+              <SettingsGroup variant="inset">
                 {PAIRING_SCOPE_OPTIONS.filter(({ scope }) => delegatableScopes.includes(scope)).map(
                   ({ scope, title, description }) => (
                     <label
                       key={scope}
-                      className="flex cursor-pointer items-start gap-3 px-3 py-2.5 transition-colors hover:bg-muted/40"
+                      className="flex cursor-pointer items-start gap-3 px-3 py-2.5 transition-colors duration-(--motion-duration-fast) ease-out first:rounded-t-lg last:rounded-b-lg hover:bg-muted/40"
                     >
                       <Checkbox
                         className="mt-0.5"
@@ -1188,7 +1210,7 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
                     </label>
                   ),
                 )}
-              </div>
+              </SettingsGroup>
               {selectedScopes.length === 0 ? (
                 <p className="text-xs text-destructive">Select at least one permission.</p>
               ) : selectedScopes.includes(AuthAccessWriteScope) ? (
@@ -1215,7 +1237,7 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
           </DialogFooter>
         </DialogPopup>
       </Dialog>
-    </div>
+    </>
   );
 });
 
@@ -1279,7 +1301,7 @@ const PairingClientsList = memo(function PairingClientsList({
       ))}
 
       {pairingLinks.length === 0 && clientSessions.length === 0 && !isLoading ? (
-        <SettingsNote>No pairing links or client sessions.</SettingsNote>
+        <SettingsEmpty icon={<MonitorSmartphoneIcon />} label="No devices or pairing links yet." />
       ) : null}
     </>
   );
@@ -1601,7 +1623,7 @@ function SavedBackendListRow({
             type="button"
             aria-expanded={routesOpen}
             onClick={() => setRoutesOpen((open) => !open)}
-            className="inline-flex shrink-0 items-center gap-0.5 rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+            className="inline-flex shrink-0 items-center gap-0.5 rounded-sm text-muted-foreground outline-none transition-colors duration-(--motion-duration-fast) ease-out hover:text-foreground focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
           >
             {routeCount === 1 ? "Routes" : `${routeCount} routes`}
             <DisclosureChevron open={routesOpen} />
@@ -1614,7 +1636,7 @@ function SavedBackendListRow({
             aria-expanded={permissionsOpen}
             aria-controls={`remote-permissions-${environmentId}`}
             onClick={() => setPermissionsOpen((open) => !open)}
-            className="inline-flex shrink-0 items-center gap-0.5 rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+            className="inline-flex shrink-0 items-center gap-0.5 rounded-sm text-muted-foreground outline-none transition-colors duration-(--motion-duration-fast) ease-out hover:text-foreground focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
           >
             Permissions
             <DisclosureChevron open={permissionsOpen} />
@@ -1630,13 +1652,13 @@ function SavedBackendListRow({
       }
       detail={
         <>
-          {routesOpen && (
+          <DisclosurePanel open={routesOpen}>
             <EnvironmentRoutesList
               environment={environment}
               onAddRoute={() => onAddRoute(environment)}
             />
-          )}
-          {permissionsOpen && (
+          </DisclosurePanel>
+          <DisclosurePanel open={permissionsOpen}>
             <div
               id={`remote-permissions-${environmentId}`}
               className="mt-2 border-t border-border/50"
@@ -1647,7 +1669,7 @@ function SavedBackendListRow({
                 routeContext
               />
             </div>
-          )}
+          </DisclosurePanel>
         </>
       }
     >
@@ -2833,7 +2855,11 @@ export function ConnectionsSettings() {
   const renderRemoteModeBody = () => (
     <div className="space-y-4">
       {relayRouteOffer !== null ? (
-        <div className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2">
+        <SettingsGroup
+          variant="inset"
+          divided={false}
+          className="flex items-center justify-between gap-3 px-3 py-2"
+        >
           <p className="text-xs text-muted-foreground">
             This machine is on your Cogenly Connect account. Use it as a fallback route.
           </p>
@@ -2845,7 +2871,7 @@ export function ConnectionsSettings() {
           >
             Add Cogenly Connect
           </Button>
-        </div>
+        </SettingsGroup>
       ) : null}
       {renderRemoteFields()}
       {savedBackendError ? <p className="text-xs text-destructive">{savedBackendError}</p> : null}
@@ -3272,39 +3298,36 @@ export function ConnectionsSettings() {
             ) : null
           }
           control={
-            <Select
-              value={selectValue}
-              onValueChange={(value) => {
-                if (typeof value !== "string") return;
-                handleSelectWslMode(value);
-              }}
-            >
-              <SelectTrigger
-                size="sm"
-                className="w-full sm:w-56"
-                aria-label="WSL backend"
-                disabled={isUpdatingWslBackend}
+            <SettingsField>
+              <Select
+                value={selectValue}
+                onValueChange={(value) => {
+                  if (typeof value !== "string") return;
+                  handleSelectWslMode(value);
+                }}
               >
-                <SelectValue>{selectLabel}</SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value={BACKEND_VALUE_WSL_OFF}>
-                  Off
-                </SelectItem>
-                {desktopWslState.distros.length === 0 ? (
-                  <SelectItem hideIndicator value={BACKEND_VALUE_DEFAULT_WSL}>
-                    Default distro
+                <SelectTrigger size="sm" aria-label="WSL backend" disabled={isUpdatingWslBackend}>
+                  <SelectValue>{selectLabel}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem hideIndicator value={BACKEND_VALUE_WSL_OFF}>
+                    Off
                   </SelectItem>
-                ) : (
-                  desktopWslState.distros.map((distro) => (
-                    <SelectItem hideIndicator key={distro.name} value={distro.name}>
-                      {distro.name}
-                      {distro.isDefault ? " (default)" : ""}
+                  {desktopWslState.distros.length === 0 ? (
+                    <SelectItem hideIndicator value={BACKEND_VALUE_DEFAULT_WSL}>
+                      Default distro
                     </SelectItem>
-                  ))
-                )}
-              </SelectPopup>
-            </Select>
+                  ) : (
+                    desktopWslState.distros.map((distro) => (
+                      <SelectItem hideIndicator key={distro.name} value={distro.name}>
+                        {distro.name}
+                        {distro.isDefault ? " (default)" : ""}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectPopup>
+              </Select>
+            </SettingsField>
           }
         />
         {desktopWslState.enabled ? (
@@ -3523,13 +3546,63 @@ export function ConnectionsSettings() {
             ) : null}
             {canManageLocalBackend && desktopBridge ? renderWslRow() : null}
             {primaryEnvironment ? (
-              <SettingsDisclosure title="Permissions">
+              <SettingsDisclosure
+                title="Permissions"
+                summary="What this client's connection can do on this machine."
+              >
                 <div className="px-3 sm:px-4">
                   <SessionPermissions
                     environmentId={primaryEnvironment.environmentId}
                     connected={primaryEnvironment.connection.phase === "connected"}
                   />
                 </div>
+              </SettingsDisclosure>
+            ) : null}
+            {canReadAccess || canWriteAccess ? (
+              <SettingsDisclosure
+                id="authorized-clients"
+                title="Devices with access"
+                summary={
+                  canReadAccess
+                    ? summarizeAuthorizedClients(desktopClientSessions, visibleDesktopPairingLinks)
+                    : "Pair another device to give it access."
+                }
+                control={
+                  canWriteAccess ? (
+                    <AuthorizedClientsActions
+                      delegatableScopes={currentSessionScopes ?? []}
+                      onPairingLinkCreated={handlePairingLinkCreated}
+                      clientSessions={
+                        canReadAccess &&
+                        authAccessChanges.error === null &&
+                        authAccessChanges.data?.type === "snapshot"
+                          ? desktopClientSessions
+                          : null
+                      }
+                      isRevokingOtherClients={isRevokingOtherDesktopClients}
+                      onRevokeOtherClients={handleRevokeOtherDesktopClients}
+                    />
+                  ) : undefined
+                }
+              >
+                <ScrollArea
+                  scrollFade
+                  chainVerticalScroll
+                  className="max-h-[22.5rem]"
+                  data-testid="authorized-clients-scroll-area"
+                >
+                  {/* Divided like the card's own rows. */}
+                  <div className="[&>*+*]:border-t [&>*+*]:border-border/50">
+                    {canReadAccess ? (
+                      renderAuthorizedClients("current")
+                    ) : (
+                      <SettingsNote>
+                        This connection can make pairing links but can't see which devices have
+                        access.
+                      </SettingsNote>
+                    )}
+                  </div>
+                </ScrollArea>
               </SettingsDisclosure>
             ) : null}
           </SettingsSection>
@@ -3552,48 +3625,6 @@ export function ConnectionsSettings() {
             </SettingsSection>
           ) : null}
 
-          {canReadAccess || canWriteAccess ? (
-            <FoldedSettingsSection
-              id="authorized-clients"
-              title="Devices with access"
-              summary={summarizeAuthorizedClients(
-                desktopClientSessions,
-                visibleDesktopPairingLinks,
-              )}
-              control={
-                canWriteAccess ? (
-                  <AuthorizedClientsHeaderAction
-                    delegatableScopes={currentSessionScopes ?? []}
-                    onPairingLinkCreated={handlePairingLinkCreated}
-                    clientSessions={
-                      canReadAccess &&
-                      authAccessChanges.error === null &&
-                      authAccessChanges.data?.type === "snapshot"
-                        ? desktopClientSessions
-                        : null
-                    }
-                    isRevokingOtherClients={isRevokingOtherDesktopClients}
-                    onRevokeOtherClients={handleRevokeOtherDesktopClients}
-                  />
-                ) : undefined
-              }
-            >
-              <ScrollArea
-                scrollFade
-                chainVerticalScroll
-                className="max-h-[22.5rem]"
-                data-testid="authorized-clients-scroll-area"
-              >
-                {canReadAccess ? (
-                  renderAuthorizedClients("current")
-                ) : (
-                  <SettingsNote>
-                    This connection can make pairing links but can't see which devices have access.
-                  </SettingsNote>
-                )}
-              </ScrollArea>
-            </FoldedSettingsSection>
-          ) : null}
           <AlertDialog
             open={isDesktopServerExposureDialogOpen && canManageLocalBackend}
             onOpenChange={(open) => {
@@ -3776,7 +3807,7 @@ export function ConnectionsSettings() {
       <SettingsSection
         {...searchableSetting("remote-environments")}
         headerAction={
-          <div className="flex items-center gap-1">
+          <>
             {savedServerUpdateTargets.length > 0 ? (
               <ServerUpdatesAction targets={savedServerUpdateTargets} variant="ghost-muted" />
             ) : null}
@@ -3831,7 +3862,7 @@ export function ConnectionsSettings() {
                 </DialogPanel>
               </DialogPopup>
             </Dialog>
-          </div>
+          </>
         }
       >
         {listedEnvironments.map((environment) => (

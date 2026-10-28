@@ -4,7 +4,7 @@ import {
   squashAtomCommandFailure,
 } from "@cogenly/client-runtime/state/runtime";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@cogenly/shared/keybindings";
-import { ChevronDownIcon, PlusIcon } from "lucide-react";
+import { ChevronDownIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useProjectConfigFileState } from "../../hooks/useProjectConfigFile";
 import type { SidebarProjectGroupMember } from "../../sidebarProjectGrouping";
@@ -30,7 +30,7 @@ import {
 } from "../ui/menu";
 import { ProjectActionsList } from "./ProjectActionsList";
 import { useProjectScriptSettings } from "./useProjectScriptSettings";
-import { SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingsRow, SettingsSection, SettingsSectionAction } from "./settingsLayout";
 
 /**
  * A repository's actions, on the Repository page. They are stored on each
@@ -107,65 +107,63 @@ export function RepositoryActionsSettings({
   );
 
   return (
-    <SettingsSection id="project-actions" title="Actions">
-      <SettingsRow
-        title="Actions"
-        description="Commands that run in this repository or its worktrees, with optional shortcuts. Saved on every checkout of this repository."
-        control={
-          <div className="flex flex-wrap items-center gap-1.5">
-            {importableScripts.length > 0 ? (
-              <Menu>
-                <MenuTrigger
-                  render={
-                    <Button
-                      id="import-scripts"
-                      size="sm"
-                      variant="ghost"
-                      disabled={saving || !canWriteSettings}
-                      type="button"
-                    />
-                  }
-                >
-                  Import scripts
-                  <ChevronDownIcon className="size-3.5" />
-                </MenuTrigger>
-                <MenuPopup align="end">
-                  <MenuGroup>
-                    <MenuGroupLabel>Import from {configFile.fileName}</MenuGroupLabel>
-                    <p className="px-2 pb-2 text-pretty text-sm text-muted-foreground">
-                      Add actions declared by this checkout without editing them first.
-                    </p>
-                  </MenuGroup>
-                  <MenuSeparator />
-                  {importableScripts.map((fileScript) => (
-                    <MenuItem
-                      key={`${fileScript.name} ${fileScript.command}`}
-                      onClick={() => void importFileScript(fileScript)}
-                    >
-                      <ScriptIcon icon={fileScript.icon ?? "play"} className="size-4 shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate font-medium">{fileScript.name}</div>
-                        <div className="truncate font-mono text-muted-foreground">
-                          {fileScript.command}
-                        </div>
+    <SettingsSection
+      id="project-actions"
+      title="Actions"
+      footer="Commands that run in this repository or its worktrees, with optional shortcuts. Saved on every checkout of this repository."
+      headerAction={
+        // A fragment, so "Add action" stays the header's last child and reaches the card edge.
+        <>
+          {importableScripts.length > 0 ? (
+            <Menu>
+              <MenuTrigger
+                render={
+                  <Button
+                    id="import-scripts"
+                    size="xs"
+                    variant="ghost-muted"
+                    disabled={saving || !canWriteSettings}
+                    type="button"
+                  />
+                }
+              >
+                Import scripts
+                <ChevronDownIcon className="size-3" />
+              </MenuTrigger>
+              <MenuPopup align="end">
+                <MenuGroup>
+                  <MenuGroupLabel>Import from {configFile.fileName}</MenuGroupLabel>
+                  <p className="px-2 pb-2 text-pretty text-sm text-muted-foreground">
+                    Add actions declared by this checkout without editing them first.
+                  </p>
+                </MenuGroup>
+                <MenuSeparator />
+                {importableScripts.map((fileScript) => (
+                  <MenuItem
+                    key={`${fileScript.name} ${fileScript.command}`}
+                    onClick={() => void importFileScript(fileScript)}
+                  >
+                    <ScriptIcon icon={fileScript.icon ?? "play"} className="size-4 shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-medium">{fileScript.name}</div>
+                      <div className="truncate font-mono text-muted-foreground">
+                        {fileScript.command}
                       </div>
-                    </MenuItem>
-                  ))}
-                </MenuPopup>
-              </Menu>
-            ) : null}
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={saving || !canWriteSettings}
-              onClick={() => setRequest({ scriptId: null, initial: EMPTY_PROJECT_SCRIPT_INPUT })}
-            >
-              <PlusIcon className="size-3.5" />
-              Add action
-            </Button>
-          </div>
-        }
-      />
+                    </div>
+                  </MenuItem>
+                ))}
+              </MenuPopup>
+            </Menu>
+          ) : null}
+          <SettingsSectionAction
+            disabled={saving || !canWriteSettings}
+            onClick={() => setRequest({ scriptId: null, initial: EMPTY_PROJECT_SCRIPT_INPUT })}
+          >
+            Add action
+          </SettingsSectionAction>
+        </>
+      }
+    >
       <ProjectActionsList
         scripts={scripts}
         keybindings={keybindings}

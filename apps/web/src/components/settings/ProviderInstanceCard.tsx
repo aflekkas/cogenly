@@ -52,7 +52,13 @@ import { ProviderModelsSection } from "./ProviderModelsSection";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { ProviderAccentColorPicker } from "./ProviderAccentColorPicker";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
-import { SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SETTINGS_MICRO_LABEL_CLASSNAME,
+  SettingsField,
+  SettingsRow,
+  SettingsSection,
+} from "./settingsLayout";
+import { SettingsGroup } from "./SettingsGroup";
 import { SettingsStatusBadge, SettingsStatusDot, type SettingsStatusTone } from "./SettingsStatus";
 import { SettingsMasterDetailRow } from "./SettingsMasterDetail";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
@@ -274,12 +280,11 @@ function ProviderEnvironmentFieldRow(props: {
       title={<label htmlFor={inputId}>{props.field.label}</label>}
       description={props.field.description}
       control={
-        <div className="flex w-full min-w-0 items-center gap-2 @min-[32rem]/settings-row:w-56">
+        <SettingsField>
           {props.field.sensitive === false ? (
             <DraftInput
               id={inputId}
               size="sm"
-              className="min-w-0 flex-1"
               autoComplete="off"
               value={value}
               onCommit={(next) => props.onCommit(props.field, next)}
@@ -290,7 +295,6 @@ function ProviderEnvironmentFieldRow(props: {
             <SecretInput
               id={inputId}
               size="sm"
-              className="min-w-0 flex-1"
               value={value}
               onCommit={(next) => props.onCommit(props.field, next)}
               placeholder={props.field.placeholder}
@@ -309,7 +313,7 @@ function ProviderEnvironmentFieldRow(props: {
               <XIcon className="size-3.5" />
             </Button>
           ) : null}
-        </div>
+        </SettingsField>
       }
     />
   );
@@ -408,20 +412,23 @@ export function ProviderEnvironmentSection(props: {
       }
     >
       {rows.length > 0 ? (
-        <div className="mt-3 min-w-0 space-y-2 pb-2">
+        <div className="mt-3 min-w-0 space-y-2">
           {rows.map((variable, index) => (
             <div key={variable.id} className="flex min-w-0 flex-wrap items-center gap-1.5">
               <DraftInput
                 size="sm"
                 font="mono"
-                className="w-full min-w-0 sm:w-44 sm:shrink-0"
+                className="w-full min-w-0 @min-[32rem]/settings-row:w-44 @min-[32rem]/settings-row:shrink-0"
                 value={variable.name}
                 onCommit={(name) => updateVariable(variable.id, { name: name.trim() })}
                 placeholder="VARIABLE_NAME"
                 spellCheck={false}
                 aria-label={`Environment variable name ${index + 1}`}
               />
-              <span className="hidden text-xs text-muted-foreground sm:inline" aria-hidden>
+              <span
+                className="hidden text-xs text-muted-foreground @min-[32rem]/settings-row:inline"
+                aria-hidden
+              >
                 =
               </span>
               {variable.sensitive ? (
@@ -747,10 +754,6 @@ export function ProviderInstanceCard({
     />
   );
 
-  const titleTailNode = headerAction ? (
-    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">{headerAction}</span>
-  ) : null;
-
   const versionCodeNode = versionLabel ? (
     <code className="text-xs text-muted-foreground">{versionLabel}</code>
   ) : null;
@@ -867,14 +870,18 @@ export function ProviderInstanceCard({
             </p>
           ) : null}
           {onRunVersionAction && updateCommand ? (
-            <div className="flex items-center gap-2 text-3xs font-medium uppercase tracking-wider text-muted-foreground">
+            <div className={cn("flex items-center gap-2", SETTINGS_MICRO_LABEL_CLASSNAME)}>
               <span aria-hidden className="h-px flex-1 bg-border" />
-              or, update manually using
+              Or update manually with
               <span aria-hidden className="h-px flex-1 bg-border" />
             </div>
           ) : null}
           {updateCommand ? (
-            <div className="flex min-w-0 items-center gap-1 rounded-md border border-border/70 bg-muted/40 py-0.5 pr-0.5 pl-2">
+            <SettingsGroup
+              variant="inset"
+              divided={false}
+              className="flex min-w-0 items-center gap-1 py-0.5 pr-0.5 pl-2"
+            >
               <code className="min-w-0 flex-1 truncate font-mono text-2xs text-foreground">
                 {updateCommand}
               </code>
@@ -892,7 +899,7 @@ export function ProviderInstanceCard({
                   )
                 }
               />
-            </div>
+            </SettingsGroup>
           ) : null}
         </div>
       </PopoverPopup>
@@ -953,33 +960,30 @@ export function ProviderInstanceCard({
     );
   }
 
+  // A fragment, so the header's last quiet button (delete, or the reset) is
+  // its direct child and lines up with the row controls' edge. Read-only
+  // settings hide the reset and disable delete.
   const editorHeaderAction = (
-    <div className="flex shrink-0 items-center gap-1.5">
+    <>
       {driverOption?.badgeLabel ? (
         <SettingsStatusBadge tone="warning">{driverOption.badgeLabel}</SettingsStatusBadge>
       ) : null}
       {versionCodeNode}
       {versionAdvisoryNode}
-      <span
-        inert={readOnly}
-        aria-disabled={readOnly || undefined}
-        className={cn("inline-flex items-center gap-1", readOnly && "opacity-50")}
-      >
-        {titleTailNode}
-        {onDelete ? (
-          <Button
-            type="button"
-            size="icon-xs"
-            variant="ghost-destructive"
-            disabled={readOnly}
-            onClick={onDelete}
-            aria-label={`Delete instance ${instanceId}`}
-          >
-            <Trash2Icon />
-          </Button>
-        ) : null}
-      </span>
-    </div>
+      {readOnly ? null : headerAction}
+      {onDelete ? (
+        <Button
+          type="button"
+          size="icon-xs"
+          variant="ghost-destructive"
+          disabled={readOnly}
+          onClick={onDelete}
+          aria-label={`Delete instance ${instanceId}`}
+        >
+          <Trash2Icon />
+        </Button>
+      ) : null}
+    </>
   );
 
   const runtimeFields = driverOption ? (
@@ -1043,7 +1047,9 @@ export function ProviderInstanceCard({
               <DraftInput
                 id={`provider-instance-${instanceId}-display-name`}
                 size="sm"
-                className="min-w-0 flex-1 @min-[32rem]/settings-row:w-56"
+                // The settings field width, so it lines up with the inputs below;
+                // the swatch sits outside it.
+                className="min-w-0 flex-1 @min-[32rem]/settings-row:w-56 @min-[32rem]/settings-row:flex-none"
                 value={instance.displayName ?? ""}
                 onCommit={updateDisplayName}
                 placeholder={driverOption?.label ?? "Instance label"}
@@ -1057,26 +1063,24 @@ export function ProviderInstanceCard({
       {setup || environmentFields.length > 0 ? (
         <SettingsSection title="Setup">
           {setup}
-          <div
-            inert={readOnly}
-            aria-disabled={readOnly || undefined}
-            className={readOnly ? "opacity-50 select-none" : undefined}
-          >
-            {environmentFields.length > 0 ? (
-              <>
-                {environmentFields.map((field) => (
-                  <ProviderEnvironmentFieldRow
-                    key={field.name}
-                    field={field}
-                    variable={readProviderEnvironmentVariable(instance.environment, field.name)}
-                    idPrefix={`provider-instance-${instanceId}`}
-                    onCommit={updateEnvironmentField}
-                    onRemove={removeEnvironmentField}
-                  />
-                ))}
-              </>
-            ) : null}
-          </div>
+          {environmentFields.length > 0 ? (
+            <div
+              inert={readOnly}
+              aria-disabled={readOnly || undefined}
+              className={cn("divide-y divide-border/50", readOnly && "opacity-50 select-none")}
+            >
+              {environmentFields.map((field) => (
+                <ProviderEnvironmentFieldRow
+                  key={field.name}
+                  field={field}
+                  variable={readProviderEnvironmentVariable(instance.environment, field.name)}
+                  idPrefix={`provider-instance-${instanceId}`}
+                  onCommit={updateEnvironmentField}
+                  onRemove={removeEnvironmentField}
+                />
+              ))}
+            </div>
+          ) : null}
         </SettingsSection>
       ) : null}
 
@@ -1119,28 +1123,21 @@ export function ProviderInstanceCard({
       </SettingsSection>
 
       {driverOption !== undefined ? (
-        <SettingsSection
-          title="Models"
-          footer="Saved on this machine, so every device connected to it sees the same models."
-        >
-          <div className="px-3 py-3 sm:px-4">
-            <ProviderModelsSection
-              canManageCustomModels={!readOnly}
-              canWritePreferences={canWriteSettings}
-              instanceId={instanceId}
-              driverKind={driverKind}
-              models={modelsForDisplay}
-              customModels={customModels}
-              hiddenModels={hiddenModels}
-              modelOrder={modelOrder}
-              onChange={updateCustomModels}
-              onHiddenModelsChange={onHiddenModelsChange}
-              onModelOrderChange={onModelOrderChange}
-              {...(effortDefaults ? { effortDefaults } : {})}
-              {...(onEffortDefaultChange ? { onEffortDefaultChange } : {})}
-            />
-          </div>
-        </SettingsSection>
+        <ProviderModelsSection
+          canManageCustomModels={!readOnly}
+          canWritePreferences={canWriteSettings}
+          instanceId={instanceId}
+          driverKind={driverKind}
+          models={modelsForDisplay}
+          customModels={customModels}
+          hiddenModels={hiddenModels}
+          modelOrder={modelOrder}
+          onChange={updateCustomModels}
+          onHiddenModelsChange={onHiddenModelsChange}
+          onModelOrderChange={onModelOrderChange}
+          {...(effortDefaults ? { effortDefaults } : {})}
+          {...(onEffortDefaultChange ? { onEffortDefaultChange } : {})}
+        />
       ) : null}
     </>
   );

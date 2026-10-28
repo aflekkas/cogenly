@@ -50,7 +50,7 @@ export function SettingsListFilter({
 }) {
   return (
     <Select value={value} onValueChange={(next) => next !== null && onValueChange(next)}>
-      <SelectTrigger aria-label={label} className="w-full sm:w-auto">
+      <SelectTrigger size="sm" aria-label={label} className="w-full sm:w-auto">
         <SelectValue>
           {options.find((option) => option.value === value)?.label ?? label}
         </SelectValue>
@@ -88,14 +88,21 @@ export function SettingsListMeta({ children }: { children: ReactNode }) {
   const shown = Children.toArray(children);
   if (shown.length === 0) return null;
   return (
+    // Each dot travels with the fact after it, so a wrapped line starts with
+    // the dot instead of leaving one dangling at the end of the line above.
     <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
-      {shown.map((item, index) => (
-        // oxlint-disable-next-line react/no-array-index-key -- positions are the identity here
-        <Fragment key={index}>
-          {index > 0 ? <span aria-hidden>·</span> : null}
-          {item}
-        </Fragment>
-      ))}
+      {shown.map((item, index) =>
+        index === 0 ? (
+          // oxlint-disable-next-line react/no-array-index-key -- positions are the identity here
+          <Fragment key={index}>{item}</Fragment>
+        ) : (
+          // oxlint-disable-next-line react/no-array-index-key -- positions are the identity here
+          <span key={index} className="flex min-w-0 items-center gap-1.5">
+            <span aria-hidden>·</span>
+            {item}
+          </span>
+        ),
+      )}
     </span>
   );
 }

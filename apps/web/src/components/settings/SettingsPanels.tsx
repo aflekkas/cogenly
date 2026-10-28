@@ -105,6 +105,7 @@ import {
 import {
   PolicyTooltip,
   SettingResetButton,
+  SettingsField,
   SettingsNumberField,
   SettingsRow,
   SettingsSection,
@@ -361,27 +362,29 @@ function AboutVersionSection() {
           {...searchableSetting("update-track")}
           description="The release channel this hosted app follows."
           control={
-            <Select
-              value={selectedHostedAppChannel}
-              onValueChange={(value) => {
-                if (value === selectedHostedAppChannel) return;
-                window.location.assign(
-                  buildHostedChannelSelectionUrl({ channel: value as HostedAppChannel }),
-                );
-              }}
-            >
-              <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Update track">
-                <SelectValue>{HOSTED_APP_CHANNEL_LABEL}</SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="latest">
-                  Latest
-                </SelectItem>
-                <SelectItem hideIndicator value="nightly">
-                  Nightly
-                </SelectItem>
-              </SelectPopup>
-            </Select>
+            <SettingsField>
+              <Select
+                value={selectedHostedAppChannel}
+                onValueChange={(value) => {
+                  if (value === selectedHostedAppChannel) return;
+                  window.location.assign(
+                    buildHostedChannelSelectionUrl({ channel: value as HostedAppChannel }),
+                  );
+                }}
+              >
+                <SelectTrigger size="sm" aria-label="Update track">
+                  <SelectValue>{HOSTED_APP_CHANNEL_LABEL}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem hideIndicator value="latest">
+                    Latest
+                  </SelectItem>
+                  <SelectItem hideIndicator value="nightly">
+                    Nightly
+                  </SelectItem>
+                </SelectPopup>
+              </Select>
+            </SettingsField>
           }
         />
       ) : null}
@@ -657,42 +660,42 @@ function BackgroundActivityAdvancedDialog({
                 title="Shared policy"
                 description="Controls whether background work may run after a subscribed interval fires."
                 control={
-                  <Select
-                    value={activeProfile}
-                    onValueChange={(value) => {
-                      if (
-                        value === "balanced" ||
-                        value === "performance" ||
-                        value === "battery-saver"
-                      ) {
-                        updateSettings({
-                          backgroundActivity: backgroundActivitySharedPolicySettings(
-                            settings,
-                            value,
-                          ),
-                        });
-                      }
-                    }}
-                  >
-                    <SelectTrigger
-                      size="sm"
-                      className="w-full sm:w-40"
-                      aria-label="Shared background policy"
+                  <SettingsField>
+                    <Select
+                      value={activeProfile}
+                      onValueChange={(value) => {
+                        if (
+                          value === "balanced" ||
+                          value === "performance" ||
+                          value === "battery-saver"
+                        ) {
+                          updateSettings({
+                            backgroundActivity: backgroundActivitySharedPolicySettings(
+                              settings,
+                              value,
+                            ),
+                          });
+                        }
+                      }}
                     >
-                      <SelectValue>{BACKGROUND_ACTIVITY_PROFILE_LABELS[activeProfile]}</SelectValue>
-                    </SelectTrigger>
-                    <SelectPopup align="end" alignItemWithTrigger={false}>
-                      <SelectItem hideIndicator value="balanced">
-                        {BACKGROUND_ACTIVITY_PROFILE_LABELS.balanced}
-                      </SelectItem>
-                      <SelectItem hideIndicator value="performance">
-                        {BACKGROUND_ACTIVITY_PROFILE_LABELS.performance}
-                      </SelectItem>
-                      <SelectItem hideIndicator value="battery-saver">
-                        {BACKGROUND_ACTIVITY_PROFILE_LABELS["battery-saver"]}
-                      </SelectItem>
-                    </SelectPopup>
-                  </Select>
+                      <SelectTrigger size="sm" aria-label="Shared background policy">
+                        <SelectValue>
+                          {BACKGROUND_ACTIVITY_PROFILE_LABELS[activeProfile]}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectPopup align="end" alignItemWithTrigger={false}>
+                        <SelectItem hideIndicator value="balanced">
+                          {BACKGROUND_ACTIVITY_PROFILE_LABELS.balanced}
+                        </SelectItem>
+                        <SelectItem hideIndicator value="performance">
+                          {BACKGROUND_ACTIVITY_PROFILE_LABELS.performance}
+                        </SelectItem>
+                        <SelectItem hideIndicator value="battery-saver">
+                          {BACKGROUND_ACTIVITY_PROFILE_LABELS["battery-saver"]}
+                        </SelectItem>
+                      </SelectPopup>
+                    </Select>
+                  </SettingsField>
                 }
               />
               <SettingsRow
@@ -1127,21 +1130,30 @@ function LegacyFeaturesSection() {
 
 function RestoreDefaultsSection({ onRestored }: { onRestored: () => void }) {
   const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
+  const unchanged = changedSettingLabels.length === 0;
+  const restoreButton = (
+    <Button size="sm" variant="outline" disabled={unchanged} onClick={() => void restoreDefaults()}>
+      <RotateCcwIcon className="size-3.5" />
+      Restore defaults
+    </Button>
+  );
   return (
     <SettingsSection id="reset" title="Reset">
       <SettingsRow
         title="Restore default settings"
         description="Reset preferences across Settings. Keybindings, providers and connections stay. You confirm the list first."
         control={
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={changedSettingLabels.length === 0}
-            onClick={() => void restoreDefaults()}
-          >
-            <RotateCcwIcon className="size-3.5" />
-            Restore defaults
-          </Button>
+          unchanged ? (
+            // A disabled button gets no hover, so a focusable wrapper carries the reason.
+            <Tooltip>
+              <TooltipTrigger render={<span tabIndex={0} className="inline-flex rounded-md" />}>
+                {restoreButton}
+              </TooltipTrigger>
+              <TooltipPopup side="top">Every setting is already at its default.</TooltipPopup>
+            </Tooltip>
+          ) : (
+            restoreButton
+          )
         }
       />
     </SettingsSection>
@@ -1224,29 +1236,31 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
             ) : null
           }
           control={
-            <Select
-              value={settings.sendShortcut}
-              onValueChange={(value) => {
-                const option = sendShortcutOptions.find((option) => option.value === value);
-                if (option) updateSettings({ sendShortcut: option.value });
-              }}
-            >
-              <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Send shortcut">
-                <SelectValue>
-                  {
-                    sendShortcutOptions.find((option) => option.value === settings.sendShortcut)
-                      ?.label
-                  }
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                {sendShortcutOptions.map((option) => (
-                  <SelectItem hideIndicator key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
+            <SettingsField>
+              <Select
+                value={settings.sendShortcut}
+                onValueChange={(value) => {
+                  const option = sendShortcutOptions.find((option) => option.value === value);
+                  if (option) updateSettings({ sendShortcut: option.value });
+                }}
+              >
+                <SelectTrigger size="sm" aria-label="Send shortcut">
+                  <SelectValue>
+                    {
+                      sendShortcutOptions.find((option) => option.value === settings.sendShortcut)
+                        ?.label
+                    }
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  {sendShortcutOptions.map((option) => (
+                    <SelectItem hideIndicator key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </SettingsField>
           }
         />
 
@@ -1266,26 +1280,28 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
             ) : null
           }
           control={
-            <Select
-              value={settings.followUpBehavior}
-              onValueChange={(value) => {
-                if (value === "queue" || value === "steer") {
-                  updateSettings({ followUpBehavior: value });
-                }
-              }}
-            >
-              <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Follow-up behavior">
-                <SelectValue>{FOLLOW_UP_BEHAVIOR_LABELS[settings.followUpBehavior]}</SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="steer">
-                  {FOLLOW_UP_BEHAVIOR_LABELS.steer}
-                </SelectItem>
-                <SelectItem hideIndicator value="queue">
-                  {FOLLOW_UP_BEHAVIOR_LABELS.queue}
-                </SelectItem>
-              </SelectPopup>
-            </Select>
+            <SettingsField>
+              <Select
+                value={settings.followUpBehavior}
+                onValueChange={(value) => {
+                  if (value === "queue" || value === "steer") {
+                    updateSettings({ followUpBehavior: value });
+                  }
+                }}
+              >
+                <SelectTrigger size="sm" aria-label="Follow-up behavior">
+                  <SelectValue>{FOLLOW_UP_BEHAVIOR_LABELS[settings.followUpBehavior]}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem hideIndicator value="steer">
+                    {FOLLOW_UP_BEHAVIOR_LABELS.steer}
+                  </SelectItem>
+                  <SelectItem hideIndicator value="queue">
+                    {FOLLOW_UP_BEHAVIOR_LABELS.queue}
+                  </SelectItem>
+                </SelectPopup>
+              </Select>
+            </SettingsField>
           }
         />
 
@@ -1388,28 +1404,30 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
             ) : null
           }
           control={
-            <Select
-              value={settings.responseStreamingMode}
-              onValueChange={(value) => {
-                if (value === "turn" || value === "paragraph") {
-                  updateSettings({ responseStreamingMode: value });
-                }
-              }}
-            >
-              <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Response streaming">
-                <SelectValue>
-                  {(value: ResponseStreamingMode) => RESPONSE_STREAMING_MODE_LABELS[value]}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="paragraph">
-                  {RESPONSE_STREAMING_MODE_LABELS.paragraph}
-                </SelectItem>
-                <SelectItem hideIndicator value="turn">
-                  {RESPONSE_STREAMING_MODE_LABELS.turn}
-                </SelectItem>
-              </SelectPopup>
-            </Select>
+            <SettingsField>
+              <Select
+                value={settings.responseStreamingMode}
+                onValueChange={(value) => {
+                  if (value === "turn" || value === "paragraph") {
+                    updateSettings({ responseStreamingMode: value });
+                  }
+                }}
+              >
+                <SelectTrigger size="sm" aria-label="Response streaming">
+                  <SelectValue>
+                    {(value: ResponseStreamingMode) => RESPONSE_STREAMING_MODE_LABELS[value]}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem hideIndicator value="paragraph">
+                    {RESPONSE_STREAMING_MODE_LABELS.paragraph}
+                  </SelectItem>
+                  <SelectItem hideIndicator value="turn">
+                    {RESPONSE_STREAMING_MODE_LABELS.turn}
+                  </SelectItem>
+                </SelectPopup>
+              </Select>
+            </SettingsField>
           }
         />
 
@@ -1559,27 +1577,29 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
             ) : null
           }
           control={
-            <Select
-              value={settings.sidebarProjectSortOrder}
-              onValueChange={(value) => {
-                if (isSidebarProjectSortOrder(value)) {
-                  updateSettings({ sidebarProjectSortOrder: value });
-                }
-              }}
-            >
-              <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Repository order">
-                <SelectValue>
-                  {SIDEBAR_PROJECT_SORT_ORDER_LABELS[settings.sidebarProjectSortOrder]}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                {SidebarProjectSortOrder.literals.map((sortOrder) => (
-                  <SelectItem hideIndicator key={sortOrder} value={sortOrder}>
-                    {SIDEBAR_PROJECT_SORT_ORDER_LABELS[sortOrder]}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
+            <SettingsField>
+              <Select
+                value={settings.sidebarProjectSortOrder}
+                onValueChange={(value) => {
+                  if (isSidebarProjectSortOrder(value)) {
+                    updateSettings({ sidebarProjectSortOrder: value });
+                  }
+                }}
+              >
+                <SelectTrigger size="sm" aria-label="Repository order">
+                  <SelectValue>
+                    {SIDEBAR_PROJECT_SORT_ORDER_LABELS[settings.sidebarProjectSortOrder]}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  {SidebarProjectSortOrder.literals.map((sortOrder) => (
+                    <SelectItem hideIndicator key={sortOrder} value={sortOrder}>
+                      {SIDEBAR_PROJECT_SORT_ORDER_LABELS[sortOrder]}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </SettingsField>
           }
         />
         <SettingsRow
@@ -1678,29 +1698,27 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
               ) : null
             }
             control={
-              <Select
-                value={settings.confirmQuit}
-                onValueChange={(value) => {
-                  if (value === "direct" || value === "hold" || value === "double-click") {
-                    updateSettings({ confirmQuit: value });
-                  }
-                }}
-              >
-                <SelectTrigger
-                  size="sm"
-                  className="w-full sm:w-56"
-                  aria-label="Quit shortcut behavior"
+              <SettingsField>
+                <Select
+                  value={settings.confirmQuit}
+                  onValueChange={(value) => {
+                    if (value === "direct" || value === "hold" || value === "double-click") {
+                      updateSettings({ confirmQuit: value });
+                    }
+                  }}
                 >
-                  <SelectValue>{QUIT_CONFIRMATION_MODE_LABELS[settings.confirmQuit]}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {Object.entries(QUIT_CONFIRMATION_MODE_LABELS).map(([value, label]) => (
-                    <SelectItem hideIndicator key={value} value={value}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
+                  <SelectTrigger size="sm" aria-label="Quit shortcut behavior">
+                    <SelectValue>{QUIT_CONFIRMATION_MODE_LABELS[settings.confirmQuit]}</SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup align="end" alignItemWithTrigger={false}>
+                    {Object.entries(QUIT_CONFIRMATION_MODE_LABELS).map(([value, label]) => (
+                      <SelectItem hideIndicator key={value} value={value}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              </SettingsField>
             }
           />
         ) : null}
@@ -1759,7 +1777,8 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
             ) : null
           }
           control={
-            <>
+            // The advanced settings button follows the select; the select flexes.
+            <SettingsField>
               <Select
                 value={backgroundActivityProfileOption}
                 onValueChange={(value) => {
@@ -1776,11 +1795,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
                   }
                 }}
               >
-                <SelectTrigger
-                  size="sm"
-                  className="w-full sm:w-56"
-                  aria-label="Background activity profile"
-                >
+                <SelectTrigger size="sm" aria-label="Background activity profile">
                   <SelectValue>
                     {(value: BackgroundActivityProfileOption) =>
                       BACKGROUND_ACTIVITY_PROFILE_OPTION_LABELS[value]
@@ -1825,7 +1840,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
                 open={backgroundActivityDialogOpen && hasMachine}
                 onOpenChange={setBackgroundActivityDialogOpen}
               />
-            </>
+            </SettingsField>
           }
         />
       </SettingsSection>
@@ -2005,7 +2020,8 @@ export function ArchivedThreadsPanel() {
 
   return (
     <>
-      <SettingsSection id={searchableSetting("archive").id} title="Archived threads">
+      {/* The page is "Archive"; its one section names what it holds. */}
+      <SettingsSection id={searchableSetting("archive").id} title="Threads">
         {/* Search and filter only help once there is something to look through. */}
         {archivedGroups.length > 0 ? (
           <SettingsListToolbar>
@@ -2111,7 +2127,7 @@ export function ArchivedThreadsPanel() {
                         <Button
                           type="button"
                           variant="outline"
-                          size="xs"
+                          size="sm"
                           onClick={() =>
                             void unarchive(
                               scopeThreadRef(thread.environmentId, thread.id),
@@ -2125,7 +2141,7 @@ export function ArchivedThreadsPanel() {
                         <Button
                           type="button"
                           variant="ghost-destructive"
-                          size="icon-xs"
+                          size="icon-sm"
                           aria-label={`Delete ${thread.title}`}
                           title="Delete"
                           onClick={() =>

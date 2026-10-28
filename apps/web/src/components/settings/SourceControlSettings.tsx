@@ -24,8 +24,7 @@ import { PULL_REQUEST_MERGE_METHOD_LABELS } from "~/lib/pullRequestContext";
 import { useEnvironmentQuery } from "../../state/query";
 import { sourceControlEnvironment } from "../../state/sourceControl";
 import { Button } from "../ui/button";
-import { DisclosureTrigger } from "../ui/disclosure";
-import { Collapsible, CollapsibleContent } from "../ui/collapsible";
+import { DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Skeleton } from "../ui/skeleton";
 import { Switch } from "../ui/switch";
@@ -39,9 +38,11 @@ import { SourceControlWritingSettingsSection } from "./SourceControlWritingSetti
 import {
   SettingResetButton,
   SettingsEmpty,
+  SettingsField,
   SettingsNumberField,
   SettingsRefreshAction,
   SettingsRow,
+  SettingsRowContent,
   SettingsSearchTarget,
   SettingsSection,
   useSearchTargetFold,
@@ -236,53 +237,59 @@ function DiscoveryItemRow({
     item.kind === "github" ? [searchableSetting("github-accounts").id] : [],
   );
 
-  return (
-    <div className="first:rounded-t-xl last:rounded-b-xl">
-      <div className="px-3 py-3 sm:px-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0 flex-1 space-y-1">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <SourceControlItemIcon item={item} />
-              <span className="truncate text-sm font-medium text-foreground">{item.label}</span>
-              {version ? <code className="text-xs text-muted-foreground">{version}</code> : null}
-              {authStatus?.badge ? (
-                <SettingsStatusBadge tone={authStatus.badge}>
-                  {authStatus.label}
-                </SettingsStatusBadge>
-              ) : null}
-            </div>
-            <SettingsStatusText
-              tone={itemStatusTone(item)}
-              className="flex text-xs text-muted-foreground"
-            >
-              <span className="flex min-w-0 flex-wrap items-center gap-x-1 leading-normal">
-                {itemSummary({ item, auth, authAccount })}
-              </span>
-            </SettingsStatusText>
-          </div>
-          {hasDetails ? (
-            <div className="flex shrink-0 items-center sm:justify-end">
-              <DisclosureTrigger
-                variant="quiet"
-                open={isExpanded}
-                onClick={() => setIsExpanded(!isExpanded)}
-                aria-label={`${isExpanded ? "Hide" : "Show"} ${item.label} ${detailsLabel.toLowerCase()}`}
-              >
-                {detailsLabel}
-              </DisclosureTrigger>
-            </div>
-          ) : null}
-        </div>
-      </div>
+  const summary = (
+    <span className="flex min-w-0 flex-wrap items-center gap-x-1 leading-normal">
+      {itemSummary({ item, auth, authAccount })}
+    </span>
+  );
 
+  return (
+    <SettingsRowContent
+      title={
+        <span className="flex min-w-0 items-center gap-2">
+          <SourceControlItemIcon item={item} />
+          <span className="truncate">{item.label}</span>
+        </span>
+      }
+      titleActions={
+        <>
+          {version ? (
+            <code className="min-w-0 truncate text-xs text-muted-foreground">{version}</code>
+          ) : null}
+          {authStatus?.badge ? (
+            <SettingsStatusBadge tone={authStatus.badge}>{authStatus.label}</SettingsStatusBadge>
+          ) : null}
+        </>
+      }
+      // A problem the badge already names keeps its line plain: one status per problem.
+      status={
+        authStatus?.badge ? (
+          summary
+        ) : (
+          <SettingsStatusText tone={itemStatusTone(item)} className="flex">
+            {summary}
+          </SettingsStatusText>
+        )
+      }
+      control={
+        hasDetails ? (
+          <DisclosureTrigger
+            variant="quiet"
+            open={isExpanded}
+            onClick={() => setIsExpanded(!isExpanded)}
+            aria-label={`${isExpanded ? "Hide" : "Show"} ${item.label} ${detailsLabel.toLowerCase()}`}
+          >
+            {detailsLabel}
+          </DisclosureTrigger>
+        ) : undefined
+      }
+    >
       {hasDetails ? (
-        <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
-          <CollapsibleContent>
-            <div className="px-3 pb-4 pt-1 sm:px-4">{children}</div>
-          </CollapsibleContent>
-        </Collapsible>
+        <DisclosurePanel open={isExpanded}>
+          <div className="pt-3">{children}</div>
+        </DisclosurePanel>
       ) : null}
-    </div>
+    </SettingsRowContent>
   );
 }
 
@@ -392,30 +399,32 @@ function PullRequestSettingsSection() {
           ) : null
         }
         control={
-          <Select
-            value={settings.pullRequestMergeMethod ?? "last"}
-            onValueChange={(value) => {
-              if (value === "last") updateSettings({ pullRequestMergeMethod: null });
-              else if (value === "merge" || value === "squash" || value === "rebase")
-                updateSettings({ pullRequestMergeMethod: value });
-            }}
-          >
-            <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Default merge method">
-              <SelectValue>
-                {(value: string | null) =>
-                  value === "merge" || value === "squash" || value === "rebase"
-                    ? PULL_REQUEST_MERGE_METHOD_LABELS[value]
-                    : "Last used"
-                }
-              </SelectValue>
-            </SelectTrigger>
-            <SelectPopup align="end" alignItemWithTrigger={false}>
-              <SelectItem value="last">Last used</SelectItem>
-              <SelectItem value="merge">{PULL_REQUEST_MERGE_METHOD_LABELS.merge}</SelectItem>
-              <SelectItem value="squash">{PULL_REQUEST_MERGE_METHOD_LABELS.squash}</SelectItem>
-              <SelectItem value="rebase">{PULL_REQUEST_MERGE_METHOD_LABELS.rebase}</SelectItem>
-            </SelectPopup>
-          </Select>
+          <SettingsField>
+            <Select
+              value={settings.pullRequestMergeMethod ?? "last"}
+              onValueChange={(value) => {
+                if (value === "last") updateSettings({ pullRequestMergeMethod: null });
+                else if (value === "merge" || value === "squash" || value === "rebase")
+                  updateSettings({ pullRequestMergeMethod: value });
+              }}
+            >
+              <SelectTrigger size="sm" aria-label="Default merge method">
+                <SelectValue>
+                  {(value: string | null) =>
+                    value === "merge" || value === "squash" || value === "rebase"
+                      ? PULL_REQUEST_MERGE_METHOD_LABELS[value]
+                      : "Last used"
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem value="last">Last used</SelectItem>
+                <SelectItem value="merge">{PULL_REQUEST_MERGE_METHOD_LABELS.merge}</SelectItem>
+                <SelectItem value="squash">{PULL_REQUEST_MERGE_METHOD_LABELS.squash}</SelectItem>
+                <SelectItem value="rebase">{PULL_REQUEST_MERGE_METHOD_LABELS.rebase}</SelectItem>
+              </SelectPopup>
+            </Select>
+          </SettingsField>
         }
       />
       <SettingsRow
@@ -541,8 +550,9 @@ export function SourceControlSettingsPanel() {
         onRefresh={handleScan}
       />
     );
-  const rescanButton = (
-    <Button size="xs" variant="outline" onClick={handleScan} disabled={discovery.isPending}>
+  // Rescan as a failed row's recovery step (`sm`) or an empty list's one action (`xs`).
+  const rescanButton = (size: "sm" | "xs") => (
+    <Button size={size} variant="outline" onClick={handleScan} disabled={discovery.isPending}>
       <RefreshIcon size="sm" refreshing={discovery.isPending} />
       Rescan
     </Button>
@@ -584,13 +594,13 @@ export function SourceControlSettingsPanel() {
       <SettingsRow
         title="Could not scan this machine"
         description={discovery.error}
-        control={rescanButton}
+        control={rescanButton("sm")}
       />
     ) : (
       <SettingsEmpty
         icon={<PullRequestGlyph.pullRequest />}
         label="Save a GitHub token or sign in with gh on this machine, then rescan."
-        action={rescanButton}
+        action={rescanButton("xs")}
       />
     );
 

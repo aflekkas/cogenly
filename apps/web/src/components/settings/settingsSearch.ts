@@ -92,7 +92,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/scheduled-tasks": "Scheduled tasks",
   "/settings/vault": "Vault",
   "/settings/project-tags": "Projects",
-  "/settings/projects": "Repository",
+  "/settings/projects": "Repositories",
   "/settings/new-threads": "New threads",
   "/settings/source-control": "Source control",
   "/settings/machines": "Machines",
@@ -263,7 +263,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "storage-backup-retention",
-    title: "Backups to keep",
+    title: "Nightly backups",
     to: "/settings/storage",
     searchTerms: ["nightly backup snapshots retention database disk space cleanup"],
   },

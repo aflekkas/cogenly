@@ -1,10 +1,10 @@
 import type { ProjectScript, ResolvedKeybindingsConfig } from "@cogenly/contracts";
-import { SettingsIcon } from "lucide-react";
+import { PlayIcon, SettingsIcon } from "lucide-react";
 import { shortcutLabelForCommand } from "../../keybindings";
 import { commandForProjectScript } from "../../projectScripts";
 import { ScriptIcon } from "../projectScriptEditor";
 import { Button } from "../ui/button";
-import { SettingsNote, SettingsRow } from "./settingsLayout";
+import { SettingsEmpty, SettingsRow } from "./settingsLayout";
 import { SettingsTag } from "./SettingsStatus";
 
 export function ProjectActionsList({
@@ -18,7 +18,14 @@ export function ProjectActionsList({
   disabled: boolean;
   onEdit: (script: ProjectScript) => void;
 }) {
-  if (scripts.length === 0) return <SettingsNote>No actions configured.</SettingsNote>;
+  if (scripts.length === 0) {
+    return (
+      <SettingsEmpty
+        icon={<PlayIcon />}
+        label="Add commands you run here often, such as a dev server or tests."
+      />
+    );
+  }
   return scripts.map((script) => {
     const shortcutLabel = shortcutLabelForCommand(keybindings, commandForProjectScript(script.id));
     return (
@@ -46,13 +53,13 @@ export function ProjectActionsList({
             ) : null}
             <span className="flex shrink-0 opacity-0 interactive group-focus-within:opacity-100 group-hover:opacity-100">
               <Button
-                size="icon-xs"
+                size="icon-sm"
                 variant="ghost-muted"
                 aria-label={`Edit ${script.name}`}
                 disabled={disabled}
                 onClick={() => onEdit(script)}
               >
-                <SettingsIcon className="size-3.5" />
+                <SettingsIcon />
               </Button>
             </span>
           </>

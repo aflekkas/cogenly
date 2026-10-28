@@ -2,6 +2,13 @@ import { type EnvironmentId, sessionGrantsScope } from "@cogenly/contracts";
 import { AUTH_SCOPE_OPTIONS } from "@cogenly/shared/authScopeOptions";
 import { useEnvironmentSessionState } from "~/state/session";
 
+import { SettingsStatusText } from "./SettingsStatus";
+
+/**
+ * What this client's session may do on a machine. In a route list
+ * (`routeContext`) it says the list is for the active route; elsewhere the
+ * row that folds it names what it is.
+ */
 export function SessionPermissions({
   environmentId,
   connected,
@@ -14,20 +21,26 @@ export function SessionPermissions({
   const session = useEnvironmentSessionState(environmentId);
   return connected && !session.hasError && !session.isPending && session.data?.authenticated ? (
     <div className="space-y-3 py-3 text-xs">
-      <p className="text-muted-foreground">
-        {routeContext
-          ? "These permissions apply to your active route. Other routes may have different permissions."
-          : "These permissions apply to this client’s current connection."}
-      </p>
+      {routeContext ? (
+        <p className="text-muted-foreground">
+          These permissions apply to your active route. Other routes may have different permissions.
+        </p>
+      ) : null}
       <ul className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
-        {AUTH_SCOPE_OPTIONS.map(({ scope, title }) => (
-          <li key={scope} className="flex items-start justify-between gap-3">
-            <span>{title}</span>
-            <span className="shrink-0 text-muted-foreground">
-              {sessionGrantsScope(session.data!, scope) ? "Allowed" : "Not granted"}
-            </span>
-          </li>
-        ))}
+        {AUTH_SCOPE_OPTIONS.map(({ scope, title }) => {
+          const allowed = sessionGrantsScope(session.data!, scope);
+          return (
+            <li key={scope} className="flex items-start justify-between gap-3">
+              <span>{title}</span>
+              <SettingsStatusText
+                tone={allowed ? "success" : "neutral"}
+                className="shrink-0 text-muted-foreground"
+              >
+                {allowed ? "Allowed" : "Not granted"}
+              </SettingsStatusText>
+            </li>
+          );
+        })}
       </ul>
     </div>
   ) : (

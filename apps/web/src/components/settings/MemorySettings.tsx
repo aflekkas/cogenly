@@ -92,7 +92,8 @@ export function MemorySettings() {
       <SettingsSection
         footer="Chats in a project, and agents that can read it, use its confirmed facts. Facts without a project stay private. Proposals are never used until you confirm them."
         id="memory"
-        title="Memory"
+        // The page already says "Memory"; the section names what it lists.
+        title="Facts"
         headerAction={
           showsEmptyAction ? null : (
             <SettingsSectionAction

@@ -6,14 +6,15 @@ import { ScrollArea } from "../ui/scroll-area";
 import { SettingsGroup } from "./SettingsGroup";
 
 /**
- * The card's footprint per size. `page` fills a page of its own (Providers),
- * `section` sits among other sections (Integrations). Shared with placeholder
- * states so switching machines never changes the card's footprint.
+ * The card's tallest footprint per size. `page` fills a page of its own
+ * (Providers), `section` sits among other sections (Integrations, Vault). The
+ * card is as tall as its longer pane up to this cap, so a short list never
+ * leaves an empty slab and only long content scrolls. Shared with placeholder
+ * states.
  */
 export const SETTINGS_MASTER_DETAIL_HEIGHT = {
-  page: "@min-[48rem]/settings-page:h-[min(44rem,calc(100dvh-11rem))] @min-[48rem]/settings-page:min-h-[32rem]",
-  section:
-    "@min-[48rem]/settings-page:h-[min(28rem,calc(100dvh-11rem))] @min-[48rem]/settings-page:min-h-[20rem]",
+  page: "@min-[48rem]/settings-page:max-h-[calc(100dvh-11rem)]",
+  section: "@min-[48rem]/settings-page:max-h-[min(40rem,calc(100dvh-11rem))]",
 } as const;
 
 /**
@@ -34,12 +35,14 @@ export function SettingsMasterDetail({
   return (
     <SettingsGroup
       divided={false}
+      // A flex row, not a grid: a single-line flex container clamps its
+      // stretched panes to the max height, so each pane scrolls on its own.
       className={cn(
         SETTINGS_MASTER_DETAIL_HEIGHT[size],
-        "overflow-hidden @min-[48rem]/settings-page:grid @min-[48rem]/settings-page:grid-cols-[17rem_minmax(0,1fr)]",
+        "overflow-hidden @min-[48rem]/settings-page:flex",
       )}
     >
-      <div className="border-b border-border/60 bg-muted/10 @min-[48rem]/settings-page:flex @min-[48rem]/settings-page:min-h-0 @min-[48rem]/settings-page:flex-col @min-[48rem]/settings-page:border-r @min-[48rem]/settings-page:border-b-0">
+      <div className="border-b border-border/60 bg-muted/10 @min-[48rem]/settings-page:flex @min-[48rem]/settings-page:min-h-0 @min-[48rem]/settings-page:w-68 @min-[48rem]/settings-page:shrink-0 @min-[48rem]/settings-page:flex-col @min-[48rem]/settings-page:border-r @min-[48rem]/settings-page:border-b-0">
         <ScrollArea
           scrollFade
           chainVerticalScroll
@@ -48,7 +51,9 @@ export function SettingsMasterDetail({
           <div className="divide-y divide-border/50">{list}</div>
         </ScrollArea>
       </div>
-      <div className="min-w-0 @min-[48rem]/settings-page:min-h-0">{detail}</div>
+      <div className="min-w-0 @min-[48rem]/settings-page:min-h-0 @min-[48rem]/settings-page:flex-1">
+        {detail}
+      </div>
     </SettingsGroup>
   );
 }
@@ -61,7 +66,8 @@ export function SettingsMasterDetail({
 export function SettingsMasterDetailEditor({ children }: { readonly children: ReactNode }) {
   return (
     <ScrollArea scrollFade chainVerticalScroll className="@min-[48rem]/settings-page:h-full">
-      <div className="space-y-6 p-4 [&_[data-settings-group=grouped]]:bg-transparent [&_[data-settings-group=grouped]]:bg-none [&_[data-settings-group=grouped]]:shadow-none">
+      {/* Stacked on a narrow page, the nested cards give back their side inset. */}
+      <div className="space-y-6 px-2 py-4 @min-[48rem]/settings-page:p-4 [&_[data-settings-group=grouped]]:bg-transparent [&_[data-settings-group=grouped]]:bg-none [&_[data-settings-group=grouped]]:shadow-none">
         {children}
       </div>
     </ScrollArea>
@@ -97,13 +103,13 @@ export function SettingsMasterDetailRow({
     <div
       data-slot="settings-row"
       className={cn(
-        "group flex min-h-18 items-center gap-3 px-3 py-3 transition-colors sm:px-4",
+        "group flex min-h-18 items-center gap-3 px-3 py-3 transition-colors duration-(--motion-duration-fast) ease-out sm:px-4",
         selected ? "bg-muted/45" : "hover:bg-muted/25",
       )}
     >
       <div
         className={cn(
-          "pointer-events-none relative flex min-w-0 flex-1 items-start gap-3 rounded-md text-left transition-opacity",
+          "pointer-events-none relative flex min-w-0 flex-1 items-start gap-3 rounded-md text-left transition-opacity duration-(--motion-duration-fast) ease-out",
           dimmed && !selected && "opacity-60 group-hover:opacity-100",
         )}
       >
@@ -141,7 +147,7 @@ export function SettingsMasterDetailAddRow({
     <button
       type="button"
       disabled={disabled}
-      className="flex w-full cursor-pointer items-center gap-3 px-3 py-3 text-left text-sm text-muted-foreground transition-colors outline-none hover:bg-muted/25 hover:text-foreground focus-visible:bg-muted/25 focus-visible:text-foreground disabled:pointer-events-none disabled:opacity-60 sm:px-4"
+      className="flex w-full cursor-pointer items-center gap-3 px-3 py-3 text-left text-sm text-muted-foreground transition-colors duration-(--motion-duration-fast) ease-out outline-none hover:bg-muted/25 hover:text-foreground focus-visible:bg-muted/25 focus-visible:text-foreground disabled:pointer-events-none disabled:opacity-60 sm:px-4"
       onClick={onClick}
     >
       <PlusIcon className="size-4 shrink-0" />

@@ -47,7 +47,10 @@ export function ProjectCard(props: {
       className={props.className}
     >
       {props.isEmpty ? (
-        <SettingsEmpty label={props.empty ?? `No ${props.title.toLowerCase()} yet.`} />
+        <SettingsEmpty
+          icon={props.icon}
+          label={props.empty ?? `No ${props.title.toLowerCase()} yet.`}
+        />
       ) : (
         props.children
       )}

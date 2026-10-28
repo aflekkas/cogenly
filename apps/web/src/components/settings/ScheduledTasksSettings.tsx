@@ -135,7 +135,6 @@ import {
   SettingsSection,
   SettingsSectionAction,
   SettingsNote,
-  SETTINGS_PICKER_TRIGGER_CLASSNAME,
   useRelativeTimeTick,
 } from "./settingsLayout";
 import { SettingsStatusBadge, type SettingsStatusTone } from "./SettingsStatus";
@@ -342,7 +341,8 @@ export function ScheduledTasksSettings(target: {
     <>
       <SettingsSection
         id={searchableSetting("scheduled-tasks").id}
-        title="Scheduled tasks"
+        // The page already says "Scheduled tasks"; the section names what it lists.
+        title="Tasks"
         headerAction={
           // With no tasks yet, the empty state carries the one New task action.
           !filtered && noTasksYet ? null : (
@@ -353,9 +353,7 @@ export function ScheduledTasksSettings(target: {
         }
       >
         {scope.kind === "unavailable" ? (
-          <SettingsSection title="Unavailable selection">
-            <SettingsRow title={scope.message} />
-          </SettingsSection>
+          <SettingsRow title={scope.message} />
         ) : environments.length === 0 ? (
           <SettingsListEmpty
             icon={<Clock3Icon />}
@@ -1708,7 +1706,7 @@ function ScheduledTaskEditorDialog({
             ) : null}
 
             <Field label="Model">
-              <div>
+              <div className="flex *:min-w-0 *:flex-1">
                 <ProviderModelPicker
                   environmentId={environmentId}
                   disabled={saving || !connected}
@@ -1718,7 +1716,7 @@ function ScheduledTaskEditorDialog({
                   instanceEntries={instanceEntries}
                   modelOptionsByInstance={modelOptionsByInstance}
                   isComposerOwned={false}
-                  triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+                  triggerVariant="field"
                   onInstanceModelChange={(instanceId, model) =>
                     setDraft((current) => ({ ...current, modelKey: `${instanceId}:${model}` }))
                   }

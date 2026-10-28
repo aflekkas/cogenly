@@ -11,7 +11,7 @@ import {
   type VaultUpdateInput,
   type VaultUsageEntry,
 } from "@cogenly/contracts";
-import { KeyRoundIcon, Trash2Icon } from "lucide-react";
+import { KeyRoundIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useId, useState } from "react";
 
 import { AnimatedHeight } from "../components/AnimatedHeight";
@@ -22,7 +22,12 @@ import {
   SettingsMasterDetailEditor,
   SettingsMasterDetailRow,
 } from "../components/settings/SettingsMasterDetail";
-import { SettingsEmpty, SettingsRow, SettingsSection } from "../components/settings/settingsLayout";
+import {
+  SettingsEmpty,
+  SettingsField,
+  SettingsRow,
+  SettingsSection,
+} from "../components/settings/settingsLayout";
 import { SettingsStatusBadge } from "../components/settings/SettingsStatus";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -33,11 +38,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { useVaultUsage } from "./useVault";
 import { VaultAccessOptions } from "./VaultAccessOptions";
 import { VaultUsageList } from "./VaultUsageList";
-import { vaultLastUsedText, vaultPolicySummary, vaultPolicyWithAccess } from "./vault.logic";
+import { vaultLastUsedText, vaultPolicyWithAccess } from "./vault.logic";
 
 const NO_WRITE_TITLE = "This connection cannot change the vault.";
 
@@ -207,6 +213,8 @@ function VaultLoginDetail(props: {
     }
   };
   const disabled = busy || !props.canWrite;
+  const missingUsername = vaultLoginMissingUsername(item);
+  const [addingUsername, setAddingUsername] = useState(false);
   const linked = item.integrationIds ?? [];
   const integrationName = (id: string) => {
     const found = props.integrations.find((summary) => summary.integration.id === id);
@@ -235,25 +243,42 @@ function VaultLoginDetail(props: {
       <SettingsRow
         title="Username or email"
         description={
-          vaultLoginMissingUsername(item)
+          missingUsername
             ? "Only the password is saved. Add the username or email so agents can sign in on their own."
             : (item.username ?? "Saved, too long to show")
         }
         control={
-          // One dialog edits the username, label and password alike.
-          <Button size="sm" variant="outline" disabled={disabled} onClick={props.onEdit}>
-            Edit login
-          </Button>
+          <>
+            {missingUsername && !addingUsername ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={disabled}
+                onClick={() => setAddingUsername(true)}
+              >
+                Add
+              </Button>
+            ) : null}
+            {/* One dialog edits the username, label and password alike. */}
+            <Button size="sm" variant="outline" disabled={disabled} onClick={props.onEdit}>
+              Edit login
+            </Button>
+          </>
         }
       >
-        {vaultLoginMissingUsername(item) ? (
-          <AddUsername
-            idPrefix={idPrefix}
-            disabled={disabled}
-            onSave={(username) =>
-              run(() => props.onUpdate({ id: item.id, secretFields: { username } }))
-            }
-          />
+        {missingUsername ? (
+          <AnimatedHeight>
+            {addingUsername ? (
+              <AddUsernameForm
+                idPrefix={idPrefix}
+                disabled={disabled}
+                onCancel={() => setAddingUsername(false)}
+                onSave={(username) =>
+                  run(() => props.onUpdate({ id: item.id, secretFields: { username } }))
+                }
+              />
+            ) : null}
+          </AnimatedHeight>
         ) : null}
       </SettingsRow>
       <SettingsRow
@@ -264,8 +289,9 @@ function VaultLoginDetail(props: {
             : "None yet. Every fill asks you first."
         }
       />
-      <SettingsRow title="Access" description={vaultPolicySummary(item.policy, props.agentName)}>
-        <div className="pb-3">
+      {/* The chosen option is the summary, so the row has no description. */}
+      <SettingsRow title="Access">
+        <div className="pt-2">
           <VaultAccessOptions
             idPrefix={idPrefix}
             mode={item.policy.mode}
@@ -290,29 +316,31 @@ function VaultLoginDetail(props: {
         }
         control={
           unlinked.length > 0 ? (
-            <Select
-              value=""
-              disabled={disabled}
-              onValueChange={(value) => {
-                if (value) void setLinks([...linked, value]);
-              }}
-            >
-              <SelectTrigger size="sm" aria-label="Link an integration">
-                <SelectValue>Link integration</SelectValue>
-              </SelectTrigger>
-              <SelectPopup>
-                {unlinked.map((summary) => (
-                  <SelectItem key={summary.integration.id} value={summary.integration.id}>
-                    {summary.integration.displayName}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
+            <SettingsField>
+              <Select
+                value=""
+                disabled={disabled}
+                onValueChange={(value) => {
+                  if (value) void setLinks([...linked, value]);
+                }}
+              >
+                <SelectTrigger size="sm" aria-label="Link an integration">
+                  <SelectValue>Link integration</SelectValue>
+                </SelectTrigger>
+                <SelectPopup>
+                  {unlinked.map((summary) => (
+                    <SelectItem key={summary.integration.id} value={summary.integration.id}>
+                      {summary.integration.displayName}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </SettingsField>
           ) : null
         }
       >
         {linked.length > 0 ? (
-          <ul className="flex flex-col gap-1 pb-3 text-sm">
+          <ul className="flex flex-col gap-1 pt-2 text-sm">
             {linked.map((id) => (
               <li key={id} className="flex items-center justify-between gap-2">
                 <span className="truncate">{integrationName(id)}</span>
@@ -329,72 +357,89 @@ function VaultLoginDetail(props: {
           </ul>
         ) : null}
       </SettingsRow>
-      <SettingsRow title="History">
-        <div className="pb-3 text-xs text-muted-foreground">
-          {usage.error ? (
-            <p className="text-destructive">{usage.error}</p>
+      {/* Like "Allowed sites", an empty or pending history is the row's description. */}
+      <SettingsRow
+        title="History"
+        description={
+          usage.error ? (
+            <span className="text-destructive">{usage.error}</span>
           ) : !usage.isLoaded ? (
-            <p>Loading history…</p>
+            "Loading history…"
           ) : usage.usage.length === 0 ? (
-            <p>Not used yet.</p>
-          ) : (
+            "Not used yet."
+          ) : null
+        }
+      >
+        {!usage.error && usage.isLoaded && usage.usage.length > 0 ? (
+          <div className="pt-2">
             <VaultUsageList
               environmentId={props.environmentId}
               usage={usage.usage}
               agentName={props.agentName}
             />
-          )}
-        </div>
+          </div>
+        ) : null}
       </SettingsRow>
     </SettingsSection>
   );
 }
 
-/** "Add email": one field that saves the username into a password-only login. */
-function AddUsername(props: {
+/**
+ * The row's "Add" opened: one field that saves the username into a
+ * password-only login. Escape or the cancel button folds it away again.
+ */
+function AddUsernameForm(props: {
   readonly idPrefix: string;
   readonly disabled: boolean;
+  readonly onCancel: () => void;
   readonly onSave: (username: string) => Promise<void>;
 }) {
-  const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
   return (
-    <div className="pb-3">
-      <AnimatedHeight>
-        {open ? (
-          <form
-            className="flex items-center gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const username = value.trim();
-              if (username) void props.onSave(username);
-            }}
-          >
-            <Input
-              id={`${props.idPrefix}-username`}
-              aria-label="Username or email"
-              size="sm"
-              autoFocus
-              autoComplete="off"
-              value={value}
-              placeholder="you@example.com"
-              onChange={(event) => setValue(event.currentTarget.value)}
+    <form
+      className="flex max-w-md items-center gap-2 pt-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const username = value.trim();
+        if (username) void props.onSave(username);
+      }}
+    >
+      <Input
+        id={`${props.idPrefix}-username`}
+        aria-label="Username or email"
+        size="sm"
+        className="min-w-0 flex-1"
+        autoFocus
+        autoComplete="off"
+        value={value}
+        placeholder="you@example.com"
+        onChange={(event) => setValue(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          // The settings route treats an unhandled Escape as "go back".
+          if (event.key !== "Escape") return;
+          event.preventDefault();
+          props.onCancel();
+        }}
+      />
+      <Button size="sm" type="submit" disabled={props.disabled || value.trim() === ""}>
+        Save
+      </Button>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost-muted"
+              aria-label="Cancel adding a username"
+              onClick={props.onCancel}
             />
-            <Button size="sm" type="submit" disabled={props.disabled || value.trim() === ""}>
-              Save
-            </Button>
-          </form>
-        ) : (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={props.disabled}
-            onClick={() => setOpen(true)}
-          >
-            Add email
-          </Button>
-        )}
-      </AnimatedHeight>
-    </div>
+          }
+        >
+          <XIcon />
+        </TooltipTrigger>
+        <TooltipPopup side="top">Cancel</TooltipPopup>
+      </Tooltip>
+    </form>
   );
 }

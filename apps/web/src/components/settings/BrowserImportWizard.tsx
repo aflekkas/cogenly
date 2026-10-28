@@ -37,6 +37,7 @@ import {
   type WizardStep,
 } from "./browserImportWizard.logic";
 
+import { SETTINGS_MICRO_LABEL_CLASSNAME } from "./settingsLayout";
 export type { WizardTarget } from "./browserImportWizard.logic";
 
 interface BrowserImportWizardProps {
@@ -378,9 +379,7 @@ function ConfigureStep({
         {/* Side by side when the dialog has room, stacked when it doesn't. */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
           <section className="flex-1 space-y-2">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              From
-            </p>
+            <p className={SETTINGS_MICRO_LABEL_CLASSNAME}>From</p>
             {source.profiles.map((profile) => (
               <SelectableTile
                 key={profile.directory}
@@ -396,9 +395,7 @@ function ConfigureStep({
             <ArrowRightIcon className="hidden size-4 sm:block" />
           </div>
           <section className="flex-1 space-y-2">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Into
-            </p>
+            <p className={SETTINGS_MICRO_LABEL_CLASSNAME}>Into</p>
             {canCreateProfile ? (
               <SelectableTile
                 selected={target.kind === "new"}
@@ -564,9 +561,7 @@ function DoneStep({
       </DialogHeader>
       {skippedDomains.length > 0 ? (
         <DialogPanel>
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Skipped
-          </p>
+          <p className={SETTINGS_MICRO_LABEL_CLASSNAME}>Skipped</p>
           <p className="mt-1 text-sm text-foreground">{formatSkippedDomains(skippedDomains)}</p>
         </DialogPanel>
       ) : null}

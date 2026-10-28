@@ -19,6 +19,11 @@ export type KeybindingSource = "Default" | "Custom" | "Repository";
 export interface KeybindingRow {
   readonly id: string;
   readonly command: KeybindingCommand;
+  /**
+   * The row's title: the command's label, marked "(alternate)" on every binding
+   * after a command's first so two rows never read the same.
+   */
+  readonly label: string;
   readonly key: string;
   readonly when: string;
   readonly source: KeybindingSource;
@@ -186,7 +191,8 @@ const KEYBINDING_GROUPS = [
     ],
   },
   { id: "threads", title: "Threads", prefixes: ["thread", "chat", "pullRequest"] },
-  { id: "composer", title: "Composer", prefixes: ["composer", "modelPicker"] },
+  { id: "composer", title: "Composer", prefixes: ["composer"] },
+  { id: "modelPicker", title: "Model picker", prefixes: ["modelPicker"] },
   { id: "preview", title: "Preview", prefixes: ["preview"] },
   { id: "appearance", title: "Appearance", prefixes: ["appearance"] },
   { id: "scripts", title: "Repository scripts", prefixes: ["script"] },
@@ -223,14 +229,21 @@ export function buildKeybindingRows(
   query: string,
 ): ReadonlyArray<KeybindingRow> {
   const normalizedQuery = query.trim().toLowerCase();
+  // A command's first binding in config order is its main one; later ones are alternates.
+  const listedCommands = new Set<KeybindingCommand>();
   const rows = keybindings.flatMap((binding, index) => {
     if (RETIRED_KEYBINDING_COMMANDS.has(binding.command)) return [];
     const defaultBinding = defaultBindingForBinding(binding);
     const key = shortcutToKeybindingInput(binding.shortcut);
     const when = whenAstToExpression(binding.whenAst);
+    const alternate = listedCommands.has(binding.command);
+    listedCommands.add(binding.command);
     return {
       id: `${keybindingRowId(binding.command, key, when)}\u0000${index}`,
       command: binding.command,
+      label: alternate
+        ? `${commandLabel(binding.command)} (alternate)`
+        : commandLabel(binding.command),
       key,
       when,
       source: sourceForBinding(binding),
@@ -252,11 +265,8 @@ export function buildKeybindingRows(
       : row;
   });
 
-  rowsWithConflicts.sort((left, right) => {
-    const commandCompare = left.command.localeCompare(right.command);
-    if (commandCompare !== 0) return commandCompare;
-    return left.key.localeCompare(right.key);
-  });
+  // A stable sort keeps one command's bindings in config order, main one first.
+  rowsWithConflicts.sort((left, right) => left.command.localeCompare(right.command));
 
   if (normalizedQuery.length === 0) {
     return rowsWithConflicts;
@@ -265,7 +275,7 @@ export function buildKeybindingRows(
   return rowsWithConflicts.filter((row) => {
     return (
       row.command.toLowerCase().includes(normalizedQuery) ||
-      commandLabel(row.command).toLowerCase().includes(normalizedQuery) ||
+      row.label.toLowerCase().includes(normalizedQuery) ||
       row.key.toLowerCase().includes(normalizedQuery) ||
       row.when.toLowerCase().includes(normalizedQuery) ||
       (whenSummary(row.binding.whenAst)?.toLowerCase().includes(normalizedQuery) ?? false) ||

@@ -66,13 +66,19 @@ describe("KeybindingsSettings.logic", () => {
       "Navigation",
       "Threads",
       "Composer",
+      "Model picker",
       "Preview",
       "Appearance",
       "Other",
     ]);
     const composer = groups.find((group) => group.id === "composer");
     expect(composer?.rows.map((row) => row.command)).toEqual(
-      expect.arrayContaining(["composer.host", "modelPicker.toggle"]),
+      expect.arrayContaining(["composer.host"]),
+    );
+    expect(composer?.rows.some((row) => row.command.startsWith("modelPicker."))).toBe(false);
+    const modelPicker = groups.find((group) => group.id === "modelPicker");
+    expect(modelPicker?.rows.map((row) => row.command)).toEqual(
+      expect.arrayContaining(["modelPicker.toggle", "modelPicker.jump.1"]),
     );
     expect(
       groupKeybindingRows(buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS, "preview.toggle")),
@@ -283,6 +289,19 @@ describe("KeybindingsSettings.logic", () => {
     expect(commandLabel("view.reopenClosed")).toBe("Reopen closed tab");
     expect(commandLabel("preview.focusUrl")).toBe("Preview: focus URL");
     expect(commandLabel("script.setup-db.run")).toBe("Run script: setup-db");
+  });
+
+  it("gives every default row a distinct title, main binding first", () => {
+    const rows = buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS, "");
+    expect(new Set(rows.map((row) => row.label)).size).toBe(rows.length);
+    const chatNew = rows.filter((row) => row.command === "chat.new");
+    expect(chatNew.map((row) => [row.label, row.key])).toEqual([
+      ["Chat: new", "mod+n"],
+      ["Chat: new (alternate)", "mod+shift+o"],
+    ]);
+    expect(
+      rows.filter((row) => row.command === "composer.sendBackground").map((row) => row.key),
+    ).toEqual(["mod+enter", "mod+alt+enter"]);
   });
 
   it("summarizes when clauses in plain words, falling back to the expression", () => {

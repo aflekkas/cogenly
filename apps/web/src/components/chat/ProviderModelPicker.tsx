@@ -7,6 +7,7 @@ import {
 import { memo, useEffect, useMemo, useState } from "react";
 import { Badge } from "../ui/badge";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { SelectButton } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import {
@@ -63,6 +64,12 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   isComposerOwned?: boolean;
   disabled?: boolean;
   open?: boolean;
+  /**
+   * `composer` (default) is the toolbar's borderless control; `field` is the
+   * bordered select look a form uses (Settings), sized `sm`. Width comes from
+   * `triggerClassName`.
+   */
+  triggerVariant?: "composer" | "field";
   triggerClassName?: string;
   /** Aggregate settings can show a neutral value without claiming one provider is selected. */
   triggerLabel?: string;
@@ -250,90 +257,135 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         setIsMenuOpen(open);
       }}
     >
-      <PopoverTrigger
-        render={
-          <ComposerControl
-            aria-label={props.triggerAriaLabel ?? allModelNames ?? triggerModelLabel}
-            size={size}
-            data-chat-provider-model-picker="true"
-            className={cn(
-              "min-w-0 shrink justify-between whitespace-nowrap",
-              props.compact
-                ? "max-w-42 shrink-0"
-                : !props.isComposerOwned && "max-w-48 sm:max-w-56",
-              props.triggerClassName,
-            )}
-            disabled={props.disabled}
-          />
-        }
-      >
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <span
-                className={cn(
-                  "flex min-w-0 flex-1 items-center",
-                  composerControlGapClassName(size),
-                )}
-              />
-            }
-          >
-            {selectedEntries && props.triggerLabel === undefined ? (
-              <ProviderIconStack
-                className="[--provider-stack-ring:var(--chat-composer-glass-surface,var(--background))]"
-                items={selectedStackItems}
-              />
-            ) : activeEntry && props.triggerLabel === undefined ? (
-              <ProviderInstanceIcon
-                driverKind={activeEntry.driverKind}
-                displayName={activeEntry.displayName}
-                accentColor={activeEntry.accentColor}
-                showBadge={showInstanceBadge}
-                // Brand marks fill their box; the margin gives them the side bearing the
-                // lucide icons on the other controls have, so the gaps match.
-                className="mx-px size-4"
-                size="md"
-                iconClassName={props.activeProviderIconClassName}
-                indicatorBackground={props.instanceIndicatorBackground ?? "var(--contrast-input)"}
-              />
-            ) : null}
-            {/* A one-column grid so a container can collapse the label to icon-only
-              (grid-cols-[0fr]) and the width eases instead of snapping. */}
-            <span
-              className={COLLAPSIBLE_FRAME_CLASS}
-              data-chat-provider-model-picker-label-frame="true"
-            >
-              <span
-                // flex-1 is inert in the grid; measurement reads flex-none as the
-                // resting strip's deliberate collapse.
-                className="min-w-0 flex-1 overflow-hidden truncate"
-                data-chat-provider-model-picker-label="true"
-              >
+      {props.triggerVariant === "field" ? (
+        <PopoverTrigger
+          render={
+            <SelectButton
+              size="sm"
+              aria-label={props.triggerAriaLabel ?? allModelNames ?? triggerModelLabel}
+              disabled={props.disabled}
+            />
+          }
+        >
+          <Tooltip>
+            <TooltipTrigger render={<span className="flex min-w-0 items-center gap-1.5" />}>
+              {selectedEntries && props.triggerLabel === undefined ? (
+                <ProviderIconStack
+                  className="[--provider-stack-ring:var(--background)]"
+                  items={selectedStackItems}
+                />
+              ) : activeEntry && props.triggerLabel === undefined ? (
+                <ProviderInstanceIcon
+                  driverKind={activeEntry.driverKind}
+                  displayName={activeEntry.displayName}
+                  accentColor={activeEntry.accentColor}
+                  showBadge={showInstanceBadge}
+                  className="size-4 shrink-0"
+                  size="md"
+                  iconClassName={props.activeProviderIconClassName}
+                  indicatorBackground={props.instanceIndicatorBackground ?? "var(--background)"}
+                />
+              ) : null}
+              <span className="min-w-0 truncate">
                 {props.triggerLabel ?? multipleLabel ?? triggerTitle}
               </span>
-            </span>
-            {selectedModel?.isUnavailable &&
-            !selectedEntries &&
-            props.triggerLabel === undefined ? (
-              <Badge variant="outline" size="sm">
-                Unavailable
-              </Badge>
-            ) : null}
-          </TooltipTrigger>
-          <TooltipPopup side="top">{triggerTooltipContent}</TooltipPopup>
-        </Tooltip>
-        {/* The chevron's optical margins sit on the frame, outside its clip, so they
-          match the other controls' chevrons without cutting off the glyph. */}
-        <span
-          aria-hidden="true"
-          className={cn(COLLAPSIBLE_FRAME_CLASS, size === "xs" ? "-ms-0.5 -me-1" : "-mx-0.5")}
-          data-chat-provider-model-picker-chevron="true"
+              {selectedModel?.isUnavailable &&
+              !selectedEntries &&
+              props.triggerLabel === undefined ? (
+                <Badge variant="outline" size="sm">
+                  Unavailable
+                </Badge>
+              ) : null}
+            </TooltipTrigger>
+            <TooltipPopup side="top">{triggerTooltipContent}</TooltipPopup>
+          </Tooltip>
+        </PopoverTrigger>
+      ) : (
+        <PopoverTrigger
+          render={
+            <ComposerControl
+              aria-label={props.triggerAriaLabel ?? allModelNames ?? triggerModelLabel}
+              size={size}
+              data-chat-provider-model-picker="true"
+              className={cn(
+                "min-w-0 shrink justify-between whitespace-nowrap",
+                props.compact
+                  ? "max-w-42 shrink-0"
+                  : !props.isComposerOwned && "max-w-48 sm:max-w-56",
+                props.triggerClassName,
+              )}
+              disabled={props.disabled}
+            />
+          }
         >
-          <span className="flex min-w-0 items-center overflow-hidden">
-            <ComposerControlChevron size={size} className="m-0!" />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span
+                  className={cn(
+                    "flex min-w-0 flex-1 items-center",
+                    composerControlGapClassName(size),
+                  )}
+                />
+              }
+            >
+              {selectedEntries && props.triggerLabel === undefined ? (
+                <ProviderIconStack
+                  className="[--provider-stack-ring:var(--chat-composer-glass-surface,var(--background))]"
+                  items={selectedStackItems}
+                />
+              ) : activeEntry && props.triggerLabel === undefined ? (
+                <ProviderInstanceIcon
+                  driverKind={activeEntry.driverKind}
+                  displayName={activeEntry.displayName}
+                  accentColor={activeEntry.accentColor}
+                  showBadge={showInstanceBadge}
+                  // Brand marks fill their box; the margin gives them the side bearing the
+                  // lucide icons on the other controls have, so the gaps match.
+                  className="mx-px size-4"
+                  size="md"
+                  iconClassName={props.activeProviderIconClassName}
+                  indicatorBackground={props.instanceIndicatorBackground ?? "var(--contrast-input)"}
+                />
+              ) : null}
+              {/* A one-column grid so a container can collapse the label to icon-only
+                (grid-cols-[0fr]) and the width eases instead of snapping. */}
+              <span
+                className={COLLAPSIBLE_FRAME_CLASS}
+                data-chat-provider-model-picker-label-frame="true"
+              >
+                <span
+                  // flex-1 is inert in the grid; measurement reads flex-none as the
+                  // resting strip's deliberate collapse.
+                  className="min-w-0 flex-1 overflow-hidden truncate"
+                  data-chat-provider-model-picker-label="true"
+                >
+                  {props.triggerLabel ?? multipleLabel ?? triggerTitle}
+                </span>
+              </span>
+              {selectedModel?.isUnavailable &&
+              !selectedEntries &&
+              props.triggerLabel === undefined ? (
+                <Badge variant="outline" size="sm">
+                  Unavailable
+                </Badge>
+              ) : null}
+            </TooltipTrigger>
+            <TooltipPopup side="top">{triggerTooltipContent}</TooltipPopup>
+          </Tooltip>
+          {/* The chevron's optical margins sit on the frame, outside its clip, so they
+            match the other controls' chevrons without cutting off the glyph. */}
+          <span
+            aria-hidden="true"
+            className={cn(COLLAPSIBLE_FRAME_CLASS, size === "xs" ? "-ms-0.5 -me-1" : "-mx-0.5")}
+            data-chat-provider-model-picker-chevron="true"
+          >
+            <span className="flex min-w-0 items-center overflow-hidden">
+              <ComposerControlChevron size={size} className="m-0!" />
+            </span>
           </span>
-        </span>
-      </PopoverTrigger>
+        </PopoverTrigger>
+      )}
       <PopoverPopup
         {...(props.isComposerOwned ? composerFloatingLayerProps : {})}
         align="start"

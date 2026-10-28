@@ -507,7 +507,7 @@ function ItemUsage(props: {
 }) {
   const usage = useVaultUsage(props.environmentId, props.item.id);
   return (
-    <div className="reveal-motion ms-0.5 mt-2 mb-2 border-s border-border/70 ps-3 text-xs text-muted-foreground">
+    <div className="reveal-motion ms-0.5 mt-2 border-s border-border/70 ps-3 text-xs text-muted-foreground">
       <UsageBody error={usage.error} isLoaded={usage.isLoaded} empty={usage.usage.length === 0}>
         <VaultUsageList
           environmentId={props.environmentId}

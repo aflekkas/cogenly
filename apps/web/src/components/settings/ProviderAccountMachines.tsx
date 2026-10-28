@@ -163,7 +163,7 @@ function ProviderAccountMachineRow({
       }
       control={
         actionable ? (
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <Button
               size="sm"
               variant={signedIn ? "outline" : "default"}
@@ -177,7 +177,7 @@ function ProviderAccountMachineRow({
             {signedIn && (row.targetEnvironmentId || provider.auth.canLogout !== false) ? (
               <Button
                 size="sm"
-                variant="ghost"
+                variant="outline"
                 disabled={signingOut}
                 onClick={() => void signOut()}
               >

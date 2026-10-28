@@ -5,7 +5,7 @@ import { usePrimaryEnvironmentId } from "../../state/environments";
 import { Button } from "../ui/button";
 import { DraftInput } from "../ui/draft-input";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingResetButton, SettingsField, SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
@@ -57,10 +57,11 @@ export function ProjectFoldersSettings() {
           ) : null
         }
         control={
-          <div className="flex w-full items-center gap-2 @min-[32rem]/settings-row:w-auto">
+          <SettingsField>
             <DraftInput
               size="sm"
-              className="w-full @min-[32rem]/settings-row:w-56"
+              // A long path clips in the field; hovering shows all of it.
+              title={settings.projectsRoot || undefined}
               value={settings.projectsRoot}
               onCommit={(next) => updateSettings({ projectsRoot: next })}
               placeholder={
@@ -74,7 +75,7 @@ export function ProjectFoldersSettings() {
                 Change…
               </Button>
             ) : null}
-          </div>
+          </SettingsField>
         }
       />
       <SettingsRow
@@ -95,15 +96,17 @@ export function ProjectFoldersSettings() {
           ) : null
         }
         control={
-          <DraftInput
-            size="sm"
-            className="w-full @min-[32rem]/settings-row:w-56"
-            value={settings.addProjectBaseDirectory}
-            onCommit={(next) => updateSettings({ addProjectBaseDirectory: next })}
-            placeholder="~/"
-            spellCheck={false}
-            aria-label="Folder browser starts in"
-          />
+          <SettingsField>
+            <DraftInput
+              size="sm"
+              title={settings.addProjectBaseDirectory || undefined}
+              value={settings.addProjectBaseDirectory}
+              onCommit={(next) => updateSettings({ addProjectBaseDirectory: next })}
+              placeholder="~/"
+              spellCheck={false}
+              aria-label="Folder browser starts in"
+            />
+          </SettingsField>
         }
       />
     </SettingsSection>

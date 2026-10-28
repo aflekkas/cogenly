@@ -130,7 +130,7 @@ function AccentSwatch(props: {
  */
 function AccentPreviewStrip({ accent }: { readonly accent: AccentColor }) {
   return (
-    <div aria-hidden inert className="mt-1 mb-2 grid *:[grid-area:1/1]">
+    <div aria-hidden inert className="mt-2 grid *:[grid-area:1/1]">
       {ACCENT_COLORS.map((layer) => (
         <div
           key={layer}

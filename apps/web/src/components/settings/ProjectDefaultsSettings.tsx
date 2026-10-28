@@ -26,8 +26,9 @@ import { searchableSetting } from "./settingsSearch";
 import { SettingsTag } from "./SettingsStatus";
 import { useSettingsScope } from "./SettingsScopeContext";
 import {
-  SETTINGS_PICKER_TRIGGER_CLASSNAME,
   SettingResetButton,
+  SettingsField,
+  SettingsModelPickers,
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
@@ -87,6 +88,12 @@ export function ProjectDefaultsSettings({ category }: { category: "models" | "ne
       settingKeys={["defaultModelSelection"]}
       {...searchableSetting("default-model")}
       description="Used for new chats and threads. Automatic uses the first available model."
+      // Until a model is picked, the picker shows the automatic fallback.
+      status={
+        selection && activeEntry && !unavailable && settings.defaultModelSelection === null ? (
+          <SettingsTag>Automatic</SettingsTag>
+        ) : undefined
+      }
       resetAction={
         settings.defaultModelSelection !== null ? (
           <SettingResetButton label="default model" onClick={() => setModel(null)} />
@@ -94,11 +101,7 @@ export function ProjectDefaultsSettings({ category }: { category: "models" | "ne
       }
       control={
         selection && activeEntry ? (
-          <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
-            {/* Until a model is picked, the picker shows the automatic fallback. */}
-            {!unavailable && settings.defaultModelSelection === null ? (
-              <SettingsTag>Automatic</SettingsTag>
-            ) : null}
+          <SettingsModelPickers>
             <ProviderModelPicker
               environmentId={representative?.environmentId ?? null}
               activeInstanceId={selection.instanceId}
@@ -106,7 +109,7 @@ export function ProjectDefaultsSettings({ category }: { category: "models" | "ne
               lockedProvider={null}
               instanceEntries={entries}
               modelOptionsByInstance={modelOptions}
-              triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+              triggerVariant="field"
               getModelDisabledReason={modelDisabledReason}
               onOpenProviderSetup={(instanceId) => {
                 if (representative)
@@ -128,12 +131,12 @@ export function ProjectDefaultsSettings({ category }: { category: "models" | "ne
               modelOptions={selection.options ?? []}
               allowPromptInjectedEffort={false}
               planModeEnabled={settings.planModeEnabled}
-              triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+              triggerVariant="field"
               onModelOptionsChange={(options) =>
                 setModel(createModelSelection(selection.instanceId, selection.model, options))
               }
             />
-          </div>
+          </SettingsModelPickers>
         ) : (
           <span className="text-sm text-muted-foreground">No providers available</span>
         )
@@ -155,27 +158,29 @@ export function ProjectDefaultsSettings({ category }: { category: "models" | "ne
         ) : null
       }
       control={
-        <Select
-          value={effective?.defaultThreadEnvMode ?? null}
-          onValueChange={(value) => {
-            if (value === "local" || value === "worktree")
-              updateSettings({ defaultThreadEnvMode: value });
-          }}
-        >
-          <SelectTrigger size="sm" aria-label="Start new threads in">
-            <SelectValue>
-              {(value: string | null) =>
-                value === "local" || value === "worktree"
-                  ? resolveEnvModeLabel(value)
-                  : "Unavailable"
-              }
-            </SelectValue>
-          </SelectTrigger>
-          <SelectPopup align="end" alignItemWithTrigger={false}>
-            <SelectItem value="local">{resolveEnvModeLabel("local")}</SelectItem>
-            <SelectItem value="worktree">{resolveEnvModeLabel("worktree")}</SelectItem>
-          </SelectPopup>
-        </Select>
+        <SettingsField>
+          <Select
+            value={effective?.defaultThreadEnvMode ?? null}
+            onValueChange={(value) => {
+              if (value === "local" || value === "worktree")
+                updateSettings({ defaultThreadEnvMode: value });
+            }}
+          >
+            <SelectTrigger size="sm" aria-label="Start new threads in">
+              <SelectValue>
+                {(value: string | null) =>
+                  value === "local" || value === "worktree"
+                    ? resolveEnvModeLabel(value)
+                    : "Unavailable"
+                }
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              <SelectItem value="local">{resolveEnvModeLabel("local")}</SelectItem>
+              <SelectItem value="worktree">{resolveEnvModeLabel("worktree")}</SelectItem>
+            </SelectPopup>
+          </Select>
+        </SettingsField>
       }
     />
   );
@@ -232,27 +237,29 @@ export function ProjectDefaultsSettings({ category }: { category: "models" | "ne
           ) : null
         }
         control={
-          <Select
-            value={effective?.worktreeSubmodules ?? null}
-            onValueChange={(value) => {
-              if (isWorktreeSubmodules(value)) updateSettings({ worktreeSubmodules: value });
-            }}
-          >
-            <SelectTrigger size="sm" aria-label="Worktree submodules">
-              <SelectValue>
-                {(value: string | null) =>
-                  isWorktreeSubmodules(value) ? WORKTREE_SUBMODULES_LABELS[value] : "Unavailable"
-                }
-              </SelectValue>
-            </SelectTrigger>
-            <SelectPopup align="end" alignItemWithTrigger={false}>
-              {WORKTREE_SUBMODULES_OPTIONS.map((option) => (
-                <SelectItem key={option} value={option}>
-                  {WORKTREE_SUBMODULES_LABELS[option]}
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
+          <SettingsField>
+            <Select
+              value={effective?.worktreeSubmodules ?? null}
+              onValueChange={(value) => {
+                if (isWorktreeSubmodules(value)) updateSettings({ worktreeSubmodules: value });
+              }}
+            >
+              <SelectTrigger size="sm" aria-label="Worktree submodules">
+                <SelectValue>
+                  {(value: string | null) =>
+                    isWorktreeSubmodules(value) ? WORKTREE_SUBMODULES_LABELS[value] : "Unavailable"
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {WORKTREE_SUBMODULES_OPTIONS.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {WORKTREE_SUBMODULES_LABELS[option]}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          </SettingsField>
         }
       />
     </SettingsSection>

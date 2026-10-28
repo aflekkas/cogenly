@@ -300,7 +300,7 @@ export function PlatformStatus(props: {
         icon={props.status.ready ? CheckGlyph : CircleAlert}
       />
       <div className={cn(props.compact && props.status.ready && "flex items-center gap-2")}>
-        <p className="font-medium">{props.platform}</p>
+        <p className="text-sm font-medium text-foreground">{props.platform}</p>
         <p className="text-xs text-muted-foreground">
           {props.compact && props.status.ready
             ? (props.readyLabel ?? "Ready")

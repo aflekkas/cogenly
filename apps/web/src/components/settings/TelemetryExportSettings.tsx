@@ -5,11 +5,12 @@ import { useEffect, useEffectEvent, useState } from "react";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
+import { DisclosurePanel } from "../ui/disclosure";
 import { Input } from "../ui/input";
-import { Label } from "../ui/label";
+import { toastManager } from "../ui/toast";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { useScopedSettings } from "./useScopedSettings";
-import { SettingsSection } from "./settingsLayout";
+import { SettingsNote, SettingsRowContent, SettingsSection } from "./settingsLayout";
 import { SettingsScopeNotice } from "./SettingsScopeNotice";
 import { SettingsStatusBadge, type SettingsStatusTone } from "./SettingsStatus";
 
@@ -64,7 +65,6 @@ function TelemetryExportForm() {
   const saved = useScopedSettings((settings) => settings.observability);
   const [draft, setDraft] = useState<Partial<typeof saved>>({});
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const environmentId = environment?.environmentId;
   // Checks need the same grant as saving, so one permission covers the whole form.
   const canEdit = useAtomValue(
@@ -121,14 +121,18 @@ function TelemetryExportForm() {
   }, [canCheck]);
 
   return (
-    <SettingsSection title="OpenTelemetry export" id="telemetry-export">
+    <SettingsSection
+      title="OpenTelemetry export"
+      id="telemetry-export"
+      footer="Sends traces, metrics, and logs to an OTLP HTTP receiver. Changes apply after a server restart, and environment variables override them."
+    >
+      {/* The rows sit inside the form, so it draws the card's row separators. */}
       <form
-        className="grid gap-4 px-4 py-4 sm:px-5"
+        className="divide-y divide-border/50"
         onSubmit={async (event) => {
           event.preventDefault();
           if (!environment || saving) return;
           setSaving(true);
-          setMessage(null);
           try {
             const result = await updateSettings({
               environmentId: environment.environmentId,
@@ -142,35 +146,42 @@ function TelemetryExportForm() {
             });
             if (result._tag === "Success") {
               setDraft({});
-              setMessage("Saved. Restart the server to apply.");
+              toastManager.add({
+                type: "success",
+                title: "Endpoints saved",
+                description: "Restart the server to apply them.",
+              });
             }
           } finally {
             setSaving(false);
           }
         }}
       >
-        <p className="text-xs text-muted-foreground">
-          Send traces, metrics, and logs to an OTLP HTTP receiver. Restart the server to apply.
-          Environment variables override these settings.
-        </p>
         {!canEdit && (
-          <p className="text-xs text-muted-foreground">
+          <SettingsNote>
             This connection lacks permission to change settings on{" "}
             {environment?.label ?? "the selected machine"}.
-          </p>
+          </SettingsNote>
         )}
         {SIGNALS.map(({ key, label, signal }) => {
           const url = values[key].trim();
           const status = canCheck ? endpointStatus(url, checks[key]) : null;
           return (
-            <div key={key} className="grid gap-1.5">
-              <div className="flex items-center justify-between gap-3">
-                <Label htmlFor={key}>{label} endpoint</Label>
-                {status && (
+            <SettingsRowContent
+              key={key}
+              title={<label htmlFor={key}>{label} endpoint</label>}
+              description={
+                saved[key] !== (running?.[key] ?? "") ? (
+                  <span className="break-all">Running: {running?.[key] || "Disabled"}</span>
+                ) : undefined
+              }
+              control={
+                status ? (
                   <SettingsStatusBadge tone={status.tone}>{status.label}</SettingsStatusBadge>
-                )}
-              </div>
-              <div className="flex gap-2">
+                ) : undefined
+              }
+            >
+              <div className="flex gap-2 pt-2">
                 <Input
                   id={key}
                   size="sm"
@@ -189,7 +200,6 @@ function TelemetryExportForm() {
                       if (value.trim() === saved[key]) delete next[key];
                       return next;
                     });
-                    setMessage(null);
                   }}
                 />
                 {canCheck && (
@@ -204,41 +214,36 @@ function TelemetryExportForm() {
                   </Button>
                 )}
               </div>
-              {saved[key] !== (running?.[key] ?? "") && (
-                <p className="break-all text-xs text-muted-foreground">
-                  Running: {running?.[key] || "Disabled"}
-                </p>
-              )}
-            </div>
+            </SettingsRowContent>
           );
         })}
-        <div className="flex items-center justify-between gap-3">
-          <p role="status" className="text-xs text-muted-foreground">
-            {message}
-          </p>
-          <div className="flex shrink-0 gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={!changed || saving || !canEdit}
-              onClick={() => {
-                setDraft({});
-                setMessage(null);
-                // A tested draft replaced the saved endpoint's status; check the saved one again.
-                if (!canCheck) return;
-                for (const { key, signal } of SIGNALS) {
-                  if (checks[key]?.url !== saved[key]) checkEndpoint(key, signal, saved[key]);
-                }
-              }}
-            >
-              Discard
-            </Button>
-            <Button type="submit" size="sm" disabled={!changed || saving || !canEdit}>
-              {saving ? "Saving…" : "Save"}
-            </Button>
+        {/* Save and Discard only exist while there is something to save or discard. */}
+        <DisclosurePanel open={changed}>
+          <div className="flex items-center justify-between gap-3 px-3 py-3 sm:px-4">
+            <p className="min-w-0 text-xs text-muted-foreground">Unsaved changes</p>
+            <div className="flex shrink-0 gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={saving}
+                onClick={() => {
+                  setDraft({});
+                  // A tested draft replaced the saved endpoint's status; check the saved one again.
+                  if (!canCheck) return;
+                  for (const { key, signal } of SIGNALS) {
+                    if (checks[key]?.url !== saved[key]) checkEndpoint(key, signal, saved[key]);
+                  }
+                }}
+              >
+                Discard
+              </Button>
+              <Button type="submit" size="sm" disabled={saving}>
+                {saving ? "Saving…" : "Save"}
+              </Button>
+            </div>
           </div>
-        </div>
+        </DisclosurePanel>
       </form>
     </SettingsSection>
   );

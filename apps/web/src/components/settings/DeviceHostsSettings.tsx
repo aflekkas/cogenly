@@ -16,11 +16,19 @@ import { deviceEnvironment } from "../../state/device";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button, InlineButton } from "../ui/button";
-import { CheckIcon, CircleIcon, MoreVertical, PlusIcon, TriangleAlertIcon } from "lucide-react";
+import {
+  CheckIcon,
+  CircleIcon,
+  MoreVertical,
+  PlusIcon,
+  SmartphoneIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import { DisclosureChevron } from "../ui/disclosure";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Menu, MenuTrigger, MenuPopup, MenuItem } from "../ui/menu";
-import { SettingsRow } from "./settingsLayout";
+import { SettingsGroup } from "./SettingsGroup";
+import { SettingsEmpty, SettingsRow } from "./settingsLayout";
 
 import { useSettingsScope } from "./SettingsScopeContext";
 import { toastManager } from "../ui/toast";
@@ -164,7 +172,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
         </Button>
       }
     >
-      <div className="pt-3 pb-2">
+      <div className="mt-2">
         {!props.environmentId ? (
           <p className="text-xs text-muted-foreground">
             Connect this machine to manage its device hosts.
@@ -194,7 +202,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
                       "No device hosts"
                     }
                   >
-                    <div className="px-3 sm:px-4 [&>div:first-child]:border-t-0">
+                    <div className="p-3 sm:px-4">
                       <DeviceHostList environments={[environment]} {...listActions} />
                     </div>
                   </FoldedSettingsSection>
@@ -283,11 +291,15 @@ function DeviceHostList({
         members: [{ environmentId: environment.environmentId, label: environment.label, host }],
       })),
     );
+  if (rows.length === 0) {
+    return (
+      <SettingsGroup variant="inset" divided={false}>
+        <SettingsEmpty icon={<SmartphoneIcon />} label="No device hosts yet." />
+      </SettingsGroup>
+    );
+  }
   return (
-    <>
-      {rows.length === 0 ? (
-        <p className="py-2 text-xs text-muted-foreground">No device hosts yet.</p>
-      ) : null}
+    <SettingsGroup variant="inset">
       {rows.map(({ host, members }) => {
         const hostChecks = checks[deviceHostConnectionKey(host)];
         const checkedMembers = scopeEnvironments.flatMap((environment) =>
@@ -420,7 +432,7 @@ function DeviceHostList({
                   ),
               }));
         return (
-          <div key={host.id} className="flex items-center gap-2 border-t border-border/50 py-2.5">
+          <div key={host.id} className="flex items-center gap-2 px-3 py-2.5 sm:px-4">
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 items-center gap-2">
                 <p className="truncate text-sm font-medium">{host.label}</p>
@@ -571,7 +583,7 @@ function DeviceHostList({
           </div>
         );
       })}
-    </>
+    </SettingsGroup>
   );
 }
 
