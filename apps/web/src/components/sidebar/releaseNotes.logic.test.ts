@@ -7,6 +7,7 @@ import {
   parseReleaseNotesBody,
   releaseHistory,
   releasesBetween,
+  whatsNewReleases,
 } from "./releaseNotes.logic";
 
 function release(tag: string, body = "", overrides: Record<string, unknown> = {}) {
@@ -95,6 +96,17 @@ describe("release ranges", () => {
       "0.1.1",
       "0.1.0",
     ]);
+  });
+
+  it("what's new is the update on offer, else exactly the running release", () => {
+    const incoming = releasesBetween(releases, "0.1.1", "0.1.3");
+    expect(versions(whatsNewReleases(incoming, releases, "0.1.1"))).toEqual(["0.1.3", "0.1.2"]);
+    expect(versions(whatsNewReleases([], releaseHistory(releases, "0.1.2"), "0.1.2"))).toEqual([
+      "0.1.2",
+    ]);
+    // Running 0.1.4 against a list that stops at 0.1.3: no notes rather than 0.1.3's.
+    expect(whatsNewReleases([], releaseHistory(releases, "0.1.4"), "0.1.4")).toEqual([]);
+    expect(whatsNewReleases([], releases, "0.0.0-dev")).toEqual([]);
   });
 });
 
