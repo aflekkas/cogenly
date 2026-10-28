@@ -275,6 +275,8 @@ import { openCreateProjectDialog } from "../projectLabels/CreateProjectDialogHos
 import { usePendingProjectFolderStore } from "../projectLabels/pendingProjectFolders";
 import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "../projectLabels/useProjectLabels";
+import { orderProjectsByUse } from "../projectLabels/projectOrder.logic";
+import { readProjectLastUsedAt } from "../projectLabels/useProjectLastUsed";
 import { useThreadRepository } from "../projectLabels/useThreadRepository";
 import { useRepositoryNames } from "../projectLabels/useRepositoryNames";
 import { ProjectFolderIcon, type ProjectIconProject } from "../projectLabels/ProjectFolderMark";
@@ -4891,6 +4893,8 @@ export default function Sidebar() {
           projectLabelDirectory,
           threadRepositoryOf(thread),
         );
+        // Recently used projects lead the move menu, as they lead the pickers.
+        const folderOrder = orderProjectsByUse(folderState.options, readProjectLastUsedAt());
         const machineList = machineDirectory.get(thread.environmentId) ?? null;
         const machineTargets = machineMoveTargetsForThreads(machineList, [
           thread.source.ownerMachine,
@@ -4945,11 +4949,12 @@ export default function Sidebar() {
                   name: folderState.current.label.name,
                 },
                 removable: folderState.removable,
-                options: folderState.options.map((entry) => ({
+                options: [...folderOrder.recent, ...folderOrder.rest].map((entry, index) => ({
                   id: entry.label.id,
                   name: entry.label.name,
                   color: entry.label.color,
                   blockedReason: folderState.blocked.get(entry.key),
+                  startsGroup: index > 0 && index === folderOrder.recent.length,
                 })),
                 // A project's own chat can't go into a new project either.
                 inRepository: folderState.inRepository || folderState.projectHome,
