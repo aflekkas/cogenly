@@ -3,10 +3,6 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./legacyRecoveryEvent": {
-      "types": "./src/legacyRecoveryEvent.ts",
-      "import": "./src/legacyRecoveryEvent.ts"
-    },
     "./snooze": {
       "types": "./src/snooze.ts",
       "import": "./src/snooze.ts"

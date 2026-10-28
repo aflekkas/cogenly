@@ -1,6 +1,4 @@
-import { isMisroutedLegacyRecoveryEvent } from "@cogenly/shared/legacyRecoveryEvent";
 import { projectReplicaFilings } from "./replicaFiling.ts";
-import { normalizeLegacyProviderThread } from "./legacyProviderThreadIdentity.ts";
 import { normalizeLegacySession } from "./legacySessionIdentity.ts";
 /**
  * ThreadReplication: copies thread event logs between paired machines. Each
@@ -210,12 +208,6 @@ const rawThreadId = (raw: unknown) => {
   const value = rawField(raw, "threadId");
   return typeof value === "string" ? value : undefined;
 };
-// Replica command ids end in a batch cursor (or a held-event cursor).
-// Recover the writer before a handoff changed the thread's current owner.
-const replicaSessionOrigin = (commandId: unknown) =>
-  typeof commandId === "string" && commandId.startsWith(REPLICA_COMMAND_PREFIX)
-    ? commandId.slice(REPLICA_COMMAND_PREFIX.length).match(/^(.*?):(?:held:)?[0-9]+$/)?.[1]
-    : undefined;
 const decodeSource = Schema.decodeUnknownEffect(Schema.fromJsonString(ThreadReplicaSource));
 const encodeSource = Schema.encodeSync(Schema.fromJsonString(ThreadReplicaSource));
 /** A pending handoff: the machine taking the thread and the epoch it takes it at. */
@@ -440,6 +432,7 @@ const make = Effect.gen(function* () {
         .filter((item) => wanted.has(item.sequence))
         .sort((left, right) => left.sequence - right.sequence);
       const raw = yield* rawEvents(stored.map((item) => item.event.id));
+      const eventOwners = yield* ownerRows([...runs.keys()]);
       const commandIds = [
         ...new Set(stored.flatMap((item) => (item.commandId === null ? [] : [item.commandId]))),
       ];
@@ -462,13 +455,16 @@ const make = Effect.gen(function* () {
         let encoded =
           kept === undefined ? ((yield* encodeEventJson(item.event)) as Schema.Json) : kept;
         if (
-          (normalizeLegacySession(item.event, environmentId) !== item.event ||
-            normalizeLegacyProviderThread(item.event, environmentId) !== item.event) &&
+          normalizeLegacySession(item.event, environmentId) !== item.event &&
           rawField(encoded, "cogenlyReplicaSessionOrigin") === undefined
         ) {
+          const owner = eventOwners.get(item.event.threadId);
           encoded = {
             ...(encoded as object),
-            cogenlyReplicaSessionOrigin: replicaSessionOrigin(item.commandId) ?? environmentId,
+            cogenlyReplicaSessionOrigin:
+              item.commandId?.startsWith(REPLICA_COMMAND_PREFIX) === true && owner !== undefined
+                ? owner.owner_env
+                : environmentId,
           } as Schema.Json;
         }
         const receipt = item.commandId == null ? undefined : byCommand.get(item.commandId);
@@ -727,7 +723,6 @@ const make = Effect.gen(function* () {
     // Each event speaks for its own thread: the projection keys thread rows
     // by the payload's id, so a mismatched one would rewrite another thread.
     const consistent = (event: OrchestrationV2DomainEvent) => {
-      if (isMisroutedLegacyRecoveryEvent(event)) return true;
       const payload = event.payload as Record<string, unknown> | null;
       if (typeof payload !== "object" || payload === null) return true;
       if (typeof payload.threadId === "string" && payload.threadId !== event.threadId) return false;
@@ -744,18 +739,9 @@ const make = Effect.gen(function* () {
     const normalized = items.map(({ event, raw }) => {
       const origin = rawField(raw, "cogenlyReplicaSessionOrigin");
       const decodedOrigin = decodeEnvironmentId(origin);
-      const receiptCommand = rawField(rawField(raw, "cogenlyReplicaReceipt"), "commandId");
-      const sessionOrigin = Option.getOrElse(decodedOrigin, () =>
-        EnvironmentId.make(
-          replicaSessionOrigin(receiptCommand) ??
-            accepted.get(event.threadId)?.meta.owner ??
-            source,
-        ),
-      );
-      const scoped = normalizeLegacyProviderThread(
-        normalizeLegacySession(event, sessionOrigin),
-        sessionOrigin,
-      );
+      const owner = accepted.get(event.threadId)?.meta.owner ?? source;
+      const sessionOrigin = Option.getOrElse(decodedOrigin, () => owner);
+      const scoped = normalizeLegacySession(event, sessionOrigin);
       return {
         event: scoped,
         raw:

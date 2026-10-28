@@ -26,7 +26,6 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import { isMisroutedLegacyRecoveryEvent } from "@cogenly/shared/legacyRecoveryEvent";
 import { replayAndBufferProjectedLiveEvents } from "./LiveStreamBudget.ts";
 import type { UnsequencedProjectEvent } from "../persistence/OrchestrationEventStore.ts";
 import { projectDomainEventForWire } from "./WireProjection.ts";
@@ -408,21 +407,7 @@ const layerBase: Layer.Layer<
             FROM thread_owners WHERE thread_id IN (${left}, ${right})`.pipe(
             Effect.map((rows) => rows.length === 2 && rows[0]!.writer === rows[1]!.writer),
           );
-        // Older builds shared one session id across a machine. Its namespace
-        // still proves ownership when a sibling thread has since moved away.
-        const machineSessionOwner = (id: string, threadId: ThreadId) =>
-          sql<{ readonly owner_env: string }>`SELECT owner_env FROM thread_owners
-            WHERE thread_id = ${threadId}`.pipe(
-            Effect.map((rows) =>
-              rows.some(
-                (row) =>
-                  /^provider-session:provider-instance:[^:]+:shared:machine:[^:]+$/.test(id) &&
-                  id.endsWith(`:machine:${encodeURIComponent(row.owner_env)}`),
-              ),
-            ),
-          );
         for (const event of events) {
-          if (isMisroutedLegacyRecoveryEvent(event)) continue;
           const payload = event.payload;
           if (
             ("threadId" in payload && payload.threadId !== event.threadId) ||
@@ -445,11 +430,7 @@ const layerBase: Layer.Layer<
           if (
             prior !== undefined &&
             prior !== event.threadId &&
-            !(
-              table === "provider_sessions" &&
-              ((yield* sameWriter(prior, event.threadId)) ||
-                (yield* machineSessionOwner(payload.id, event.threadId)))
-            )
+            !(table === "provider_sessions" && (yield* sameWriter(prior, event.threadId)))
           )
             return yield* new ThreadOwnedElsewhereError({ threadId: event.threadId });
           claimed.set(key, event.threadId);
@@ -465,12 +446,7 @@ const layerBase: Layer.Layer<
               const bound =
                 yield* sql`SELECT 1 FROM orchestration_v2_projection_provider_session_bindings
                 WHERE provider_session_id = ${payload.id} AND thread_id = ${event.threadId}`;
-              if (
-                bound.length > 0 ||
-                (yield* sameWriter(row.thread_id, event.threadId)) ||
-                (yield* machineSessionOwner(payload.id, event.threadId))
-              )
-                continue;
+              if (bound.length > 0 || (yield* sameWriter(row.thread_id, event.threadId))) continue;
             }
             return yield* new ThreadOwnedElsewhereError({ threadId: event.threadId });
           }
