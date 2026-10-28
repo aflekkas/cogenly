@@ -70,6 +70,7 @@ import {
   type ModelSelection,
   type ProjectScript,
   type ProjectId,
+  type ProjectLabelId,
   type ProviderApprovalDecision,
   type PreviewAnnotationPayload,
   ProviderInstanceId,
@@ -1796,7 +1797,7 @@ export default function ChatView(props: ChatViewProps) {
     [activeThreadEnvironmentId, activeThreadProjectId],
   );
   const activeProject = useProject(activeProjectRef);
-  const { scratchWorkspaceRootFor, openScratchProject } = useScratchProject();
+  const { scratchWorkspaceRootFor, openScratchProject, startScratchThread } = useScratchProject();
   const activeProjectIsScratch =
     activeProject !== null &&
     isScratchProject(
@@ -5730,6 +5731,11 @@ export default function ChatView(props: ChatViewProps) {
     });
   };
   const onOpenRelatedThreadStable = useStableCallback(onOpenRelatedThread);
+  // The header's project segment: a new chat in that project, as its page's "New chat in project".
+  const onOpenProjectStable = useStableCallback(
+    (projectEnvironmentId: EnvironmentId, projectFolderId: ProjectLabelId) =>
+      void startScratchThread(projectEnvironmentId, { surface: "chat", projectFolderId }),
+  );
   const childThreadInputs = useChildThreadInputs(activeThreadRef);
   const threadApprovalBannerItems = useThreadApprovalBannerItems(
     environmentId,
@@ -9708,7 +9714,10 @@ export default function ChatView(props: ChatViewProps) {
               shell={activeThreadShell}
               title={activeThread.title}
               messagesCarried={workHandoffMessagesCarried}
+              isWork={activeThreadKind === "work"}
+              inRepository={activeProject !== null && !activeProjectIsScratch}
               onOpenThread={onOpenRelatedThreadStable}
+              onOpenProject={onOpenProjectStable}
             />
           ) : (
             <h2 className="sr-only">{activeThread.title}</h2>
