@@ -1,4 +1,5 @@
 import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 /**
  * ThreadLaunchRouting: starting a new thread on another paired machine. The
  * caller sends a portable launch over `threads.launch.v1` (through the hub
@@ -136,7 +137,7 @@ const make = Effect.gen(function* () {
         UNION ALL SELECT 1 FROM orchestration_events
         WHERE event_type = 'subagent.updated'
           AND json_extract(payload_json, '$.childThreadId') = ${childThreadId}
-          AND json_extract(payload_json, '$.origin') = 'app_owned' LIMIT 1`;
+          AND json_extract(payload_json, '$.origin') = 'app_owned' LIMIT 1`.pipe(NodeSqliteClient.readOnly);
       if (attached.length === 0)
         yield* routing.callMachine(
           target,

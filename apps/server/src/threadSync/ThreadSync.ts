@@ -114,9 +114,11 @@ const make = Effect.gen(function* () {
           );
           if (batch.cursor.events === batch.after.events && batch.cursor.meta === batch.after.meta)
             return false;
+          const peerStarted = yield* Clock.currentTimeMillis;
           const result = yield* machines
             .call(peer, ThreadReplicationApply, batch)
             .pipe(Effect.timeout("30 seconds"));
+          const peerElapsed = (yield* Clock.currentTimeMillis) - peerStarted;
           // Only a committed batch acknowledges; never trust a cursor past what was sent.
           if (
             result.acknowledged.events < batch.cursor.events ||
@@ -126,7 +128,9 @@ const make = Effect.gen(function* () {
           yield* replication.acknowledge(peer, batch.cursor);
           yield* budget.completed(
             Math.max(batch.events.length, batch.meta.length),
-            (yield* Clock.currentTimeMillis) - batchStarted,
+            // Batch sizing protects local responsiveness. A WAN round trip says
+            // nothing about local work and otherwise shrinks every batch to one.
+            (yield* Clock.currentTimeMillis) - batchStarted - peerElapsed,
           );
           return true;
         }),

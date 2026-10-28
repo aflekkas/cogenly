@@ -62,6 +62,8 @@ export function secretRequestDisplay(
       return DECLINED_DISPLAY;
     case "cancelled":
       return ENDED_DISPLAY;
+    case "skipped":
+      return { kind: "answered", outcome: "ended", label: "Skipped" };
   }
 }
 
@@ -168,6 +170,8 @@ export function loginRequestDisplay(
       return { kind: "answered", outcome: "declined", label: "Skipped" };
     case "cancelled":
       return ENDED_DISPLAY;
+    case "skipped":
+      return { kind: "answered", outcome: "ended", label: "Skipped" };
   }
 }
 

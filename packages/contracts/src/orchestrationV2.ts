@@ -1230,7 +1230,7 @@ export const OrchestrationV2RuntimeRequest = Schema.Struct({
     ProviderRequestKind,
     Schema.Literals(["dynamic_tool_call", "user_input", "auth_refresh"]),
   ]),
-  status: Schema.Literals(["pending", "resolved", "expired", "cancelled"]),
+  status: Schema.Literals(["pending", "resolved", "expired", "cancelled", "skipped"]),
   responseCapability: Schema.Union([
     Schema.Struct({ type: Schema.Literal("live"), providerSessionId: ProviderSessionId }),
     Schema.Struct({ type: Schema.Literal("message") }),
@@ -1582,6 +1582,10 @@ export type OrchestrationV2UserMessageInputIntent =
   typeof OrchestrationV2UserMessageInputIntent.Type;
 
 const OrchestrationV2TurnItemBaseFields = {
+  /** A skipped input stays in history and must be reopened before it can be answered. */
+  requestSkipped: Schema.optional(Schema.Boolean),
+  /** Explicitly waiting after this turn ends. Cleared when the card is reopened. */
+  requestKeepOpen: Schema.optional(Schema.Boolean),
   toolNonExecutionKind: Schema.optional(Schema.String),
   toolSurface: Schema.optional(ToolActivitySurface),
   toolIcon: Schema.optional(ToolActivityIcon),
@@ -1622,6 +1626,7 @@ export const OrchestrationV2SecretRequestStatus = Schema.Literals([
   "saved",
   "declined",
   "cancelled",
+  "skipped",
 ]);
 export type OrchestrationV2SecretRequestStatus = typeof OrchestrationV2SecretRequestStatus.Type;
 
@@ -3367,6 +3372,13 @@ export const OrchestrationV2Command = Schema.Union([
     attachments: Schema.optional(Schema.Array(ChatAttachment)),
   }),
   Schema.Struct({
+    type: Schema.Literal("inline-request.update"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    turnItemId: TurnItemId,
+    action: Schema.Literals(["skip", "reopen", "keep_open"]),
+  }),
+  Schema.Struct({
     type: Schema.Literal("runtime-request.respond"),
     commandId: CommandId,
     threadId: ThreadId,
@@ -3649,7 +3661,14 @@ const OrchestrationV2InternalCommand = Schema.Union([
    * client can mark a request saved without the value being stored.
    */
   Schema.Struct({
+    type: Schema.Literal("inline-requests.reconcile"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    endedRunId: RunId,
+  }),
+  Schema.Struct({
     type: Schema.Literal("secret_request.record"),
+    requestKeepOpen: Schema.optional(Schema.Boolean),
     commandId: CommandId,
     threadId: ThreadId,
     runId: RunId,

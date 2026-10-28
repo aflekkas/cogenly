@@ -511,6 +511,8 @@ export interface SyncPeerSample {
 
 /** Remembered between samples, so a backlog that never drains reads as stuck. */
 export interface SyncPeerProgress {
+  readonly backlog?: number;
+  readonly growingSinceMs?: number | null;
   readonly acknowledged: string;
   /** When the current unmoving backlog was first seen; null when in sync or offline. */
   readonly pendingSinceMs: number | null;
@@ -524,12 +526,12 @@ export function trackSyncProgress(
   nowMs: number,
 ): SyncPeerProgress {
   if (sample.backlog === 0) {
-    return { acknowledged: sample.acknowledged, pendingSinceMs: null, inSyncAtMs: nowMs };
+    return { acknowledged: sample.acknowledged, pendingSinceMs: null, inSyncAtMs: nowMs, backlog: 0, growingSinceMs: null };
   }
   const inSyncAtMs = previous?.inSyncAtMs ?? null;
   // An offline peer is reported by machine-links; its backlog is expected.
   if (!sample.online)
-    return { acknowledged: sample.acknowledged, pendingSinceMs: null, inSyncAtMs };
+    return { acknowledged: sample.acknowledged, pendingSinceMs: null, inSyncAtMs, backlog: sample.backlog, growingSinceMs: null };
   const unmoved =
     previous !== undefined &&
     previous.acknowledged === sample.acknowledged &&
@@ -538,6 +540,10 @@ export function trackSyncProgress(
     acknowledged: sample.acknowledged,
     pendingSinceMs: unmoved ? previous.pendingSinceMs : nowMs,
     inSyncAtMs,
+    backlog: sample.backlog,
+    growingSinceMs: previous?.backlog !== undefined && sample.backlog > previous.backlog
+      ? previous.growingSinceMs ?? nowMs
+      : null,
   };
 }
 
@@ -596,13 +602,16 @@ export function syncCheck(input: {
     }
     if (sample.online && sample.backlog > 0) {
       const rate = sample.ratePerSecond ?? 0;
+      const growing = progress.growingSinceMs != null && input.nowMs - progress.growingSinceMs >= SYNC_STUCK_AFTER_MS;
       items.push(
         item({
           key: `sync:catch-up:${sample.environmentId}`,
-          status: "ok",
-          title: `Catching up ${sample.name}`,
+          status: growing ? "warn" : "ok",
+          title: growing ? `Sync backlog with ${sample.name} is growing` : `Catching up ${sample.name}`,
           detail: `${plural(sample.backlog, "change")} pending. ${
-            rate > 0
+            growing
+              ? "New changes are arriving faster than they can be sent. Check server load and the machine connection."
+              : rate > 0
               ? `About ${rate.toFixed(1)} changes/s; estimated ${formatAgo((sample.backlog / rate) * 1000)} remaining.`
               : "Measuring catch-up rate and time remaining."
           }`,

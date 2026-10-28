@@ -542,6 +542,8 @@ export function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId
     case "queued-run.cancel":
     case "queued-run.edit":
     case "runtime-request.respond":
+    case "inline-request.update":
+    case "inline-requests.reconcile":
     case "thread.user-input.dismiss":
     case "checkpoint.rollback":
     case "checkpoint.rollback.fail":
@@ -1448,7 +1450,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     Effect.gen(function* () {
       // Every terminal run checks the queue. Only a deliverable queued run
       // needs the transcript for provider handoff and legacy import context.
-      if (!(yield* projectionStore.canStartQueuedRun(threadId))) return;
+      if (providerSessions.isStoppingThread(threadId) || !(yield* projectionStore.canStartQueuedRun(threadId))) return;
       const projection = yield* readCommandProjection(threadId);
       if (
         projection.thread.archivedAt !== null ||
@@ -8070,7 +8072,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       // asked: either one records the card unchanged.
       const unchanged =
         existing !== undefined &&
-        (existing.secretStatus !== "pending" || command.secretStatus === "pending");
+        ((existing.secretStatus !== "pending" &&
+          !(existing.secretStatus === "skipped" && existing.integrationSetup !== undefined && command.secretStatus === "saved")) || command.secretStatus === "pending");
       const pending = command.secretStatus === "pending";
       // A close that does not restate the sign-in card keeps what it asked.
       const login =
@@ -8099,7 +8102,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             startedAt: existing?.startedAt ?? now,
             completedAt: pending ? null : now,
             updatedAt: now,
+            requestSkipped: false,
             type: "secret_request",
+            ...(command.requestKeepOpen === undefined ? {} : { requestKeepOpen: command.requestKeepOpen }),
             label: command.label,
             reason: command.reason,
             ...(command.placeholder === undefined ? {} : { placeholder: command.placeholder }),
@@ -8126,6 +8131,83 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
     },
   );
+
+  /** Plan card changes under the thread lock. Provider work never runs here. */
+  const updateInlineRequests = Effect.fn("orchestrationV2.updateInlineRequests")(function* (
+    command: OrchestrationV2ServerCommand,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    input: {
+      readonly action: "skip" | "reopen" | "keep_open";
+      readonly turnItemId?: TurnItemId;
+      readonly endedRunId?: RunId;
+      readonly beforeRunId?: RunId;
+    },
+  ) {
+    const threadId = commandThreadId(command);
+    const projection = yield* projectionStore.getThreadRecords(
+      threadId,
+      ["turnItems", "runtimeRequests", "runs", "nodes"],
+      { turnItemTypes: ["secret_request", "approval_request", "user_input_request"], messageRoles: [] },
+    ).pipe(mapDispatchError(command));
+    const planned = (yield* Ref.get(events)).filter((event) => event.threadId === threadId);
+    const items = new Map(projection.turnItems.map((item) => [item.id, item]));
+    const requests = new Map(projection.runtimeRequests.map((request) => [request.id, request]));
+    const runs = new Map(projection.runs.map((run) => [run.id, run]));
+    for (const event of planned) {
+      if (event.type === "turn-item.updated") items.set(event.payload.id, event.payload);
+      if (event.type === "runtime-request.updated") requests.set(event.payload.id, event.payload);
+      if (event.type === "run.created" || event.type === "run.updated") runs.set(event.payload.id, event.payload);
+    }
+    const current = { turnItems: [...items.values()], runtimeRequests: [...requests.values()], runs: [...runs.values()] };
+    const before = current.runs.find((run) => run.id === input.beforeRunId);
+    let found = false;
+    for (const item of current.turnItems) {
+      if (input.turnItemId !== undefined && item.id !== input.turnItemId) continue;
+      if (input.endedRunId !== undefined && item.runId !== input.endedRunId) continue;
+      if (before !== undefined && !current.runs.some((run) => run.id === item.runId && run.ordinal < before.ordinal)) continue;
+      if (item.type !== "secret_request" && item.type !== "approval_request" && item.type !== "user_input_request") continue;
+      const request = item.type === "secret_request" ? undefined : current.runtimeRequests.find((request) => request.id === item.requestId);
+      const open = item.type === "secret_request" ? item.secretStatus === "pending" : request?.status === "pending";
+      const skipped = item.type === "secret_request" ? item.secretStatus === "skipped" : request?.status === "skipped";
+      if (input.action === "reopen" ? !skipped : !open) continue;
+      if (input.turnItemId === undefined && item.requestKeepOpen) continue;
+      found = true;
+      const now = yield* DateTime.now;
+      const reopening = input.action === "reopen";
+      const keeping = input.action === "keep_open";
+      const updated = {
+        ...item,
+        ...(item.type === "secret_request" ? { secretStatus: keeping || reopening ? "pending" as const : "skipped" as const } : {}),
+        requestSkipped: !keeping && !reopening,
+        requestKeepOpen: keeping,
+        status: keeping || reopening ? "waiting" as const : "cancelled" as const,
+        completedAt: keeping || reopening ? null : now,
+        updatedAt: now,
+      };
+      yield* emit(events, command)({ type: "turn-item.updated", threadId, occurredAt: now, payload: updated });
+      if (request !== undefined && !keeping) {
+        const run = current.runs.find((run) => run.id === item.runId);
+        const active = run !== undefined && ["starting", "running", "interrupting"].includes(run.status);
+        yield* emit(events, command)({
+          type: "runtime-request.updated", threadId, nodeId: request.nodeId, occurredAt: now,
+          payload: {
+            ...request,
+            status: reopening ? "pending" : "skipped",
+            resolvedAt: reopening ? null : now,
+            // A dead provider callback cannot be restored. Questions continue through a message;
+            // tool approvals already use the late-approval continuation path.
+            ...(active ? {} : { responseCapability: request.kind === "user_input"
+              ? { type: "message" as const }
+              : { type: "not_resumable" as const, reason: "The original turn ended." } }),
+          },
+        });
+      }
+    }
+    if (!found && input.turnItemId !== undefined) return yield* new OrchestratorDispatchError({
+      commandId: command.commandId, commandType: command.type,
+      cause: "The input request is no longer available for this action.",
+    });
+  });
 
   const dispatchRuntimeRequestRespond = (
     command: Extract<OrchestrationV2Command, { readonly type: "runtime-request.respond" }>,
@@ -12534,8 +12616,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "secret_request.record":
         yield* dispatchSecretRequestRecord(command, events);
         break;
+      case "inline-request.update":
+        yield* updateInlineRequests(command, events, command);
+        break;
+      case "inline-requests.reconcile":
+        yield* updateInlineRequests(command, events, { action: "skip", endedRunId: command.endedRunId });
+        break;
       default:
         return yield* dispatchUnsupported(command);
+    }
+    // Starting later work supersedes old inputs even if a terminal-event reactor has not run yet.
+    for (const event of yield* Ref.get(events)) {
+      if (event.type === "run.created" && event.payload.status !== "queued") {
+        yield* updateInlineRequests(command, events, { action: "skip", beforeRunId: event.payload.id });
+      }
     }
     return {
       events: yield* Ref.get(events),
@@ -12692,6 +12786,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         command.type === "thread.background-work.settle" ||
         command.type === "thread.stale-work.settle" ||
         command.type === "thread.stop" ||
+        command.type === "inline-requests.reconcile" ||
         command.type === "subagent.stop"
           ? Effect.succeed(planned)
           : Effect.fail(
@@ -12982,6 +13077,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const handleTerminalRun = (stored: OrchestrationV2StoredEvent) =>
     Effect.gen(function* () {
       const threadId = stored.event.threadId;
+      if (stored.event.type === "run.updated" && !isReplayedCommandId(stored.commandId)) {
+        yield* threadDispatch.withLock(threadId, dispatchWithReceiptEffect({
+          type: "inline-requests.reconcile",
+          commandId: CommandId.make(`inline-requests:ended:${stored.event.id}`),
+          threadId,
+          endedRunId: stored.event.payload.id,
+        }));
+      }
       if (isReplayedCommandId(stored.commandId)) {
         const parentThreadId = yield* appOwnedSubagentParentThreadId(threadId);
         if (parentThreadId !== undefined) yield* finalizeAppOwnedSubagent(threadId);

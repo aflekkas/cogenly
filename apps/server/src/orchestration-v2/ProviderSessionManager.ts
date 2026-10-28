@@ -153,6 +153,9 @@ export const ProviderSessionManagerV2Error = Schema.Union([
 export type ProviderSessionManagerV2Error = typeof ProviderSessionManagerV2Error.Type;
 
 export interface ProviderSessionManagerV2Shape {
+  /** Signal live runtimes without SQL. The returned release keeps queue promotion held until Stop commits. */
+  readonly interruptThreadNow: (threadId: ThreadId, runId?: import("@cogenly/contracts").RunId) => Effect.Effect<Effect.Effect<void>>;
+  readonly isStoppingThread: (threadId: ThreadId) => boolean;
   readonly shutdown: Effect.Effect<void>;
   readonly open: (input: {
     readonly threadId: ThreadId;
@@ -410,6 +413,22 @@ export const layerWithOptions = (
           }),
       );
       const sessions = yield* Ref.make(new Map<string, LiveSessionEntry>());
+      const stoppingThreads = new Map<ThreadId, number>();
+      const activeTurnControls = new Map<ThreadId, {
+        input: ProviderAdapter.ProviderAdapterV2TurnInput;
+        runtime: ProviderAdapter.ProviderAdapterV2SessionRuntime;
+        providerTurnId?: import("@cogenly/contracts").ProviderTurnId;
+        stopRequested: boolean;
+      }>();
+      const interruptControl = (target: typeof activeTurnControls extends Map<ThreadId, infer T> ? T : never) =>
+        target.providerTurnId === undefined ? Effect.void : target.runtime.interruptTurn({
+          providerThread: target.input.providerThread, providerTurnId: target.providerTurnId,
+          requestRuntimeRestart: true,
+        }).pipe(
+          Effect.catchCause(() => Effect.logWarning("Immediate provider interrupt failed; durable Stop will retry")),
+          Effect.forkIn(layerScope, { startImmediately: true }),
+          Effect.asVoid,
+        );
       // One retry per released entry, so a later release with the same id
       // cannot drop cleanup for threads only the earlier session served.
       const releaseRecordRetries = yield* FiberSet.make();
@@ -1981,7 +2000,19 @@ export const layerWithOptions = (
                     ),
                   ),
                   () =>
-                    runtime.startTurn(input).pipe(turnMetrics("send", input.modelSelection.model)),
+                    Effect.gen(function* () {
+                      if (stoppingThreads.has(input.threadId)) return yield* new ProviderAdapter.ProviderAdapterTurnStartError({
+                        driver: runtime.driver, threadId: input.threadId, providerThreadId: input.providerThread.id, runId: input.runId,
+                      });
+                      const target = { input, runtime, stopRequested: false };
+                      activeTurnControls.set(input.threadId, target);
+                      yield* runtime.startTurn(input).pipe(
+                        turnMetrics("send", input.modelSelection.model),
+                        Effect.onError(() => Effect.sync(() => {
+                          if (activeTurnControls.get(input.threadId) === target) activeTurnControls.delete(input.threadId);
+                        })),
+                      );
+                    }),
                   (_, exit) =>
                     Exit.isFailure(exit)
                       ? observeActivity(
@@ -2045,6 +2076,19 @@ export const layerWithOptions = (
         return entry.runtime.events.pipe(
           Stream.runForEach((event) => {
             if (shutdownSignal.received) return Effect.void;
+            // Cache the exact native turn before activity persistence can wait for SQL.
+            let immediateInterrupt = Effect.void;
+            if (event.type === "provider_turn.updated") {
+              for (const target of activeTurnControls.values()) {
+                if (target.runtime !== entry.runtime || target.input.attemptId !== event.providerTurn.runAttemptId) continue;
+                target.providerTurnId = event.providerTurn.id;
+                if (target.stopRequested && event.providerTurn.status === "running") immediateInterrupt = interruptControl(target);
+              }
+            }
+            if (event.type === "turn.terminal") {
+              const target = activeTurnControls.get(event.threadId);
+              if (target?.runtime === entry.runtime && target.input.runOrdinal === event.runOrdinal) activeTurnControls.delete(event.threadId);
+            }
             // Live output skips run subscribers and ingestion entirely: it is
             // never persisted, and a flood of it must not queue ahead of real events.
             if (event.type === "command_output.delta") {
@@ -2066,7 +2110,7 @@ export const layerWithOptions = (
             ) {
               stoppedByProvider = true;
             }
-            return observeActivity(
+            return immediateInterrupt.pipe(Effect.andThen(observeActivity(
               entry.runtime.providerSessionId,
               event.type === "turn.terminal"
                 ? markIdle(
@@ -2075,7 +2119,7 @@ export const layerWithOptions = (
                     event.runOrdinal,
                   )
                 : touchActivity(entry.runtime.providerSessionId, { providerActivity: true }),
-            ).pipe(
+            ))).pipe(
               Effect.andThen(
                 event.type === "provider_session.updated"
                   ? persistProviderSessionUpdate(entry, event)
@@ -2198,6 +2242,20 @@ export const layerWithOptions = (
       );
 
       return ProviderSessionManagerV2.of({
+        isStoppingThread: (threadId) => stoppingThreads.has(threadId),
+        interruptThreadNow: (threadId, runId) => Effect.gen(function* () {
+          stoppingThreads.set(threadId, (stoppingThreads.get(threadId) ?? 0) + 1);
+          const target = activeTurnControls.get(threadId);
+          if (target !== undefined && (runId === undefined || target.input.runId === runId)) {
+            target.stopRequested = true;
+            yield* interruptControl(target);
+          }
+          return Effect.sync(() => {
+            const remaining = (stoppingThreads.get(threadId) ?? 1) - 1;
+            if (remaining === 0) stoppingThreads.delete(threadId);
+            else stoppingThreads.set(threadId, remaining);
+          });
+        }),
         shutdown,
         open: (input) =>
           sessionOpen.withLock(

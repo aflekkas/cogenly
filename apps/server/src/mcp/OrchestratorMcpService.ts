@@ -195,6 +195,10 @@ export interface OrchestratorMcpServiceShape {
    * Asks the user for a secret through a card in the calling thread and waits
    * for the answer. The value never reaches the agent: the result is a status.
    */
+  readonly updateInputRequest: (
+    scope: McpInvocationScope,
+    input: import("@cogenly/contracts").OrchestratorMcpInputRequestUpdateInput,
+  ) => Effect.Effect<void, OrchestratorMcpFailure>;
   readonly requestSecret: (
     scope: McpInvocationScope,
     input: OrchestratorMcpRequestSecretInput,
@@ -1888,6 +1892,16 @@ const make = Effect.gen(function* () {
     });
 
   return OrchestratorMcpService.of({
+    updateInputRequest: (scope, input) => Effect.gen(function* () {
+      const caller = yield* requireThreadScope(scope, "input_request_update");
+      yield* threadManagement.dispatch({
+        type: "inline-request.update",
+        commandId: stableCommandId({ scope, requestKey: yield* requestKey(input.clientRequestId), operation: "input-request-update" }),
+        threadId: caller.thread.threadId,
+        turnItemId: input.turnItemId,
+        action: input.action,
+      }).pipe(Effect.mapError(() => failure("invalid_request", "This input request cannot be changed.")));
+    }),
     scheduleTask: (scope, input) =>
       Effect.gen(function* () {
         const { parent, limits } = yield* loadCaller(scope);
@@ -2152,6 +2166,7 @@ const make = Effect.gen(function* () {
           threadManagement
             .dispatch({
               type: "secret_request.record",
+              requestKeepOpen: input.keepOpen ?? false,
               commandId: stableCommandId({
                 scope,
                 requestKey: key,
@@ -2333,6 +2348,7 @@ const make = Effect.gen(function* () {
           threadManagement
             .dispatch({
               type: "secret_request.record",
+              requestKeepOpen: input.keepOpen ?? false,
               commandId: stableCommandId({
                 scope,
                 requestKey: key,

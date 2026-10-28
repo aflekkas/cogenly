@@ -765,11 +765,21 @@ const make = Effect.gen(function* () {
     }
   };
 
-  const dispatch: ThreadManagementServiceShape["dispatch"] = (command) =>
-    ensureCommandTranscripts(command).pipe(
+  const dispatch: ThreadManagementServiceShape["dispatch"] = (command) => {
+    const persist = ensureCommandTranscripts(command).pipe(
       Effect.andThen(assertDispatchTargetEnabled(command)),
       Effect.andThen(orchestrator.dispatch(command)),
     );
+    if (command.type !== "thread.stop" && command.type !== "run.interrupt") return persist;
+    // Stop is an urgent control signal. Do not make a provider wait behind history,
+    // the command lock, or the SQLite writer before asking it to stop. The normal
+    // command still records the stop, holds the queue, and durably retries it.
+    return Effect.acquireUseRelease(
+      sessions.interruptThreadNow(command.threadId, command.type === "run.interrupt" ? command.runId : undefined),
+      () => persist,
+      (release) => release,
+    );
+  };
 
   const getProjectThread: ThreadManagementServiceShape["getProjectThread"] = (input) =>
     getThreadProjection(input.threadId).pipe(

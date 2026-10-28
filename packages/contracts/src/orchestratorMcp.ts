@@ -706,7 +706,15 @@ export const OrchestratorMcpUpdateScheduledTaskInput = Schema.Struct({
 export type OrchestratorMcpUpdateScheduledTaskInput =
   typeof OrchestratorMcpUpdateScheduledTaskInput.Type;
 
+export const OrchestratorMcpInputRequestUpdateInput = Schema.Struct({
+  turnItemId: TurnItemId,
+  action: Schema.Literals(["skip", "reopen", "keep_open"]),
+  clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
+});
+export type OrchestratorMcpInputRequestUpdateInput = typeof OrchestratorMcpInputRequestUpdateInput.Type;
+
 export const OrchestratorMcpRequestSecretInput = Schema.Struct({
+  keepOpen: Schema.optional(Schema.Boolean).annotate({ description: "Keep waiting across turn boundaries. Otherwise an unanswered card is skipped when this turn ends." }),
   label: TrimmedNonEmptyString.annotate({
     description: "What you need, shown as the card's title, e.g. 'GitHub webhook secret'.",
   }),
@@ -763,7 +771,7 @@ export const OrchestratorMcpRequestSecretResult = Schema.Union([
     vaultItemName: Schema.optional(TrimmedNonEmptyString),
   }),
   Schema.Struct({
-    status: Schema.Literals(["declined", "cancelled", "timed_out"]).annotate({
+    status: Schema.Literals(["declined", "cancelled", "timed_out", "skipped"]).annotate({
       description:
         "declined: the user chose not to. cancelled: the card was explicitly cancelled or closed by an older server. timed_out: the bounded tool wait ended; the card stays answerable and a later answer notifies this thread. Retry with the same clientRequestId to await it, or a new id to re-post a cancelled legacy card.",
     }),
@@ -772,6 +780,7 @@ export const OrchestratorMcpRequestSecretResult = Schema.Union([
 export type OrchestratorMcpRequestSecretResult = typeof OrchestratorMcpRequestSecretResult.Type;
 
 export const OrchestratorMcpRequestLoginInput = Schema.Struct({
+  keepOpen: Schema.optional(Schema.Boolean).annotate({ description: "Keep waiting across turn boundaries. Otherwise an unanswered card is skipped when this turn ends." }),
   site: TrimmedNonEmptyString.check(Schema.isMaxLength(2048)).annotate({
     description:
       "The sign-in page URL or its host, e.g. 'https://github.com/login'. The saved login is allowed only on this host and its subdomains.",
@@ -831,7 +840,7 @@ export const OrchestratorMcpRequestLoginResult = Schema.Union([
     }),
   }),
   Schema.Struct({
-    status: Schema.Literals(["declined", "cancelled", "timed_out"]).annotate({
+    status: Schema.Literals(["declined", "cancelled", "timed_out", "skipped"]).annotate({
       description:
         "declined: the user chose not to sign in; continue without it or ask again later with a new clientRequestId if they ask you to. cancelled: the card was explicitly cancelled or closed by an older server. timed_out: only the tool wait ended; the card remains answerable, and its answer automatically notifies this thread.",
     }),

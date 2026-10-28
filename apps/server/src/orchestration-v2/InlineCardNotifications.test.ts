@@ -280,7 +280,7 @@ it.effect.each(["accept", "decline"] as const)(
 );
 
 it.effect(
-  "a private card survives its run and re-awaiting it cannot replace its vault target",
+  "a private card is skipped at turn end, and reopening preserves its vault target",
   () => {
     const provider = makeControllableProvider(CodexProviderCapabilitiesV2);
     return Effect.gen(function* () {
@@ -310,6 +310,8 @@ it.effect(
           (event.payload.status === "waiting" || event.payload.status === "completed"),
       );
       yield* worker.drain();
+      yield* waitFor((event) => event.type === "turn-item.updated" && event.payload.id === card.turnItemId && event.payload.requestSkipped === true);
+      expect((yield* engine.getThreadShell(threadId))?.pendingRuntimeRequest).toBeNull();
       yield* notify("Resume setup");
       yield* worker.drain();
       const after = yield* engine.getThreadProjection(threadId);
@@ -321,6 +323,7 @@ it.effect(
         nodeId: next.rootNodeId!,
         secretVault: { name: "replacement-client", type: "api_key" },
       });
+      yield* engine.dispatch({ type: "inline-request.update", commandId: CommandId.make("private:reopen"), threadId, turnItemId: card.turnItemId, action: "reopen" });
       const item = (yield* engine.getThreadProjection(threadId)).turnItems.find(
         (item) => item.id === card.turnItemId,
       );

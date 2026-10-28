@@ -5,6 +5,7 @@ import { useChatCanvas } from "./ChatCanvasContext";
 import { useTimelineMinimapClearance } from "./useTimelineMinimapClearance";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { DisclosureChevron } from "../ui/disclosure";
+import { SkippedInputRequest } from "./SkippedInputRequest";
 import {
   WorkLogBlock,
   WorkLogButton,
@@ -3833,6 +3834,9 @@ function v2EventPresentation(item: OrchestrationV2TurnItem): {
 function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event" }> }) {
   const ctx = use(TimelineRowCtx);
   const { item, visibility, sourceThreadId } = row.projectedItem;
+  if (item.requestSkipped || (item.type === "secret_request" && item.secretStatus === "skipped")) {
+    return <SkippedInputRequest environmentId={ctx.activeThreadEnvironmentId} item={item} local={visibility === "local"} />;
+  }
   if (item.type === "secret_request") {
     return (
       <SecretRequestCard

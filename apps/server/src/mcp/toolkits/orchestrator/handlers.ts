@@ -9,6 +9,14 @@ import * as OrchestratorMcpService from "../../OrchestratorMcpService.ts";
 import * as ThreadMetadataMcpService from "../../ThreadMetadataMcpService.ts";
 
 const handlers = {
+  input_request_update: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.McpInvocationContext;
+      const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+      yield* service.updateInputRequest(scope, input);
+      return {};
+    }),
+  ),
   orchestrator_capabilities: McpToolAccess.reads(() =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.McpInvocationContext;

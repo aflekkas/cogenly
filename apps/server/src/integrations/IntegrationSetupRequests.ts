@@ -23,6 +23,7 @@ import * as Stream from "effect/Stream";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 
 import type { McpInvocationScope } from "../mcp/McpInvocationContext.ts";
 import * as InlineCardNotifications from "../orchestration-v2/InlineCardNotifications.ts";
@@ -87,7 +88,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const pending = yield* sql<{
         thread_id: string;
-      }>`SELECT DISTINCT thread_id FROM orchestration_v2_projection_turn_items WHERE type = 'secret_request' AND json_extract(payload_json, '$.secretStatus') = 'pending' AND json_type(payload_json, '$.integrationSetup') = 'object'`;
+      }>`SELECT DISTINCT thread_id FROM orchestration_v2_projection_turn_items WHERE type = 'secret_request' AND json_extract(payload_json, '$.secretStatus') IN ('pending', 'skipped') AND json_type(payload_json, '$.integrationSetup') = 'object'`.pipe(NodeSqliteClient.readOnly);
       for (const row of pending) {
         const threadId = ThreadId.make(row.thread_id);
         const records = yield* threads.getThreadRecords(threadId, ["turnItems"], {
@@ -98,7 +99,7 @@ const make = Effect.gen(function* () {
         for (const item of records.turnItems) {
           if (
             item.type !== "secret_request" ||
-            item.secretStatus !== "pending" ||
+            (item.secretStatus !== "pending" && item.secretStatus !== "skipped") ||
             !item.integrationSetup ||
             !item.runId ||
             !item.nodeId
@@ -115,7 +116,7 @@ const make = Effect.gen(function* () {
           );
           if (!connected) continue;
           const waiting = waitingCalls.get(item.id);
-          if (waiting === undefined || !(yield* Deferred.await(waiting))) {
+          if (item.secretStatus === "pending" && (waiting === undefined || !(yield* Deferred.await(waiting)))) {
             yield* cards.answered({
               threadId,
               key: `integration-connected:${item.id}`,

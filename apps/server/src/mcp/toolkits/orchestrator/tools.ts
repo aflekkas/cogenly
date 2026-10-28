@@ -1,5 +1,6 @@
 import {
   OrchestratorMcpCapabilitiesResult,
+  OrchestratorMcpInputRequestUpdateInput,
   OrchestrationV2StopWorkflowInput,
   OrchestratorMcpCreateThreadsInput,
   OrchestratorMcpCreateThreadsResult,
@@ -299,6 +300,14 @@ const ThreadInterruptTool = Tool.make("thread_interrupt", {
   .annotate(Tool.Destructive, true);
 
 export const OrchestratorToolkit = Toolkit.make(
+  Tool.make("input_request_update", {
+    description: "Skip, reopen, or explicitly keep an inline input request open in this thread. Get turnItemId from thread_read. Use skip when doing the work yourself or when the input is no longer needed. Unanswered requests are skipped at turn end unless keep_open was set. A skipped card must be reopened before answering; its old answer cannot wake abandoned work.",
+    parameters: OrchestratorMcpInputRequestUpdateInput,
+    success: Schema.Struct({}),
+    failure: OrchestratorMcpFailure,
+    failureMode: "return",
+    dependencies,
+  }),
   OrchestratorCapabilitiesTool,
   DelegateTaskTool,
   TaskStatusTool,
