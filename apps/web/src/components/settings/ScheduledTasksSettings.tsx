@@ -72,14 +72,16 @@ import { Link } from "@tanstack/react-router";
 import {
   useEnvironment,
   useEnvironmentHttpBaseUrl,
+  usePrimaryEnvironmentId,
   type EnvironmentPresentation,
 } from "../../state/environments";
+import { isLocalMachine, machineChoiceLabel } from "../../machines/machineBadge.logic";
 import { useProjects } from "../../state/entities";
 import { formatEnvironmentQueryError, useEnvironmentQuery } from "../../state/query";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { WorktreeBaseBranchPicker } from "../WorktreeBaseBranchPicker";
-import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
+import { MachineGlyph } from "../MachineBadge";
 import { ConnectionStatusDot, connectionPhaseDotClassName } from "../ConnectionStatusDot";
 import { AuthOrchestrationOperateScope } from "@cogenly/contracts";
 import { readEnvironmentScope } from "~/state/session";
@@ -1090,6 +1092,7 @@ function ScheduledTaskEditorDialog({
   const [environmentId, setEnvironmentId] = useState(initialEnvironmentId);
   const [targetMachine, setTargetMachine] = useState<EnvironmentId | null>(task?.machine ?? null);
   const machineList = useEnvironmentMachineList(environmentId);
+  const localEnvironmentId = usePrimaryEnvironmentId();
   const runTarget =
     targetMachine ??
     task?.ownerMachine ??
@@ -1721,19 +1724,17 @@ function ScheduledTaskEditorDialog({
                 >
                   <SelectTrigger id="scheduled-task-environment" size="sm">
                     <SelectValue>
-                      <span className="flex items-center gap-2">
-                        <EnvironmentMachineIcon
-                          kind={
-                            runOnOptions.find((option) => option.environmentId === runTarget)
-                              ?.machine ??
-                            resolveEnvironmentMachineKind(environment?.serverConfig ?? null)
+                      <EnvironmentOptionContent
+                        option={
+                          runOnOptions.find((option) => option.environmentId === runTarget) ?? {
+                            environmentId: runTarget,
+                            projectId: null,
+                            label: environment?.label ?? "Unavailable machine",
+                            isPrimary: false,
+                            machine: "server",
                           }
-                          className="size-4"
-                        />
-                        {runOnOptions.find((option) => option.environmentId === runTarget)?.label ??
-                          environment?.label ??
-                          "Unavailable machine"}
-                      </span>
+                        }
+                      />
                     </SelectValue>
                   </SelectTrigger>
                   <SelectPopup>
@@ -1746,15 +1747,29 @@ function ScheduledTaskEditorDialog({
                         <SelectItem
                           key={entry.environmentId}
                           value={entry.environmentId}
-                          label={entry.label}
+                          label={machineChoiceLabel(
+                            entry.environmentId,
+                            entry.label,
+                            localEnvironmentId,
+                          )}
                         >
                           <span className="flex min-w-0 items-center gap-2">
-                            <EnvironmentMachineIcon
-                              kind={resolveEnvironmentMachineKind(entry.serverConfig)}
+                            <MachineGlyph
+                              machine={
+                                isLocalMachine(entry.environmentId, localEnvironmentId)
+                                  ? null
+                                  : { name: entry.label, online: true }
+                              }
                               className="size-4"
                             />
                             <span className="min-w-0">
-                              <span className="block truncate">{entry.label}</span>
+                              <span className="block truncate">
+                                {machineChoiceLabel(
+                                  entry.environmentId,
+                                  entry.label,
+                                  localEnvironmentId,
+                                )}
+                              </span>
                               {secondary ? (
                                 <span className="block max-w-72 truncate text-xs text-muted-foreground">
                                   {secondary}
