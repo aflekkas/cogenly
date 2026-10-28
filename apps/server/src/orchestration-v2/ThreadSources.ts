@@ -387,6 +387,10 @@ function collectMessage(collector: Collector, row: ThreadSourceMessageRow, threa
     const name = text(attachment.name);
     const mimeType = text(attachment.mimeType);
     if (attachmentId === undefined || name === undefined || mimeType === undefined) continue;
+    const sizeBytes =
+      typeof attachment.sizeBytes === "number" && Number.isInteger(attachment.sizeBytes)
+        ? { sizeBytes: Math.max(0, attachment.sizeBytes) }
+        : {};
     if (row.role === "assistant") {
       collector.output({
         kind: "attachment",
@@ -395,6 +399,7 @@ function collectMessage(collector: Collector, row: ThreadSourceMessageRow, threa
         attachmentId,
         name,
         mimeType,
+        ...sizeBytes,
       });
     } else if (row.role === "user") {
       collector.source(
@@ -405,6 +410,7 @@ function collectMessage(collector: Collector, row: ThreadSourceMessageRow, threa
           name,
           attachmentId,
           mimeType,
+          ...sizeBytes,
         },
         at,
       );

@@ -304,6 +304,7 @@ describe("deriveThreadSources", () => {
         attachmentId: "att-out",
         name: "data.csv",
         mimeType: "text/csv",
+        sizeBytes: 3,
       },
       {
         kind: "file",

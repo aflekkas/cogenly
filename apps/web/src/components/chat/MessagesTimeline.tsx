@@ -21,7 +21,7 @@ import {
   type TimelineRestoreTarget,
 } from "./timelineRestoreWait";
 import { PullRequestGlyph } from "../changeRequestIcons";
-import type { WorktreeSetupSnapshot } from "@cogenly/contracts";
+import type { IntegrationContextRecord, WorktreeSetupSnapshot } from "@cogenly/contracts";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { useOpenLink } from "~/browser/useOpenLink";
@@ -5171,11 +5171,7 @@ const userMessageContextPresentationRegistry = createContextPresentationRegistry
       // A sent message shows the account it named, not today's sign-in state.
       render: (record, context) =>
         record.kind === "integration" ? (
-          <IntegrationContextChip
-            record={record}
-            environmentId={null}
-            copyMarkdown={context.copyMarkdown}
-          />
+          <TimelineIntegrationContextChip record={record} copyMarkdown={context.copyMarkdown} />
         ) : (
           <UnavailableUserMessageContextChip {...context} />
         ),
@@ -5839,6 +5835,22 @@ function BrowserAppIcon({ className }: { className: string }) {
       <path d="M11.2 7.2h4.3" />
       <path d="m12.4 11.4 7.5 2.6-3.4 1.6-1.5 3.6z" fill="currentColor" stroke="none" />
     </svg>
+  );
+}
+
+/** A sent source chip: the snapshot it named, with the live icon from the thread's machine. */
+function TimelineIntegrationContextChip(props: {
+  record: IntegrationContextRecord;
+  copyMarkdown: string | undefined;
+}) {
+  const { activeThreadEnvironmentId } = use(TimelineRowCtx);
+  return (
+    <IntegrationContextChip
+      record={props.record}
+      environmentId={null}
+      iconEnvironmentId={activeThreadEnvironmentId}
+      {...(props.copyMarkdown === undefined ? {} : { copyMarkdown: props.copyMarkdown })}
+    />
   );
 }
 

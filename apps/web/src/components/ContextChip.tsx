@@ -25,7 +25,7 @@ import { cn } from "~/lib/utils";
 const contextChipVariants = cva(
   "inline-flex h-[1.41em] max-w-full items-center gap-[0.33em] rounded-[0.5em] border px-[0.5em] align-middle font-medium text-[0.86em] leading-none [&_svg]:block [&_svg]:size-[1.17em] [&_svg]:shrink-0 [&_svg]:self-center [button&,a&,[data-popup-open]&]:cursor-pointer [button&,a&]:transition-colors [button&,a&]:motion-reduce:transition-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-foreground disabled:cursor-default",
   {
-    defaultVariants: { kind: "neutral" },
+    defaultVariants: { kind: "neutral", look: "pill" },
     variants: {
       kind: {
         neutral: "border-border/70 bg-accent/40 text-foreground",
@@ -50,6 +50,16 @@ const contextChipVariants = cva(
         integration:
           "transition-colors duration-(--motion-duration-fast) ease-out motion-reduce:transition-none [--context-chip-accent:oklch(0.62_0.12_140)]",
         citation: "[--context-chip-accent:oklch(0.62_0.16_259)]",
+      },
+      /**
+       * `pill` borders and fills the chip. `inline` is the chip's icon and tinted text in
+       * the run of the sentence, for links to things (a source, thread, agent or project);
+       * it stays one atomic token in the editor all the same.
+       */
+      look: {
+        pill: "",
+        inline:
+          "h-[1.3em] gap-[0.25em] rounded-[0.35em] border-transparent bg-transparent px-[0.12em] text-[1em] [&_svg]:size-[1.05em]",
       },
       // Colors live in compoundVariants below so they come after the kind colors.
       state: {
@@ -85,12 +95,24 @@ const contextChipVariants = cva(
         className:
           "[--context-chip-border:color-mix(in_oklab,var(--context-chip-accent)_34%,var(--contrast-border))] [--context-chip-border-hover:color-mix(in_oklab,var(--context-chip-accent)_48%,var(--contrast-border))] [--context-chip-foreground:color-mix(in_oklab,var(--context-chip-accent)_22%,var(--contrast-foreground))] border-(--context-chip-border) bg-(--context-chip-accent)/11 text-(--context-chip-foreground) [button:enabled&,a&]:hover:border-(--context-chip-border-hover) [button:enabled&,a&]:hover:bg-(--context-chip-accent)/17",
       },
+      {
+        look: "inline",
+        className:
+          "border-transparent bg-transparent [--context-chip-foreground:color-mix(in_oklab,var(--context-chip-accent)_62%,var(--contrast-foreground))] [button:enabled&,a&]:hover:border-transparent [button:enabled&,a&]:hover:bg-(--context-chip-accent)/12",
+      },
       // State colors win over any kind.
       { state: "unresolved", className: "text-foreground" },
       { state: "invalid", className: "border-destructive/35 bg-destructive/8 text-destructive" },
       {
         state: "warning",
         className: "border-warning/40 bg-warning/8 text-warning-foreground dark:bg-warning/16",
+      },
+      // Inline, a state is its text color and a dashed underline; no box appears.
+      {
+        look: "inline",
+        state: ["unresolved", "invalid", "warning"],
+        className:
+          "border-transparent bg-transparent underline decoration-dashed decoration-1 underline-offset-[0.2em] dark:bg-transparent",
       },
     ],
   },
@@ -100,12 +122,13 @@ type ContextChipKind = NonNullable<VariantProps<typeof contextChipVariants>["kin
 
 interface ContextChipProps extends useRender.ComponentProps<"span"> {
   kind?: ContextChipKind;
+  look?: "pill" | "inline";
   state?: "unresolved" | "invalid" | "warning";
 }
 
-function ContextChip({ className, kind, state, render, ...props }: ContextChipProps) {
+function ContextChip({ className, kind, look, state, render, ...props }: ContextChipProps) {
   const defaultProps = {
-    className: cn(contextChipVariants({ kind, state }), className),
+    className: cn(contextChipVariants({ kind, look, state }), className),
     "data-slot": "context-chip",
     "data-state": state,
   };

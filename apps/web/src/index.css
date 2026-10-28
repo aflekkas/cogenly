@@ -1073,6 +1073,42 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   }
 }
 
+/* An item a user's action added to a small group (a source joining the composer's
+   Sources stack): a fade with the dialogs' slight scale, once per mount. Reduced
+   motion keeps the fade. Mount it only for arrivals, never for what loaded with
+   the view. */
+@utility arrive-motion {
+  transition-property: opacity, scale;
+  transition-duration: var(--motion-duration-base);
+  transition-timing-function: --theme(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    scale: 0.85;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: opacity;
+
+    @starting-style {
+      scale: 1;
+    }
+  }
+}
+
+/* The outgoing side of a cross-fade: mounts opaque and fades out in place. Pair
+   it with arrive-motion or reveal-motion on the incoming side. */
+@utility depart-motion {
+  opacity: 0;
+  transition-property: opacity;
+  transition-duration: var(--motion-duration-fast);
+  transition-timing-function: --theme(--ease-out);
+
+  @starting-style {
+    opacity: 1;
+  }
+}
+
 /* A result row that arrives while its list is already open (a keystroke
    widened the composer menu's matches) fades in where it lands. */
 @utility animate-row-enter {

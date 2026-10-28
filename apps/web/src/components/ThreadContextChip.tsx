@@ -56,6 +56,7 @@ export function ThreadContextChip(props: {
         render={
           <ContextChip
             kind="thread"
+            look="inline"
             render={
               params ? (
                 <Link to="/$environmentId/$threadId" params={params} />
@@ -102,6 +103,7 @@ export function AgentContextChip(props: {
         render={
           <ContextChip
             kind="agent"
+            look="inline"
             render={
               <Link
                 to="/$environmentId/$threadId"
@@ -131,9 +133,12 @@ export function AgentContextChip(props: {
 export function IntegrationContextChip(props: {
   record: { integrationId: string; label: string; icon: IntegrationCatalogId | null };
   environmentId: EnvironmentId | null;
+  /** Where a sent message's source lives, for its live icon only. */
+  iconEnvironmentId?: EnvironmentId | null;
   copyMarkdown?: string;
 }) {
-  const { all, isLoaded } = useComposerSources(props.environmentId, null);
+  const sourcesEnvironmentId = props.environmentId ?? props.iconEnvironmentId ?? null;
+  const { all, isLoaded } = useComposerSources(sourcesEnvironmentId, null);
   const live = all.find((source) => source.id === props.record.integrationId);
   const watching = props.environmentId !== null && isLoaded;
   const notice = !watching
@@ -144,8 +149,17 @@ export function IntegrationContextChip(props: {
   return (
     <ContextChipShell
       kind="integration"
+      look="inline"
       {...(notice ? { state: "warning" as const } : {})}
-      icon={<IntegrationSourceIcon icon={live?.icon ?? props.record.icon} />}
+      icon={
+        <IntegrationSourceIcon
+          icon={live?.icon ?? props.record.icon}
+          iconUrl={live?.iconUrl}
+          faviconHost={live?.faviconHost}
+          environmentId={sourcesEnvironmentId}
+          className="text-foreground"
+        />
+      }
       label={props.record.label}
       aria-label={`Source, ${props.record.label}${notice ? `. ${notice.detail}` : ""}`}
       data-markdown-copy={props.copyMarkdown}
@@ -169,6 +183,7 @@ export function ProjectFolderContextChip(props: {
         render={
           <ContextChip
             kind="project-folder"
+            look="inline"
             render={
               <Link
                 to="/project/$environmentId/$labelId"

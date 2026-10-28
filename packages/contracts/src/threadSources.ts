@@ -49,6 +49,7 @@ export const ThreadSource = Schema.Union([
     path: Schema.optional(Path),
     attachmentId: Schema.optional(Name),
     mimeType: Schema.optional(Name),
+    sizeBytes: Schema.optional(NonNegativeInt),
     /** The project folder a project file was read from; absent for the thread's own. */
     projectLabelId: Schema.optional(Name),
   }),
@@ -111,6 +112,7 @@ export const ThreadOutput = Schema.Union([
     attachmentId: Name,
     name: Name,
     mimeType: Name,
+    sizeBytes: Schema.optional(NonNegativeInt),
   }),
   Schema.Struct({
     ...outputFields,
