@@ -1389,7 +1389,9 @@ const make = Effect.gen(function* () {
     if (Option.isNone(remoteLaunch)) return { providers: yield* providerRegistry.getProviders };
     const remote = yield* remoteLaunch.value.catalog(machine);
     return {
-      providers: Option.isSome(remote) ? remote.value : yield* providerRegistry.getProviders,
+      providers: Option.isSome(remote)
+        ? remote.value.providers
+        : yield* providerRegistry.getProviders,
     };
   });
   return ThreadLaunchService.of({

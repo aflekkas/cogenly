@@ -2,8 +2,11 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   budgetComposerStack,
+  COMPOSER_TRAY_FOLD_RANK,
+  composerNoticeDistance,
   composerStackCap,
   foldNotices,
+  partitionUrgentNotices,
   type ComposerStackPanel,
 } from "./composerStackBudget.logic";
 
@@ -104,5 +107,40 @@ describe("foldNotices", () => {
     );
     expect(folded.hidden.has("error")).toBe(false);
     expect([...folded.hidden]).toEqual(["b", "c"]);
+  });
+});
+
+describe("composer stack ordering", () => {
+  it("puts decisions in their own stack nearest the composer, keeping each side's order", () => {
+    const notices = [
+      { id: "approval", variant: "warning", priority: "urgent" as const },
+      { id: "update", variant: "info" },
+      { id: "limit", variant: "warning", priority: "urgent" as const },
+      { id: "work", variant: "default", priority: "activity" as const },
+    ];
+    const { urgent, rest } = partitionUrgentNotices(notices);
+    expect(urgent.map((notice) => notice.id)).toEqual(["approval", "limit"]);
+    expect(rest.map((notice) => notice.id)).toEqual(["update", "work"]);
+  });
+
+  it("fronts running activity, then errors and warnings, then plain notices", () => {
+    const ordered = [
+      { id: "update", variant: "info" },
+      { id: "error", variant: "error" },
+      { id: "work", variant: "default", priority: "activity" as const },
+    ].toSorted((a, b) => composerNoticeDistance(a) - composerNoticeDistance(b));
+    expect(ordered.map((notice) => notice.id)).toEqual(["work", "error", "update"]);
+  });
+
+  it("folds background work first and the user's queue last", () => {
+    const folds = budgetComposerStack(
+      [
+        list("queue", 200, COMPOSER_TRAY_FOLD_RANK.queue),
+        list("tasks", 200, COMPOSER_TRAY_FOLD_RANK.tasks),
+        list("background-work", 200, COMPOSER_TRAY_FOLD_RANK["background-work"]),
+      ],
+      header * 3 + 120,
+    ).folded;
+    expect([...folds].toSorted()).toEqual(["background-work", "tasks"]);
   });
 });

@@ -56,6 +56,8 @@ describe("browserExtensionInstalledMessage", () => {
     version: "1.2",
     description: "",
     manifestVersion: 3,
+    hasAction: false,
+    state: "loaded",
     enabled: true,
     source: { type: "webStore" },
     permissions: [],

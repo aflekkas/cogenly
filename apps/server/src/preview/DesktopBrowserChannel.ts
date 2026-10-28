@@ -67,12 +67,6 @@ export class DesktopBrowserChannel extends Context.Service<
       profileId: string,
       cookie: ImportedCookie,
     ) => Effect.Effect<boolean>;
-    /** Loads exactly these unpacked extensions into the desktop's session for the profile. */
-    readonly extensions: (
-      environmentId: string,
-      profileId: string,
-      extensions: ReadonlyArray<{ readonly id: string; readonly path: string }>,
-    ) => Effect.Effect<boolean>;
     /**
      * Waits for a tab to be attached. Subscribes before it checks, so an
      * attach landing in between is never missed. False after `timeout`.
@@ -129,7 +123,6 @@ const make = Effect.gen(function* () {
       available: false,
       importCookie: () => Effect.succeed(false),
       clearProfile: () => Effect.succeed(false),
-      extensions: () => Effect.succeed(false),
       awaitAttached: () => Effect.succeed(false),
       detached: Stream.empty,
       attached: Stream.empty,
@@ -301,14 +294,6 @@ const make = Effect.gen(function* () {
         type: "clearProfile",
         environmentId,
         profileId,
-        requestId,
-      })),
-    extensions: (environmentId, profileId, extensions) =>
-      storageRequest((requestId) => ({
-        type: "extensions",
-        environmentId,
-        profileId,
-        extensions,
         requestId,
       })),
     awaitAttached: (key, timeout) =>

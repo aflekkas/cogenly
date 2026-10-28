@@ -1,3 +1,4 @@
+import * as MachineResources from "../resourceTelemetry/MachineResources.ts";
 import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 // @effect-diagnostics nodeBuiltinImport:off -- Effect's FileSystem has no statfs; free disk space needs node:fs.
 /**
@@ -114,6 +115,7 @@ export class MachineHealth extends Context.Service<
     /** This machine, or a paired one read over the peer link. */
     readonly reportFor: (
       input: MachineHealthInput,
+      includeResources?: boolean,
     ) => Effect.Effect<MachineHealthReport, MachineHealthError>;
     /** The report, then a fresh one whenever it changes. */
     readonly subscribe: (
@@ -205,13 +207,22 @@ export const makePeerReports = Effect.fn("MachineHealth.makePeerReports")(functi
   const machines = yield* Machines.Machines;
   const channels = yield* PeerChannels.PeerChannels;
   const identity = yield* MachineIdentity.MachineIdentity;
-  yield* channels.register(MachineHealthRead, () => local);
+  const resources = yield* Effect.serviceOption(MachineResources.MachineResources);
+  const read = (includeResources = false) =>
+    Effect.gen(function* () {
+      const report = yield* local;
+      return includeResources && Option.isSome(resources)
+        ? { ...report, resources: yield* resources.value.read }
+        : report;
+    });
+  yield* channels.register(MachineHealthRead, (input) => read(input.includeResources));
 
   const reportFor: MachineHealth["Service"]["reportFor"] = Effect.fn("MachineHealth.reportFor")(
-    function* (input) {
+    function* (input, includeResources = false) {
       const self = yield* identity.self;
       const environmentId = input.environmentId;
-      if (environmentId === undefined || environmentId === self.environmentId) return yield* local;
+      if (environmentId === undefined || environmentId === self.environmentId)
+        return yield* read(includeResources);
       const view = yield* machines.list.pipe(Effect.mapError(unavailable));
       const machine = view.machines.find(
         (candidate) => candidate.environmentId === environmentId && candidate.relation !== "this",
@@ -234,18 +245,24 @@ export const makePeerReports = Effect.fn("MachineHealth.makePeerReports")(functi
       const answer: PeerAnswer =
         machine.relation === "peer"
           ? { _tag: "timeout" }
-          : yield* machines.call(environmentId, MachineHealthRead, {}).pipe(
-              Effect.timeoutOption(PEER_REPORT_TIMEOUT),
-              Effect.map((report): PeerAnswer =>
-                Option.isSome(report)
-                  ? { _tag: "report", report: report.value }
-                  : { _tag: "timeout" },
-              ),
-              Effect.catchTags({
-                PeerCallError: (error) =>
-                  Effect.succeed<PeerAnswer>({ _tag: "error", reason: error.reason }),
-              }),
-            );
+          : yield* machines
+              .call(
+                environmentId,
+                MachineHealthRead,
+                includeResources ? { includeResources: true } : {},
+              )
+              .pipe(
+                Effect.timeoutOption(PEER_REPORT_TIMEOUT),
+                Effect.map((report): PeerAnswer =>
+                  Option.isSome(report)
+                    ? { _tag: "report", report: report.value }
+                    : { _tag: "timeout" },
+                ),
+                Effect.catchTags({
+                  PeerCallError: (error) =>
+                    Effect.succeed<PeerAnswer>({ _tag: "error", reason: error.reason }),
+                }),
+              );
       if (answer._tag === "report" && answer.report.environmentId === environmentId) {
         return answer.report;
       }
@@ -282,12 +299,11 @@ const make = Effect.gen(function* () {
   const greetings = yield* ChatGreetingService.ChatGreetingService;
   const computerUse = yield* ComputerUseService.ComputerUse;
   const sandbox = yield* ReadOnlySandbox.ReadOnlySandbox;
-  const previewBrowser = yield* Effect.serviceOption(PreviewBrowser.PreviewBrowser);
+  const previewBrowser = yield* PreviewBrowser.PreviewBrowser;
   const browserHostServices = yield* Effect.context<
     FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
   >();
   const agentProcesses = yield* AgentProcesses.AgentProcesses;
-
   const freeSpace = yield* Effect.cachedWithTTL(
     Effect.tryPromise(() => NodeFSP.statfs(config.stateDir)).pipe(
       Effect.map((stats) => ({
@@ -472,10 +488,9 @@ const make = Effect.gen(function* () {
         guarded(
           "preview-browser",
           Effect.gen(function* () {
-            if (Option.isNone(previewBrowser)) return unknownCheck("preview-browser");
-            const status = yield* previewBrowser.value.status;
+            const status = yield* previewBrowser.status;
             if (status.state !== "ready") return previewBrowserCheck(status);
-            const executable = yield* previewBrowser.value.installed;
+            const executable = yield* previewBrowser.installed;
             const setupCommand = yield* resolveRootCliCommand(PreviewBrowserHost.SETUP_SUBCOMMAND);
             const blocked =
               !PreviewBrowserHost.sandboxDisabled(yield* HostProcess.Environment) &&
@@ -560,7 +575,7 @@ const make = Effect.gen(function* () {
       ],
       { concurrency: "unbounded" },
     );
-    return buildReport({
+    const report = buildReport({
       environmentId: self.environmentId,
       machineName: self.name,
       observedAt: now,
@@ -568,6 +583,7 @@ const make = Effect.gen(function* () {
       uptimeSeconds: Math.floor(process.uptime()),
       checks,
     });
+    return report;
   }).pipe(Effect.withSpan("MachineHealth.evaluate"));
 
   // The newest report whose content changed; subscribers share it.
@@ -632,4 +648,7 @@ const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(MachineHealth, make).pipe(Layer.provide(ReadOnlySandbox.layer));
+export const layer = Layer.effect(MachineHealth, make).pipe(
+  Layer.provide(ReadOnlySandbox.layer),
+  Layer.provideMerge(PreviewBrowser.layer),
+);

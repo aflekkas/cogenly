@@ -18,6 +18,7 @@ import * as Fiber from "effect/Fiber";
 import * as TestClock from "effect/testing/TestClock";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
+import * as Queue from "effect/Queue";
 import * as Option from "effect/Option";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -55,9 +56,14 @@ const scope: McpThreadInvocationScope = {
 afterEach(() => vi.restoreAllMocks());
 
 /** Playwright boundary only: the real manager, broker, control, operations, and viewer lifecycle run. */
-const rig = (native = false, autoOpen = true) =>
+const rig = (native = false, autoOpen = true, extensions = false) =>
   Effect.gen(function* () {
     const connected = yield* Deferred.make<void>();
+    const extensionReady = yield* Queue.unbounded<void>();
+    let loader: ((profileId: string) => Effect.Effect<void>) | undefined;
+    let surfaceOpener:
+      | Parameters<Extensions.BrowserExtensions["Service"]["registerSurfaceOpener"]>[0]
+      | undefined;
     let titleAvailable = true;
     const permission = vi.fn<Channel.DesktopBrowserChannel["Service"]["permission"]>(() =>
       Effect.succeedSome({
@@ -106,12 +112,12 @@ const rig = (native = false, autoOpen = true) =>
       ariaSnapshot: vi.fn(async () => '- document "Signed in"'),
       close: vi.fn(async () => {}),
     });
-    const context = {
+    const context = Object.assign(new NodeEvents.EventEmitter(), {
       newPage: vi.fn(async () => page as unknown as Page),
       newCDPSession: async () => cdp,
       grantPermissions: async () => {},
       close: async () => {},
-    };
+    });
     vi.spyOn(ServerBrowserContexts.prototype, "contextFor").mockResolvedValue(
       context as unknown as BrowserContext,
     );
@@ -134,11 +140,38 @@ const rig = (native = false, autoOpen = true) =>
         Layer.mock(Browser.PreviewBrowser)({
           executable: Effect.die("No real browser in this test"),
           installed: Effect.succeedNone,
+          extensionsReady: Stream.fromQueue(extensionReady),
         }),
         Layer.mock(Extensions.BrowserExtensions)({
-          loadable: () => Effect.succeed([]),
-          profiles: Effect.succeed([]),
-          changes: Stream.empty,
+          loadable: () =>
+            Effect.succeed(extensions ? [{ id: "a".repeat(32), path: "/extension" }] : []),
+          registerLoader: (load) =>
+            Effect.sync(() => {
+              loader = load;
+            }),
+          reportLoad: () => Effect.void,
+          registerSurfaceOpener: (open) =>
+            Effect.sync(() => {
+              surfaceOpener = open;
+            }),
+          openSurface: (input) =>
+            surfaceOpener!(
+              { ...input, profileId: input.profileId ?? "default" },
+              {
+                id: input.id,
+                name: "Extension",
+                version: "1.0.0",
+                description: "",
+                manifestVersion: 3,
+                hasAction: true,
+                enabled: true,
+                state: "loaded",
+                source: { type: "webStore" },
+                permissions: [],
+                hostPermissions: [],
+                installedAt: "2026-01-01",
+              },
+            ),
         }),
         Layer.mock(Channel.DesktopBrowserChannel)({
           available: true,
@@ -204,6 +237,12 @@ const rig = (native = false, autoOpen = true) =>
     if (autoOpen) expect(open?.tabId).not.toBeNull();
     return {
       browser,
+      extensionReady,
+      setExtensions: (enabled: boolean) =>
+        Effect.gen(function* () {
+          extensions = enabled;
+          if (loader) yield* loader("default");
+        }),
       manager: Context.get(dependencies, Manager.PreviewManager),
       awaitAttached,
       permission,
@@ -572,4 +611,136 @@ it.effect.each([
       ).toBe(true);
     }),
   ),
+);
+
+it.effect(
+  "extension profiles stream full Chrome into the desktop without waiting for a native tab",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const r = yield* rig(true, false, true);
+        const events = yield* r.manager.subscribeEvents;
+        const opening = yield* r
+          .invoke<PreviewAutomationStatus>("open", undefined, {
+            profileId: "default",
+            reuseExistingTab: false,
+            open: true,
+          })
+          .pipe(Effect.forkScoped);
+        const revealed = yield* Stream.fromSubscription(events).pipe(
+          Stream.filter((event) => event.type === "navigated" && event.snapshot.reveal === true),
+          Stream.runHead,
+        );
+        const event = Option.getOrThrow(revealed);
+        const viewerScope = yield* Scope.make();
+        yield* r.browser
+          .attachViewer({
+            threadId,
+            tabId: event.tabId,
+            canOperate: true,
+            quality: 80,
+            maxWidth: 1280,
+            maxHeight: 800,
+          })
+          .pipe(Scope.provide(viewerScope));
+        const opened = yield* Fiber.join(opening);
+        expect(opened.available).toBe(true);
+        expect(opened.rendering).toBe("panel");
+        expect(opened.sessionMismatch).not.toBe(true);
+        expect(r.awaitAttached).not.toHaveBeenCalled();
+        expect(r.connectDesktop).not.toHaveBeenCalled();
+        expect(r.context.newPage).toHaveBeenCalledTimes(1);
+        expect((yield* r.manager.list({ threadId })).sessions[0]?.serverRendering).toBe("stream");
+        yield* Scope.close(viewerScope, Exit.void);
+      }),
+    ),
+);
+
+it.effect("installing extensions keeps native tabs intact and routes only new tabs to Chrome", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const r = yield* rig(true);
+      expect(r.connectDesktop).toHaveBeenCalledTimes(1);
+      yield* r.setExtensions(true);
+      expect(r.closeConnection).not.toHaveBeenCalled();
+      expect(r.page.close).not.toHaveBeenCalled();
+      yield* r.invoke("snapshot", r.tabId, FULL);
+      const existing = (yield* r.manager.list({ threadId })).sessions.find(
+        (tab) => tab.tabId === r.tabId,
+      );
+      expect(existing?.serverRendering).toBe("native");
+      yield* r.invoke("open", undefined, {
+        profileId: "default",
+        reuseExistingTab: false,
+        open: false,
+      });
+      expect(r.connectDesktop).toHaveBeenCalledTimes(1);
+      expect(r.context.newPage).toHaveBeenCalledTimes(1);
+      yield* r.setExtensions(false);
+      yield* r.invoke("open", undefined, {
+        profileId: "default",
+        reuseExistingTab: false,
+        open: true,
+      });
+      expect(r.connectDesktop).toHaveBeenCalledTimes(2);
+      expect(r.closeConnection).not.toHaveBeenCalled();
+    }),
+  ),
+);
+
+it.effect("completed Chrome installation retries profiles that fell back while installing", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const r = yield* rig(true, false, true);
+      vi.spyOn(ServerBrowserContexts.prototype, "extensionFallbackProfiles").mockReturnValue([
+        "default",
+      ]);
+      const retry = vi
+        .spyOn(ServerBrowserContexts.prototype, "restartProfile")
+        .mockResolvedValue(true);
+      const loaded = Promise.withResolvers<void>();
+      vi.spyOn(ServerBrowserContexts.prototype, "contextFor").mockImplementation(async () => {
+        loaded.resolve();
+        return r.context as unknown as BrowserContext;
+      });
+      yield* Queue.offer(r.extensionReady, undefined);
+      yield* Effect.promise(() => loaded.promise);
+      expect(retry).toHaveBeenCalledWith("default", ["/extension"]);
+      expect(r.connectDesktop).not.toHaveBeenCalled();
+    }),
+  ),
+);
+
+it("keeps Playwright launch transcripts out of agent errors", () => {
+  const error = new ServerBrowser.ServerBrowserLaunchError({
+    cause: new Error(
+      "browserType.launch: Browser closed unexpectedly.\nBrowser logs:\n<launching> chrome --secret",
+    ),
+  });
+  expect(error.message).toBe(
+    "The server preview browser could not start: Browser closed unexpectedly.",
+  );
+});
+
+it.effect("MCP toolbar actions explain native desktop and profile runtime gaps", () =>
+  Effect.gen(function* () {
+    const native = yield* rig(true);
+    const nativeError = yield* Effect.flip(
+      native.invoke<PreviewAutomationStatus>("extensionOpen", native.tabId, {
+        id: "a".repeat(32),
+        page: "popup",
+      }),
+    );
+    expect(nativeError.message).toContain("native desktop rendering");
+    expect(nativeError.message).toContain("preview_* for element access");
+    const server = yield* rig(false, true, true);
+    const profileError = yield* Effect.flip(
+      server.invoke<PreviewAutomationStatus>("extensionOpen", server.tabId, {
+        id: "a".repeat(32),
+        page: "sidePanel",
+        profileId: "work",
+      }),
+    );
+    expect(profileError.message).toContain("host tab must use the extension's browser profile");
+  }).pipe(Effect.scoped),
 );

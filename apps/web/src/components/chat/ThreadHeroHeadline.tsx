@@ -125,7 +125,6 @@ export function ThreadHeroHeadline({
             environmentId={thread.environmentId}
             threadId={thread.id}
             draftId={null}
-            size="sm"
           />
         </>
       ) : (

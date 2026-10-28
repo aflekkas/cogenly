@@ -3,10 +3,15 @@ import {
   AuthEnvironmentMaintainScope,
   AuthOrchestrationOperateScope,
   AuthPeerDelegateScope,
+  AuthProvidersManageScope,
   AuthSyncReplicateScope,
   EnvironmentId,
+  MachineHealthError,
+  MachineHealthAlertsRead,
   MachineHealthFixRun,
+  MachineHealthTurnOffProviderRun,
   MachineVersionUpdate,
+  ProviderInstanceId,
   type MachineHealthFixResult,
   type MachineHealthItem,
   type MachineHealthReport,
@@ -17,11 +22,17 @@ import {
   ThreadId,
 } from "@cogenly/contracts";
 import { NodeCrypto } from "@effect/platform-node";
+import * as Deferred from "effect/Deferred";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
+import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import * as Integrations from "../integrations/Integrations.ts";
+import * as HealthAlerts from "./HealthAlerts.ts";
+import * as Sqlite from "../persistence/Sqlite.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 import * as ServerSelfUpdate from "../cloud/selfUpdate.ts";
 import * as MachineIdentity from "../machines/MachineIdentity.ts";
@@ -29,12 +40,16 @@ import * as Machines from "../machines/Machines.ts";
 import * as PeerChannels from "../machines/PeerChannels.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ScheduledTasks from "../scheduledTasks/ScheduledTaskService.ts";
+import * as Scheduler from "../scheduling/Scheduler.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import * as HealthAlertsState from "./HealthAlertsState.ts";
 import * as MachineHealth from "./MachineHealth.ts";
 import * as MachineHealthFixes from "./MachineHealthFixes.ts";
 import { summarizeFixOutcomes } from "./MachineHealthFixes.ts";
 
 const laptop = EnvironmentId.make("laptop");
 const vps = EnvironmentId.make("vps");
+const offline = EnvironmentId.make("offline");
 const taskId = ScheduledTaskId.make("task:nightly");
 
 const item = (key: string, fix: MachineHealthItem["fix"], target: MachineHealthItem["target"]) =>
@@ -91,6 +106,15 @@ const harness = (
   withVersionItem = false,
   capability: "boot-service" | "desktop-managed" | null = "boot-service",
   browserProblem = false,
+  auto: {
+    readonly report?: MachineHealthReport;
+    readonly enabled?: boolean;
+    readonly database?: Layer.Layer<SqlClient.SqlClient>;
+    readonly scheduler?: Scheduler.Scheduler["Service"];
+    readonly retried?: Deferred.Deferred<void>;
+    readonly withAlerts?: boolean;
+    readonly afterRetry?: () => void;
+  } = {},
 ) =>
   Effect.gen(function* () {
     const ran: Array<string> = [];
@@ -109,6 +133,8 @@ const harness = (
     const call = ((environmentId: EnvironmentId, channel: PeerChannel, payload: unknown) =>
       Effect.sync(() => {
         peerCalls.push({ environmentId, channel: channel.name, payload });
+        if (channel.name === MachineHealthAlertsRead.name)
+          return { open: [], recentlyResolved: [] };
         return fromVps;
       })) as unknown as Machines.Machines["Service"]["call"];
     const machine = (environmentId: EnvironmentId, relation: "this" | "hub"): MachineInfo => ({
@@ -126,11 +152,14 @@ const harness = (
       serverVersion: relation === "this" ? "0.3.3" : "0.3.4",
     });
     const context = yield* Layer.build(
-      MachineHealthFixes.layer.pipe(
+      Layer.mergeAll(
+        MachineHealthFixes.layer,
+        ...(auto.withAlerts ? [HealthAlerts.layer] : []),
+      ).pipe(
         Layer.provideMerge(
           Layer.mergeAll(
             Layer.mock(PreviewBrowser.PreviewBrowser)({
-              executable: Effect.sync(() => {
+              setup: Effect.sync(() => {
                 ran.push("install-browser");
                 return "/test/browser";
               }),
@@ -145,37 +174,38 @@ const harness = (
             }),
             Layer.mock(MachineHealth.MachineHealth)({
               report: Effect.succeed(
-                browserProblem
-                  ? {
-                      ...report,
-                      checks: [
-                        {
-                          id: "preview-browser",
-                          status: "warn",
-                          summary: "Browser missing",
-                          items: [item("preview-browser:install", "setup-browser", null)],
-                        },
-                      ],
-                    }
-                  : withVersionItem
+                auto.report ??
+                  (browserProblem
                     ? {
                         ...report,
                         checks: [
                           {
-                            id: "machine-links",
+                            id: "preview-browser",
                             status: "warn",
-                            summary: "Versions differ",
-                            items: [
-                              item(`machine-version:${laptop}`, "update-machine", {
-                                _tag: "machine",
-                                environmentId: laptop,
-                              }),
-                            ],
+                            summary: "Browser missing",
+                            items: [item("preview-browser:install", "setup-browser", null)],
                           },
-                          syncCheck,
                         ],
                       }
-                    : { ...report, checks: [...report.checks, syncCheck] },
+                    : withVersionItem
+                      ? {
+                          ...report,
+                          checks: [
+                            {
+                              id: "machine-links",
+                              status: "warn",
+                              summary: "Versions differ",
+                              items: [
+                                item(`machine-version:${laptop}`, "update-machine", {
+                                  _tag: "machine",
+                                  environmentId: laptop,
+                                }),
+                              ],
+                            },
+                            syncCheck,
+                          ],
+                        }
+                      : { ...report, checks: [...report.checks, syncCheck] }),
               ),
               discardQuarantined: (threadId) =>
                 Effect.sync(() => {
@@ -183,9 +213,13 @@ const harness = (
                   return 7;
                 }),
               retrySync: ({ environmentId }) =>
-                Effect.sync(() => {
-                  retried.push(environmentId);
-                }),
+                environmentId === offline
+                  ? Effect.fail(new MachineHealthError({ reason: "unavailable" }))
+                  : Effect.gen(function* () {
+                      retried.push(environmentId);
+                      auto.afterRetry?.();
+                      if (auto.retried) yield* Deferred.succeed(auto.retried, undefined);
+                    }),
             }),
             Layer.mock(Machines.Machines)({
               list: Effect.succeed({
@@ -195,6 +229,7 @@ const harness = (
               call,
             }),
             PeerChannels.layer,
+            Layer.mock(Integrations.Integrations)({}),
             Layer.mock(MachineIdentity.MachineIdentity)({ self: Effect.succeed(self) }),
             Layer.mock(ThreadManagement.ThreadManagementService)({}),
             Layer.mock(ScheduledTasks.ScheduledTaskService)({
@@ -204,7 +239,10 @@ const harness = (
                   return {} as never;
                 }),
             }),
-            Layer.succeed(SqlClient.SqlClient, {} as never),
+            auto.database ?? Sqlite.layerMemory,
+            ServerSettings.layerTest({ health: { autoFix: auto.enabled ?? true } }),
+            HealthAlertsState.layer,
+            Layer.succeed(Scheduler.Scheduler, auto.scheduler ?? { register: () => Effect.void }),
             NodeCrypto.layer,
           ),
         ),
@@ -212,7 +250,17 @@ const harness = (
     );
     const fixes = yield* MachineHealthFixes.MachineHealthFixes.pipe(Effect.provideContext(context));
     const channels = yield* PeerChannels.PeerChannels.pipe(Effect.provideContext(context));
-    return { fixes, channels, ran, peerCalls, retried };
+    const alertsState = yield* HealthAlertsState.HealthAlertsState.pipe(
+      Effect.provideContext(context),
+    );
+    const settings = yield* ServerSettings.ServerSettingsService.pipe(
+      Effect.provideContext(context),
+    );
+    const sql = yield* SqlClient.SqlClient.pipe(Effect.provideContext(context));
+    const alerts = yield* Effect.serviceOption(HealthAlerts.HealthAlerts).pipe(
+      Effect.provideContext(context),
+    );
+    return { fixes, channels, alertsState, settings, ran, peerCalls, retried, sql, alerts };
   });
 
 describe("MachineHealthFixes", () => {
@@ -370,6 +418,93 @@ describe("MachineHealthFixes", () => {
   );
 });
 
+describe("turning off a provider that isn't signed in", () => {
+  const claude = ProviderInstanceId.make("claude");
+  const signedOut: MachineHealthReport = {
+    ...report,
+    checks: [
+      {
+        id: "providers",
+        status: "fail",
+        summary: "",
+        items: [
+          item("providers:claude", "sign-in", { _tag: "provider", instanceId: claude }),
+          ...report.checks[0]!.items,
+        ],
+      },
+    ],
+  };
+
+  it.effect("turns it off in this machine's settings, with providers:manage", () =>
+    Effect.gen(function* () {
+      const { fixes, settings, peerCalls } = yield* harness(false, "boot-service", false, {
+        report: signedOut,
+      });
+      const denied = yield* fixes.fix(
+        { itemKeys: ["providers:claude"], action: "turn-off-provider" },
+        [AuthOrchestrationOperateScope],
+      );
+      expect(denied.outcomes).toMatchObject([{ status: "failed" }]);
+      expect((yield* settings.getSettings).providerInstances[claude]).toBeUndefined();
+
+      const result = yield* fixes.fix(
+        { itemKeys: ["providers:claude", "scheduled-tasks:nightly"], action: "turn-off-provider" },
+        [AuthProvidersManageScope],
+      );
+      expect(result.outcomes).toMatchObject([
+        {
+          itemKey: "providers:claude",
+          status: "fixed",
+          message: expect.stringContaining("MacBook"),
+        },
+        // Turn off never runs another item's fix.
+        { itemKey: "scheduled-tasks:nightly", status: "failed" },
+      ]);
+      expect((yield* settings.getSettings).providerInstances[claude]).toEqual({
+        driver: "claude",
+        enabled: false,
+      });
+      expect(peerCalls).toEqual([]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("asks the machine with the problem over its own peer channel", () =>
+    Effect.gen(function* () {
+      const { fixes, settings, peerCalls } = yield* harness(false, "boot-service", false, {
+        report: signedOut,
+      });
+      yield* fixes.fix(
+        { environmentId: vps, itemKeys: ["providers:claude"], action: "turn-off-provider" },
+        [AuthProvidersManageScope],
+      );
+      expect(peerCalls).toEqual([
+        {
+          environmentId: vps,
+          channel: MachineHealthTurnOffProviderRun.name,
+          payload: { itemKeys: ["providers:claude"], callerScopes: [AuthProvidersManageScope] },
+        },
+      ]);
+      // Only that machine's settings change.
+      expect((yield* settings.getSettings).providerInstances[claude]).toBeUndefined();
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("serves a paired machine's turn-off from this machine's own report", () =>
+    Effect.gen(function* () {
+      const { channels, settings } = yield* harness(false, "boot-service", false, {
+        report: signedOut,
+      });
+      const served = yield* channels.dispatch({
+        channel: MachineHealthTurnOffProviderRun.name,
+        payload: { itemKeys: ["providers:claude"], callerScopes: [AuthProvidersManageScope] },
+        caller: { environmentId: vps, scopes: [AuthPeerDelegateScope] },
+      });
+      expect(served).toMatchObject({ outcomes: [{ status: "fixed" }] });
+      expect((yield* settings.getSettings).providerInstances[claude]?.enabled).toBe(false);
+    }).pipe(Effect.scoped),
+  );
+});
+
 describe("summarizeFixOutcomes", () => {
   it("uses the item's own message when there is one item", () => {
     expect(
@@ -422,4 +557,237 @@ it.effect("leaves desktop updates to the app without starting a partial update",
     expect(result.outcomes[0]?.status).toBe("failed");
     expect(ran).toEqual([]);
   }).pipe(Effect.scoped),
+);
+
+describe("automatic fixes", () => {
+  const machineTarget = (environmentId: EnvironmentId) =>
+    ({ _tag: "machine", environmentId }) as const;
+  const autoReport = (items: ReadonlyArray<MachineHealthItem>): MachineHealthReport => ({
+    ...report,
+    checks: [{ id: "sync", status: "fail", summary: "", items }],
+  });
+
+  it.effect("runs only the safe fixes, and holds their alerts", () =>
+    Effect.gen(function* () {
+      const h = yield* harness(false, "boot-service", false, {
+        report: autoReport([
+          item(`sync:stuck:${vps}`, "retry-sync", machineTarget(vps)),
+          item(`machine-version:${vps}`, "update-machine", machineTarget(vps)),
+          item(`machine-version:${laptop}`, "update-machine", machineTarget(laptop)),
+          item("scheduled-tasks:nightly", "run-now", { _tag: "scheduledTask", taskId }),
+          item("sync:quarantined-thread:thread:bad", "discard-quarantined", {
+            _tag: "thread",
+            threadId: ThreadId.make("thread:bad"),
+          }),
+          item("providers:claude", "sign-in", null),
+        ]),
+      });
+      const outcomes = yield* h.fixes.autoFix;
+      expect(outcomes.map((outcome) => [outcome.itemKey, outcome.status])).toEqual([
+        [`sync:stuck:${vps}`, "failed"],
+      ]);
+      expect(h.retried).toEqual([vps]);
+      expect(h.peerCalls).toEqual([]);
+      expect(h.ran).toEqual([]);
+      const view = yield* h.alertsState.autoFix;
+      expect([...view.holds]).toEqual([]);
+      expect(view.failures.has(`machine-version:${vps}`)).toBe(false);
+      expect(view.failures.has(`machine-version:${laptop}`)).toBe(false);
+      expect(view.failures.get(`sync:stuck:${vps}`)).toContain("still present");
+      // The retry budget prevents another immediate attempt.
+      expect(yield* h.fixes.autoFix).toEqual([]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("alerts with the reason when a fix fails, and retries it later", () =>
+    Effect.gen(function* () {
+      const key = `sync:stuck:${offline}`;
+      const h = yield* harness(false, "boot-service", false, {
+        report: autoReport([item(key, "retry-sync", machineTarget(offline))]),
+      });
+      expect(yield* h.fixes.autoFix).toMatchObject([{ itemKey: key, status: "failed" }]);
+      const view = yield* h.alertsState.autoFix;
+      expect(view.holds.has(key)).toBe(false);
+      expect(view.failures.get(key)).toBe("Machine health could not be read.");
+      expect(yield* h.fixes.autoFix).toEqual([]);
+      yield* TestClock.adjust("30 minutes");
+      expect(yield* h.fixes.autoFix).toMatchObject([{ itemKey: key, status: "failed" }]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("does nothing while the setting is off", () =>
+    Effect.gen(function* () {
+      const h = yield* harness(false, "boot-service", false, {
+        enabled: false,
+        report: autoReport([item(`sync:stuck:${vps}`, "retry-sync", machineTarget(vps))]),
+      });
+      expect(yield* h.fixes.autoFix).toEqual([]);
+      expect(h.retried).toEqual([]);
+      expect((yield* h.alertsState.autoFix).holds.size).toBe(0);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("keeps a successful retry when the recheck clears the problem", () =>
+    Effect.gen(function* () {
+      const check = {
+        id: "sync" as const,
+        status: "fail" as const,
+        summary: "",
+        items: [
+          item("clears", "retry-sync", machineTarget(vps)),
+        ] as ReadonlyArray<MachineHealthItem>,
+      };
+      const h = yield* harness(false, "boot-service", false, {
+        report: { ...report, checks: [check] },
+        afterRetry: () => {
+          check.items = [];
+        },
+      });
+      expect(yield* h.fixes.autoFix).toMatchObject([{ itemKey: "clears", status: "fixed" }]);
+      expect((yield* h.alertsState.autoFix).failures.size).toBe(0);
+      expect(yield* h.fixes.autoFix).toEqual([]);
+      expect(h.retried).toEqual([vps]);
+    }).pipe(Effect.scoped),
+  );
+});
+
+it.effect("manual updates still start while work is running", () =>
+  Effect.gen(function* () {
+    const h = yield* harness(true, "boot-service", false, {
+      report: {
+        ...report,
+        checks: [
+          {
+            id: "machine-links",
+            status: "warn",
+            summary: "Versions differ",
+            items: [
+              item(`machine-version:${laptop}`, "update-machine", {
+                _tag: "machine",
+                environmentId: laptop,
+              }),
+            ],
+          },
+        ],
+      },
+    });
+    yield* h.sql`INSERT INTO orchestration_v2_projection_runs(run_id,thread_id,ordinal,provider,status,requested_at,payload_json)
+      VALUES ('busy','work',1,'codex','running','2026-01-01','{}')`;
+    expect(yield* h.fixes.autoFix).toEqual([]);
+    expect(h.ran).toEqual([]);
+    expect(h.peerCalls).toEqual([]);
+    const view = yield* h.alertsState.autoFix;
+    expect(view.holds.size).toBe(0);
+    expect(view.failures.size).toBe(0);
+    const result = yield* h.fixes.fix({ itemKeys: [`machine-version:${laptop}`] });
+    expect(result.outcomes).toMatchObject([{ status: "fixed" }]);
+    expect(h.ran).toEqual(["update:0.3.4"]);
+    yield* h.channels.dispatch({
+      channel: MachineVersionUpdate.name,
+      payload: { targetVersion: "0.3.4" },
+      caller: { environmentId: vps, scopes: [AuthPeerDelegateScope] },
+    });
+    expect(h.ran).toEqual(["update:0.3.4", "update:0.3.4"]);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("retained retry budgets do not hold recovered health items", () =>
+  Effect.gen(function* () {
+    const problem = item("recovered", "retry-sync", { _tag: "machine", environmentId: vps });
+    const check: {
+      id: "sync";
+      status: "fail";
+      summary: string;
+      items: ReadonlyArray<MachineHealthItem>;
+    } = { id: "sync", status: "fail", summary: "", items: [problem] };
+    const h = yield* harness(false, "boot-service", false, {
+      report: { ...report, checks: [check] },
+    });
+    yield* h.fixes.autoFix;
+    expect((yield* h.alertsState.autoFix).failures.has(problem.key)).toBe(true);
+    check.items = [{ ...problem, status: "ok", fix: null }];
+    expect(yield* h.fixes.autoFix).toEqual([]);
+    expect((yield* h.alertsState.autoFix).holds.size).toBe(0);
+    const rows = yield* h.sql`SELECT item_key FROM health_auto_fix_attempts`;
+    expect(rows).toHaveLength(1);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("retry budgets survive service reconstruction and reset after a person's fix", () =>
+  Effect.gen(function* () {
+    const database = Sqlite.layerMemory;
+    // Build once, then reconstruct the feature with the same durable database.
+    const context = yield* Layer.build(database);
+    const sql = yield* SqlClient.SqlClient.pipe(Effect.provideContext(context));
+    const options = {
+      database: Layer.succeed(SqlClient.SqlClient, sql),
+      report: {
+        ...report,
+        checks: [
+          {
+            id: "sync",
+            status: "fail",
+            summary: "",
+            items: [item("persistent", "retry-sync", { _tag: "machine", environmentId: vps })],
+          },
+        ],
+      } satisfies MachineHealthReport,
+    };
+    for (const delay of [0, 10, 20]) {
+      yield* TestClock.adjust(`${delay} minutes`);
+      const h = yield* harness(false, "boot-service", false, options);
+      expect(yield* h.fixes.autoFix).toHaveLength(1);
+    }
+    yield* TestClock.adjust("1 day");
+    const h = yield* harness(false, "boot-service", false, options);
+    expect(yield* h.fixes.autoFix).toEqual([]);
+    expect((yield* h.alertsState.autoFix).failures.has("persistent")).toBe(true);
+    yield* h.fixes.fix({ itemKeys: ["persistent"] });
+    expect(yield* h.fixes.autoFix).toHaveLength(1);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("the live scheduler fires health-auto-fix and publishes to its shared alert state", () =>
+  Effect.gen(function* () {
+    const scheduler = yield* Scheduler.Scheduler;
+    const retried = yield* Deferred.make<void>();
+    const finished = yield* Deferred.make<void>();
+    const h = yield* harness(false, "boot-service", false, {
+      scheduler: {
+        register: (name, work) =>
+          scheduler.register(
+            name,
+            work.pipe(
+              Effect.ensuring(
+                name === "health-auto-fix" ? Deferred.succeed(finished, undefined) : Effect.void,
+              ),
+            ),
+          ),
+      },
+      retried,
+      withAlerts: true,
+      report: {
+        ...report,
+        checks: [
+          {
+            id: "sync",
+            status: "fail",
+            summary: "",
+            items: [item("scheduled-auto", "retry-sync", { _tag: "machine", environmentId: vps })],
+          },
+        ],
+      },
+    });
+    yield* Deferred.await(retried);
+    yield* Deferred.await(finished);
+    expect(h.retried).toEqual([vps]);
+    expect((yield* h.alertsState.autoFix).failures.has("scheduled-auto")).toBe(true);
+    yield* TestClock.adjust("3 minutes");
+    expect(h.retried).toEqual([vps]);
+    expect(Option.isSome(h.alerts)).toBe(true);
+    if (Option.isSome(h.alerts))
+      expect((yield* h.alerts.value.snapshot).open).toMatchObject([
+        { itemKey: "scheduled-auto", status: "fail" },
+      ]);
+  }).pipe(Effect.provide(Scheduler.layer), Effect.scoped),
 );

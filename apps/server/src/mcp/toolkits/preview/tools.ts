@@ -11,6 +11,7 @@ import {
   BrowserExtensionInstallResult,
   BrowserExtensionPage,
   BrowserExtensionRemoveInput,
+  BrowserExtensionReloadInput,
   BrowserExtensionToggleInput,
   BrowserExtensionsListInput,
   BrowserExtensionsListResult,
@@ -416,7 +417,7 @@ const PreviewRecordingStopTool = safeBrowserTool(
 
 const extensionDependencies = [...dependencies, BrowserExtensions.BrowserExtensions];
 const EXTENSION_HOSTS =
-  "Extensions load per browser profile into the server browser (background and agent tabs, and every tab on a remote or VPS environment) and into the desktop panel when this environment runs on the same machine as the desktop app. Remote environments' panel tabs on another machine do not get them. Incognito and isolated agent tabs never run extensions. A change restarts that profile's server browser, which closes its server-browser tabs; desktop panel tabs keep running and pick up content scripts on their next load. The desktop panel supports content scripts, background service workers, storage, messaging, and opening extension pages, but not declarativeNetRequest blocking, cookies, context menus, notifications, identity, or side panels; the server browser supports all of them.";
+  "Extensions run only in server full Chrome, per browser profile, streamed to web and desktop panels. Native Electron tabs, incognito and isolated agent tabs do not run extensions. Open a server tab in the extension profile first. Remote tabs run in their owning environment. Chrome storage is separate from native desktop storage. Changes restart the profile's server browser and close its tabs. Install returns installing promptly while Chrome loads in the background; browser_extensions_list and subscriptions report loaded or loadError without waiting on Chrome's download lock. Use browser_extension_reload for rebuilt folders. preview_* tools drive native extension popup and side-panel surfaces by their returned tabId. Open shadow roots appear in snapshots; closed shadow roots do not, so use screenshots or evaluate the host's exposed APIs. Desktop computer_* sees streamed extension surfaces as pixels; use preview_* for element access.";
 
 const BrowserExtensionsListTool = Tool.make("browser_extensions_list", {
   description: `List the Chromium extensions installed in a browser profile (default: the user's default profile), with each one's version, whether it is on, its source, the API permissions and sites it can read and change, and its popup and options pages. ${EXTENSION_HOSTS}`,
@@ -438,6 +439,15 @@ const BrowserExtensionInstallTool = Tool.make("browser_extension_install", {
 })
   .annotate(Tool.OpenWorld, true)
   .annotate(Tool.Destructive, false);
+
+const BrowserExtensionReloadTool = Tool.make("browser_extension_reload", {
+  description:
+    "Reload an unpacked extension from its original folder to pick up changed files and manifest metadata, keeping its ID and Chrome storage. Restarts that profile's server browser and refreshes its worker. Web Store extensions must be reinstalled to update them.",
+  parameters: BrowserExtensionReloadInput,
+  success: BrowserExtensionInstallResult,
+  failure: Schema.Union([BrowserExtensionError, OrchestratorMcpFailure]),
+  dependencies: extensionDependencies,
+}).annotate(Tool.Destructive, false);
 
 const BrowserExtensionToggleTool = Tool.make("browser_extension_toggle", {
   description:
@@ -461,7 +471,7 @@ const BrowserExtensionRemoveTool = Tool.make("browser_extension_remove", {
 
 const BrowserExtensionOpenTool = browserTool(
   Tool.make("browser_extension_open", {
-    description: `Open an installed extension's own UI as a browser tab in its profile, as clicking its toolbar button would: page "popup" opens the toolbar popup, "options" its options page, or pass a path inside the extension such as "dashboard.html". Then drive the returned tab with the usual preview_* tools (snapshot, click, type, screenshot). An extension whose toolbar button only runs code, with no popup, cannot be clicked: Cogenly's browser has no extension toolbar. A popup opened as a tab sees itself as the active tab, so popups that act on "the current page" may need that page open in another tab. To see what a content script changed on a site, open or snapshot that site in the same profile. Pass open=false to keep the tab in the background, or tabId to load the page in an existing tab of that profile. ${EXTENSION_HOSTS}`,
+    description: `Use an installed extension on a host tab. For page "popup", "sidePanel", or "action", tabId identifies the host (default: current web tab); Cogenly clicks its toolbar action, respects popup versus onClicked versus openPanelOnActionClick, and returns hostTabId and surfaceTabId when a surface appears. Drive the surface with preview_snapshot/click/type/screenshot/evaluate using surfaceTabId. Reopening a side panel reuses its host's panel slot. Closing the host closes its surfaces. Fallback surface pages include a notice because active-tab semantics differ. For "options" or a path such as "dashboard.html", open a normal extension tab; tabId reuses an existing tab and open=false keeps a new tab in the background. ${EXTENSION_HOSTS}`,
     parameters: Schema.Struct({
       id: BrowserExtensionId,
       page: BrowserExtensionPage,
@@ -478,6 +488,7 @@ const BrowserExtensionOpenTool = browserTool(
 const extensionTools = [
   BrowserExtensionsListTool,
   BrowserExtensionInstallTool,
+  BrowserExtensionReloadTool,
   BrowserExtensionToggleTool,
   BrowserExtensionRemoveTool,
   BrowserExtensionOpenTool,

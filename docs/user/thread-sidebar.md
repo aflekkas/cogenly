@@ -296,7 +296,7 @@ suggestion on every machine. Merging removes the source project everywhere and c
 be undone automatically; files with conflicting names are kept under new names.
 
 A new task's heading reads "What should we build in _project_ / _repository_?". Pick
-the project there or in the composer's project control, and the task moves to that
+the project there or under the composer, beside the machine, and the task moves to that
 project's most recently used repository, or to the project's folder when it has none.
 The repository menu lists every repository in the project, on the machine the task runs on
 (with **No project**, that machine's repositories). A repository the project has but this
@@ -353,7 +353,8 @@ unarchive it, though you can still move threads out. **Archived** at the top of
 Settings → Projects lists them; choose **Unarchive** to bring one back.
 
 To file a thread, right-click it and choose **Move to project…**, run **Move to project…**
-from the command palette, or pick a project in the composer. Choose **Remove from
+from the command palette. A new chat picks its project under the composer, beside its
+machine, before you send; after that the composer just names it. Choose **Remove from
 project** to take it out; Work then falls back to its repository's project. A filed chat also gets
 [project context](./memory-and-export.md#project-context-in-chats).
 

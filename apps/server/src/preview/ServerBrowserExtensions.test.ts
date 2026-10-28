@@ -14,6 +14,18 @@ import * as NodeModule from "node:module";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
+import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
+import { FetchHttpClient } from "effect/http";
+import type { Page } from "playwright-core";
+import { makeBrowserExtensions } from "./BrowserExtensions.ts";
+
 import { extensionIdFromPublicKey } from "./BrowserExtensionCrx.ts";
 import { ServerBrowserContexts } from "./ServerBrowserContexts.ts";
 
@@ -43,6 +55,100 @@ const CONTENT_JS = `chrome.storage.local.get("greeting", ({ greeting }) => {
   banner.textContent = greeting ?? "no greeting yet";
   document.body.append(banner);
 });`;
+
+/** Resolves on a DOM mutation, without timers or polling. */
+const textChanged = (page: Page, selector: string, expected: string) =>
+  page.evaluate<void>(`new Promise((resolve) => {
+    const selector = ${JSON.stringify(selector)};
+    const expected = ${JSON.stringify(expected)};
+    const check = () => {
+      if (document.querySelector(selector)?.textContent !== expected) return;
+      observer.disconnect();
+      resolve();
+    };
+    const observer = new MutationObserver(check);
+    observer.observe(document, { childList: true, subtree: true, characterData: true });
+    check();
+  })`);
+
+const loadFinished = (
+  store: import("./BrowserExtensions.ts").BrowserExtensions["Service"],
+  id: string,
+) =>
+  store.subscribe({}).pipe(
+    Stream.filter((list) =>
+      list.extensions.some((extension) => extension.id === id && extension.state !== "installing"),
+    ),
+    Stream.runHead,
+    Effect.map((list) =>
+      Option.getOrThrow(list).extensions.find((extension) => extension.id === id)!,
+    ),
+  );
+
+const extensionRig = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const root = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-extension-regression-" });
+  const store = yield* makeBrowserExtensions({ rootDir: path.join(root, "store") });
+  let extensions: ReadonlyArray<{ readonly id: string; readonly path: string }> = [];
+  const results = new Map<string, string | undefined>();
+  const loads = yield* Queue.unbounded<void>();
+  const contexts = new ServerBrowserContexts({
+    profilesDir: path.join(root, "profiles"),
+    executable: async () => chromium!,
+    extensionsExecutable: async () => chromium!,
+    extensionsFor: async () => extensions,
+    onExtensionLoad: async (_profileId, directory, error) => {
+      results.set(directory, error);
+    },
+    env: { ...process.env, COGENLY_SERVER_BROWSER_SANDBOX: "0" },
+  });
+  yield* Effect.addFinalizer(() => Effect.promise(() => contexts.close()));
+  yield* store.registerLoader((profileId) =>
+    Effect.gen(function* () {
+      extensions = yield* store.loadable(profileId);
+      yield* Effect.promise(() =>
+        contexts.restartProfile(
+          profileId,
+          extensions.map((extension) => extension.path),
+        ),
+      );
+      if (extensions.length > 0) yield* Effect.promise(() => contexts.contextFor(profileId));
+      for (const [directory, error] of results)
+        yield* store.reportLoad(profileId, directory, error);
+      yield* Queue.offer(loads, undefined);
+    }),
+  );
+  const folder = path.join(root, "source");
+  const write = (version: string, pageText = version, broken = false) =>
+    Effect.gen(function* () {
+      yield* fs.makeDirectory(folder, { recursive: true });
+      yield* fs.writeFileString(
+        path.join(folder, "manifest.json"),
+        JSON.stringify({
+          manifest_version: 3,
+          name: "Regression extension",
+          version,
+          permissions: ["storage", "sidePanel"],
+          background: { service_worker: "worker.js", type: "module" },
+          side_panel: { default_path: "options.html" },
+          options_page: "options.html",
+          ...(broken
+            ? { content_scripts: [{ matches: ["http://localhost/*"], js: ["missing.js"] }] }
+            : {}),
+        }),
+      );
+      yield* fs.writeFileString(
+        path.join(folder, "worker.js"),
+        `chrome.runtime.onMessage.addListener((_message, _sender, respond) => { respond(${JSON.stringify(pageText)}); });`,
+      );
+      yield* fs.writeFileString(
+        path.join(folder, "options.html"),
+        `<title>Options</title><p>${pageText}</p>`,
+      );
+    });
+  return { root, fs, path, store, contexts, folder, write, awaitLoad: Queue.take(loads) };
+});
 
 describe.skipIf(chromium === undefined)("server browser extensions", () => {
   let root: string;
@@ -86,7 +192,8 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
       profilesDir: NodePath.join(root, "profiles"),
       executable: async () => chromium!,
       extensionsExecutable: async () => chromium!,
-      extensionsFor: async (profileId) => (profileId === "default" ? [extension] : []),
+      extensionsFor: async (profileId) =>
+        profileId === "default" ? [{ id: extensionId, path: extension }] : [],
       // CI runners block Chromium's user-namespace sandbox; this covers extensions, not sandboxing.
       env: { ...process.env, COGENLY_SERVER_BROWSER_SANDBOX: "0" },
     });
@@ -102,29 +209,15 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
     const context = await contexts.contextFor("default");
     const before = await context.newPage();
     await before.goto(siteUrl);
-    await expect
-      .poll(() =>
-        before
-          .locator("#extension-banner")
-          .textContent()
-          .catch(() => null),
-      )
-      .toBe("no greeting yet");
+    await textChanged(before, "#extension-banner", "no greeting yet");
 
     const popup = await context.newPage();
     await popup.goto(`chrome-extension://${extensionId}/popup.html`);
     await popup.getByRole("button", { name: "Save greeting" }).click();
-    await expect.poll(() => popup.locator("#status").textContent()).toBe("saved");
+    await textChanged(popup, "#status", "saved");
 
     await before.reload();
-    await expect
-      .poll(() =>
-        before
-          .locator("#extension-banner")
-          .textContent()
-          .catch(() => null),
-      )
-      .toBe("hello from the popup");
+    await textChanged(before, "#extension-banner", "hello from the popup");
   }, 60_000);
 
   it("keeps extensions out of a profile that has none", async () => {
@@ -134,4 +227,192 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
     await page.waitForLoadState("load");
     expect(await page.locator("#extension-banner").count()).toBe(0);
   }, 60_000);
+
+  it.live(
+    "skips a broken extension, reports Chrome's reason on install and list, and keeps the browser usable",
+    () =>
+      Effect.gen(function* () {
+        const r = yield* extensionRig;
+        yield* r.write("1.0.0", "broken", true);
+        const installed = yield* r.store.install({ source: r.folder });
+        const failed = yield* loadFinished(r.store, installed.extension.id);
+        expect(failed.loadError).toContain("Regression extension");
+        expect(failed.loadError).toContain("missing.js");
+        expect((yield* r.store.list({})).extensions[0]?.loadError).toBe(failed.loadError);
+        const context = yield* Effect.promise(() => r.contexts.contextFor("default"));
+        const page = yield* Effect.promise(() => context.newPage());
+        yield* Effect.promise(() => page.goto(siteUrl));
+        expect(yield* Effect.promise(() => page.title())).toBe("Site");
+        // A healthy extension in the same profile still runs.
+        const healthy = r.path.join(r.root, "healthy");
+        yield* r.write("1.0.0", "working");
+        yield* r.fs.copy(r.folder, healthy);
+        const good = yield* r.store.install({ source: healthy });
+        expect((yield* loadFinished(r.store, good.extension.id)).loadError).toBeUndefined();
+        const active = yield* Effect.promise(() => r.contexts.contextFor("default"));
+        const options = yield* Effect.promise(() => active.newPage());
+        const url = yield* r.store.pageUrl({ id: good.extension.id, page: "options" });
+        yield* Effect.promise(() => options.goto(url));
+        expect(yield* Effect.promise(() => options.locator("p").textContent())).toBe("working");
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(Layer.merge(NodeServices.layer, FetchHttpClient.layer)),
+      ),
+  );
+
+  it.live(
+    "reloads rebuilt files and bumped versions while keeping the ID, storage and refreshed worker",
+    () =>
+      Effect.gen(function* () {
+        const r = yield* extensionRig;
+        yield* r.write("1.0.0");
+        const first = yield* r.store.install({ source: r.folder });
+        expect((yield* loadFinished(r.store, first.extension.id)).loadError).toBeUndefined();
+        const url = yield* r.store.pageUrl({ id: first.extension.id, page: "options" });
+        const firstContext = yield* Effect.promise(() => r.contexts.contextFor("default"));
+        const firstPage = yield* Effect.promise(() => firstContext.newPage());
+        yield* Effect.promise(() => firstPage.goto(url));
+        yield* Effect.promise(() =>
+          firstPage.evaluate("chrome.storage.local.set({ greeting: 'retained' })"),
+        );
+        expect(
+          yield* Effect.promise(() => firstPage.evaluate("chrome.runtime.sendMessage({})")),
+        ).toBe("1.0.0");
+        yield* r.write("1.1.0");
+        const second = yield* r.store.reload({ id: first.extension.id });
+        expect(second).toMatchObject({
+          updated: true,
+          previousVersion: "1.0.0",
+          extension: { id: first.extension.id, version: "1.1.0" },
+        });
+        expect((yield* loadFinished(r.store, second.extension.id)).loadError).toBeUndefined();
+        const secondContext = yield* Effect.promise(() => r.contexts.contextFor("default"));
+        expect(secondContext).not.toBe(firstContext);
+        const page = yield* Effect.promise(() => secondContext.newPage());
+        yield* Effect.promise(() => page.goto(url));
+        expect(yield* Effect.promise(() => page.locator("p").textContent())).toBe("1.1.0");
+        expect(yield* Effect.promise(() => page.evaluate("chrome.runtime.sendMessage({})"))).toBe(
+          "1.1.0",
+        );
+        expect(
+          yield* Effect.promise(() => page.evaluate("chrome.storage.local.get('greeting')")),
+        ).toEqual({ greeting: "retained" });
+        yield* r.write("1.1.0", "rebuilt without a version bump");
+        const third = yield* r.store.reload({ id: first.extension.id });
+        expect((yield* loadFinished(r.store, third.extension.id)).loadError).toBeUndefined();
+        expect((yield* r.store.list({})).extensions[0]?.version).toBe("1.1.0");
+        const rebuilt = yield* Effect.promise(() =>
+          r.contexts.contextFor("default").then((context) => context.newPage()),
+        );
+        yield* Effect.promise(() => rebuilt.goto(url));
+        expect(
+          yield* Effect.promise(() => rebuilt.evaluate("chrome.runtime.sendMessage({})")),
+        ).toBe("rebuilt without a version bump");
+        expect(
+          yield* Effect.promise(() => rebuilt.evaluate("chrome.storage.local.get('greeting')")),
+        ).toEqual({ greeting: "retained" });
+        expect(yield* Effect.promise(() => rebuilt.locator("p").textContent())).toBe(
+          "rebuilt without a version bump",
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(Layer.merge(NodeServices.layer, FetchHttpClient.layer)),
+      ),
+  );
+
+  it.live(
+    "reloads disabled files without restarting an open profile or enabling the extension",
+    () =>
+      Effect.gen(function* () {
+        const r = yield* extensionRig;
+        yield* r.write("1.0.0");
+        const first = yield* r.store.install({ source: r.folder });
+        yield* r.awaitLoad;
+        const url = yield* r.store.pageUrl({ id: first.extension.id, page: "options" });
+        const initial = yield* Effect.promise(() =>
+          r.contexts.contextFor("default").then((context) => context.newPage()),
+        );
+        yield* Effect.promise(() => initial.goto(url));
+        yield* Effect.promise(() =>
+          initial.evaluate("chrome.storage.local.set({ greeting: 'retained' })"),
+        );
+        yield* r.store.toggle({ id: first.extension.id, enabled: false });
+        yield* r.awaitLoad;
+        const context = yield* Effect.promise(() => r.contexts.contextFor("default"));
+        const disabledOptions = yield* Effect.promise(() => context.newPage());
+        yield* Effect.promise(() =>
+          expect(disabledOptions.goto(url)).rejects.toThrow("ERR_BLOCKED_BY_CLIENT"),
+        );
+        yield* Effect.promise(() => disabledOptions.close());
+        const page = yield* Effect.promise(() => context.newPage());
+        yield* Effect.promise(() => page.goto(siteUrl));
+        yield* r.write("1.1.0");
+        const reloaded = yield* r.store.reload({ id: first.extension.id });
+        expect(reloaded.extension).toMatchObject({
+          id: first.extension.id,
+          version: "1.1.0",
+          enabled: false,
+          state: "disabled",
+          installedAt: first.extension.installedAt,
+        });
+        expect(yield* r.store.loadable("default")).toEqual([]);
+        expect(yield* Effect.promise(() => r.contexts.contextFor("default"))).toBe(context);
+        expect(page.isClosed()).toBe(false);
+        expect(yield* Effect.promise(() => page.title())).toBe("Site");
+        // Turning it back on loads the rebuilt copy into a new profile context.
+        const enabled = yield* r.store.toggle({ id: first.extension.id, enabled: true });
+        expect(enabled.loadError).toBeUndefined();
+        yield* r.awaitLoad;
+        const enabledContext = yield* Effect.promise(() => r.contexts.contextFor("default"));
+        expect(enabledContext).not.toBe(context);
+        const options = yield* Effect.promise(() => enabledContext.newPage());
+        yield* Effect.promise(() => options.goto(url));
+        expect(yield* Effect.promise(() => options.locator("p").textContent())).toBe("1.1.0");
+        expect(
+          yield* Effect.promise(() => options.evaluate("chrome.storage.local.get('greeting')")),
+        ).toEqual({ greeting: "retained" });
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(Layer.merge(NodeServices.layer, FetchHttpClient.layer)),
+      ),
+  );
+
+  it("keeps browsing available while installing, then loads extensions when Chrome is ready", async () => {
+    const failures: (string | undefined)[] = [];
+    let installing = true;
+    const fallback = new ServerBrowserContexts({
+      profilesDir: NodePath.join(root, "fallback-profiles"),
+      executable: async () => chromium!,
+      extensionsExecutable: async () => {
+        if (installing) throw { _tag: "PreviewBrowserInstallingError" };
+        return chromium!;
+      },
+      extensionsFor: async () => [{ id: extensionId, path: NodePath.join(root, "extension") }],
+      onExtensionLoad: async (_profileId, _path, error) => {
+        failures.push(error);
+      },
+      env: { ...process.env, COGENLY_SERVER_BROWSER_SANDBOX: "0" },
+    });
+    try {
+      const context = await fallback.contextFor("default");
+      const page = await context.newPage();
+      await page.goto(siteUrl);
+      expect(await page.title()).toBe("Site");
+      expect(failures[0]).toContain("still installing");
+      expect(fallback.extensionFallbackProfiles()).toEqual(["default"]);
+      installing = false;
+      expect(await fallback.restartProfile("default", [NodePath.join(root, "extension")])).toBe(
+        true,
+      );
+      const loaded = await fallback.contextFor("default");
+      expect(loaded).not.toBe(context);
+      const popup = await loaded.newPage();
+      await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+      expect(await popup.locator("button").textContent()).toBe("Save greeting");
+      expect(failures.at(-1)).toBeUndefined();
+      expect(fallback.extensionFallbackProfiles()).toEqual([]);
+    } finally {
+      await fallback.close();
+    }
+  });
 });

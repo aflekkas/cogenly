@@ -23,16 +23,30 @@ interface Options {
   readonly env?: NodeJS.ProcessEnv;
   readonly onContextClose?: (context: BrowserContext) => void;
   /** Unpacked extension directories a human profile loads; none keeps the headless shell. */
-  readonly extensionsFor?: (profileId: string) => Promise<ReadonlyArray<string>>;
+  readonly extensionsFor?: (
+    profileId: string,
+  ) => Promise<ReadonlyArray<{ readonly id: string; readonly path: string }>>;
   /** A browser that can load extensions, installing it on first use. */
   readonly extensionsExecutable?: () => Promise<string>;
+  readonly onExtensionLoad?: (profileId: string, path: string, error?: string) => Promise<void>;
 }
 
-/** Chrome's flags to run exactly these unpacked extensions. */
-export const extensionArgs = (paths: ReadonlyArray<string>) =>
-  paths.length === 0
-    ? []
-    : [`--disable-extensions-except=${paths.join(",")}`, `--load-extension=${paths.join(",")}`];
+/** Keep browser errors useful in tool output without Playwright's launch transcript. */
+export const browserErrorMessage = (cause: unknown) => {
+  if (
+    typeof cause === "object" &&
+    cause !== null &&
+    "_tag" in cause &&
+    cause._tag === "PreviewBrowserInstallingError"
+  ) {
+    return "The extension browser is still installing. Extensions will load when installation finishes.";
+  }
+  const message = cause instanceof Error ? cause.message : String(cause);
+  return (message.split("\n").find((line) => line.trim()) ?? "Unknown browser error.")
+    .replace(/^.*?Protocol error \(Extensions\.loadUnpacked\):\s*/, "")
+    .replace(/^browserType\.[^:]+:\s*/, "")
+    .trim();
+};
 
 const UA_PLATFORMS: Partial<Record<NodeJS.Platform, string>> = {
   darwin: "macOS",
@@ -97,6 +111,7 @@ export class ServerBrowserContexts {
   private readonly clearing = new Map<string, Promise<void>>();
   /** The extension directories each running human profile launched with. */
   private readonly launchedExtensions = new Map<string, string>();
+  private readonly extensionFallbacks = new Set<string>();
   private browser: Promise<Browser> | undefined;
   private closing: Promise<void> | undefined;
 
@@ -189,21 +204,88 @@ export class ServerBrowserContexts {
     }
     const directory = this.profileDirectory(profileId);
     const extensions = (await this.options.extensionsFor?.(profileId)) ?? [];
-    // The headless shell cannot load extensions; the full build runs them in new headless mode.
-    const options =
-      extensions.length > 0 && this.options.extensionsExecutable
-        ? await this.launchOptions(this.options.extensionsExecutable)
-        : await this.launchOptions();
     const { chromium } = loadPlaywright();
     await NodeFSP.mkdir(directory, { recursive: true });
-    this.launchedExtensions.set(JSON.stringify([profileId, null]), extensions.join("\n"));
-    return this.launch(options, () =>
-      chromium.launchPersistentContext(directory, {
-        ...options,
-        args: [...options.args, ...extensionArgs(extensions)],
-        ...contextOptions,
-      }),
-    );
+    const key = JSON.stringify([profileId, null]);
+    const start = async (withExtensions: boolean) => {
+      const options = await this.launchOptions(
+        withExtensions ? this.options.extensionsExecutable : this.options.executable,
+      );
+      return this.launch(options, () =>
+        chromium.launchPersistentContext(directory, {
+          ...options,
+          // Load individually after startup: Chrome returns each extension's real error,
+          // and a rejected manifest cannot abort the browser's launch.
+          // Keep this on while extensions are off: otherwise Chrome persists an
+          // unsupported-developer disable reason that survives loadUnpacked.
+          // --disable-extensions still prevents execution in those launches.
+          args: [...options.args, "--enable-unsafe-extension-debugging"],
+          ignoreDefaultArgs: [
+            ...options.ignoreDefaultArgs,
+            ...(withExtensions ? ["--disable-extensions"] : []),
+          ],
+          ...contextOptions,
+        }),
+      );
+    };
+    const fallback = async (error?: string) => {
+      this.launchedExtensions.set(key, "");
+      if (extensions.length > 0) this.extensionFallbacks.add(profileId);
+      for (const { path } of extensions) {
+        if (error) await this.options.onExtensionLoad?.(profileId, path, error);
+      }
+      return start(false);
+    };
+    if (extensions.length === 0) {
+      this.extensionFallbacks.delete(profileId);
+      return fallback();
+    }
+    let context: BrowserContext;
+    try {
+      context = await start(true);
+    } catch (cause) {
+      // A missing or broken full Chrome install must not take down ordinary browsing.
+      return fallback(browserErrorMessage(cause));
+    }
+    let session: CDPSession | undefined;
+    let storageSession: CDPSession | undefined;
+    try {
+      session = await context.browser()!.newBrowserCDPSession();
+      storageSession = await context.newCDPSession(context.pages()[0] ?? (await context.newPage()));
+      for (const { id, path } of extensions) {
+        try {
+          // A persisted worker can keep running old scripts after files change.
+          // Keep local/extension storage, including chrome.storage, intact.
+          await storageSession.send("Storage.clearDataForOrigin", {
+            origin: `chrome-extension://${id}`,
+            storageTypes: "service_workers,cache_storage",
+          });
+          await session.send("Extensions.loadUnpacked", { path });
+          await this.options.onExtensionLoad?.(profileId, path);
+        } catch (cause) {
+          await this.options.onExtensionLoad?.(profileId, path, browserErrorMessage(cause));
+        }
+      }
+    } catch (cause) {
+      for (const { path } of extensions) {
+        await this.options.onExtensionLoad?.(profileId, path, browserErrorMessage(cause));
+      }
+    } finally {
+      await storageSession?.detach().catch(constVoid);
+      await session?.detach().catch(constVoid);
+    }
+    if (!context.browser()?.isConnected()) {
+      await context.close().catch(constVoid);
+      return fallback("The extension browser disconnected; extensions are not running.");
+    }
+    this.extensionFallbacks.delete(profileId);
+    this.launchedExtensions.set(key, extensions.map(({ path }) => path).join("\n"));
+    return context;
+  }
+
+  /** Profiles currently browsing without their requested extensions. */
+  extensionFallbackProfiles() {
+    return [...this.extensionFallbacks];
   }
 
   /**
@@ -218,9 +300,20 @@ export class ServerBrowserContexts {
     // Already running exactly these.
     if (this.launchedExtensions.get(key) === extensions.join("\n")) return false;
     this.contexts.delete(key);
-    const context = await pending.catch(() => undefined);
-    await context?.close().catch(constVoid);
-    return context !== undefined;
+    const closing = (async () => {
+      const context = await pending.catch(() => undefined);
+      await context?.close().catch(constVoid);
+      return context !== undefined;
+    })();
+    // A concurrent tab must not launch against a profile whose browser still
+    // holds its lock. Publish the barrier before yielding to the close.
+    const clearing = closing.then(constVoid);
+    this.clearing.set(key, clearing);
+    try {
+      return await closing;
+    } finally {
+      if (this.clearing.get(key) === clearing) this.clearing.delete(key);
+    }
   }
 
   private profileDirectory(profileId: string) {

@@ -1,3 +1,4 @@
+import { MachineResourcesSnapshot } from "./resourceTelemetry.ts";
 import * as Schema from "effect/Schema";
 import { AgentId, AgentUpsertInput, AgentMutationResult } from "./agent.ts";
 import { AuthPeerDelegateScope, AuthSyncReplicateScope } from "./auth.ts";
@@ -127,6 +128,7 @@ export class ThreadRemoteError extends Schema.TaggedError<ThreadRemoteError>()(
       "busy",
       "local-changes",
       "needs-repository",
+      "missing-prerequisites",
       "behind",
     ]),
     detail: Schema.optional(Schema.String),
@@ -221,6 +223,13 @@ export const ThreadRepositoryBundle = Schema.Struct({
   revision: Schema.String.check(Schema.isPattern(/^[a-f0-9]{40,64}$/)),
   ref: Schema.String.check(Schema.isPattern(/^refs\/cogenly\/delegate\/[a-zA-Z0-9._-]+$/)),
   base64: Schema.String.check(Schema.isMaxLength(45 * 1024 * 1024)),
+  /** Fetch these prerequisites from the target clone's origin before importing the delta. */
+  prerequisites: Schema.optional(
+    Schema.Array(Schema.String.check(Schema.isPattern(/^[a-f0-9]{40,64}$/))).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(256),
+    ),
+  ),
 });
 export type ThreadRepositoryBundle = typeof ThreadRepositoryBundle.Type;
 
@@ -540,7 +549,11 @@ export const ThreadMachineCatalog = makePeerChannel({
   name: "threads.catalog.v1",
   scope: AuthPeerDelegateScope,
   payload: Schema.Struct({ target: EnvironmentId }),
-  success: Schema.Struct({ providers: Schema.Array(ServerProvider) }),
+  success: Schema.Struct({
+    providers: Schema.Array(ServerProvider),
+    resources: Schema.optional(MachineResourcesSnapshot),
+    repositoryTransfer: Schema.optional(Schema.Literal("remote-delta-v1")),
+  }),
   error: ThreadRemoteError,
 });
 
@@ -596,7 +609,11 @@ export const ThreadAgentDelete = makePeerChannel({
 export const ThreadTaskBranch = makePeerChannel({
   name: "threads.task-branch.v1",
   scope: AuthPeerDelegateScope,
-  payload: Schema.Struct({ target: EnvironmentId, threadId: ThreadId }),
+  payload: Schema.Struct({
+    target: EnvironmentId,
+    threadId: ThreadId,
+    remoteDelta: Schema.optional(Schema.Boolean),
+  }),
   success: Schema.Struct({ branch: TrimmedNonEmptyString, bundle: ThreadRepositoryBundle }),
   error: ThreadRemoteError,
 });

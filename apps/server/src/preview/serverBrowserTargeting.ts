@@ -9,6 +9,7 @@
  */
 
 export interface TargetableTab {
+  readonly extensionSurface?: { readonly hostTabId: string } | undefined;
   readonly tabId: string;
   readonly threadId: string;
   /** The agent session that opened the tab, if an agent did. */
@@ -56,7 +57,7 @@ export const pickDefaultTab = <T extends TargetableTab>(
   agentSessionId: string | undefined,
   shown: ShownTabs,
 ): T | undefined => {
-  const threadTabs = [...tabs].filter((tab) => tab.threadId === threadId);
+  const threadTabs = [...tabs].filter((tab) => tab.threadId === threadId && !tab.extensionSurface);
   const byRecentUse = (left: T, right: T) => right.usedAt - left.usedAt;
   const own = threadTabs
     .filter((tab) => agentSessionId !== undefined && tab.agentId === agentSessionId)

@@ -67,6 +67,8 @@ it.effect("a fresh home reports install failure and the next attempt retries it"
     expect((yield* browser.status).state).toBe("ready");
     expect(yield* browser.executable).toBe(executable);
     expect(requests).toBe(2);
+    yield* fs.remove(executable);
+    expect((yield* browser.status).state).toBe("missing");
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
@@ -102,5 +104,34 @@ it.effect(
       yield* Deferred.succeed(finish, undefined);
       yield* Effect.flip(browser.executable);
       expect((yield* browser.status).state).toBe("failed");
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "machine health names a failed full-Chrome install even when only extensions requested it",
+  () =>
+    Effect.gen(function* () {
+      const baseDir = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped();
+      const requested: string[] = [];
+      const browser = yield* Browser.makePreviewBrowser({ baseDir }).pipe(
+        Effect.provideService(
+          HttpClient.HttpClient,
+          HttpClient.make((request) =>
+            Effect.sync(() => {
+              requested.push(request.url);
+              return HttpClientResponse.fromWeb(request, new Response(null, { status: 503 }));
+            }),
+          ),
+        ),
+      );
+      yield* Effect.flip(browser.extensionsExecutable);
+      const status = yield* browser.status;
+      expect(status.state).toBe("failed");
+      expect(status.detail).toContain("Extension browser:");
+      expect(status.detail).toContain("network access");
+      expect(previewBrowserCheck(status).status).toBe("fail");
+      yield* Effect.flip(browser.setup);
+      expect(requested).toHaveLength(2);
+      expect(requested.every((url) => /\/chrome-[^/]+\.zip$/.test(url))).toBe(true);
     }).pipe(Effect.provide(NodeServices.layer)),
 );

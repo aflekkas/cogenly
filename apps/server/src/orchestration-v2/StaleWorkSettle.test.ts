@@ -113,6 +113,16 @@ it.effect("ends a delegated task no live work will end, and leaves a live one al
     // The child is still running: its own Stop ends it, not this.
     yield* settle("settle-live");
     expect((yield* task()).status).toBe("running");
+    yield* orchestrator.dispatch({
+      type: "thread.stale-work.settle",
+      commandId: CommandId.make("settle-unreachable-automatic"),
+      threadId: parentId,
+      subagentIds: [taskId],
+      unreachableChildThreadIds: [childId],
+      keepLiveSessions: true,
+      reason,
+    });
+    expect((yield* task()).status).toBe("running");
 
     // The child goes away without its parent hearing (as a lost process or a
     // reconcile can leave it): nothing will ever end the task now.

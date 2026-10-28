@@ -14,21 +14,27 @@ The same menus can turn an extension off, remove it, and open its popup or optio
 
 ## Agents
 
-Agents can install, list, turn off and remove extensions themselves, and open an extension's popup or options page as a tab they can click through. Ask in plain words, for example "install uBlock Origin Lite in my Work profile".
+Agents can install, list, turn off and remove extensions themselves. They can open a popup or side panel for a website tab, click an extension's toolbar action, and open its options page. Ask in plain words, for example "open this extension's side panel for the current page".
+
+With `browser_extension_open`, pass the website's `tabId` and choose `page: "popup"`, `"sidePanel"`, or `"action"`. The website must be a server browser tab in the extension's profile. Options pages open with `page: "options"`.
 
 ## Where extensions run
 
-- **Background and agent tabs, and every tab on a remote machine or VPS**, run the full set of Chrome extension features. The first time a profile needs extensions, that machine downloads a larger copy of Chrome (about 200 MB).
-- **The desktop app's browser panel**, for the machine it runs on, supports content scripts, background workers, storage and extension pages. It does not support ad-blocking rules, cookies, context menus or notifications, so most ad blockers and password managers do nothing there.
+- New tabs opened in a profile with enabled extensions run in Cogenly’s built-in Chrome on that machine and stream into the browser panel, including in the desktop app. Existing native desktop tabs stay where they are, with their pages and logins intact. Disabling or removing all extensions makes new desktop tabs native again. The first time a profile needs extensions, that machine downloads a larger copy of Chrome (about 200 MB).
+- Extension tabs keep separate browsing storage from native desktop tabs. You may need to sign in in the new tabs.
 - Incognito never runs extensions.
 
-Changing a profile's extensions restarts its background browser, which closes that profile's background tabs.
+Changing a profile's extensions restarts its browser, which closes its streamed browser tabs. Existing native desktop tabs are never moved or closed. Reinstall an unpacked folder after rebuilding it, even if its version has not changed.
+
+An extension that fails to load is skipped so browsing can continue. The extension list shows its last load result without starting Chrome. Agents can read its name and the load error with `browser_extensions_list`; reinstall or turn it off after correcting the problem.
 
 The extension list belongs to each machine. A paired machine keeps its own list.
 
-## Popups open as tabs
+## Popups and side panels
 
-Cogenly's browser has no extension toolbar. An extension's popup opens as a normal tab instead, so a popup that acts on "the current page" sees itself rather than the page you meant. Extensions whose toolbar button runs an action without showing a popup can't be triggered.
+Extension popups and side panels stream into the browser panel beside their host website. Toolbar actions run against that host, including actions that have no popup. Closing the host also closes its extension surfaces.
+
+Agent-opened popups stay open while the agent switches focus. Some extensions require a fallback page whose behavior differs from a native popup; Cogenly shows a notice when that happens. Options pages and popup pages opened directly from the extension menus remain ordinary tabs.
 
 ## Passwords
 
