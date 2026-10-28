@@ -8,6 +8,8 @@ import { DisclosureChevron } from "../ui/disclosure";
 import {
   WorkLogBlock,
   WorkLogButton,
+  WorkLogCard,
+  WorkLogCardHeader,
   WorkLogCollapse,
   WorkLogDetails,
   WorkLogList,
@@ -52,7 +54,9 @@ import {
   type EnvironmentId,
   type MessageId,
   type OrchestrationV2TurnItem,
+  type ProviderApprovalDecision,
   type RunAttemptId,
+  type RuntimeRequestId,
   type ScopedThreadRef,
   type ServerProvider,
   type ServerProviderSkill,
@@ -121,11 +125,13 @@ import {
 import { FileDiff } from "@pierre/diffs/react";
 import { DiffWorkerPoolProvider } from "../DiffWorkerPoolProvider";
 import {
+  type PendingApproval,
   type TimelineEntry,
   providerErrorPresentation,
   createMessageAttachmentPreviewProjector,
   selectMessageImageResources,
   workEntryDisplayIndicatesToolFailure,
+  workEntryIndicatesToolSuccess,
   workEntrySignalsSevereFailure,
   workLogEntryIsToolLike,
 } from "../../session-logic";
@@ -187,6 +193,7 @@ import {
   Redo2Icon,
   Minimize2Icon,
   SearchIcon,
+  ShieldQuestionIcon,
   SmartphoneIcon,
   SquarePenIcon,
   TerminalIcon,
@@ -278,6 +285,14 @@ import {
   workEntryReadOutput,
   workEntryIsVisibleInGroup,
   worktreeSetupAgentStarted,
+  openLiveWorkGroupIds,
+  settledLiveWorkGroupIds,
+  thoughtRowLabel,
+  workEntryDurationMs,
+  workEntryFailureLine,
+  workEntryIsToolCall,
+  workGroupCardOpensWhileLive,
+  type WorkGroupCard,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
   TIMELINE_MINIMAP_MIN_ITEMS,
@@ -414,7 +429,8 @@ interface TimelineRowSharedState {
   onFileOpen: (attachment: ChatFileAttachment) => void;
   onFileDownload: (attachment: ChatFileAttachment) => void;
   openPullRequest: (event: MouseEvent<HTMLElement>, url: string) => void;
-  onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
+  /** `liveCard`: the group is a live card that is open unless the user collapses it. */
+  onToggleWorkGroup: (groupId: string, anchorKey: string, liveCard?: boolean) => void;
   /** Holds the toggled row in place while it resizes; true when the toggle stays pinned to the end. */
   onToggleWorkEntry: (anchorKey: string, collapsed: boolean) => boolean;
   /** A collapsed group's details finished animating out. */
@@ -458,6 +474,8 @@ interface TimelineRowActivityState {
   awaitingUser: boolean;
   isPreparingWorktree: boolean;
   latestRunId: RunId | null;
+  /** Provider approvals the thread waits on, for approval rows in work cards. */
+  approvals: TimelineApprovalState;
   /**
    * A worktree setup whose script is still running after the agent took
    * over. The working header shows it as a chip with a popover; the stage
@@ -473,6 +491,31 @@ interface WorkGroupViewState {
   scrollPositions: Map<string, WorkGroupScrollAnchor>;
   expandedEntries: Set<string>;
 }
+
+/**
+ * Provider approvals the thread waits on, so an approval row in a work card
+ * can answer it in place. The composer's approval panel answers the same
+ * requests through the same command.
+ */
+interface TimelineApprovalState {
+  readonly pending: ReadonlyMap<RuntimeRequestId, PendingApproval>;
+  readonly responding: ReadonlySet<RuntimeRequestId>;
+  readonly respond:
+    | ((requestId: RuntimeRequestId, decision: ProviderApprovalDecision) => void)
+    | null;
+}
+
+const NO_TIMELINE_APPROVALS: TimelineApprovalState = {
+  pending: new Map(),
+  responding: new Set(),
+  respond: null,
+};
+
+/**
+ * Set inside a work card's body. `live` while its turn runs: rows that
+ * arrive then grow in, and status marks swap with a fade.
+ */
+const WorkLogCardCtx = createContext<{ readonly live: boolean } | null>(null);
 
 const WorkGroupViewCtx = createContext<{
   state: WorkGroupViewState;
@@ -577,6 +620,10 @@ interface MessagesTimelineProps {
   isCompacting?: boolean;
   /** The agent waits on an approval or an answer from the user. */
   awaitingUser?: boolean;
+  /** Provider approvals the thread waits on; approval rows answer them in place. */
+  pendingApprovals?: ReadonlyArray<PendingApproval>;
+  respondingApprovalRequestIds?: ReadonlyArray<RuntimeRequestId>;
+  onRespondToApproval?: (requestId: RuntimeRequestId, decision: ProviderApprovalDecision) => void;
   /** Thread state shown after the last message, such as a settled or snoozed line. */
   footer?: ReactNode;
 
@@ -695,6 +742,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
   isPreparingWorktree = false,
   isCompacting = false,
   awaitingUser = false,
+  pendingApprovals,
+  respondingApprovalRequestIds,
+  onRespondToApproval,
   listRef,
   timelineEntries,
   findExpanded = false,
@@ -759,6 +809,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const [closingWorkGroupIds, setClosingWorkGroupIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const [collapsedLiveWorkGroupIds, setCollapsedLiveWorkGroupIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [closingFoldIds, setClosingFoldIds] = useState<ReadonlySet<string>>(() => new Set());
   const [disclosureOpens] = useState<DisclosureOpenTimes>(() => new Map());
   // Every open, the first one after a reload included, goes through the
@@ -797,6 +850,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     setExpandedWorkGroupIds(paintedExpandedWorkGroupIds);
     setExpandedAttemptIds(paintedExpandedAttemptIds);
     setClosingWorkGroupIds(new Set());
+    setCollapsedLiveWorkGroupIds(new Set());
     setClosingFoldIds(new Set());
     disclosureOpens.clear();
   }
@@ -985,8 +1039,10 @@ const ConversationTimeline = memo(function ConversationTimeline({
     });
   }, []);
   const onToggleWorkGroup = useCallback(
-    (groupId: string, anchorKey: string) => {
-      const collapsing = expandedWorkGroupIds.has(groupId);
+    (groupId: string, anchorKey: string, liveCard = false) => {
+      const collapsing = liveCard
+        ? !collapsedLiveWorkGroupIds.has(groupId)
+        : expandedWorkGroupIds.has(groupId);
       suspendEndScrollMaintenanceForDisclosure(anchorKey, collapsing);
       // Collapsing keeps the details row until it animates out; reopening
       // mid-close reuses that row, so only a fresh open plays the enter.
@@ -1011,7 +1067,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
         else next.delete(groupId);
         return next;
       });
-      setExpandedWorkGroupIds((existing) => {
+      (liveCard ? setCollapsedLiveWorkGroupIds : setExpandedWorkGroupIds)((existing) => {
         const next = new Set(existing);
         if (next.has(groupId)) {
           next.delete(groupId);
@@ -1023,6 +1079,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     },
     [
       closingWorkGroupIds,
+      collapsedLiveWorkGroupIds,
       disclosureOpens,
       expandedWorkGroupIds,
       onWorkGroupClosed,
@@ -1126,31 +1183,66 @@ const ConversationTimeline = memo(function ConversationTimeline({
     readonly threadKey: string;
     readonly workspaceRoot: string | undefined;
     readonly projection: MessagesTimelineRowsProjection;
+    /** Live cards open on their own in the last rows, to see them settle. */
+    readonly openLiveGroupIds: ReadonlySet<string>;
   } | null>(null);
+  // Live cards that just settled, held closing until the state below takes
+  // them over. Kept in a ref so a repeated memo call derives the same rows.
+  const settlingWorkGroupIdsRef = useRef<Set<string>>(new Set());
   const rawRows = useMemo(() => {
     const previous = rowsProjectionRef.current;
-    const projection = deriveMessagesTimelineRowsWithState(
-      {
-        timelineEntries,
-        latestRun,
-        runningRunId,
-        expandedRunIds: visibleExpandedRunIds,
-        expandedAttemptIds: visibleExpandedAttemptIds,
-        expandedWorkGroupIds,
-        closingWorkGroupIds,
-        closingFoldIds,
-        isWorking,
-        runlessWorkActive,
-        activeTurnStartedAt,
-        turnDiffSummaries,
-        supportsConversationRollback,
-        worktreeSetup,
-      },
-      previous?.threadKey === listIdentityKey && previous.workspaceRoot === workspaceRoot
-        ? previous.projection
-        : null,
-    );
-    rowsProjectionRef.current = { threadKey: listIdentityKey, workspaceRoot, projection };
+    const sameTimeline =
+      previous?.threadKey === listIdentityKey && previous.workspaceRoot === workspaceRoot;
+    if (!sameTimeline) settlingWorkGroupIdsRef.current = new Set();
+    const settling = settlingWorkGroupIdsRef.current;
+    const derive = (projectionToReuse: MessagesTimelineRowsProjection | null) =>
+      deriveMessagesTimelineRowsWithState(
+        {
+          timelineEntries,
+          latestRun,
+          runningRunId,
+          expandedRunIds: visibleExpandedRunIds,
+          expandedAttemptIds: visibleExpandedAttemptIds,
+          expandedWorkGroupIds,
+          // A fresh set only while a card settles, so streamed text keeps
+          // reusing the previous projection.
+          closingWorkGroupIds:
+            settling.size === 0
+              ? closingWorkGroupIds
+              : new Set([...closingWorkGroupIds, ...settling]),
+          collapsedLiveWorkGroupIds,
+          closingFoldIds,
+          isWorking,
+          runlessWorkActive,
+          activeTurnStartedAt,
+          turnDiffSummaries,
+          supportsConversationRollback,
+          worktreeSetup,
+        },
+        projectionToReuse,
+      );
+    let projection = derive(sameTimeline ? previous.projection : null);
+    if (sameTimeline) {
+      // A live card that settles closes with the same motion a click would;
+      // a card that turns up live mid-session grows in instead of popping.
+      const settled = settledLiveWorkGroupIds(previous.openLiveGroupIds, projection.rows);
+      if (settled.size > 0) {
+        for (const groupId of settled) settling.add(groupId);
+        projection = derive(null);
+      }
+      const now = performance.now();
+      for (const groupId of openLiveWorkGroupIds(projection.rows)) {
+        if (!previous.openLiveGroupIds.has(groupId)) {
+          markDisclosureOpened(disclosureOpens, groupId, now);
+        }
+      }
+    }
+    rowsProjectionRef.current = {
+      threadKey: listIdentityKey,
+      workspaceRoot,
+      projection,
+      openLiveGroupIds: openLiveWorkGroupIds(projection.rows),
+    };
     return projection.rows;
   }, [
     rowsProjectionRef,
@@ -1163,6 +1255,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     visibleExpandedAttemptIds,
     expandedWorkGroupIds,
     closingWorkGroupIds,
+    collapsedLiveWorkGroupIds,
+    disclosureOpens,
     closingFoldIds,
     isWorking,
     runlessWorkActive,
@@ -1171,6 +1265,35 @@ const ConversationTimeline = memo(function ConversationTimeline({
     supportsConversationRollback,
     worktreeSetup,
   ]);
+  // Hand settling cards to the closing state, which drops each once its
+  // details report their exit (or the fallback timer fires off screen).
+  useEffect(() => {
+    const settling = settlingWorkGroupIdsRef.current;
+    if (settling.size === 0) return;
+    settlingWorkGroupIdsRef.current = new Set();
+    const timers = workGroupClosingTimersRef.current;
+    for (const groupId of settling) {
+      markDisclosureClosed(disclosureOpens, groupId);
+      const existingTimer = timers.get(groupId);
+      if (existingTimer !== undefined) clearTimeout(existingTimer);
+      timers.set(
+        groupId,
+        setTimeout(() => onWorkGroupClosed(groupId), FOLD_CLOSE_FALLBACK_MS),
+      );
+    }
+    setClosingWorkGroupIds((existing) => new Set([...existing, ...settling]));
+  }, [rawRows, disclosureOpens, onWorkGroupClosed]);
+  const approvalState = useMemo<TimelineApprovalState>(
+    () =>
+      pendingApprovals === undefined || pendingApprovals.length === 0
+        ? NO_TIMELINE_APPROVALS
+        : {
+            pending: new Map(pendingApprovals.map((approval) => [approval.requestId, approval])),
+            responding: new Set(respondingApprovalRequestIds ?? []),
+            respond: onRespondToApproval ?? null,
+          },
+    [onRespondToApproval, pendingApprovals, respondingApprovalRequestIds],
+  );
   const rows = useStableRows(rawRows, listIdentityKey);
   const claimActivityEnter = useActivityEnterClaim(rows, listIdentityKey);
   // Run status/timestamps churn on every stream event; the shared row context
@@ -1787,12 +1910,14 @@ const ConversationTimeline = memo(function ConversationTimeline({
       awaitingUser,
       isPreparingWorktree,
       latestRunId: latestRun?.runId ?? null,
+      approvals: approvalState,
     }),
     [
       awaitingUser,
       compactionAwaitingRow,
       backgroundWorktreeSetup,
       activeTurnInProgress,
+      approvalState,
       isPreparingWorktree,
       isRevertingCheckpoint,
       isWorking,
@@ -2576,17 +2701,34 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
         <WorkGroupDetailsReveal
           groupId={row.groupId}
           closing={row.closing === true}
-          continues={row.continuesWorkLog}
+          // A card keeps its gap below even when more work follows.
+          continues={row.card ? false : row.continuesWorkLog}
         >
-          <WorkGroupSection
-            anchorKey={row.id}
-            groupedEntries={row.groupedEntries}
-            isExpandedToolGroup
-          />
+          {row.card ? (
+            <WorkLogCard part="body">
+              <WorkGroupCardBody entries={row.groupedEntries}>
+                <WorkGroupSection
+                  anchorKey={row.id}
+                  groupedEntries={row.groupedEntries}
+                  isExpandedToolGroup
+                />
+              </WorkGroupCardBody>
+            </WorkLogCard>
+          ) : (
+            <WorkGroupSection
+              anchorKey={row.id}
+              groupedEntries={row.groupedEntries}
+              isExpandedToolGroup
+            />
+          )}
         </WorkGroupDetailsReveal>
       ) : isWorkLogRow ? (
         <WorkLogBlock
-          continues={row.continuesWorkLog}
+          continues={
+            (row.kind === "work-toggle" || row.kind === "work-live") && row.card
+              ? false
+              : row.continuesWorkLog
+          }
           layout={
             isExpandedToolGroup
               ? "group-content"
@@ -4688,10 +4830,13 @@ function WorkLogToolLabel({
   tool,
   environmentId,
   linked,
+  showResult = true,
 }: {
   tool: WorkLogToolPresentation;
   environmentId: EnvironmentId;
   linked: boolean;
+  /** A card row shows the result at its end instead, beside the duration. */
+  showResult?: boolean;
 }) {
   const target = tool.target?.title ? { ...tool.target, title: tool.target.title } : null;
   return (
@@ -4704,7 +4849,7 @@ function WorkLogToolLabel({
           {target.quoted ? <span className="shrink-0">”</span> : null}
         </>
       ) : null}
-      {tool.result ? (
+      {showResult && tool.result ? (
         <span className="shrink-0 text-muted-foreground">&nbsp;· {tool.result}</span>
       ) : null}
     </span>
@@ -4712,6 +4857,23 @@ function WorkLogToolLabel({
 }
 
 function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "work-live" }> }) {
+  if (row.card) {
+    return (
+      <WorkGroupCardHeaderRow
+        card={row.card}
+        groupId={row.groupId}
+        rowId={row.id}
+        expanded={row.expanded}
+        closing={row.closing === true}
+        live
+        active={row.active}
+      />
+    );
+  }
+  return <LiveWorkEntryStatusRow row={row} />;
+}
+
+function LiveWorkEntryStatusRow({ row }: { row: Extract<TimelineRow, { kind: "work-live" }> }) {
   const ctx = use(TimelineRowCtx);
   const liveTool = useWorkEntryTool(
     {
@@ -4814,12 +4976,111 @@ function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
   );
 }
 
+/** A work card's header row. The body is the group's details row below it. */
+function WorkGroupCardHeaderRow({
+  card,
+  groupId,
+  rowId,
+  expanded,
+  closing,
+  live,
+  active,
+}: {
+  card: WorkGroupCard;
+  groupId: string;
+  rowId: string;
+  expanded: boolean;
+  closing: boolean;
+  live: boolean;
+  active: boolean;
+}) {
+  const ctx = use(TimelineRowCtx);
+  // A card that turns up live fades in with its body; history and
+  // virtualized remounts show at rest.
+  const [appear] = useState(
+    () =>
+      live &&
+      disclosureOpenedRecently(
+        ctx.disclosureOpens,
+        groupId,
+        performance.now(),
+        DISCLOSURE_REVEAL_WINDOW_MS,
+      ),
+  );
+  const icons = card.icons.map((icon) => ({
+    key: icon.key,
+    icon: (
+      <ToolActivityIconView
+        icon={icon.toolIcon}
+        fallbackName={icon.iconName}
+        className="size-3.5 shrink-0 stroke-2 text-icon-muted"
+        muted
+      />
+    ),
+  }));
+  return (
+    <div className={cn(appear && "swap-motion")}>
+      <WorkLogCard part={expanded || closing ? "header" : "whole"}>
+        <WorkLogCardHeader
+          icons={icons}
+          label={card.label}
+          // Open, the running row shimmers instead, so only one line moves.
+          active={active && !expanded && !card.awaitingApproval}
+          live={live}
+          // A card of thoughts alone already says how long it thought.
+          duration={
+            card.toolCount === 0 || card.durationMs === null
+              ? null
+              : formatDuration(card.durationMs)
+          }
+          failedCount={card.failedCount}
+          open={expanded}
+          aria-label={
+            card.failedCount > 0 ? `${card.label}, ${card.failedCount} failed` : card.label
+          }
+          onClick={() =>
+            ctx.onToggleWorkGroup(groupId, rowId, live && workGroupCardOpensWhileLive(card))
+          }
+        />
+      </WorkLogCard>
+    </div>
+  );
+}
+
+/** A card body's rows: live ones grow in as calls arrive and swap status marks with a fade. */
+function WorkGroupCardBody({
+  entries,
+  children,
+}: {
+  entries: ReadonlyArray<TimelineWorkEntry>;
+  children: ReactNode;
+}) {
+  const { isWorking, latestRunId } = use(TimelineRowActivityCtx);
+  const live =
+    isWorking && latestRunId !== null && entries.some((entry) => entry.runId === latestRunId);
+  const value = useMemo(() => ({ live }), [live]);
+  return <WorkLogCardCtx value={value}>{children}</WorkLogCardCtx>;
+}
+
 function WorkGroupToggleTimelineRow({
   row,
 }: {
   row: Extract<TimelineRow, { kind: "work-toggle" }>;
 }) {
   const ctx = use(TimelineRowCtx);
+  if (row.card) {
+    return (
+      <WorkGroupCardHeaderRow
+        card={row.card}
+        groupId={row.groupId}
+        rowId={row.id}
+        expanded={row.expanded}
+        closing={row.closing === true}
+        live={false}
+        active={false}
+      />
+    );
+  }
   return (
     <WorkGroupHeader
       label={row.summary}
@@ -6276,6 +6537,15 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
   const [expanded, setExpanded] = useState(
     () => groupView?.state.expandedEntries.has(workEntry.id) ?? false,
   );
+  const card = use(WorkLogCardCtx);
+  const { approvals } = use(TimelineRowActivityCtx);
+  // A call that arrives in a live card grows in; history and remounts stay still.
+  const [enter] = useState(
+    () =>
+      card?.live === true &&
+      workEntry.toolLifecycleStatus === "inProgress" &&
+      liveCardRowEntersNow(workEntry.id, workEntry.createdAt),
+  );
   const toggleExpanded = () => {
     const next = !expanded;
     if (groupView) {
@@ -6401,6 +6671,19 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
       ? undefined
       : (workEntry.toolIcon ?? workEntry.toolSource?.icon);
   const isReasoning = workEntry.itemType === "reasoning";
+  const running = workEntry.toolLifecycleStatus === "inProgress";
+  const approvalRequest =
+    workEntry.structuredPayload?.type === "approval_request" ? workEntry.structuredPayload : null;
+  const pendingApproval =
+    card !== null && approvalRequest !== null && running
+      ? (approvals.pending.get(approvalRequest.requestId) ?? null)
+      : null;
+  const cardSubtitle =
+    card === null
+      ? null
+      : pendingApproval
+        ? (approvalRequest?.prompt?.trim() ?? null)
+        : workEntryFailureLine(workEntry);
   // The question is the row's identity: a generic "User input submitted"
   // label buries what was asked, so lead with the question text (even over a
   // lone tool row's display label) and keep the answer as the trailing preview.
@@ -6532,25 +6815,41 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
       }
     : {};
 
-  return (
+  // A thought reads "Thinking" / "Thought for 4s", with its first line muted beside it.
+  const thoughtPreview = isReasoning ? liveThoughtLine(workEntry.detail ?? "") : "";
+  const rowElement = (
     <WorkLogRow
       data-v2-item-type={workEntry.projectedItem?.item.type}
       data-v2-item-visibility={workEntry.projectedItem?.visibility}
       {...rowToggleProps}
       active={shimmering}
+      emphasis={
+        pendingApproval
+          ? "attention"
+          : card?.live === true && running && workEntryIsToolCall(workEntry)
+            ? "running"
+            : undefined
+      }
+      subtitle={cardSubtitle}
       icon={
-        <span
-          className={iconWrapperClass}
-          role={showFailedIndicator ? "img" : undefined}
-          aria-label={showFailedIndicator ? "Tool call failed" : undefined}
-        >
-          <ToolActivityIconView
-            icon={entryToolIcon}
-            fallbackName={entryIconName}
-            className={cn("block shrink-0 stroke-2", quietNotice ? "size-3.5" : "size-4")}
-            muted
-          />
-        </span>
+        pendingApproval ? (
+          <span className="flex size-4 items-center justify-center text-info">
+            <ShieldQuestionIcon aria-hidden className="block size-4 shrink-0 stroke-2" />
+          </span>
+        ) : (
+          <span
+            className={iconWrapperClass}
+            role={showFailedIndicator ? "img" : undefined}
+            aria-label={showFailedIndicator ? "Tool call failed" : undefined}
+          >
+            <ToolActivityIconView
+              icon={entryToolIcon}
+              fallbackName={entryIconName}
+              className={cn("block shrink-0 stroke-2", quietNotice ? "size-3.5" : "size-4")}
+              muted
+            />
+          </span>
+        )
       }
       label={
         <div className="min-w-0 flex-1 overflow-hidden">
@@ -6563,23 +6862,19 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
             <span
               className={cn(answerPreview ? "min-w-0" : "min-w-0 flex-1", "truncate", headingClass)}
             >
-              {isReasoning && !expanded ? (
-                <ReactMarkdown
-                  remarkPlugins={[
-                    remarkGfm,
-                    [
-                      remarkThoughtPreview,
-                      workEntry.toolLifecycleStatus === "inProgress" ? "Thinking" : "Thought",
-                    ],
-                  ]}
-                >
-                  {workEntry.detail ?? previewText}
-                </ReactMarkdown>
+              {isReasoning ? (
+                <>
+                  {thoughtRowLabel(workEntry)}
+                  {thoughtPreview && !expanded ? (
+                    <span className="text-muted-foreground">&nbsp;· {thoughtPreview}</span>
+                  ) : null}
+                </>
               ) : tool ? (
                 <WorkLogToolLabel
                   tool={tool}
                   environmentId={ctx.activeThreadEnvironmentId}
                   linked
+                  showResult={card === null}
                 />
               ) : (
                 previewText
@@ -6647,10 +6942,16 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
               Open subagent
             </InlineButton>
           ) : null}
-          {showFailedIndicator &&
+          {card === null &&
+          showFailedIndicator &&
           !showDestructiveRowStyle &&
           !toolIconAcceptsTint(entryToolIcon) ? (
             <XIcon aria-hidden className={cn("size-3 shrink-0", failedToolIconClassName)} />
+          ) : null}
+          {pendingApproval ? (
+            <WorkCardApprovalActions approval={pendingApproval} />
+          ) : card !== null ? (
+            <WorkCardRowStatus entry={workEntry} result={tool?.result ?? null} live={card.live} />
           ) : null}
         </>
       }
@@ -6694,6 +6995,123 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
         ) : null}
       </WorkLogCollapse>
     </WorkLogRow>
+  );
+  return enter ? (
+    <WorkLogCollapse open appear>
+      {rowElement}
+    </WorkLogCollapse>
+  ) : (
+    rowElement
+  );
+}
+
+/** First sight of each call in a live card, so a remount within the motion keeps growing in. */
+const liveCardRowFirstSeen = new Map<string, number>();
+/** A call this old when its row mounts is history, not an arrival. */
+const LIVE_CARD_ROW_FRESH_MS = 5_000;
+
+function liveCardRowEntersNow(entryId: string, createdAt: string): boolean {
+  if (Date.now() - Date.parse(createdAt) > LIVE_CARD_ROW_FRESH_MS) return false;
+  const now = performance.now();
+  const seenAt = liveCardRowFirstSeen.get(entryId);
+  if (seenAt === undefined) {
+    if (liveCardRowFirstSeen.size > 2_000) liveCardRowFirstSeen.clear();
+    liveCardRowFirstSeen.set(entryId, now);
+    return true;
+  }
+  return now - seenAt <= DISCLOSURE_REVEAL_WINDOW_MS;
+}
+
+/** A card row's end: its result and duration once done, and a running, done or failed mark. */
+function WorkCardRowStatus({
+  entry,
+  result,
+  live,
+}: {
+  entry: TimelineWorkEntry;
+  result: string | null;
+  live: boolean;
+}) {
+  const isTool = workEntryIsToolCall(entry);
+  const running = entry.toolLifecycleStatus === "inProgress";
+  const failed =
+    isTool &&
+    !running &&
+    entry.toolLifecycleStatus !== "declined" &&
+    workEntryDisplayIndicatesToolFailure(entry);
+  const done = isTool && !running && !failed && workEntryIndicatesToolSuccess(entry);
+  const durationMs = isTool && !running ? workEntryDurationMs(entry) : null;
+  const meta = [result, durationMs === null ? null : formatDuration(durationMs)]
+    .filter(Boolean)
+    .join(" · ");
+  const state = running ? "running" : failed ? "failed" : done ? "done" : "none";
+  return (
+    <span className="flex shrink-0 items-center gap-1.5 ps-2">
+      {meta ? <span className="text-xs text-muted-foreground tabular-nums">{meta}</span> : null}
+      <span
+        key={state}
+        className={cn("flex size-4 items-center justify-center", live && "swap-motion")}
+      >
+        {running ? (
+          <Spinner size="xs" tone="muted" />
+        ) : failed ? (
+          <CircleAlertIcon aria-label="Failed" className="size-3.5 text-destructive" />
+        ) : done ? (
+          <CheckIcon aria-label="Done" className="size-3.5 text-success" />
+        ) : null}
+      </span>
+    </span>
+  );
+}
+
+/** The provider's own choice label for a decision, or null when it does not offer one. */
+function approvalChoiceLabel(
+  approval: PendingApproval,
+  decision: "accept" | "decline",
+): string | null {
+  if (!approval.options || approval.options.length === 0) {
+    return decision === "accept" ? "Allow" : "Deny";
+  }
+  return approval.options.find((option) => option.decision === decision)?.label ?? null;
+}
+
+/**
+ * Deny and Allow on an approval row, through the same command as the
+ * composer's approval panel. Requests with warnings or without a plain
+ * accept/decline pair stay with the panel, which shows every choice.
+ */
+function WorkCardApprovalActions({ approval }: { approval: PendingApproval }) {
+  const { responding, respond } = use(TimelineRowActivityCtx).approvals;
+  const allow = approvalChoiceLabel(approval, "accept");
+  const deny = approvalChoiceLabel(approval, "decline");
+  if (
+    respond === null ||
+    approval.responseCapability !== "live" ||
+    allow === null ||
+    deny === null ||
+    approval.options?.some((option) => option.warning !== undefined)
+  ) {
+    return null;
+  }
+  const busy = responding.has(approval.requestId);
+  return (
+    <span
+      className="flex shrink-0 items-center gap-1 ps-2"
+      onClick={stopRowToggle}
+      onKeyDown={stopRowToggle}
+    >
+      <Button
+        size="xs"
+        variant="ghost"
+        disabled={busy}
+        onClick={() => respond(approval.requestId, "decline")}
+      >
+        {deny}
+      </Button>
+      <Button size="xs" disabled={busy} onClick={() => respond(approval.requestId, "accept")}>
+        {allow}
+      </Button>
+    </span>
   );
 }
 

@@ -54,6 +54,13 @@ type RowContent = {
   wrapLabel?: boolean;
   /** In progress: the label carries the shared shimmer. The icon stays muted. */
   active?: boolean | undefined;
+  /** A muted second line under the label, such as a failed call's error. */
+  subtitle?: ReactNode;
+  /**
+   * Inside a work card: `running` marks the call in progress with a faint
+   * fill, `attention` rings a call that waits on the user.
+   */
+  emphasis?: "running" | "attention" | undefined;
   /**
    * Open state of an expandable row. The chevron sits right after the label,
    * so it rotates in one spot instead of riding the row's far edge. Omit it
@@ -140,12 +147,22 @@ function WorkLogLine({ icon, label, trailing, wrapLabel, active, disclosure }: R
 const interactionClassName =
   "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70";
 
-function useRowClassName(interactive: boolean) {
+function useRowClassName(interactive: boolean, emphasis?: RowContent["emphasis"]) {
   const grouped = use(GroupedRows);
   return cn(
-    "group/timeline-row relative w-full min-w-0 rounded-md px-0.5 text-left transition-colors",
+    "group/timeline-row relative w-full min-w-0 rounded-md px-0.5 text-left transition-colors duration-(--motion-duration-fast) ease-out",
     grouped ? "py-0" : "py-0.5",
+    emphasis === "running" && "bg-muted/50",
+    emphasis === "attention" && "bg-info/6 ring-1 ring-info/40 ring-inset",
     interactive && interactionClassName,
+  );
+}
+
+function WorkLogSubtitle({ children }: { children: ReactNode }) {
+  return (
+    <span className="ms-7.5 block min-w-0 truncate pb-1 text-xs leading-relaxed text-muted-foreground">
+      {children}
+    </span>
   );
 }
 
@@ -157,9 +174,11 @@ export function WorkLogButton({
   wrapLabel = false,
   active,
   disclosure,
+  subtitle,
+  emphasis,
   ...buttonProps
 }: RowContent & Omit<ComponentProps<"button">, "className" | "style" | "children">) {
-  const className = useRowClassName(true);
+  const className = useRowClassName(true, emphasis);
   return (
     <button {...buttonProps} type="button" className={className}>
       <WorkLogLine
@@ -170,6 +189,7 @@ export function WorkLogButton({
         active={active}
         disclosure={disclosure}
       />
+      {subtitle ? <WorkLogSubtitle>{subtitle}</WorkLogSubtitle> : null}
     </button>
   );
 }
@@ -182,10 +202,12 @@ export function WorkLogRow({
   wrapLabel = false,
   active,
   disclosure,
+  subtitle,
+  emphasis,
   children,
   ...rowProps
 }: RowContent & Omit<ComponentProps<"div">, "className" | "style">) {
-  const className = useRowClassName(rowProps.onClick !== undefined);
+  const className = useRowClassName(rowProps.onClick !== undefined, emphasis);
   return (
     <div {...rowProps} className={className}>
       <WorkLogLine
@@ -196,8 +218,115 @@ export function WorkLogRow({
         active={active}
         disclosure={disclosure}
       />
+      {subtitle ? <WorkLogSubtitle>{subtitle}</WorkLogSubtitle> : null}
       {children}
     </div>
+  );
+}
+
+/**
+ * The border of one work card: a run of tool calls and thoughts. A card's
+ * header and its open body are separate timeline rows (the list virtualizes
+ * them), so each draws its own part: `whole` for a header alone, `header`
+ * and `body` for the two halves of an open card.
+ */
+export function WorkLogCard({
+  part,
+  children,
+}: {
+  part: "whole" | "header" | "body";
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "min-w-0 border border-border/70 bg-card",
+        part === "whole" && "rounded-lg",
+        part === "header" && "rounded-t-lg border-b-0",
+        part === "body" && "rounded-b-lg border-t-border/40 px-1.5 py-1",
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** One kind of tool in a card header's overlapping icon stack. */
+export interface WorkLogCardIcon {
+  readonly key: string;
+  readonly icon: ReactNode;
+}
+
+/**
+ * A work card's header: the overlapping tool icons, the label ("Using 3
+ * tools", "Thought for 4s"), its total duration and failures once settled,
+ * and the chevron. `live` crossfades the label and fades in each new icon as
+ * calls arrive; settled history renders still.
+ */
+export function WorkLogCardHeader({
+  icons,
+  label,
+  active,
+  live,
+  duration,
+  failedCount,
+  open,
+  ...buttonProps
+}: {
+  icons: ReadonlyArray<WorkLogCardIcon>;
+  label: string;
+  active: boolean;
+  live: boolean;
+  duration: string | null;
+  failedCount: number;
+  open: boolean;
+} & Omit<ComponentProps<"button">, "className" | "style" | "children">) {
+  return (
+    <button
+      {...buttonProps}
+      type="button"
+      aria-expanded={open}
+      className={cn(
+        "group/timeline-row flex min-h-9 w-full min-w-0 items-center gap-2 rounded-[inherit] px-2.5 text-left text-sm leading-relaxed select-none",
+        interactionClassName,
+      )}
+    >
+      {icons.length > 0 ? (
+        <span aria-hidden className="flex shrink-0 items-center -space-x-1.5">
+          {icons.map((item) => (
+            <span
+              key={item.key}
+              className={cn(
+                "flex size-5 items-center justify-center overflow-hidden rounded-full bg-card ring-2 ring-card",
+                live && "swap-motion",
+              )}
+            >
+              {item.icon}
+            </span>
+          ))}
+        </span>
+      ) : null}
+      <span className="min-w-0 flex-1 text-secondary-label">
+        <span key={live ? label : undefined} className={cn("block min-w-0", live && "swap-motion")}>
+          <WorkLogShimmer active={active}>
+            <span className="block truncate">{label}</span>
+          </WorkLogShimmer>
+        </span>
+      </span>
+      {failedCount > 0 ? (
+        <span
+          className={cn("shrink-0 text-xs text-destructive tabular-nums", live && "swap-motion")}
+        >
+          {failedCount} failed
+        </span>
+      ) : null}
+      {duration ? (
+        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{duration}</span>
+      ) : null}
+      <span className="flex size-4 shrink-0 items-center justify-center">
+        <DisclosureChevron open={open} />
+      </span>
+    </button>
   );
 }
 

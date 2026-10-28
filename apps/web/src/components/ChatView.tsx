@@ -9821,6 +9821,13 @@ export default function ChatView(props: ChatViewProps) {
                       // A secret request has no runtime request; the shell carries it.
                       activeThreadShell?.hasPendingUserInput === true)
                   }
+                  {...(paintOnlyDisplayedTimeline
+                    ? {}
+                    : {
+                        pendingApprovals,
+                        respondingApprovalRequestIds: respondingRequestIds,
+                        onRespondToApproval: onRespondToApprovalStable,
+                      })}
                   activeTurnStartedAt={paintOnlyDisplayedTimeline ? null : activeWorkStartedAt}
                   worktreeSetup={paintOnlyDisplayedTimeline ? null : worktreeSetup}
                   onCancelWorktreeSetup={onCancelWorktreeSetupStable}
