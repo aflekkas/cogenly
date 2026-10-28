@@ -1,3 +1,4 @@
+import type { EnvironmentConnectionPhase } from "@cogenly/client-runtime/connection";
 import type { EnvironmentId } from "@cogenly/contracts";
 
 /**
@@ -34,20 +35,34 @@ export function isLocalMachine(
   return runsOn !== null && localEnvironmentId !== null && runsOn === localEnvironmentId;
 }
 
+const UNREACHABLE_PHASES: ReadonlySet<EnvironmentConnectionPhase> = new Set([
+  "offline",
+  "error",
+  "unsupported",
+]);
+
 /**
  * The badge for work that runs on `runsOn`: null on this computer, else its
- * name and whether it is reachable. A connected environment names itself;
- * otherwise the paired machine report read through the work's environment
- * does. A machine neither knows yet still gets a cloud, since it is not here.
+ * name and whether it is reachable. `direct` is this client's own saved
+ * connection to that machine, `paired` the pairing report read through the
+ * work's environment. A live direct connection answers for itself; otherwise
+ * the pairing report does, since a saved connection that is down or still
+ * reconnecting says nothing about the machine. Without a report, only an
+ * unreachable direct connection reads as offline, so a reconnect does not
+ * flash it. A machine neither knows yet still gets a cloud, since it is not here.
  */
 export function resolveRemoteMachine(input: {
   readonly runsOn: EnvironmentId | null;
   readonly localEnvironmentId: EnvironmentId | null;
-  readonly connected: RemoteMachine | null;
+  readonly direct: { readonly name: string; readonly phase: EnvironmentConnectionPhase } | null;
   readonly paired: RemoteMachine | null;
 }): RemoteMachine | null {
   if (input.runsOn === null || isLocalMachine(input.runsOn, input.localEnvironmentId)) return null;
-  return input.connected ?? input.paired ?? { name: UNKNOWN_REMOTE_MACHINE_NAME, online: true };
+  const { direct, paired } = input;
+  if (direct?.phase === "connected") return { name: direct.name, online: true };
+  if (paired !== null) return { name: direct?.name ?? paired.name, online: paired.online };
+  if (direct !== null) return { name: direct.name, online: !UNREACHABLE_PHASES.has(direct.phase) };
+  return { name: UNKNOWN_REMOTE_MACHINE_NAME, online: true };
 }
 
 /** A paired machine as a picker shows it: null for this computer, else its name and reachability. */

@@ -5,12 +5,10 @@ import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
 import { isLocalMachine, resolveRemoteMachine, type RemoteMachine } from "./machineBadge.logic";
 import { useEnvironmentMachineList } from "./useMachines";
 
-const UNREACHABLE_PHASES = new Set(["offline", "error", "unsupported"]);
-
 /**
  * The cloud badge for work that runs on `runsOn`, or null when it runs on this
  * computer. `via` is the environment the work was read from, whose paired
- * machine list names a machine this client does not connect to.
+ * machine list reports machines this client is not connected to right now.
  */
 export function useRemoteMachine(
   runsOn: EnvironmentId | null,
@@ -19,11 +17,10 @@ export function useRemoteMachine(
   const localEnvironmentId = usePrimaryEnvironmentId();
   const remote = runsOn !== null && !isLocalMachine(runsOn, localEnvironmentId);
   const environment = useEnvironment(remote ? runsOn : null);
-  const list = useEnvironmentMachineList(remote && environment === null ? via : null);
+  const directName = environment?.label ?? null;
+  const directPhase = environment?.connection.phase ?? null;
+  const list = useEnvironmentMachineList(remote && directPhase !== "connected" ? via : null);
   const paired = list?.machines.find((machine) => machine.environmentId === runsOn) ?? null;
-  const connectedName = environment?.label ?? null;
-  const connectedOnline =
-    environment === null ? true : !UNREACHABLE_PHASES.has(environment.connection.phase);
   const pairedName = paired?.name ?? null;
   const pairedOnline = paired?.online ?? true;
   return useMemo(
@@ -31,9 +28,12 @@ export function useRemoteMachine(
       resolveRemoteMachine({
         runsOn,
         localEnvironmentId,
-        connected: connectedName === null ? null : { name: connectedName, online: connectedOnline },
+        direct:
+          directName === null || directPhase === null
+            ? null
+            : { name: directName, phase: directPhase },
         paired: pairedName === null ? null : { name: pairedName, online: pairedOnline },
       }),
-    [runsOn, localEnvironmentId, connectedName, connectedOnline, pairedName, pairedOnline],
+    [runsOn, localEnvironmentId, directName, directPhase, pairedName, pairedOnline],
   );
 }

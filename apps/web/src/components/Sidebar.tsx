@@ -148,6 +148,7 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import {
   useEnvironmentIdentities,
   useConnectedEnvironmentIds,
+  useEnvironmentConnectionPhases,
   usePrimaryEnvironmentId,
 } from "../state/environments";
 import { readThreadShell, useProjects, useThreadShells } from "../state/entities";
@@ -2711,28 +2712,23 @@ export default function Sidebar() {
   const machineDirectory = useMachineDirectory(labelEnvironmentIds);
   const moveThreadsToMachine = useMoveThreadsToMachine();
   const forkToMachine = useForkToMachine();
-  // The other machine a row's cloud names, null for work on this computer. A
-  // connected environment names itself; else the pairing report it was read through.
-  const connectedEnvironmentIdSet = useMemo(
-    () => new Set(labelEnvironmentIds),
-    [labelEnvironmentIds],
-  );
+  // The other machine a row's cloud names, null for work on this computer,
+  // resolved the same way as useRemoteMachine.
+  const connectionPhaseById = useEnvironmentConnectionPhases();
   const runsOnFor = (thread: Pick<EnvironmentThreadShell, "environmentId" | "source">) => {
     const runsOn = threadRunsOn(thread);
-    const knownName = environmentLabelById.get(runsOn) ?? null;
+    const directName = environmentLabelById.get(runsOn) ?? null;
+    const directPhase = connectionPhaseById.get(runsOn) ?? null;
     const paired = machineDirectory
       .get(thread.environmentId)
       ?.machines.find((machine) => machine.environmentId === runsOn);
-    // A saved environment this client is not connected to reads as offline,
-    // unless a pairing report says how it is doing.
-    const connectedOnline = connectedEnvironmentIdSet.has(runsOn);
     const machine = resolveRemoteMachine({
       runsOn,
       localEnvironmentId: primaryEnvironmentId,
-      connected:
-        knownName === null || (!connectedOnline && paired !== undefined)
+      direct:
+        directName === null || directPhase === null
           ? null
-          : { name: knownName, online: connectedOnline },
+          : { name: directName, phase: directPhase },
       paired: paired === undefined ? null : { name: paired.name, online: paired.online },
     });
     return { name: machine?.name ?? null, online: machine?.online ?? true };

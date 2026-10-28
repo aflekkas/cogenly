@@ -1,3 +1,4 @@
+import type { EnvironmentConnectionPhase } from "@cogenly/client-runtime/connection";
 import type { EnvironmentId } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -38,69 +39,66 @@ describe("isLocalMachine", () => {
 });
 
 describe("resolveRemoteMachine", () => {
-  const known = { name: "Contabo", online: true };
+  const resolve = (
+    direct: { name: string; phase: EnvironmentConnectionPhase } | null,
+    paired: { name: string; online: boolean } | null,
+    runsOn: EnvironmentId | null = hub,
+  ) => resolveRemoteMachine({ runsOn, localEnvironmentId: mac, direct, paired });
 
   it("badges nothing for work on this computer, even when it is a replica's owner", () => {
     expect(
       resolveRemoteMachine({
         runsOn: mac,
         localEnvironmentId: mac,
-        connected: null,
-        paired: known,
+        direct: null,
+        paired: { name: "MacBook", online: true },
       }),
     ).toBeNull();
   });
 
-  it("badges a hub thread seen from the Mac, and a Mac thread seen from the hub's browser", () => {
+  it("trusts a live direct connection over the pairing report", () => {
     expect(
-      resolveRemoteMachine({
-        runsOn: hub,
-        localEnvironmentId: mac,
-        connected: known,
-        paired: null,
-      }),
-    ).toEqual(known);
+      resolve({ name: "Contabo", phase: "connected" }, { name: "contabo.vps", online: false }),
+    ).toEqual({ name: "Contabo", online: true });
+  });
+
+  it("reads an offline direct connection's machine from the pairing report", () => {
+    expect(
+      resolve({ name: "Contabo", phase: "offline" }, { name: "contabo.vps", online: true }),
+    ).toEqual({ name: "Contabo", online: true });
+    expect(resolve({ name: "Contabo", phase: "error" }, null)).toEqual({
+      name: "Contabo",
+      online: false,
+    });
+  });
+
+  it("defers to the pairing report while reconnecting, and does not flash offline without one", () => {
+    expect(
+      resolve({ name: "Contabo", phase: "reconnecting" }, { name: "Contabo", online: false }),
+    ).toEqual({ name: "Contabo", online: false });
+    expect(resolve({ name: "Contabo", phase: "reconnecting" }, null)).toEqual({
+      name: "Contabo",
+      online: true,
+    });
+  });
+
+  it("names a machine only the pairing report knows, as from the hub's browser", () => {
     expect(
       resolveRemoteMachine({
         runsOn: mac,
         localEnvironmentId: hub,
-        connected: null,
+        direct: null,
         paired: { name: "MacBook", online: false },
       }),
     ).toEqual({ name: "MacBook", online: false });
   });
 
-  it("prefers the connected environment's own name over a pairing report", () => {
-    expect(
-      resolveRemoteMachine({
-        runsOn: studio,
-        localEnvironmentId: mac,
-        connected: { name: "Studio", online: true },
-        paired: { name: "studio.local", online: false },
-      }),
-    ).toEqual({ name: "Studio", online: true });
-  });
-
   it("still shows a cloud for a machine neither source knows yet", () => {
-    expect(
-      resolveRemoteMachine({
-        runsOn: studio,
-        localEnvironmentId: mac,
-        connected: null,
-        paired: null,
-      }),
-    ).toEqual({ name: "Another machine", online: true });
+    expect(resolve(null, null, studio)).toEqual({ name: "Another machine", online: true });
   });
 
   it("badges nothing while the machine is unknown", () => {
-    expect(
-      resolveRemoteMachine({
-        runsOn: null,
-        localEnvironmentId: mac,
-        connected: null,
-        paired: null,
-      }),
-    ).toBeNull();
+    expect(resolve(null, null, null)).toBeNull();
   });
 });
 
