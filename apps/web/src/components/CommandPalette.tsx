@@ -78,6 +78,7 @@ import {
   MonitorIcon,
   MonitorSmartphoneIcon,
   MoonIcon,
+  PuzzleIcon,
   RotateCcwIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -2879,6 +2880,22 @@ function OpenCommandPaletteDialog(props: {
       });
     }
   }
+
+  actionItems.push({
+    kind: "action",
+    value: "action:manage-browser-extensions",
+    searchTerms: ["browser extensions", "chrome extensions", "add-ons", "plugins", "web store"],
+    title: "Manage browser extensions",
+    icon: <PuzzleIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({
+        to: "/settings/integrations",
+        hash: "browser-extensions",
+        replace: pathname === "/settings/integrations",
+        hashScrollIntoView: false,
+      });
+    },
+  });
 
   actionItems.push({
     kind: "action",
