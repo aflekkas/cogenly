@@ -23,6 +23,14 @@ const POSITION_ONLY_PATTERN = /^\d+(?::\d+)?$/;
 
 const INLINE_CODE_DISQUALIFIER_PATTERN = /[\s`]/;
 
+// Documents under a home folder often have spaces in their names
+// (`~/Downloads/Alex x Davin Agreement.pdf`). Spaces count only there, ending in
+// an extension, with no flag or second path, so `/usr/bin/env python3 a.py` and
+// `~/bin/tool --config ~/a.json` stay code.
+const SPACED_HOME_FILE_PATH_PATTERN =
+  /^(?:~|\/Users\/[^/\s]+|\/home\/[^/\s]+)\/[^`\n]*[^\s/]\.[A-Za-z0-9_-]+$/;
+const SPACED_PATH_COMMAND_PATTERN = /\s(?:-|~|\/)/;
+
 const PATH_SEPARATOR_PATTERN = /[\\/]/;
 
 const FILE_EXTENSION_PATTERN = /\.[A-Za-z0-9_-]+$/;
@@ -177,6 +185,13 @@ function looksLikeHostname(segment: string, hasPosition: boolean): boolean {
  */
 export function inlineCodeFilePathCandidate(codeText: string): string | null {
   const trimmed = codeText.trim();
+  if (
+    /\s/.test(trimmed) &&
+    SPACED_HOME_FILE_PATH_PATTERN.test(trimmed) &&
+    !SPACED_PATH_COMMAND_PATTERN.test(trimmed)
+  ) {
+    return trimmed;
+  }
   if (trimmed.length === 0 || INLINE_CODE_DISQUALIFIER_PATTERN.test(trimmed)) return null;
 
   const candidate = isWindowsAbsolutePath(trimmed) ? trimmed : trimmed.replaceAll("\\", "/");

@@ -1,4 +1,5 @@
-import { fileBasename, workspaceRelativeFilePath } from "@cogenly/shared/path";
+import { mediaKindFromPath } from "@cogenly/shared/filePreview";
+import { fileBasename, isAbsolutePath, workspaceRelativeFilePath } from "@cogenly/shared/path";
 import {
   inlineCodeFilePathCandidate,
   isRelativeFilePath,
@@ -17,6 +18,20 @@ export interface MarkdownFileLinkMeta {
   basename: string;
   line?: number;
   column?: number;
+}
+
+/**
+ * A file an agent hands the user, such as `~/Downloads/Agreement.pdf`: a host file
+ * outside the workspace, with an extension and no line. It shows as an attachment
+ * with its size and a download. Code references (inside the workspace, or with a
+ * line) keep the path chip, and images and videos keep their inline preview.
+ */
+export function isReplyFileLink(meta: MarkdownFileLinkMeta): boolean {
+  if (meta.workspaceRelativePath !== null || meta.line !== undefined) return false;
+  if (!isAbsolutePath(meta.filePath) && !meta.filePath.startsWith("~/")) return false;
+  const extensionIndex = meta.basename.lastIndexOf(".");
+  if (extensionIndex <= 0 || extensionIndex === meta.basename.length - 1) return false;
+  return mediaKindFromPath(meta.filePath) === null;
 }
 
 export function shouldOpenMarkdownFileLinkInBrowserByDefault(path: string): boolean {
