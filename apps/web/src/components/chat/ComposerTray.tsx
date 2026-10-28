@@ -32,7 +32,10 @@ export function useComposerTrayDisclosure(
 /** The tray's disclosure glyph, in the same box as a row's icon-xs actions. */
 function Chevron({ open }: { readonly open: boolean }) {
   return (
-    <span aria-hidden className="flex size-7 flex-none items-center justify-center sm:size-6">
+    <span
+      aria-hidden
+      className="pointer-events-none flex size-7 flex-none items-center justify-center sm:size-6"
+    >
       <DisclosureChevron open={open} />
     </span>
   );
@@ -70,6 +73,9 @@ function Header({
   readonly controls?: string | undefined;
 }) {
   const hasTrailing = actions !== undefined || count !== undefined || onToggle !== undefined;
+  // Static header content lets clicks fall through to the toggle. The fading
+  // summary needs it most: below full opacity it paints above the toggle.
+  const passThrough = onToggle !== undefined && "pointer-events-none";
   return (
     <ComposerBanner.Row className={cn("relative", className)} {...props}>
       {onToggle ? (
@@ -85,11 +91,13 @@ function Header({
         />
       ) : null}
       {icon !== undefined ? (
-        <ComposerBanner.Icon className="h-(--composer-banner-icon-column) self-start">
+        <ComposerBanner.Icon
+          className={cn("h-(--composer-banner-icon-column) self-start", passThrough)}
+        >
           {icon}
         </ComposerBanner.Icon>
       ) : null}
-      <ComposerBanner.Content className="whitespace-nowrap">
+      <ComposerBanner.Content className={cn("whitespace-nowrap", passThrough)}>
         <span className="min-w-0 truncate font-medium leading-7 sm:leading-6">{title}</span>
         {summary ? (
           <span
@@ -106,7 +114,9 @@ function Header({
       {hasTrailing ? (
         <ComposerBanner.Actions>
           {actions ? <span className="relative flex items-center gap-1">{actions}</span> : null}
-          {count !== undefined ? <ComposerBanner.Count>{count}</ComposerBanner.Count> : null}
+          {count !== undefined ? (
+            <ComposerBanner.Count className={cn(passThrough)}>{count}</ComposerBanner.Count>
+          ) : null}
           {onToggle ? <Chevron open={open} /> : null}
         </ComposerBanner.Actions>
       ) : null}

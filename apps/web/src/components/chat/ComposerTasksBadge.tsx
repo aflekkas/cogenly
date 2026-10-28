@@ -45,7 +45,10 @@ function TaskSegments({
   if (steps.length <= 1 || steps.length > MAX_TASK_SEGMENTS) return null;
 
   return (
-    <span aria-hidden className={cn("flex w-10 shrink-0 items-center gap-0.5", className)}>
+    <span
+      aria-hidden
+      className={cn("pointer-events-none flex w-10 shrink-0 items-center gap-0.5", className)}
+    >
       {keyedTaskSteps(steps).map(({ key, step }) => (
         <span
           key={key}
