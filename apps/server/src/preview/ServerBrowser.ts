@@ -1475,10 +1475,13 @@ const make = Effect.gen(function* () {
         if (!/^(https?:|chrome-extension:)/i.test(url)) return;
         const realOpener = candidates.find((tab) => tab.page === openerPage);
         const extensionId = /^chrome-extension:\/\/([^/]+)/.exec(url)?.[1];
-        const surfaces = candidates
+        const surfaces = [...tabs.values()]
           .filter(
             (tab) =>
+              !tab.closing &&
               tab.extensionSurface &&
+              tabs.get(tabKey(tab.threadId, tab.extensionSurface.hostTabId))?.page.context() ===
+                context &&
               (extensionId === undefined || tab.extensionSurface.extensionId === extensionId),
           )
           .toSorted((a, b) => b.usedAt - a.usedAt);
