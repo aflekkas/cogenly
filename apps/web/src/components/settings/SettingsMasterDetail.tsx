@@ -1,9 +1,12 @@
 import { PlusIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useLayoutEffect, useRef } from "react";
 
+import { observeResize } from "../../lib/observeResize";
 import { cn } from "../../lib/utils";
+import { modeSwitchCrossfadeRunning } from "../sidebar/modes/modeSwitchMotion";
 import { ScrollArea } from "../ui/scroll-area";
 import { SettingsGroup } from "./SettingsGroup";
+import { canAnimate, prefersReducedMotion, settingsMotionTiming } from "./settingsMotion";
 
 /**
  * The card's tallest footprint per size. `page` fills a page of its own
@@ -27,13 +30,18 @@ export function SettingsMasterDetail({
   size,
   list,
   detail,
+  detailKey,
 }: {
   readonly size: keyof typeof SETTINGS_MASTER_DETAIL_HEIGHT;
   readonly list: ReactNode;
   readonly detail: ReactNode;
+  /** The selected entry's id; changing it fades the new detail in. */
+  readonly detailKey: string | null;
 }) {
+  const { cardRef, detailRef } = useDetailSwapMotion(detailKey);
   return (
     <SettingsGroup
+      ref={cardRef}
       divided={false}
       // A flex row, not a grid: a single-line flex container clamps its
       // stretched panes to the max height, so each pane scrolls on its own.
@@ -51,11 +59,63 @@ export function SettingsMasterDetail({
           <div className="divide-y divide-border/50">{list}</div>
         </ScrollArea>
       </div>
-      <div className="min-w-0 @min-[48rem]/settings-page:min-h-0 @min-[48rem]/settings-page:flex-1">
+      <div
+        ref={detailRef}
+        className="min-w-0 @min-[48rem]/settings-page:min-h-0 @min-[48rem]/settings-page:flex-1"
+      >
         {detail}
       </div>
     </SettingsGroup>
   );
+}
+
+/**
+ * Selecting another entry fades its detail in (fast token, opacity only) while
+ * the card eases from its old height to the new one (base token), so the
+ * sections below it glide instead of jumping. Nothing plays on first render or
+ * inside a mode switch's crossfade; reduced motion keeps only the fade.
+ */
+function useDetailSwapMotion(detailKey: string | null) {
+  const cardRef = useRef<HTMLDivElement>(null);
+  const detailRef = useRef<HTMLDivElement>(null);
+  // The card's height as last laid out, which is the swap's starting height:
+  // the resize observer reports after layout, so it still holds the old one
+  // when the new detail commits.
+  const laidOutHeightRef = useRef<number | null>(null);
+  const previousKeyRef = useRef(detailKey);
+
+  useLayoutEffect(() => {
+    const card = cardRef.current;
+    if (!card) return;
+    return observeResize(card, () => {
+      laidOutHeightRef.current = card.getBoundingClientRect().height;
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (previousKeyRef.current === detailKey) return;
+    previousKeyRef.current = detailKey;
+    const card = cardRef.current;
+    const detailPane = detailRef.current;
+    if (!card || !detailPane || !canAnimate(card) || modeSwitchCrossfadeRunning()) return;
+    const fade = detailPane.animate([{ opacity: 0 }, { opacity: 1 }], settingsMotionTiming("fast"));
+    const from = laidOutHeightRef.current;
+    const to = card.getBoundingClientRect().height;
+    const resize =
+      !prefersReducedMotion() && from !== null && Math.abs(from - to) >= 1
+        ? card.animate(
+            [{ height: `${from}px` }, { height: `${to}px` }],
+            settingsMotionTiming("base"),
+          )
+        : null;
+    // A quicker next selection starts from wherever this one has got to.
+    return () => {
+      fade.cancel();
+      resize?.cancel();
+    };
+  }, [detailKey]);
+
+  return { cardRef, detailRef };
 }
 
 /**
@@ -147,7 +207,7 @@ export function SettingsMasterDetailAddRow({
     <button
       type="button"
       disabled={disabled}
-      className="flex w-full cursor-pointer items-center gap-3 px-3 py-3 text-left text-sm text-muted-foreground transition-colors duration-(--motion-duration-fast) ease-out outline-none hover:bg-muted/25 hover:text-foreground focus-visible:bg-muted/25 focus-visible:text-foreground disabled:pointer-events-none disabled:opacity-60 sm:px-4"
+      className="flex w-full cursor-pointer items-center gap-3 px-3 py-3 text-left text-sm text-muted-foreground transition-colors duration-(--motion-duration-fast) ease-out outline-none hover:bg-muted/25 hover:text-foreground focus-visible:bg-muted/25 focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:pointer-events-none disabled:opacity-60 sm:px-4"
       onClick={onClick}
     >
       <PlusIcon className="size-4 shrink-0" />

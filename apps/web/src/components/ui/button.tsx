@@ -43,6 +43,9 @@ const buttonVariants = cva(
         // keycaps nearly flush so their edge is the control's edge.
         keys: "[--control-radius:var(--control-radius-xs)] h-8 gap-1 px-px sm:h-7",
         lg: "h-10 px-[calc(--spacing(3.5)-1px)] sm:h-9",
+        // A quiet control set in a row's metadata line (a keybinding's when
+        // clause): micro's height at the 12px, normal-weight meta scale.
+        meta: "[--control-radius:var(--control-radius-2xs)] h-5 gap-1 px-[calc(--spacing(1.5)-1px)] text-xs font-normal sm:text-xs [&_svg:not([class*='size-'])]:size-3 sm:[&_svg:not([class*='size-'])]:size-3",
         micro:
           "[--control-radius:var(--control-radius-2xs)] h-5 gap-1 px-[calc(--spacing(1.5)-1px)] text-[11px] sm:text-[11px] [&_svg:not([class*='size-'])]:size-3 sm:[&_svg:not([class*='size-'])]:size-3",
         sm: "[--control-radius:var(--control-radius-sm)] h-8 gap-1.5 px-[calc(--spacing(2.5)-1px)] sm:h-7",

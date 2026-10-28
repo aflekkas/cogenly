@@ -829,16 +829,16 @@ function WhenClauseControl({
       <PopoverTrigger
         // Shares the title line or wraps under it, truncating only on a line of
         // its own; the full clause is in its tooltip.
-        render={<Button variant="ghost-muted" size="micro" className="max-w-full min-w-0" />}
+        render={<Button variant="ghost-muted" size="meta" className="max-w-full min-w-0" />}
         title={summary ?? `when ${expression}`}
         aria-label={`Edit when clause for ${label}`}
       >
         {summary !== null ? (
-          <span className="truncate font-normal">{summary}</span>
+          <span className="truncate">{summary}</span>
         ) : (
           <>
-            <span className="shrink-0 font-normal">when</span>
-            <span className="truncate font-mono font-normal">{expression}</span>
+            <span className="shrink-0">when</span>
+            <span className="truncate font-mono">{expression}</span>
           </>
         )}
         <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />

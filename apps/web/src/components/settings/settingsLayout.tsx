@@ -992,6 +992,36 @@ export function SettingsDenseRow({
   );
 }
 
+/**
+ * One line of a short nested list inside a `SettingsGroup variant="inset"`
+ * (a machine's macOS grants): its name, then its status and action on the
+ * trailing edge, where every settings status sits. The inset group divides
+ * consecutive rows.
+ */
+export function SettingsInsetRow({
+  title,
+  control,
+  className,
+  ...rowProps
+}: Omit<ComponentPropsWithoutRef<"div">, "title"> & {
+  title: ReactNode;
+  control?: ReactNode;
+}) {
+  return (
+    <div
+      {...rowProps}
+      data-slot="settings-inset-row"
+      className={cn(
+        "flex min-h-11 items-center justify-between gap-3 px-3 py-2 sm:px-4",
+        className,
+      )}
+    >
+      <span className="min-w-0 truncate text-sm text-foreground">{title}</span>
+      {control ? <span className="flex shrink-0 items-center gap-2">{control}</span> : null}
+    </div>
+  );
+}
+
 /** Divides consecutive `SettingsDenseRow`s like a card's rows; other children sit between them undivided. */
 export function SettingsDenseList({ className, ...props }: ComponentProps<"div">) {
   return (

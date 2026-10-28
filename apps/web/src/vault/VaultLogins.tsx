@@ -106,6 +106,7 @@ export function VaultLoginsSection(props: {
       ) : (
         <SettingsMasterDetail
           size="section"
+          detailKey={selected?.id ?? null}
           list={
             <>
               {props.logins.map((item) => (

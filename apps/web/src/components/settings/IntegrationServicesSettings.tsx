@@ -109,6 +109,7 @@ export function IntegrationServicesSettings() {
       ) : (
         <SettingsMasterDetail
           size="section"
+          detailKey={selected?.integration.id ?? null}
           list={
             <>
               {integrations.map((summary) => (

@@ -14,7 +14,7 @@ import {
   useRequestComputerUsePermission,
 } from "../../computerUse/useComputerUse";
 import { SettingsGroup } from "./SettingsGroup";
-import { SettingsRow } from "./settingsLayout";
+import { SettingsInsetRow, SettingsRow } from "./settingsLayout";
 import { SettingsStatusBadge } from "./SettingsStatus";
 import { useSettingsScope } from "./SettingsScopeContext";
 
@@ -81,17 +81,14 @@ function ComputerUsePermissionsRow({
   return (
     <SettingsRow id="computer-use-permissions" title="macOS permissions" description={description}>
       {computerUseAvailable(status) ? (
-        // One line per grant, like a nested list: its name, then its status
-        // and action on the trailing edge, where every settings status sits.
+        // One line per grant, like a nested list.
         <SettingsGroup variant="inset" className="mt-2">
           {status.permissions.map((entry) => (
-            <div
+            <SettingsInsetRow
               key={entry.permission}
-              className="flex min-h-11 items-center justify-between gap-3 px-3 py-2 sm:px-4"
-            >
-              <span className="min-w-0 truncate text-sm text-foreground">{entry.title}</span>
-              <span className="flex shrink-0 items-center gap-2">
-                {entry.grant === "granted" ? (
+              title={entry.title}
+              control={
+                entry.grant === "granted" ? (
                   <SettingsStatusBadge tone="success">Granted</SettingsStatusBadge>
                 ) : (
                   <>
@@ -106,9 +103,9 @@ function ComputerUsePermissionsRow({
                       Open System Settings
                     </Button>
                   </>
-                )}
-              </span>
-            </div>
+                )
+              }
+            />
           ))}
         </SettingsGroup>
       ) : null}

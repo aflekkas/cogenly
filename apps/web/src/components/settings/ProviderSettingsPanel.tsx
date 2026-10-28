@@ -944,6 +944,7 @@ export function EnvironmentProviderSettings({
         ) : null}
         <SettingsMasterDetail
           size="page"
+          detailKey={selectedRow?.instanceId ?? null}
           list={
             <>
               {rows.map((row) => renderProviderInstance(row, "list"))}
