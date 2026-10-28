@@ -13,7 +13,7 @@ import {
   type AgentMutationResult,
   type EnvironmentId,
   type OrchestrationV2ServerCommand,
-  type ServerProvider,
+  ThreadMachineCatalog,
   type ThreadId,
   type NodeId,
   ThreadRemoteError,
@@ -43,7 +43,7 @@ export type RemoteDelegation = (
 
 export type RemoteMachineCatalog = (
   machine: EnvironmentId,
-) => Effect.Effect<Option.Option<ReadonlyArray<ServerProvider>>, ThreadRemoteError>;
+) => Effect.Effect<Option.Option<typeof ThreadMachineCatalog.success.Type>, ThreadRemoteError>;
 
 export type RemoteTaskPending = (
   threadId: ThreadId,
