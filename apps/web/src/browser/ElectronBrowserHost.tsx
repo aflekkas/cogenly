@@ -10,7 +10,7 @@ import { primaryEnvironmentIdAtom } from "~/state/primaryEnvironment";
 import { isElectron } from "~/env";
 import { useClientSettingsHydrated } from "~/hooks/useSettings";
 import { useTheme } from "~/hooks/useTheme";
-import { useActivePreviewSessions } from "~/previewStateStore";
+import { previewTabSessions, useActivePreviewSessions } from "~/previewStateStore";
 import { previewEnvironment } from "~/state/preview";
 import { useEnvironmentScope } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -33,9 +33,10 @@ export function ElectronBrowserHost() {
     () =>
       Object.entries(previewByThreadKey).flatMap(([threadKey, previewState]) => {
         const threadRef = parseScopedThreadKey(threadKey);
-        // Server tabs of other environments stream; this desktop's own server tabs render here.
+        // Server tabs of other environments stream; this desktop's own server tabs render
+        // here. Extension popups and side panels always stream (ExtensionSurface).
         return threadRef
-          ? Object.values(previewState.sessions)
+          ? previewTabSessions(previewState.sessions)
               .filter(
                 (snapshot) =>
                   snapshot.runtime !== "server" ||

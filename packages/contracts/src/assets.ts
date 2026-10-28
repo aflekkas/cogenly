@@ -22,6 +22,10 @@ export const AssetResource = Schema.Union([
   Schema.TaggedStruct("media-file", {
     threadId: ThreadId,
     path: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH)),
+    /** `attachment` serves any regular file as an octet-stream download, such
+        as a document an agent handed the user. Without it only previewable
+        types are served, inline. */
+    disposition: Schema.optionalKey(Schema.Literal("attachment")),
   }),
   // A workspace file named by a draft that has no thread yet. The draft names
   // its workspace root explicitly instead of resolving one from a thread.
