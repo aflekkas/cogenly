@@ -8,6 +8,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 
 import type { RateLimitStreak } from "./healthChecks.ts";
 
@@ -41,7 +42,11 @@ export const readRateLimitStreaks = (now: DateTime.Utc) =>
           json_extract(i.payload_json, '$.failure.limitKind') = 'rate_limit'
           OR json_extract(i.payload_json, '$.failure.code') = 'rateLimitExceeded'
         )
-      GROUP BY r.provider_instance_id`;
+      GROUP BY r.provider_instance_id`.pipe(
+      // A health probe on a large database must never hold the writer: a timed-out
+      // probe cannot cancel its statement, so every write would queue behind it.
+      NodeSqliteClient.readOnly,
+    );
     return rows.flatMap((row) =>
       Option.match(DateTime.make(row.latest_at), {
         onNone: () => [],

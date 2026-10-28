@@ -114,6 +114,10 @@ const make = Effect.gen(function* () {
           );
           if (batch.cursor.events === batch.after.events && batch.cursor.meta === batch.after.meta)
             return false;
+          // Size batches by this machine's own work. The peer round trip is
+          // network plus the receiver's apply, which paces itself; counting it
+          // here shrank every batch to one event on a remote link.
+          const readMs = (yield* Clock.currentTimeMillis) - batchStarted;
           const result = yield* machines
             .call(peer, ThreadReplicationApply, batch)
             .pipe(Effect.timeout("30 seconds"));
@@ -124,10 +128,7 @@ const make = Effect.gen(function* () {
           )
             return yield* new ThreadReplicationError({ reason: "invalid-cursor" });
           yield* replication.acknowledge(peer, batch.cursor);
-          yield* budget.completed(
-            Math.max(batch.events.length, batch.meta.length),
-            (yield* Clock.currentTimeMillis) - batchStarted,
-          );
+          yield* budget.completed(Math.max(batch.events.length, batch.meta.length), readMs);
           return true;
         }),
       );

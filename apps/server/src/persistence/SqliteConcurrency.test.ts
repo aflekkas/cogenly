@@ -84,6 +84,76 @@ it.live("reader queries finish while a writer transaction owns its connection", 
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
+it.live("an interactive write runs before a queued backlog of background writes", () =>
+  Effect.gen(function* () {
+    const { sql } = yield* database;
+    const entered = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    const finished: Array<string> = [];
+    // Background work (sync replication, say) holds the writer...
+    const holder = yield* sql
+      .withTransaction(
+        Effect.gen(function* () {
+          yield* sql`UPDATE items SET value = value + 1`;
+          yield* Deferred.succeed(entered, undefined);
+          yield* Deferred.await(release);
+        }),
+      )
+      .pipe(Effect.forkChild);
+    yield* Deferred.await(entered);
+    // ...with a long backlog queued behind it before the user acts.
+    const backlog = yield* Effect.forEach(Array.from({ length: 20 }, (_, index) => index), (index) =>
+      sql
+        .withTransaction(sql`UPDATE items SET value = value + 1`)
+        .pipe(
+          Effect.tap(() => Effect.sync(() => finished.push(`background-${index}`))),
+          Effect.forkChild({ startImmediately: true }),
+        ),
+    );
+    const stop = yield* sql
+      .withTransaction(sql`UPDATE items SET value = value + 100`)
+      .pipe(
+        Effect.tap(() => Effect.sync(() => finished.push("interactive"))),
+        NodeSqliteClient.interactive,
+        Effect.forkChild({ startImmediately: true }),
+      );
+    yield* Deferred.succeed(release, undefined);
+    yield* Fiber.join(holder);
+    yield* Fiber.join(stop);
+    yield* Fiber.joinAll(backlog);
+    expect(finished[0]).toBe("interactive");
+    expect(finished).toHaveLength(21);
+    expect((yield* sql<{ value: number }>`SELECT value FROM items`)[0]?.value).toBe(121);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.live("a waiter interrupted while queued leaves the writer usable", () =>
+  Effect.gen(function* () {
+    const { sql } = yield* database;
+    const entered = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    const holder = yield* sql
+      .withTransaction(
+        Effect.gen(function* () {
+          yield* sql`UPDATE items SET value = 1`;
+          yield* Deferred.succeed(entered, undefined);
+          yield* Deferred.await(release);
+        }),
+      )
+      .pipe(Effect.forkChild);
+    yield* Deferred.await(entered);
+    const abandoned = yield* sql`UPDATE items SET value = 50`.pipe(
+      NodeSqliteClient.interactive,
+      Effect.forkChild({ startImmediately: true }),
+    );
+    yield* Fiber.interrupt(abandoned);
+    yield* Deferred.succeed(release, undefined);
+    yield* Fiber.join(holder);
+    yield* sql`UPDATE items SET value = value + 1`;
+    expect((yield* sql<{ value: number }>`SELECT value FROM items`)[0]?.value).toBe(2);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
 it.live("writer lock waits leave the main event loop free and retry after release", () =>
   Effect.gen(function* () {
     const { sql, external } = yield* database;

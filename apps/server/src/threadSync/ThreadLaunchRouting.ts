@@ -54,6 +54,7 @@ import * as Option from "effect/Option";
 import type * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 
 import type * as ServerConfig from "../config.ts";
 import * as Machines from "../machines/Machines.ts";
@@ -128,15 +129,24 @@ const make = Effect.gen(function* () {
   const scheduler = yield* Scheduler.Scheduler;
   const crypto = yield* Crypto.Crypto;
   const creating = new Set<string>();
-  const abandon = (childThreadId: ThreadId, target: EnvironmentId, commandId: CommandId) =>
+  const abandon = (
+    childThreadId: ThreadId,
+    target: EnvironmentId,
+    commandId: CommandId,
+    parentThreadId: ThreadId,
+  ) =>
     Effect.gen(function* () {
       // A committed parent link wins, including a crash just after attachment.
+      // The event fallback reads only the parent's stream: an unscoped scan of
+      // the whole event log held the writer for seconds on every scheduler tick.
       const attached = yield* sql`SELECT 1 FROM orchestration_v2_projection_subagents
         WHERE child_thread_id = ${childThreadId} AND origin = 'app_owned'
         UNION ALL SELECT 1 FROM orchestration_events
-        WHERE event_type = 'subagent.updated'
+        WHERE stream_id = ${parentThreadId} AND event_type = 'subagent.updated'
           AND json_extract(payload_json, '$.childThreadId') = ${childThreadId}
-          AND json_extract(payload_json, '$.origin') = 'app_owned' LIMIT 1`;
+          AND json_extract(payload_json, '$.origin') = 'app_owned' LIMIT 1`.pipe(
+        NodeSqliteClient.readOnly,
+      );
       if (attached.length === 0)
         yield* routing.callMachine(
           target,
@@ -172,7 +182,8 @@ const make = Effect.gen(function* () {
           readonly child_thread_id: string;
           readonly target: string;
           readonly command_id: string;
-        }>`SELECT child_thread_id, target, command_id FROM remote_delegation_intents`;
+          readonly parent_thread_id: string;
+        }>`SELECT child_thread_id, target, command_id, parent_thread_id FROM remote_delegation_intents`;
         yield* Effect.forEach(
           abandoned.filter((row) => !creating.has(row.child_thread_id)),
           (row) =>
@@ -180,6 +191,7 @@ const make = Effect.gen(function* () {
               ThreadId.make(row.child_thread_id),
               EnvironmentIdSchema.make(row.target),
               CommandId.make(row.command_id),
+              ThreadId.make(row.parent_thread_id),
             ),
           { concurrency: 8, discard: true },
         );
@@ -624,7 +636,9 @@ const make = Effect.gen(function* () {
         );
         return attached;
       }).pipe(
-        Effect.onExit(() => abandon(childThreadId, machine, command.commandId)),
+        Effect.onExit(() =>
+          abandon(childThreadId, machine, command.commandId, command.parentThreadId),
+        ),
         Effect.ensuring(
           Effect.sync(() => {
             creating.delete(childThreadId);
