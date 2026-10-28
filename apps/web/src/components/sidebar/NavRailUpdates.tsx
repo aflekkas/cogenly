@@ -35,7 +35,7 @@ import { isElectron } from "~/env";
 import { useNowMinute } from "~/hooks/useNowMinute";
 import { cn } from "~/lib/utils";
 import { observeVisibleAnimation } from "~/lib/visibleAnimation";
-import { useCogenlyReleases } from "~/state/cogenlyReleases";
+import { refreshCogenlyReleases, useCogenlyReleases } from "~/state/cogenlyReleases";
 import { useDesktopUpdateState } from "~/state/desktopUpdate";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
 import { serverEnvironment } from "~/state/server";
@@ -87,6 +87,7 @@ import {
   compareReleaseVersions,
   releaseHistory,
   releasesBetween,
+  whatsNewReleases,
 } from "./releaseNotes.logic";
 import {
   checkForLocalUpdate,
@@ -623,6 +624,10 @@ export function NavRailUpdates({
   // Pinned by a click (or by using a control inside); a hover preview is not.
   const [pinned, setPinned] = useState(false);
   const popupRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // Set when Escape closes the popover and focus goes back to the trigger, so
+  // that focus does not preview it again. Cleared once the trigger loses focus.
+  const escapedRef = useRef(false);
   // The popover's main list, or the release history sub-view.
   const [view, setView] = useState<"updates" | "releases">("updates");
   const [confirmingAll, setConfirmingAll] = useState(false);
@@ -771,6 +776,8 @@ export function NavRailUpdates({
   const popoverOpen = open || countdown;
 
   const releasesSnapshot = useCogenlyReleases(popoverOpen);
+  // Loaded once up front too, so a first open already has What's new.
+  useEffect(() => refreshCogenlyReleases(), []);
   const releases = releasesSnapshot.releases ?? [];
   const installedVersion = appRow.currentVersion;
   // What the app's pending update brings, while there is one to take.
@@ -785,8 +792,7 @@ export function NavRailUpdates({
       (release) => !incomingReleases.some((incoming) => incoming.version === release.version),
     ),
   ];
-  const notesReleases =
-    incomingReleases.length > 0 ? incomingReleases : installedHistory.slice(0, 1);
+  const notesReleases = whatsNewReleases(incomingReleases, installedHistory, installedVersion);
   const releaseTone = (release: CogenlyRelease): ReleaseTone => {
     if (incomingReleases.includes(release)) return "available";
     if (release.version === installedVersion) return "installed";
@@ -1036,6 +1042,10 @@ export function NavRailUpdates({
           // The "Update all" confirmation sits outside this popover, so its
           // clicks and Escape read as outside ones. They belong to the dialog.
           if (confirmingAll) return;
+          if (details.reason === "escape-key") {
+            escapedRef.current = true;
+            triggerRef.current?.focus();
+          }
           closePopover();
         }}
       >
@@ -1045,6 +1055,7 @@ export function NavRailUpdates({
           closeDelay={HOVER_CLOSE_DELAY_MS}
           render={
             <button
+              ref={triggerRef}
               type="button"
               aria-label={updateCount > 0 ? `Updates, ${updateLabel}` : "Updates"}
               className={buttonClassName(pinned || countdown)}
@@ -1052,11 +1063,17 @@ export function NavRailUpdates({
                 // A click on an open preview pins it (the popover may not report it).
                 if (open && !pinned) setPinned(true);
               }}
+              // The release notes load as the pointer heads for the button, so
+              // What's new is there when the popover opens instead of arriving after.
+              onPointerEnter={() => refreshCogenlyReleases()}
               onFocus={(event) => {
+                refreshCogenlyReleases();
+                if (escapedRef.current) return;
                 // Keyboard focus previews it, as hovering does.
                 if (!popoverOpen && event.currentTarget.matches(":focus-visible")) setOpen(true);
               }}
               onBlur={(event) => {
+                escapedRef.current = false;
                 if (pinned || popupRef.current?.contains(event.relatedTarget as Node | null)) {
                   return;
                 }
@@ -1152,19 +1169,23 @@ export function NavRailUpdates({
                     </div>
                   </DisclosurePanel>
                 </div>
-                {hasNotes ? (
-                  <>
-                    <Separator />
-                    <WhatsNewNotes
-                      // A new set of notes (the update arrived, or was installed) fades in anew.
-                      key={notesReleases.map((release) => release.version).join(",")}
-                      releases={notesReleases}
-                      pending={incomingReleases.length > 0}
-                      hasEarlier={history.length > notesReleases.length}
-                      onShowHistory={showReleases}
-                    />
-                  </>
-                ) : null}
+                {/* Notes are prefetched before the popover opens; ones that still
+                  arrive later grow in rather than pushing the rows down at once. */}
+                <DisclosurePanel open={hasNotes}>
+                  {hasNotes ? (
+                    <>
+                      <Separator />
+                      <WhatsNewNotes
+                        // A new set of notes (the update arrived, or was installed) fades in anew.
+                        key={notesReleases.map((release) => release.version).join(",")}
+                        releases={notesReleases}
+                        pending={incomingReleases.length > 0}
+                        hasEarlier={history.length > notesReleases.length}
+                        onShowHistory={showReleases}
+                      />
+                    </>
+                  ) : null}
+                </DisclosurePanel>
                 {groups.length > 0 || offline.length > 0 || connected.length === 0 ? (
                   <Separator />
                 ) : null}

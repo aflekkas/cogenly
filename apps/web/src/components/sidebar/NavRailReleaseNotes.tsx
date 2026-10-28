@@ -104,13 +104,17 @@ export function WhatsNewNotes({
     <section aria-label="What's new" className="reveal-motion flex flex-col gap-1.25 pt-2 pb-2.5">
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-2xs font-medium text-muted-foreground select-none">
-          What's new
+          {/* An update's notes say so, so they never read as the running version's. */}
           {single ? (
             <>
-              {" in "}
+              {pending ? "Coming in " : "What's new in "}
               <span className="text-foreground tabular-nums">{single.version}</span>
             </>
-          ) : null}
+          ) : pending ? (
+            "Coming in this update"
+          ) : (
+            "What's new"
+          )}
         </span>
         {single ? (
           day ? (
