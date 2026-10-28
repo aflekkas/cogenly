@@ -42,6 +42,8 @@ import {
   threadProjectFolderId,
 } from "./projectLabels.logic";
 import { HeroProjectSuffix } from "./HeroProjectSuffix";
+import { hasProjectNamed, orderProjectsByUse, rankProjectMatches } from "./projectOrder.logic";
+import { useProjectLastUsedAt } from "./useProjectLastUsed";
 import { HERO_INLINE_ICON_STYLE, ProjectFolderIcon } from "./ProjectFolderMark";
 import { ProjectPickerRow } from "./ProjectPickerRow";
 import { useComposerProjectFolder } from "./useComposerProjectFolder";
@@ -50,7 +52,7 @@ import { pickNoProjectForWork } from "./workNoProjectPicks";
 import { HeroName, HeroPickerButton } from "../components/chat/HeroHeadline";
 import { WorkHeroCrumbText } from "../components/chat/WorkHeroSentence";
 
-type ProjectOption =
+type ProjectOption = (
   | {
       readonly kind: "project";
       readonly key: string;
@@ -61,7 +63,11 @@ type ProjectOption =
   /** "No project" while in none; "Remove from project", the way out, while in one. */
   | { readonly kind: "none"; readonly key: "none"; readonly label: string }
   | { readonly kind: "new"; readonly key: "new" }
-  | { readonly kind: "create"; readonly key: "create"; readonly name: string };
+  | { readonly kind: "create"; readonly key: "create"; readonly name: string }
+) & {
+  /** A hairline above the row, where a new group starts. */
+  readonly divider: boolean;
+};
 
 /**
  * A project chip for a composer toolbar, inside a collapsible `ComposerControl`: the
@@ -214,39 +220,60 @@ export function ComposerProjectPicker(props: {
     () => projectLabelsOn(directory.active, environmentId),
     [directory.active, environmentId],
   );
+  const lastUsedAt = useProjectLastUsedAt();
+  const noneLabel = current === null ? "No project" : "Remove from project";
   const options = useMemo((): ProjectOption[] => {
-    // "No project" is a choice like any project, so it leads the list;
-    // creating one is the lone action at the end. For Work it moves the draft
-    // to a repository in no project (DraftHeroHeadline).
-    const needle = query.trim().toLowerCase();
-    const result: ProjectOption[] =
-      needle === ""
-        ? [
-            {
-              kind: "none",
-              key: "none",
-              label: current === null ? "No project" : "Remove from project",
-            },
-          ]
-        : [];
-    for (const entry of projects) {
-      if (needle !== "" && !entry.label.name.toLowerCase().includes(needle)) continue;
+    // The projects most likely to be picked lead: recently used, then the
+    // rest by name. "No project" is not a project, so it sits apart at the
+    // end with creating one. For Work it moves the draft to a repository in
+    // no project (DraftHeroHeadline).
+    const searching = query.trim() !== "";
+    const { recent, rest } = orderProjectsByUse(projects, lastUsedAt);
+    const result: ProjectOption[] = [];
+    const pushProject = (entry: EnvironmentProjectLabel, divider: boolean) =>
       result.push({
         kind: "project",
         key: entry.key,
         id: entry.label.id,
         name: entry.label.name,
         project: entry,
+        divider,
       });
+    if (searching) {
+      for (const entry of rankProjectMatches([...recent, ...rest], query))
+        pushProject(entry, false);
+    } else {
+      for (const entry of recent) pushProject(entry, false);
+      rest.forEach((entry, index) => pushProject(entry, index === 0 && recent.length > 0));
+    }
+    const offersNone =
+      !searching || rankProjectMatches([{ label: { name: noneLabel } }], query).length > 0;
+    if (offersNone) {
+      result.push({ kind: "none", key: "none", label: noneLabel, divider: result.length > 0 });
     }
     if (canCreate) {
-      if (needle === "") result.push({ kind: "new", key: "new" });
-      else if (!projects.some((entry) => entry.label.name.toLowerCase() === needle)) {
-        result.push({ kind: "create", key: "create", name: query.trim() });
+      const divider = !offersNone && result.length > 0;
+      if (!searching) result.push({ kind: "new", key: "new", divider });
+      else if (!hasProjectNamed(projects, query)) {
+        result.push({ kind: "create", key: "create", name: query.trim(), divider });
       }
     }
     return result;
-  }, [canCreate, current, projects, query]);
+  }, [canCreate, lastUsedAt, noneLabel, projects, query]);
+  const chosenOption = useMemo(
+    (): ProjectOption =>
+      current === null
+        ? { kind: "none", key: "none", label: noneLabel, divider: false }
+        : {
+            kind: "project",
+            key: current.key,
+            id: current.label.id,
+            name: current.label.name,
+            project: current,
+            divider: false,
+          },
+    [current, noneLabel],
+  );
 
   const isHeadline = props.appearance === "headline";
   const isTray = props.appearance === "tray";
@@ -354,7 +381,8 @@ export function ComposerProjectPicker(props: {
       items={options}
       filteredItems={options}
       autoHighlight
-      value={null}
+      // The current pick, so the list opens with it highlighted.
+      value={chosenOption}
       open={open}
       onOpenChange={(next, details) => {
         if (!next && details.reason === "item-press") return;
@@ -435,8 +463,7 @@ export function ComposerProjectPicker(props: {
               value={option}
               hideIndicator
               tone={option.kind === "new" || option.kind === "create" ? "action" : "default"}
-              // One hairline sets the create action apart from the choices.
-              divider={(option.kind === "new" || option.kind === "create") && options.length > 1}
+              divider={option.divider}
               disabled={busy || (option.kind === "create" && option.name.length > 200)}
             >
               <ProjectOptionRow option={option} chosen={isChosen(option)} />

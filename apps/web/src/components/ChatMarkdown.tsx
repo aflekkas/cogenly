@@ -12,7 +12,8 @@ import {
   extractMarkdownLinkHrefs,
   inlineCodeFilePathCandidate,
 } from "@cogenly/shared/markdownLinks";
-import { isAbsolutePath } from "@cogenly/shared/path";
+import { fileBasename, isAbsolutePath } from "@cogenly/shared/path";
+import { formatAttachmentSize } from "@cogenly/client-runtime/state/attachments";
 import { AuthFilesystemReadScope, AuthOrchestrationOperateScope } from "@cogenly/contracts";
 import {
   CHAT_MARKDOWN_REMARK_PLUGINS,
@@ -26,6 +27,7 @@ import {
 } from "@cogenly/shared/composerContextClipboard";
 import {
   CodeIcon,
+  DownloadIcon,
   FileSpreadsheetIcon,
   FileTextIcon,
   GlobeIcon,
@@ -69,7 +71,11 @@ import {
 } from "@cogenly/client-runtime/markdown-images";
 import { mediaFileReference, mediaUrlReference } from "@cogenly/client-runtime/media-reference";
 import { MISSING_FILE_ACCESS_MESSAGE } from "@cogenly/client-runtime/state/assets";
-import { mediaKindFromPath, mediaMimeTypeFromExtension } from "@cogenly/shared/filePreview";
+import {
+  filePreviewKind,
+  mediaKindFromPath,
+  mediaMimeTypeFromExtension,
+} from "@cogenly/shared/filePreview";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import React, {
@@ -139,6 +145,8 @@ import { MediaActions, type MediaActionSource } from "./media/MediaActions";
 import { resolveProtocolRelativeMediaUrl } from "./media/mediaContent";
 import { WorkspaceEntryTooltip } from "./chat/WorkspaceEntryIcon";
 import { FileTagChipContent } from "./chat/FileTagChip";
+import { FileChip } from "./contextChipParts";
+import { useFileMetadata } from "../hooks/useFileMetadata";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import {
   revealInFileExplorerLabelForKind,
@@ -179,6 +187,7 @@ import {
   serializeTableElementToMarkdown,
 } from "../markdown-clipboard";
 import {
+  isReplyFileLink,
   resolveInlineCodeFileLinkMeta,
   resolveMarkdownFileLinkMeta,
   rewriteMarkdownFileUriHref,
@@ -188,7 +197,7 @@ import {
 import { isMarkdownFileLinkLabel } from "@cogenly/shared/markdownLinks";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
-import { useAssetUrlRefresh, useAssetUrlState } from "../assets/assetUrls";
+import { resolveAssetUrl, useAssetUrlRefresh, useAssetUrlState } from "../assets/assetUrls";
 import { cn } from "../lib/utils";
 import { useRightPanelStore } from "../rightPanelStore";
 import { useProjects } from "../state/entities";
@@ -2202,6 +2211,141 @@ function areMarkdownFileLinkPropsEqual(
   );
 }
 
+/** Runs a file action from a chip or its menu and reports a failure as a toast. */
+function runMarkdownFileAction(
+  action: () => Promise<AtomCommandResult<unknown, unknown> | void>,
+  context: { operation: string; target: string; failureTitle: string },
+): void {
+  const report = (cause: unknown, error: unknown) => {
+    reportMarkdownActionFailure({ operation: context.operation, target: context.target }, cause);
+    toastManager.add(
+      stackedThreadToast({
+        type: "error",
+        title: context.failureTitle,
+        description: error instanceof Error ? error.message : "An error occurred.",
+      }),
+    );
+  };
+  void action().then(
+    (result) => {
+      if (!result || result._tag === "Success" || isAtomCommandInterrupted(result)) return;
+      report(result.cause, squashAtomCommandFailure(result));
+    },
+    (cause: unknown) => report(cause, cause),
+  );
+}
+
+/**
+ * A file an agent handed the user (see `isReplyFileLink`), shown with the same
+ * chip as a file the user attached, plus a download button. Previewable files
+ * open in the files panel; anything else downloads from the chip itself.
+ */
+const MarkdownReplyFile = memo(function MarkdownReplyFile(props: {
+  environmentId: EnvironmentId | null;
+  filePath: string;
+  /** The absolute host path the files panel opens; null when it cannot. */
+  panelPath: string | null;
+  copyMarkdown: string;
+  theme: "light" | "dark";
+  onOpenInPanel: (panelPath: string, line: number | undefined) => void;
+  onDownload: (filePath: string) => Promise<void>;
+  onReveal?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
+  revealLabel?: string | undefined;
+}) {
+  const { filePath, panelPath, onOpenInPanel, onDownload, onReveal, revealLabel } = props;
+  const name = fileBasename(filePath);
+  const metadata = useFileMetadata(props.environmentId, filePath);
+  const size = metadata?.byteLength === undefined ? "" : formatAttachmentSize(metadata.byteLength);
+  const canPreview = panelPath !== null && filePreviewKind({ name }) !== "unsupported";
+  const download = useCallback(
+    () =>
+      runMarkdownFileAction(() => onDownload(filePath), {
+        operation: "download-reply-file",
+        target: filePath,
+        failureTitle: `Could not download ${name}`,
+      }),
+    [filePath, name, onDownload],
+  );
+  const open = useCallback(() => {
+    if (canPreview && panelPath !== null) onOpenInPanel(panelPath, undefined);
+    else download();
+  }, [canPreview, download, onOpenInPanel, panelPath]);
+  const showMenu = useCallback(
+    (event: ReactMouseEvent<HTMLElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const api = readLocalApi();
+      if (!api) return;
+      const position = { x: event.clientX, y: event.clientY };
+      void (async () => {
+        const clicked = await api.contextMenu.show(
+          [
+            ...(canPreview ? ([{ id: "open", label: "Open file preview" }] as const) : []),
+            { id: "download", label: "Download" },
+            ...(onReveal && revealLabel ? ([{ id: "reveal", label: revealLabel }] as const) : []),
+            { id: "copy-full", label: "Copy full path" },
+          ] as const,
+          position,
+        );
+        if (clicked === "open") open();
+        else if (clicked === "download") download();
+        else if (clicked === "reveal" && onReveal) {
+          runMarkdownFileAction(onReveal, {
+            operation: "reveal-file-in-file-manager",
+            target: filePath,
+            failureTitle: "Unable to reveal file",
+          });
+        } else if (clicked === "copy-full") {
+          void writeTextToClipboard(filePath, "full path").catch((cause: unknown) =>
+            reportMarkdownActionFailure({ operation: "copy-file-path", target: filePath }, cause),
+          );
+        }
+      })().catch((cause: unknown) =>
+        reportMarkdownActionFailure(
+          { operation: "show-file-context-menu", target: filePath },
+          cause,
+        ),
+      );
+    },
+    [canPreview, download, filePath, onReveal, open, revealLabel],
+  );
+  const chip = (
+    <FileChip
+      name={name}
+      size={size}
+      isVideo={false}
+      theme={props.theme}
+      accessibleLabel={size ? `File, ${name}, ${size}` : `File, ${name}`}
+      copyMarkdown={props.copyMarkdown}
+      tooltip={size ? `${filePath}\n${size}` : filePath}
+      onOpen={open}
+      onContextMenu={showMenu}
+    />
+  );
+  // Every reply file keeps the button, including ones the files panel cannot open
+  // (a `~/` path), so two cards in one reply never differ in what they offer.
+  return (
+    <span className="inline-flex items-center gap-0.5 align-middle">
+      {chip}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              size="icon-xs"
+              variant="ghost-muted"
+              aria-label={`Download ${name}`}
+              onClick={download}
+            />
+          }
+        >
+          <DownloadIcon />
+        </TooltipTrigger>
+        <TooltipPopup side="top">Download {name}</TooltipPopup>
+      </Tooltip>
+    </span>
+  );
+});
+
 function useChatMarkdownState({
   text,
   cwd,
@@ -2439,6 +2583,46 @@ function useChatMarkdownState({
     },
     [canOperatePreview, createAssetUrl, cwd, openPreview, preparedConnection, threadRef],
   );
+  // Signs a one-off download URL on the machine that holds the file, so a remote
+  // client gets the server's copy rather than a path on its own disk.
+  const downloadMarkdownFile = useCallback(
+    async (filePath: string) => {
+      if (!threadRef || preparedConnection._tag === "None") {
+        throw new Error("The machine is not connected.");
+      }
+      if (!readEnvironmentScope(threadRef.environmentId, AuthFilesystemReadScope)) {
+        throw new Error("This connection cannot read files on this machine.");
+      }
+      const result = await createAssetUrl({
+        environmentId: threadRef.environmentId,
+        input: {
+          resource: {
+            _tag: "media-file",
+            threadId: threadRef.threadId,
+            path: filePath,
+            disposition: "attachment",
+          },
+        },
+      });
+      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+      const url = resolveAssetUrl(preparedConnection.value.httpBaseUrl, result.value.relativeUrl);
+      if (url === null) throw new Error("The machine returned an invalid file URL.");
+      // The browser streams the signed URL straight to disk. Desktop would hand a
+      // cross-origin link to the system browser, so it saves a Blob instead.
+      let href = url;
+      if (isElectron) {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error("The file could not be loaded. Try again.");
+        href = URL.createObjectURL(await response.blob());
+      }
+      const anchor = document.createElement("a");
+      anchor.href = href;
+      anchor.download = fileBasename(filePath);
+      anchor.click();
+      if (href !== url) setTimeout(() => URL.revokeObjectURL(href), 30_000);
+    },
+    [createAssetUrl, preparedConnection, threadRef],
+  );
   const findWorkspaceBasenameMatch = useCallback(
     async (workspaceRelativePath: string) => {
       if (
@@ -2509,6 +2693,26 @@ function useChatMarkdownState({
       const panelPath =
         fileLinkMeta.workspaceRelativePath ??
         (!canPreviewMedia && isAbsolutePath(fileLinkMeta.filePath) ? fileLinkMeta.filePath : null);
+      const onReveal =
+        canUseShellActions && revealInFileManagerLabel !== undefined
+          ? () => revealMarkdownFileInFileManager(fileLinkMeta)
+          : undefined;
+
+      if (threadRef && isReplyFileLink(fileLinkMeta)) {
+        return (
+          <MarkdownReplyFile
+            environmentId={environmentId}
+            filePath={fileLinkMeta.filePath}
+            panelPath={panelPath}
+            copyMarkdown={copyMarkdown}
+            theme={resolvedTheme}
+            onOpenInPanel={openFileInPanel}
+            onDownload={downloadMarkdownFile}
+            onReveal={onReveal}
+            revealLabel={revealInFileManagerLabel}
+          />
+        );
+      }
 
       return (
         <MarkdownFileLink
@@ -2536,11 +2740,7 @@ function useChatMarkdownState({
               ? () => openMarkdownMedia(mediaPath, fileLinkMeta.filePath)
               : undefined
           }
-          onReveal={
-            canUseShellActions && revealInFileManagerLabel !== undefined
-              ? () => revealMarkdownFileInFileManager(fileLinkMeta)
-              : undefined
-          }
+          onReveal={onReveal}
           revealLabel={revealInFileManagerLabel}
           onOpenInBrowser={
             threadRef &&
@@ -2556,6 +2756,7 @@ function useChatMarkdownState({
     [
       canUseShellActions,
       canOperatePreview,
+      downloadMarkdownFile,
       environmentId,
       fileLinkParentSuffixByPath,
       openFileInPanel,

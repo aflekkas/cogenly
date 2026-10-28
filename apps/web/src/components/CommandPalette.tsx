@@ -78,6 +78,7 @@ import {
   MonitorIcon,
   MonitorSmartphoneIcon,
   MoonIcon,
+  PuzzleIcon,
   RotateCcwIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -112,6 +113,8 @@ import {
   threadForksIntoProjects,
   threadProjectFolderId,
 } from "../projectLabels/projectLabels.logic";
+import { projectsByUse } from "../projectLabels/projectOrder.logic";
+import { useProjectLastUsedAt } from "../projectLabels/useProjectLastUsed";
 import { useMergeDuplicateProjects } from "../projectLabels/useMergeDuplicateProjects";
 import { useThreadRepository } from "../projectLabels/useThreadRepository";
 import { cloneableRepositoryRows } from "../projectLabels/repositoryPicker.logic";
@@ -752,6 +755,7 @@ function OpenCommandPaletteDialog(props: {
     [activeThread],
   );
   const activeFolderDirectory = useProjectLabelDirectory(activeFolderEnvironmentIds);
+  const projectLastUsedAt = useProjectLastUsedAt();
   const threadRepositoryOf = useThreadRepository();
   const canMoveActiveThread = useAtomValue(
     serverEnvironment.moveThreadProjectFolder.permissionAtom(activeThread?.environmentId ?? null),
@@ -2312,7 +2316,8 @@ function OpenCommandPaletteDialog(props: {
           {
             value: "folders",
             label: "Projects",
-            items: folderState.options.map((entry) => ({
+            // Recently used projects first, as the pickers list them.
+            items: projectsByUse(folderState.options, projectLastUsedAt).map((entry) => ({
               kind: "action" as const,
               value: `move-folder:${entry.key}`,
               searchTerms: [entry.label.name],
@@ -2892,6 +2897,22 @@ function OpenCommandPaletteDialog(props: {
       });
     }
   }
+
+  actionItems.push({
+    kind: "action",
+    value: "action:manage-browser-extensions",
+    searchTerms: ["browser extensions", "chrome extensions", "add-ons", "plugins", "web store"],
+    title: "Manage browser extensions",
+    icon: <PuzzleIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({
+        to: "/settings/integrations",
+        hash: "browser-extensions",
+        replace: pathname === "/settings/integrations",
+        hashScrollIntoView: false,
+      });
+    },
+  });
 
   actionItems.push({
     kind: "action",

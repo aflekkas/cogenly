@@ -62,6 +62,23 @@ describe("inlineCodeFilePathCandidate", () => {
   ])("distinguishes file paths from code and hostnames in %s", (source, candidate) => {
     expect(inlineCodeFilePathCandidate(source)).toBe(candidate);
   });
+
+  it.each([
+    [
+      "~/Downloads/Alex x Davin Termination Agreement.pdf",
+      "~/Downloads/Alex x Davin Termination Agreement.pdf",
+    ],
+    ["/Users/me/Documents/Q3 Plan/Budget v2.xlsx", "/Users/me/Documents/Q3 Plan/Budget v2.xlsx"],
+    ["/home/me/Desktop/my notes.txt", "/home/me/Desktop/my notes.txt"],
+    ["/usr/bin/env python3 script.py", null],
+    ["~/bin/tool --config settings.json", null],
+    ["cp ~/a.txt ~/b.txt", null],
+    ["~/Downloads/Agreement.pdf ~/Downloads/Other.pdf", null],
+    ["~/Downloads/Some Folder", null],
+    ["Recorded evidence here: ~/Downloads/a.png", null],
+  ])("allows spaces only in a home document path: %s", (source, candidate) => {
+    expect(inlineCodeFilePathCandidate(source)).toBe(candidate);
+  });
 });
 
 describe("parseFileUrlHref", () => {

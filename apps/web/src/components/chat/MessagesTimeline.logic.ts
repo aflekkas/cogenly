@@ -20,6 +20,7 @@ import {
   type WorkLogToolIcon,
 } from "@cogenly/client-runtime/work-log/tool-registry";
 import {
+  extractCommandOutputText,
   liveActivityToolStatus,
   resolveWorkEntryTool,
   toolGroupIcon,
@@ -48,6 +49,7 @@ import {
 import {
   type ComputerUsePermission,
   type MessageId,
+  type ToolActivityIcon,
   type WorktreeSetupSnapshot,
   type OrchestrationV2ProjectedTurnItem,
   type OrchestrationV2TurnItem,
@@ -248,6 +250,228 @@ export function workEntryIsVisibleInGroup(
     !workEntryIndicatesToolNeutralStatus(entry)
   );
 }
+
+/**
+ * A call the work card counts as a tool. Reasoning gets its own card rows,
+ * and an answered question reads better as its own row than behind a header.
+ */
+export function workEntryIsToolCall(entry: WorkLogEntry): boolean {
+  return (
+    entry.itemType !== "reasoning" &&
+    entry.tone !== "thinking" &&
+    entry.itemType !== "user_input_request" &&
+    entry.sourceActivityKind !== "context-compaction" &&
+    workLogEntryIsToolLike(entry)
+  );
+}
+
+function workEntryIsThought(entry: WorkLogEntry): boolean {
+  return entry.itemType === "reasoning";
+}
+
+/** How long one call or thought ran, from its item's own start and end. */
+export function workEntryDurationMs(entry: Pick<WorkLogEntry, "structuredPayload">): number | null {
+  const item = entry.structuredPayload;
+  if (item?.startedAt == null || item.completedAt == null) return null;
+  return Math.max(
+    0,
+    DateTime.toEpochMillis(item.completedAt) - DateTime.toEpochMillis(item.startedAt),
+  );
+}
+
+/**
+ * "Thought for 4s": whole seconds read better than tenths for a thought. A
+ * zero span means the provider only reported the finished block (Claude's
+ * replayed thinking), so it has no duration to show.
+ */
+export function thoughtLabel(durationMs: number | null): string {
+  if (durationMs === null || durationMs === 0) return "Thought";
+  return `Thought for ${durationMs < 60_000 ? `${Math.max(1, Math.round(durationMs / 1_000))}s` : formatDuration(durationMs)}`;
+}
+
+/** A reasoning row's label: "Thinking" while it runs, "Thought for 4s" once done. */
+export function thoughtRowLabel(entry: WorkLogEntry): string {
+  return entry.toolLifecycleStatus === "inProgress"
+    ? "Thinking"
+    : thoughtLabel(workEntryDurationMs(entry));
+}
+
+/** One distinct tool kind in a card header's icon stack. */
+export interface WorkGroupCardIcon {
+  readonly key: string;
+  readonly iconName: WorkLogToolIcon | "brain";
+  readonly toolIcon?: ToolActivityIcon;
+}
+
+/** The header of one bordered card that holds a run of tool calls and thoughts. */
+export interface WorkGroupCard {
+  readonly label: string;
+  readonly toolCount: number;
+  readonly failedCount: number;
+  readonly awaitingApproval: boolean;
+  /** Wall time from the first start to the last end, once nothing runs. */
+  readonly durationMs: number | null;
+  readonly icons: ReadonlyArray<WorkGroupCardIcon>;
+}
+
+const WORK_GROUP_CARD_MAX_ICONS = 4;
+
+function workGroupCardIcon(entry: WorkLogEntry): WorkGroupCardIcon {
+  if (workEntryIsThought(entry)) return { key: "thought", iconName: "brain" };
+  const toolIcon = entry.toolIcon ?? entry.toolSource?.icon;
+  const iconName =
+    entry.itemType === "approval_request"
+      ? "message-circle"
+      : (resolveWorkEntryTool(entry, "completed")?.icon ?? "wrench");
+  return {
+    key: entry.toolSource?.key ?? (toolIcon ? JSON.stringify(toolIcon) : iconName),
+    iconName,
+    ...(toolIcon ? { toolIcon } : {}),
+  };
+}
+
+/**
+ * The card a group of work entries renders as, or null when it has neither
+ * tool calls nor thoughts. Thoughts sit in the card as rows but are not
+ * counted as tools; a card of thoughts alone reads "Thinking" / "Thought for 4s".
+ */
+export function summarizeWorkGroupCard(
+  entries: ReadonlyArray<WorkLogEntry>,
+  live: boolean,
+): WorkGroupCard | null {
+  const calls = entries.filter(workEntryIsToolCall);
+  const thoughts = entries.filter(workEntryIsThought);
+  if (calls.length === 0 && thoughts.length === 0) return null;
+  let failedCount = 0;
+  let awaitingApproval = false;
+  let running = false;
+  let start = Number.POSITIVE_INFINITY;
+  let end = Number.NEGATIVE_INFINITY;
+  const icons = new Map<string, WorkGroupCardIcon>();
+  for (const entry of entries) {
+    const call = workEntryIsToolCall(entry);
+    if (!call && !workEntryIsThought(entry)) continue;
+    if (entry.toolLifecycleStatus === "inProgress") {
+      running = true;
+      if (entry.itemType === "approval_request") awaitingApproval = true;
+    } else if (
+      call &&
+      entry.toolLifecycleStatus !== "declined" &&
+      workEntryDisplayIndicatesToolFailure(entry)
+    ) {
+      failedCount += 1;
+    }
+    const item = entry.structuredPayload;
+    if (item?.startedAt != null) start = Math.min(start, DateTime.toEpochMillis(item.startedAt));
+    if (item?.completedAt != null) end = Math.max(end, DateTime.toEpochMillis(item.completedAt));
+    // A thought only claims a header icon when the card has no tools.
+    if (call || calls.length === 0) {
+      const icon = workGroupCardIcon(entry);
+      if (!icons.has(icon.key)) icons.set(icon.key, icon);
+    }
+  }
+  const durationMs =
+    running || !Number.isFinite(start) || !Number.isFinite(end) ? null : Math.max(0, end - start);
+  const tools = `${calls.length} ${calls.length === 1 ? "tool" : "tools"}`;
+  const label =
+    live && awaitingApproval
+      ? "Waiting for approval"
+      : calls.length === 0
+        ? live && running
+          ? "Thinking"
+          : thoughtLabel(durationMs)
+        : live
+          ? `Using ${tools}`
+          : calls.length === 1
+            ? workEntryLabel(calls[0]!, "completed")
+            : `Used ${tools}`;
+  return {
+    label,
+    toolCount: calls.length,
+    failedCount,
+    awaitingApproval: live && awaitingApproval,
+    durationMs,
+    icons: [...icons.values()].slice(0, WORK_GROUP_CARD_MAX_ICONS),
+  };
+}
+
+function firstLine(text: string | null | undefined): string | null {
+  const line = text
+    ?.split(/\r?\n/)
+    .map((part) => part.trim())
+    .find((part) => part.length > 0);
+  return line ? line.slice(0, 240) : null;
+}
+
+/** The one line a failed call shows under its label: what went wrong, if the call says. */
+export function workEntryFailureLine(entry: WorkLogEntry): string | null {
+  if (
+    entry.toolLifecycleStatus === "inProgress" ||
+    !workEntryIsToolCall(entry) ||
+    !workEntryDisplayIndicatesToolFailure(entry)
+  ) {
+    return null;
+  }
+  if (entry.toolLifecycleStatus === "declined") return "Declined";
+  const item = entry.structuredPayload;
+  if (item?.type === "command_execution") {
+    return item.exitCode !== undefined && item.exitCode !== 0
+      ? `Exited with code ${item.exitCode}`
+      : null;
+  }
+  if (item?.type === "dynamic_tool") {
+    const output: unknown = item.output;
+    const line = firstLine(
+      typeof output === "string" ? output : extractCommandOutputText({ result: output }),
+    );
+    if (line) return line;
+  }
+  return firstLine(entry.detail);
+}
+
+/**
+ * A live card with tool calls opens on its own so each call shows as it
+ * runs; a card of thoughts alone stays a single header line until opened.
+ */
+export function workGroupCardOpensWhileLive(card: WorkGroupCard | undefined): boolean {
+  return card !== undefined && card.toolCount > 0;
+}
+
+/** Card groups shown open on their own while their turn is live, by group id. */
+export function openLiveWorkGroupIds(rows: ReadonlyArray<MessagesTimelineRow>): Set<string> {
+  const ids = new Set<string>();
+  for (const row of rows) {
+    if (row.kind === "work-live" && workGroupCardOpensWhileLive(row.card) && row.expanded) {
+      ids.add(row.groupId);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Groups that were open while live and have just settled to a collapsed
+ * card. Their details leave with the close motion instead of vanishing.
+ */
+export function settledLiveWorkGroupIds(
+  previouslyOpen: ReadonlySet<string>,
+  rows: ReadonlyArray<MessagesTimelineRow>,
+): Set<string> {
+  const ids = new Set<string>();
+  if (previouslyOpen.size === 0) return ids;
+  for (const row of rows) {
+    if (
+      row.kind === "work-toggle" &&
+      row.card &&
+      !row.expanded &&
+      row.closing !== true &&
+      previouslyOpen.has(row.groupId)
+    ) {
+      ids.add(row.groupId);
+    }
+  }
+  return ids;
+}
+
 const TIMELINE_MINIMAP_ITEM_SPACING = 8;
 export const TIMELINE_MINIMAP_MIN_ITEMS = 2;
 const TIMELINE_MINIMAP_MAX_HEIGHT_CSS = "calc(100vh - 18rem)";
@@ -567,6 +791,8 @@ type MessagesTimelineRowContent =
       groupId?: string;
       /** The group was just collapsed; its details animate out before leaving. */
       closing?: boolean;
+      /** The details are the body of a work card. */
+      card?: boolean;
     }
   | {
       kind: "work-live";
@@ -581,6 +807,8 @@ type MessagesTimelineRowContent =
       active: boolean;
       /** Latest reasoning in the live group, shown above the status line. */
       thought?: WorkLogEntry;
+      /** Set when the group renders as a work card, open while it runs. */
+      card?: WorkGroupCard;
     }
   | {
       kind: "working";
@@ -612,6 +840,8 @@ type MessagesTimelineRowContent =
       toolIcon?: WorkLogEntry["toolIcon"];
       hasFailure: boolean;
       sandboxed: boolean;
+      /** Set when the group renders as a work card. */
+      card?: WorkGroupCard;
     }
   | {
       kind: "turn-fold";
@@ -744,6 +974,7 @@ function expandedWorkGroupRow(
   createdAt: string,
   groupedEntries: WorkLogEntry[],
   closing: boolean,
+  card: boolean,
 ): Extract<MessagesTimelineRow, { kind: "work" }> {
   return {
     kind: "work",
@@ -753,6 +984,7 @@ function expandedWorkGroupRow(
     isExpandedToolGroup: true,
     groupId,
     ...(closing ? { closing: true } : {}),
+    ...(card ? { card: true } : {}),
   };
 }
 
@@ -1585,6 +1817,11 @@ export function deriveMessagesTimelineRows(input: {
    */
   closingWorkGroupIds?: ReadonlySet<string>;
   /**
+   * Live tool cards the user collapsed. A live card with tool calls is open
+   * unless it is listed here; once it settles it reads collapsed again.
+   */
+  collapsedLiveWorkGroupIds?: ReadonlySet<string>;
+  /**
    * Turn and attempt folds the user just collapsed, by fold row id. Their rows
    * read collapsed while the revealed rows stay until they animate out.
    */
@@ -1606,6 +1843,12 @@ export function deriveMessagesTimelineRows(input: {
   const timelineEntries = timelineRowEntries(input);
   const workGroupDisclosure = (groupId: string) => {
     const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false;
+    const closing = !expanded && (input.closingWorkGroupIds?.has(groupId) ?? false);
+    return { expanded, ...(closing ? { closing: true } : {}) };
+  };
+  const liveWorkGroupDisclosure = (groupId: string, card: WorkGroupCard | null) => {
+    if (!workGroupCardOpensWhileLive(card ?? undefined)) return workGroupDisclosure(groupId);
+    const expanded = !(input.collapsedLiveWorkGroupIds?.has(groupId) ?? false);
     const closing = !expanded && (input.closingWorkGroupIds?.has(groupId) ?? false);
     return { expanded, ...(closing ? { closing: true } : {}) };
   };
@@ -1755,22 +1998,30 @@ export function deriveMessagesTimelineRows(input: {
     (entry) => entry.entry.itemType === "reasoning" && (entry.entry.detail?.trim() ?? "") !== "",
   );
   const activeWorkPlacementEntryId = latestVisibleToolEntry?.id;
+  const activeWorkCard = summarizeWorkGroupCard(
+    visibleActiveToolEntries.map((entry) => entry.entry),
+    true,
+  );
+  // A card keeps its place when its latest call fails: the failure is a row
+  // in it, and the thinking row that follows says the agent carries on.
   const activeWorkRow =
-    activeWorkAnchor && latestVisibleToolEntry && !latestToolFailed
+    activeWorkAnchor && latestVisibleToolEntry && (!latestToolFailed || activeWorkCard !== null)
       ? (() => {
           const groupId = workGroupId(activeWorkAnchor.id);
           return {
             kind: "work-live" as const,
-            ...workGroupDisclosure(groupId),
-            id: latestToolKeepsActivityLive
-              ? LIVE_ACTIVITY_ROW_ID
-              : `work-live:${activeWorkAnchor.id}`,
+            ...liveWorkGroupDisclosure(groupId, activeWorkCard),
+            id:
+              latestToolKeepsActivityLive && activeWorkCard === null
+                ? LIVE_ACTIVITY_ROW_ID
+                : `work-live:${activeWorkAnchor.id}`,
             createdAt: activeWorkAnchor.createdAt,
             entry: (latestRunningToolEntry ?? latestVisibleToolEntry).entry,
             groupedEntries: visibleActiveToolEntries.map((entry) => entry.entry),
             groupId,
             active: latestToolKeepsActivityLive,
             ...(latestThoughtEntry ? { thought: latestThoughtEntry.entry } : {}),
+            ...(activeWorkCard ? { card: activeWorkCard } : {}),
           };
         })()
       : null;
@@ -1797,6 +2048,7 @@ export function deriveMessagesTimelineRows(input: {
         activeWorkRow.createdAt,
         activeWorkRow.groupedEntries,
         activeWorkRow.closing === true,
+        activeWorkRow.card !== undefined,
       ),
     );
   };
@@ -1950,9 +2202,14 @@ export function deriveMessagesTimelineRows(input: {
       );
       if (visibleGroupedEntries.length > 0) {
         const activeInProgressToolEntries = visibleGroupedEntries.filter(workEntryIsInActiveRun);
+        const settledCard =
+          activeInProgressToolEntries.length > 0
+            ? null
+            : summarizeWorkGroupCard(visibleGroupedEntries, false);
         if (activeInProgressToolEntries.length > 0) {
           const groupId = workGroupId(timelineEntry.id);
-          const disclosure = workGroupDisclosure(groupId);
+          const liveCard = summarizeWorkGroupCard(visibleGroupedEntries, true);
+          const disclosure = liveWorkGroupDisclosure(groupId, liveCard);
           const latestActiveToolEntry = activeInProgressToolEntries.at(-1)!;
           nextRows.push({
             kind: "work-live",
@@ -1963,6 +2220,7 @@ export function deriveMessagesTimelineRows(input: {
             groupId,
             ...disclosure,
             active: true,
+            ...(liveCard ? { card: liveCard } : {}),
           });
           hasActivityRow = true;
           if (disclosure.expanded || disclosure.closing) {
@@ -1972,10 +2230,12 @@ export function deriveMessagesTimelineRows(input: {
                 timelineEntry.createdAt,
                 visibleGroupedEntries,
                 disclosure.closing === true,
+                liveCard !== null,
               ),
             );
           }
         } else if (
+          settledCard === null &&
           visibleGroupedEntries.length === 1 &&
           workLogEntryIsToolLike(visibleGroupedEntries[0]!)
         ) {
@@ -2016,9 +2276,11 @@ export function deriveMessagesTimelineRows(input: {
             hiddenCount: visibleGroupedEntries.length,
             ...disclosure,
             summary:
-              singleEntry !== null
+              settledCard?.label ??
+              (singleEntry !== null
                 ? workEntryLabel(singleEntry, "completed")
-                : summarizeToolGroup(visibleGroupedEntries).summary,
+                : summarizeToolGroup(visibleGroupedEntries).summary),
+            ...(settledCard ? { card: settledCard } : {}),
             summaryIcon: toolGroupIcon(visibleGroupedEntries) ?? "wrench",
             ...(groupToolIcon ? { toolIcon: groupToolIcon } : {}),
             sandboxed: visibleGroupedEntries.some((entry) => {
@@ -2036,6 +2298,7 @@ export function deriveMessagesTimelineRows(input: {
                 timelineEntry.createdAt,
                 visibleGroupedEntries,
                 disclosure.closing === true,
+                settledCard !== null,
               ),
             );
           }
@@ -2218,7 +2481,10 @@ export function deriveMessagesTimelineRows(input: {
   ) {
     // A failed latest tool hands the row back to thinking, but its group
     // stays reachable through the same disclosure the live row offers.
-    const failedGroupAnchor = latestToolFailed ? activeWorkAnchor : undefined;
+    // A card already holds the failed call, so only a group without one hands
+    // its disclosure to the thinking row.
+    const failedGroupAnchor =
+      latestToolFailed && activeWorkRow === null ? activeWorkAnchor : undefined;
     if (failedGroupAnchor) {
       const groupId = workGroupId(failedGroupAnchor.id);
       const disclosure = workGroupDisclosure(groupId);
@@ -2236,6 +2502,7 @@ export function deriveMessagesTimelineRows(input: {
             failedGroupAnchor.createdAt,
             visibleActiveToolEntries.map((entry) => entry.entry),
             disclosure.closing === true,
+            false,
           ),
         );
       }
@@ -2556,6 +2823,20 @@ export function computeStableMessagesTimelineRows(
   return anyChanged ? { byId: next, result } : previous;
 }
 
+function sameWorkGroupCard(a: WorkGroupCard | undefined, b: WorkGroupCard | undefined): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  return (
+    a.label === b.label &&
+    a.toolCount === b.toolCount &&
+    a.failedCount === b.failedCount &&
+    a.awaitingApproval === b.awaitingApproval &&
+    a.durationMs === b.durationMs &&
+    a.icons.length === b.icons.length &&
+    a.icons.every((icon, index) => icon.key === b.icons[index]?.key)
+  );
+}
+
 /** Shallow field comparison per row variant; avoids deep equality cost. */
 function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean {
   if (a.kind !== b.kind || a.id !== b.id) return false;
@@ -2658,6 +2939,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.displayLabel === bw.displayLabel &&
         a.groupId === bw.groupId &&
         a.closing === bw.closing &&
+        a.card === bw.card &&
         Equal.equals(a.groupedEntries, bw.groupedEntries)
       );
     }
@@ -2670,6 +2952,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.expanded === bw.expanded &&
         a.closing === bw.closing &&
         a.active === bw.active &&
+        sameWorkGroupCard(a.card, bw.card) &&
         Equal.equals(a.entry, bw.entry) &&
         Equal.equals(a.groupedEntries, bw.groupedEntries)
       );
@@ -2688,7 +2971,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.summaryIcon === bw.summaryIcon &&
         Equal.equals(a.toolIcon, bw.toolIcon) &&
         a.sandboxed === bw.sandboxed &&
-        a.hasFailure === bw.hasFailure
+        a.hasFailure === bw.hasFailure &&
+        sameWorkGroupCard(a.card, bw.card)
       );
     }
 
