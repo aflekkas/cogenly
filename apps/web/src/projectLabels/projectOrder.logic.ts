@@ -31,7 +31,13 @@ export function projectLastUsedAt(
     if (thread.deletedAt != null) continue;
     const folderId = threadProjectFolderId(thread);
     if (folderId === null) continue;
-    const at = thread.latestUserAuthoredMessageAt ?? thread.latestUserMessageAt ?? thread.createdAt;
+    // `null` means no human-authored message (a scheduled agent's thread), so
+    // it counts from creation like the inbox; `undefined` is an older server.
+    const sent =
+      thread.latestUserAuthoredMessageAt === undefined
+        ? thread.latestUserMessageAt
+        : thread.latestUserAuthoredMessageAt;
+    const at = sent ?? thread.createdAt;
     const previous = lastUsed.get(folderId);
     if (previous === undefined || at > previous) lastUsed.set(folderId, at);
   }

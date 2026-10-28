@@ -48,6 +48,20 @@ describe("projectLastUsedAt", () => {
     expect(lastUsed.get(id("bartr"))).toBe("2026-10-01T00:00:00.000Z");
   });
 
+  it("dates a thread with only automated messages from when it started", () => {
+    const lastUsed = projectLastUsedAt([
+      thread("agent", {
+        authored: null,
+        user: "2026-10-09T00:00:00.000Z",
+        created: "2026-09-01T00:00:00.000Z",
+      }),
+      // An older server sends no authored stamp, so its latest user message counts.
+      thread("legacy", { user: "2026-10-09T00:00:00.000Z" }),
+    ]);
+    expect(lastUsed.get(id("agent"))).toBe("2026-09-01T00:00:00.000Z");
+    expect(lastUsed.get(id("legacy"))).toBe("2026-10-09T00:00:00.000Z");
+  });
+
   it("falls back to when an unwritten thread started, and skips unfiled and deleted threads", () => {
     const lastUsed = projectLastUsedAt([
       thread("bartr", { created: "2026-10-02T00:00:00.000Z" }),
