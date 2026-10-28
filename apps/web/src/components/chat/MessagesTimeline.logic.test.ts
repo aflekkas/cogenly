@@ -24,9 +24,15 @@ import {
   disclosureOpenedRecently,
   markDisclosureClosed,
   markDisclosureOpened,
+  openLiveWorkGroupIds,
   recordUserMessageArrivals,
   resolveDisclosureHoldsEnd,
+  settledLiveWorkGroupIds,
+  summarizeWorkGroupCard,
+  thoughtLabel,
   turnFoldRowId,
+  workEntryFailureLine,
+  workEntryLabel,
   type DisclosureOpenTimes,
   type MessagesTimelineRow,
   type TimelineLatestRun,
@@ -525,11 +531,13 @@ describe("a turn's delegations read as one subagent row", () => {
       expect(rows.indexOf(failedRows[0]!)).toBeLessThan(
         rows.findIndex((row) => row.id === prompt.id),
       );
-      expect(rows.at(-1)).toMatchObject({
+      // The live card leads; its open body follows it.
+      expect(rows.at(-2)).toMatchObject({
         kind: "work-live",
         active: true,
         entry: { id: liveCommands.at(-1)!.id, runId: forkRunId },
       });
+      expect(rows.at(-1)).toMatchObject({ kind: "work", card: true, isExpandedToolGroup: true });
     }
   });
 
@@ -861,6 +869,218 @@ describe("a disclosure toggle keeps the end pinned wherever the list would re-pi
   it("holds the toggled row before the list has measured", () => {
     expect(resolveDisclosureHoldsEnd(undefined, follow)).toBe(false);
     expect(resolveDisclosureHoldsEnd({ isAtEnd: false }, follow)).toBe(false);
+  });
+});
+
+describe("a run of tool calls and thoughts reads as one work card", () => {
+  const at = (second: number) => DateTime.makeUnsafe(Date.UTC(2026, 0, 1, 0, 0, second));
+  const itemBase = (id: string, start: number, end: number | null) => ({
+    id: TurnItemId.make(id),
+    threadId: ThreadId.make("thread-card"),
+    runId,
+    nodeId: null,
+    providerThreadId: null,
+    providerTurnId: null,
+    nativeItemRef: null,
+    parentItemId: null,
+    ordinal: start,
+    title: null,
+    startedAt: at(start),
+    completedAt: end === null ? null : at(end),
+    updatedAt: at(end ?? start),
+  });
+  const workEntry = (
+    id: string,
+    start: number,
+    item: OrchestrationV2TurnItem,
+    entry: Partial<WorkLogEntry>,
+  ): Extract<TimelineEntry, { kind: "work" }> => {
+    const createdAt = DateTime.formatIso(at(start));
+    return {
+      id,
+      kind: "work",
+      createdAt,
+      entry: {
+        id,
+        createdAt,
+        label: "Ran command",
+        tone: "tool",
+        itemType: item.type,
+        runId,
+        structuredPayload: item,
+        ...entry,
+      },
+    };
+  };
+  const tool = (
+    id: string,
+    start: number,
+    end: number | null,
+    options: { failedWith?: string } = {},
+  ) =>
+    workEntry(
+      id,
+      start,
+      {
+        ...itemBase(id, start, end),
+        type: "dynamic_tool",
+        status: end === null ? "running" : options.failedWith ? "failed" : "completed",
+        toolName: "mcp__cogenly__terminal_run",
+        input: { command: "ls" },
+        ...(options.failedWith ? { output: options.failedWith } : {}),
+      } as OrchestrationV2TurnItem,
+      {
+        toolLifecycleStatus:
+          end === null ? "inProgress" : options.failedWith ? "failed" : "completed",
+      },
+    );
+  const thought = (id: string, start: number, end: number | null) =>
+    workEntry(
+      id,
+      start,
+      {
+        ...itemBase(id, start, end),
+        type: "reasoning",
+        status: end === null ? "running" : "completed",
+        text: "**Checking the logs**",
+      } as OrchestrationV2TurnItem,
+      {
+        label: "Thinking",
+        detail: "**Checking the logs**",
+        tone: "thinking",
+        toolLifecycleStatus: end === null ? "inProgress" : "completed",
+      },
+    );
+  const entriesOf = (entries: ReadonlyArray<Extract<TimelineEntry, { kind: "work" }>>) =>
+    entries.map((entry) => entry.entry);
+
+  it("counts tools, not thoughts, and totals a settled card's wall time", () => {
+    const card = summarizeWorkGroupCard(
+      entriesOf([tool("a", 1, 2), thought("t", 2, 4), tool("b", 4, 7, { failedWith: "x" })]),
+      false,
+    );
+    expect(card).toMatchObject({
+      label: "Used 2 tools",
+      toolCount: 2,
+      failedCount: 1,
+      durationMs: 6_000,
+    });
+    // Both calls are one kind of tool; the thought claims no icon beside tools.
+    expect(card?.icons).toHaveLength(1);
+  });
+
+  it("reads present tense while live and leaves the duration for when it settles", () => {
+    expect(
+      summarizeWorkGroupCard(entriesOf([tool("a", 1, 2), tool("b", 3, null)]), true),
+    ).toMatchObject({ label: "Using 2 tools", durationMs: null });
+  });
+
+  it("names a lone settled call by its own label", () => {
+    const only = tool("a", 1, 2);
+    expect(summarizeWorkGroupCard([only.entry], false)?.label).toBe(
+      workEntryLabel(only.entry, "completed"),
+    );
+  });
+
+  it("reads Thinking, then Thought for its duration, for a card of thoughts alone", () => {
+    expect(summarizeWorkGroupCard(entriesOf([thought("t", 1, null)]), true)?.label).toBe(
+      "Thinking",
+    );
+    expect(summarizeWorkGroupCard(entriesOf([thought("t", 1, 5)]), false)).toMatchObject({
+      label: "Thought for 4s",
+      toolCount: 0,
+    });
+    expect(thoughtLabel(null)).toBe("Thought");
+    // A finished block reported once has no span to show.
+    expect(thoughtLabel(0)).toBe("Thought");
+  });
+
+  it("says it waits for approval while a call does", () => {
+    const approval = workEntry(
+      "ask",
+      3,
+      {
+        ...itemBase("ask", 3, null),
+        type: "approval_request",
+        status: "waiting",
+        requestId: "request-1",
+        requestKind: "command",
+      } as unknown as OrchestrationV2TurnItem,
+      { label: "Approval requested", toolLifecycleStatus: "inProgress" },
+    );
+    expect(summarizeWorkGroupCard(entriesOf([tool("a", 1, 2), approval]), true)).toMatchObject({
+      label: "Waiting for approval",
+      awaitingApproval: true,
+    });
+  });
+
+  it("shows a failed call's first error line", () => {
+    const failed = tool("a", 1, 6, {
+      failedWith: "Connection to app_production timed out after 5s\n  at connect()",
+    });
+    expect(workEntryFailureLine(failed.entry)).toBe(
+      "Connection to app_production timed out after 5s",
+    );
+    expect(workEntryFailureLine(tool("b", 1, 2).entry)).toBeNull();
+  });
+
+  const user = messageEntry("user-1", "user", { at: 0 });
+  const groupId = "work-group:a";
+  const cardRows = (rows: MessagesTimelineRow[]) =>
+    rows.flatMap((row): unknown[][] =>
+      row.kind === "work-live" || row.kind === "work-toggle"
+        ? [[row.kind, row.card?.label, row.expanded, row.closing ?? false]]
+        : row.kind === "work"
+          ? [[row.kind, row.card ?? false, row.groupedEntries.length, row.closing ?? false]]
+          : [],
+    );
+
+  it("keeps thoughts between calls in the same live card, open while it runs", () => {
+    const live = [user, tool("a", 1, 2), thought("t", 2, 3), tool("b", 3, null)];
+    expect(cardRows(rowsFor(live, true))).toEqual([
+      ["work-live", "Using 2 tools", true, false],
+      ["work", true, 3, false],
+    ]);
+    const collapsed = deriveMessagesTimelineRows({
+      timelineEntries: live,
+      latestRun: runningRun,
+      runningRunId: runId,
+      isWorking: true,
+      activeTurnStartedAt: runningRun.startedAt,
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+      collapsedLiveWorkGroupIds: new Set([groupId]),
+    });
+    expect(cardRows(collapsed)).toEqual([["work-live", "Using 2 tools", false, false]]);
+  });
+
+  it("settles to a collapsed card, closing the body the live card had open", () => {
+    const live = rowsFor([user, tool("a", 1, 2), tool("b", 3, null)], true);
+    const settledEntries = [
+      user,
+      tool("a", 1, 2),
+      tool("b", 3, 5),
+      messageEntry("reply-1", "assistant", { at: 6 }),
+    ];
+    const settledRows = (closingWorkGroupIds?: ReadonlySet<string>) =>
+      deriveMessagesTimelineRows({
+        timelineEntries: settledEntries,
+        latestRun: completedRun,
+        expandedRunIds: new Set([runId]),
+        isWorking: false,
+        turnDiffSummaries: [],
+        supportsConversationRollback: false,
+        ...(closingWorkGroupIds ? { closingWorkGroupIds } : {}),
+      });
+    expect(cardRows(settledRows())).toEqual([["work-toggle", "Used 2 tools", false, false]]);
+    const settling = settledLiveWorkGroupIds(openLiveWorkGroupIds(live), settledRows());
+    expect([...settling]).toEqual([groupId]);
+    expect(cardRows(settledRows(settling))).toEqual([
+      ["work-toggle", "Used 2 tools", false, true],
+      ["work", true, 2, true],
+    ]);
+    // History never had the card open, so nothing closes on load.
+    expect(settledLiveWorkGroupIds(new Set(), settledRows()).size).toBe(0);
   });
 });
 
