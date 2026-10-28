@@ -317,7 +317,6 @@ export default defineConfig({
                 // (the composer honours the prompt font-size preference).
                 "gap-[0.33em]",
                 "px-[0.5em]",
-                "rounded-[0.5em]",
                 "text-[0.86em]",
                 // Project icons render from 14px to 48px and keep one proportional corner.
                 "rounded-[25%]",

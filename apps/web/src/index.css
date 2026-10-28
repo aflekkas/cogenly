@@ -167,6 +167,14 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
    * tooltip, and toolbar controls cannot quietly drift apart.
    */
   --control-radius: 0.5rem;
+  /*
+   * The radius steps down with control height, about a fifth of it, so small
+   * controls never read as pills: 28px controls and chips 6px, 24px 5px,
+   * 20px and below 4px. Cards, dialogs and the composer keep --radius-*.
+   */
+  --control-radius-sm: 0.375rem;
+  --control-radius-xs: 0.3125rem;
+  --control-radius-2xs: 0.25rem;
   /* 12px rhythm: window edge to rail icons, icons to cards, cards to dock. */
   --sidebar-content-inset: 0.75rem;
   --sidebar-control-gap: 0.5rem;
@@ -462,6 +470,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
      badges) round like the app icon: a circular corner at 28/128 of the
      tile's width. A percentage so every size keeps the icon's proportion. */
   --radius-tile: 21.875%;
+  /* Inline context chips size in em to scale with the text they sit in, so
+     their corners do too: about 4px on the chip, half that on a thumbnail or
+     action nested inside it. */
+  --radius-chip: 0.3em;
+  --radius-chip-inner: 0.15em;
   @keyframes skeleton {
     /* The single loading-bar breath used by every skeleton: one opacity pulse
        per container, stepped so however many bars sit under it, the compositor
