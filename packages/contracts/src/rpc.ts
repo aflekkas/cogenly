@@ -9,6 +9,10 @@ import {
   BrowserExtensionInstallInput,
   BrowserExtensionInstallResult,
   BrowserExtensionRemoveInput,
+  BrowserExtensionReloadInput,
+  BrowserExtensionOpenSurfaceInput,
+  BrowserExtensionOpenSurfaceResult,
+  BrowserExtensionSurfaceNotImplementedError,
   BrowserExtensionToggleInput,
   BrowserExtensionsListInput,
   BrowserExtensionsListResult,
@@ -494,6 +498,9 @@ export const WS_METHODS = {
   browserExtensionInstall: "browser.extensions.install",
   browserExtensionRemove: "browser.extensions.remove",
   browserExtensionToggle: "browser.extensions.toggle",
+  browserExtensionReload: "browser.extensions.reload",
+  browserExtensionOpenSurface: "browser.extensions.openSurface",
+  browserExtensionsSubscribe: "browser.extensions.subscribe",
   browserImportCookies: "browser.importCookies",
   previewClearProfile: "preview.clearProfile",
   previewReportProfiles: "preview.reportProfiles",
@@ -1741,6 +1748,26 @@ const WsBrowserExtensionsListRpc = Rpc.make(WS_METHODS.browserExtensionsList, {
   payload: BrowserExtensionsListInput,
   success: BrowserExtensionsListResult,
   error: Schema.Union([BrowserExtensionError, EnvironmentAuthorizationError]),
+});
+const WsBrowserExtensionReloadRpc = Rpc.make(WS_METHODS.browserExtensionReload, {
+  payload: BrowserExtensionReloadInput,
+  success: BrowserExtensionInstallResult,
+  error: Schema.Union([BrowserExtensionError, EnvironmentAuthorizationError]),
+});
+const WsBrowserExtensionOpenSurfaceRpc = Rpc.make(WS_METHODS.browserExtensionOpenSurface, {
+  payload: BrowserExtensionOpenSurfaceInput,
+  success: BrowserExtensionOpenSurfaceResult,
+  error: Schema.Union([
+    BrowserExtensionError,
+    BrowserExtensionSurfaceNotImplementedError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+const WsBrowserExtensionsSubscribeRpc = Rpc.make(WS_METHODS.browserExtensionsSubscribe, {
+  payload: BrowserExtensionsListInput,
+  success: BrowserExtensionsListResult,
+  error: Schema.Union([BrowserExtensionError, EnvironmentAuthorizationError]),
+  stream: true,
 });
 const WsBrowserExtensionInstallRpc = Rpc.make(WS_METHODS.browserExtensionInstall, {
   payload: BrowserExtensionInstallInput,
@@ -3192,6 +3219,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsPreviewListRpc,
   WsBrowserCookieSourcesRpc,
   WsBrowserExtensionsListRpc,
+  WsBrowserExtensionReloadRpc,
+  WsBrowserExtensionOpenSurfaceRpc,
+  WsBrowserExtensionsSubscribeRpc,
   WsBrowserExtensionInstallRpc,
   WsBrowserExtensionRemoveRpc,
   WsBrowserExtensionToggleRpc,

@@ -8,6 +8,11 @@ import type {
 import * as Schema from "effect/Schema";
 import { sanitizeNewRefName } from "@cogenly/shared/git";
 import { toSortableTimestamp } from "../lib/threadSort";
+import {
+  isLocalMachine,
+  LOCAL_MACHINE_LABEL,
+  type RemoteMachine,
+} from "../machines/machineBadge.logic";
 export {
   dedupeRemoteBranchesWithLocalMatches,
   deriveLocalBranchNameFromRemoteRef,
@@ -52,17 +57,43 @@ export function resolveEnvironmentOptionLabel(input: {
       if (!label) return false;
       return !GENERIC_LOCAL_ENVIRONMENT_LABELS.has(label.toLowerCase());
     });
-    return preferredLocalLabel ?? "This device";
+    return preferredLocalLabel ?? LOCAL_MACHINE_LABEL;
   }
 
   return runtimeLabel ?? savedLabel ?? input.environmentId;
 }
 
-/** A "Run on" choice's tooltip: its label, and whether a paired machine is offline. */
-export function resolveEnvironmentOptionTitle(
-  option: Pick<EnvironmentOption, "label" | "pairedMachine">,
+/**
+ * A "Run on" choice as a machine badge sees it: null for this computer, else
+ * its name and whether a paired machine is reachable.
+ */
+export function environmentOptionMachine(
+  option: Pick<EnvironmentOption, "environmentId" | "label" | "pairedMachine">,
+  localEnvironmentId: EnvironmentId | null,
+): RemoteMachine | null {
+  return isLocalMachine(option.environmentId, localEnvironmentId)
+    ? null
+    : { name: option.label, online: option.pairedMachine?.online !== false };
+}
+
+/** A "Run on" choice's name: "This computer", or the machine's own name. */
+export function resolveEnvironmentOptionName(
+  option: Pick<EnvironmentOption, "environmentId" | "label">,
+  localEnvironmentId: EnvironmentId | null,
 ): string {
-  return option.pairedMachine?.online === false ? `${option.label} (offline)` : option.label;
+  return isLocalMachine(option.environmentId, localEnvironmentId)
+    ? LOCAL_MACHINE_LABEL
+    : option.label;
+}
+
+/** A "Run on" choice's tooltip: its name, and whether a paired machine is offline. */
+export function resolveEnvironmentOptionTitle(
+  option: Pick<EnvironmentOption, "environmentId" | "label" | "pairedMachine">,
+  localEnvironmentId: EnvironmentId | null,
+): string {
+  const machine = environmentOptionMachine(option, localEnvironmentId);
+  if (machine === null) return LOCAL_MACHINE_LABEL;
+  return machine.online ? machine.name : `${machine.name} (offline)`;
 }
 
 // A remote (non-primary) environment is always surfaced, even when it is the
@@ -82,6 +113,8 @@ export function shouldShowComposerContextStrip(input: {
   hasActiveProject: boolean;
   isGitRepo: boolean;
   showEnvironmentIndicator: boolean;
+  /** The strip names the chat's project, beside the machine. */
+  showProject: boolean;
   /**
    * Another paired machine runs the thread. The strip is where that machine is
    * named, so it stays up in active threads too.
@@ -93,7 +126,10 @@ export function shouldShowComposerContextStrip(input: {
   return (
     input.hasActiveProject &&
     (input.isDraftHeroState || input.persistInActiveThreads || input.runsOnOtherMachine) &&
-    (input.isGitRepo || input.showEnvironmentIndicator || input.hostsRestingComposerControls)
+    (input.isGitRepo ||
+      input.showEnvironmentIndicator ||
+      input.showProject ||
+      input.hostsRestingComposerControls)
   );
 }
 

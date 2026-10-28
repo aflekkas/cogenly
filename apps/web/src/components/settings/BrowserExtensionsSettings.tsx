@@ -3,13 +3,19 @@ import {
   resolveBrowserProfiles,
   type EnvironmentId,
 } from "@cogenly/contracts";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { BrowserExtensionInstallForm } from "~/browser/BrowserExtensionInstall";
 import { browserExtensionPermissionLines } from "~/browser/browserExtensions.logic";
 import { useBrowserExtensions } from "~/browser/useBrowserExtensions";
 import { useClientSettings } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
+
+import { BrowserExtensionDetailsDialog } from "../preview/extensions/BrowserExtensionDetails";
+import {
+  BrowserExtensionIcon,
+  BrowserExtensionStatusText,
+} from "../preview/extensions/BrowserExtensionIcon";
 
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -19,9 +25,8 @@ import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
 
 /**
- * Extensions per browser profile, kept by the selected machine. They load in
- * that machine's browser tabs, and in the desktop panel when the desktop app
- * runs on the same machine.
+ * Extensions per browser profile, kept by the selected machine. They run in
+ * its built-in Chrome and stream into the web and desktop panels.
  */
 export function BrowserExtensionsSetting() {
   const { environment } = useSettingsScope();
@@ -39,18 +44,15 @@ function BrowserExtensionsRow({ environmentId }: { readonly environmentId: Envir
   const profile =
     profiles.find((candidate) => candidate.id === chosenProfileId) ?? profiles[0] ?? null;
   const profileId = profile?.id ?? DEFAULT_BROWSER_PROFILE_ID;
-  const { canManage, extensions, loadError, reload, install, setEnabled, remove } =
-    useBrowserExtensions(environmentId, profileId);
-
-  // `reload` changes with the machine and profile, so each choice reads its own list.
-  useEffect(() => {
-    void reload();
-  }, [reload]);
+  const actions = useBrowserExtensions(environmentId, profileId);
+  const { canManage, extensions, loadError, install, setEnabled, remove } = actions;
+  const [detailsId, setDetailsId] = useState<string | null>(null);
+  const details = extensions?.find((extension) => extension.id === detailsId) ?? null;
 
   return (
     <SettingsRow
       {...searchableSetting("browser-extensions")}
-      description="Chromium extensions for each profile on the selected machine. Its browser tabs load them, and so does the desktop panel when the app runs on that machine."
+      description="Extensions run in Cogenly's built-in Chrome on the selected machine. Desktop tabs in profiles with enabled extensions stream from it."
       control={
         <Select
           disabled={!canManage}
@@ -96,6 +98,9 @@ function BrowserExtensionsRow({ environmentId }: { readonly environmentId: Envir
                     index > 0 && "border-t border-border/60",
                   )}
                 >
+                  <span className="mt-0.5">
+                    <BrowserExtensionIcon extension={extension} />
+                  </span>
                   <div className="grid min-w-0 flex-1 gap-0.5">
                     <p className="flex min-w-0 items-baseline gap-2 text-sm text-foreground">
                       <span className="truncate">{extension.name}</span>
@@ -103,6 +108,7 @@ function BrowserExtensionsRow({ environmentId }: { readonly environmentId: Envir
                         {extension.version}
                       </span>
                     </p>
+                    <BrowserExtensionStatusText extension={extension} withDetail />
                     {browserExtensionPermissionLines(extension).map((line) => (
                       <p key={line} className="text-xs text-muted-foreground">
                         {line}
@@ -116,6 +122,9 @@ function BrowserExtensionsRow({ environmentId }: { readonly environmentId: Envir
                       checked={extension.enabled}
                       onCheckedChange={(checked) => void setEnabled(extension.id, checked)}
                     />
+                    <Button size="xs" variant="ghost" onClick={() => setDetailsId(extension.id)}>
+                      Details
+                    </Button>
                     <Button size="xs" variant="ghost" onClick={() => void remove(extension)}>
                       Remove
                     </Button>
@@ -127,6 +136,11 @@ function BrowserExtensionsRow({ environmentId }: { readonly environmentId: Envir
         )}
         <BrowserExtensionInstallForm install={install} disabled={!canManage} />
       </div>
+      <BrowserExtensionDetailsDialog
+        extension={details}
+        onClose={() => setDetailsId(null)}
+        actions={actions}
+      />
     </SettingsRow>
   );
 }

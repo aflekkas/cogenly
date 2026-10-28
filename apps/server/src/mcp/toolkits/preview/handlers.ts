@@ -78,7 +78,8 @@ const invoke = Effect.fn("PreviewToolkit.invoke")(function* <A>(
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
     ...(tabId === undefined ? {} : { tabId }),
   });
-  if (["status", "open", "navigate", "snapshot"].includes(operation)) return { result };
+  if (["status", "open", "navigate", "snapshot", "extensionOpen"].includes(operation))
+    return { result };
   const statusTabId =
     (operation !== "evaluate" && typeof result === "object" && result !== null
       ? (result as { tabId?: PreviewTabId }).tabId
@@ -216,6 +217,10 @@ const handlers = {
         extensions.install(input),
       ),
   ),
+  browser_extension_reload: McpToolAccess.actsAsCaller(
+    (input: import("@cogenly/contracts").BrowserExtensionReloadInput) =>
+      Effect.flatMap(BrowserExtensions.BrowserExtensions, (extensions) => extensions.reload(input)),
+  ),
   browser_extension_toggle: McpToolAccess.actsAsCaller(
     (input: import("@cogenly/contracts").BrowserExtensionToggleInput) =>
       Effect.flatMap(BrowserExtensions.BrowserExtensions, (extensions) => extensions.toggle(input)),
@@ -228,6 +233,14 @@ const handlers = {
   // output follow every preview_* rule, redaction included.
   browser_extension_open: McpToolAccess.actsAsCaller(({ id, page, profileId, open, tabId }) =>
     Effect.gen(function* () {
+      if (page === "popup" || page === "sidePanel" || page === "action") {
+        return yield* invokeTargeted<PreviewAutomationStatus>("extensionOpen", {
+          id,
+          page,
+          ...(profileId === undefined ? {} : { profileId }),
+          ...(tabId === undefined ? {} : { tabId }),
+        });
+      }
       const extensions = yield* BrowserExtensions.BrowserExtensions;
       const url = yield* extensions.pageUrl({ id, page, profileId });
       return yield* invokeTargeted<PreviewAutomationStatus>(

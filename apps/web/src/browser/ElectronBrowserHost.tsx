@@ -10,7 +10,7 @@ import { primaryEnvironmentIdAtom } from "~/state/primaryEnvironment";
 import { isElectron } from "~/env";
 import { useClientSettingsHydrated } from "~/hooks/useSettings";
 import { useTheme } from "~/hooks/useTheme";
-import { useActivePreviewSessions } from "~/previewStateStore";
+import { previewTabSessions, useActivePreviewSessions } from "~/previewStateStore";
 import { previewEnvironment } from "~/state/preview";
 import { useEnvironmentScope } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -18,6 +18,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { readPreviewAnnotationTheme } from "./annotationTheme";
 import { useBrowserDefaults } from "./browserDefaults";
 import { useBrowserPointerStore } from "./browserPointerStore";
+import { DesktopServerTabSync } from "./DesktopServerTabSync";
 import { HostedBrowserWebview } from "./HostedBrowserWebview";
 import { openUrlInPreview } from "./openFileInPreview";
 import { rendersServerTabNatively } from "./previewRuntime";
@@ -32,9 +33,10 @@ export function ElectronBrowserHost() {
     () =>
       Object.entries(previewByThreadKey).flatMap(([threadKey, previewState]) => {
         const threadRef = parseScopedThreadKey(threadKey);
-        // Server tabs of other environments stream; this desktop's own server tabs render here.
+        // Server tabs of other environments stream; this desktop's own server tabs render
+        // here. Extension popups and side panels always stream (ExtensionSurface).
         return threadRef
-          ? Object.values(previewState.sessions)
+          ? previewTabSessions(previewState.sessions)
               .filter(
                 (snapshot) =>
                   snapshot.runtime !== "server" ||
@@ -141,7 +143,10 @@ export function ElectronBrowserHost() {
   return (
     <div className="contents" data-electron-browser-host>
       {primaryEnvironmentId ? (
-        <ShownServerTabReporter environmentId={primaryEnvironmentId} tabs={nativeServerTabs} />
+        <>
+          <DesktopServerTabSync environmentId={primaryEnvironmentId} />
+          <ShownServerTabReporter environmentId={primaryEnvironmentId} tabs={nativeServerTabs} />
+        </>
       ) : null}
       {sessions.map(({ threadRef, snapshot, runtimeTabId, pictureInPicture, zoomFactor }) => {
         const url = snapshot.navStatus._tag === "Idle" ? null : snapshot.navStatus.url;

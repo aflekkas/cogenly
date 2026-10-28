@@ -52,7 +52,7 @@ export const MachinesToolkit = Toolkit.make(
     }),
     success: ProviderAuthState,
     description:
-      "Start/read/cancel/sign out Claude or Codex locally or on targetEnvironmentId. In-thread start returns a sign-in card and later completion notification; never request codes/links in chat. Outside threads use CLI instructions and request_secret codeRef for Claude responses. Each machine logs in independently; never copy tokens or print credentials. No approval gate.",
+      "Start/read/cancel/sign out Claude or Codex locally or on targetEnvironmentId. Cancel with read's flowEpoch to stop only that sign-in, or omit flowId to stop the active one. In-thread start returns a sign-in card and later completion notification; never request codes/links in chat. Outside threads use CLI instructions and request_secret codeRef for Claude responses. Each machine logs in independently; never copy tokens or print credentials. No approval gate.",
   }).annotate(Tool.Destructive, false),
   Tool.make("machines_list", {
     failure: OrchestratorMcpFailure,

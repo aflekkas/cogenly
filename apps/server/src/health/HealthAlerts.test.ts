@@ -197,10 +197,58 @@ const harness = Effect.gen(function* () {
   const minute = TestClock.adjust("60 seconds").pipe(Effect.andThen(job));
   const minutes = (count: number) =>
     Effect.forEach(Array.from({ length: count }), () => minute, { discard: true });
-  return { world, calls, published, alerts, channels, job, minute, minutes };
+  const state = yield* HealthAlertsState.HealthAlertsState.pipe(Effect.provideContext(context));
+  return { world, calls, published, alerts, channels, state, job, minute, minutes };
 });
 
 describe("HealthAlerts", () => {
+  it.effect("stays quiet while a problem is fixed automatically, and alerts when that fails", () =>
+    Effect.gen(function* () {
+      const { world, published, alerts, state, job, minutes } = yield* harness;
+      const problem = { ...signedOut, key: "sync:stuck", fix: "retry-sync" as const };
+      world.items = [problem];
+      yield* state.setAutoFix({ holds: new Set([problem.key]), failures: new Map() });
+      yield* job;
+      yield* minutes(4);
+      expect(published).toEqual([]);
+      yield* state.setAutoFix({
+        holds: new Set(),
+        failures: new Map([[problem.key, "Sync ran again, but this problem is still present."]]),
+      });
+      yield* minutes(3);
+      const [opened] = (yield* alerts.snapshot).open;
+      expect(opened?.detail).toContain(
+        "Automatic fix failed: Sync ran again, but this problem is still present.",
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("an automatic hold keeps an open alert open without recovery or repeat delivery", () =>
+    Effect.gen(function* () {
+      const h = yield* harness;
+      h.world.items = [signedOut];
+      yield* h.job;
+      yield* h.minutes(3);
+      const before = yield* h.alerts.snapshot;
+      expect(before.open).toHaveLength(1);
+      const delivered = h.calls.length;
+      yield* h.state.setAutoFix({ holds: new Set([signedOut.key]), failures: new Map() });
+      yield* h.minutes(4);
+      expect(yield* h.alerts.snapshot).toEqual(before);
+      yield* h.state.setAutoFix({
+        holds: new Set(),
+        failures: new Map([[signedOut.key, "Retry failed"]]),
+      });
+      yield* h.minutes(4);
+      expect((yield* h.alerts.snapshot).open[0]?.id).toBe(before.open[0]?.id);
+      expect((yield* h.alerts.snapshot).recentlyResolved).toEqual([]);
+      expect(h.calls).toHaveLength(delivered);
+      h.world.items = [];
+      yield* h.minutes(3);
+      expect((yield* h.alerts.snapshot).open).toEqual([]);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("publishes and delivers once per transition, own alerts only", () =>
     Effect.gen(function* () {
       const { world, calls, published, alerts, minute, minutes, job } = yield* harness;

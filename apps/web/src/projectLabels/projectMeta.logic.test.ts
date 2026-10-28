@@ -16,6 +16,7 @@ import {
   projectDefaultRepository,
   projectHoldsRepository,
   projectSwitchRepository,
+  threadHeaderProject,
   threadProjectMeta,
   toggleCollapsedGroup,
   workDraftFolderId,
@@ -434,6 +435,39 @@ describe("workThreadDisplayProject", () => {
 
   it("names the filing for Work in its project's folder", () => {
     expect(shown(mind, null)).toBe("SOSC 14100 Mind");
+  });
+});
+
+describe("threadHeaderProject", () => {
+  const directory = { byKey, folderByRepository };
+  const header = (
+    folderId: string | null,
+    placement: { isWork: boolean; inRepository: boolean; repository?: string },
+  ) =>
+    threadHeaderProject(
+      {
+        environmentId: env,
+        projectId: ProjectId.make(placement.repository ?? "scratch"),
+        source: {
+          projectFolderId: folderId === null ? null : ProjectLabelId.make(folderId),
+          projectFolderSource: "explicit",
+        },
+      },
+      { ...placement, directory },
+    )?.label.name ?? null;
+
+  it("names a chat's or agent conversation's filing, and nothing for No project", () => {
+    expect(header("mind", { isWork: false, inRepository: false })).toBe("SOSC 14100 Mind");
+    expect(header(null, { isWork: false, inRepository: false })).toBeNull();
+    expect(header("gone", { isWork: false, inRepository: false })).toBeNull();
+  });
+
+  it("names Work's repository project, as its sidebar card does", () => {
+    expect(header("mind", { isWork: true, inRepository: true, repository: "platform" })).toBe(
+      "Spawn Partners",
+    );
+    // Work in its project's folder keeps its filing.
+    expect(header("mind", { isWork: true, inRepository: false })).toBe("SOSC 14100 Mind");
   });
 });
 

@@ -18,10 +18,11 @@ import {
   DialogPanel,
   DialogFooter,
 } from "../components/ui/dialog";
-import { EnvironmentOptionContent } from "../components/BranchToolbarEnvironmentSelector";
+import { MachineChoice } from "../components/MachineBadge";
+import { usePrimaryEnvironmentId } from "../state/environments";
 import { serverEnvironment } from "../state/server";
 import { useEnvironmentQuery } from "../state/query";
-import { machineIconKind } from "./machines.logic";
+import { machineChoiceLabel, pairedMachineChoice } from "./machineBadge.logic";
 
 type Request = {
   readonly preferHub: boolean;
@@ -66,6 +67,8 @@ export function LaunchMachineDialog() {
       : undefined) ??
     request?.environmentId ??
     null;
+  const pickedMachine = machines.find((machine) => machine.environmentId === picked);
+  const localEnvironmentId = usePrimaryEnvironmentId();
   const choose = (machine: EnvironmentId | null) => {
     if (!open || request === null) return;
     request.resolve(machine);
@@ -105,8 +108,13 @@ export function LaunchMachineDialog() {
           >
             <SelectTrigger aria-label="Runs on">
               <SelectValue>
-                {machines.find((machine) => machine.environmentId === picked)?.name ??
-                  "This machine"}
+                <MachineChoice
+                  machine={
+                    pickedMachine === undefined
+                      ? null
+                      : pairedMachineChoice(pickedMachine, localEnvironmentId)
+                  }
+                />
               </SelectValue>
             </SelectTrigger>
             <SelectPopup>
@@ -114,18 +122,13 @@ export function LaunchMachineDialog() {
                 <SelectItem
                   key={machine.environmentId}
                   value={machine.environmentId}
-                  label={machine.name}
+                  label={machineChoiceLabel(
+                    machine.environmentId,
+                    machine.name,
+                    localEnvironmentId,
+                  )}
                 >
-                  <EnvironmentOptionContent
-                    option={{
-                      environmentId: machine.environmentId,
-                      projectId: null,
-                      label: machine.name,
-                      isPrimary: machine.relation === "this",
-                      machine: machineIconKind(machine),
-                      pairedMachine: { online: machine.online },
-                    }}
-                  />
+                  <MachineChoice machine={pairedMachineChoice(machine, localEnvironmentId)} />
                 </SelectItem>
               ))}
             </SelectPopup>

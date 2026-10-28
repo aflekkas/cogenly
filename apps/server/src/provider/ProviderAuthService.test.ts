@@ -4,12 +4,14 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   AuthPeerDelegateScope,
   EnvironmentId,
+  ProviderMachineAuth,
   ProviderInstanceId,
   ProjectId,
   SecretRef,
 } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
+import * as Schema from "effect/Schema";
 import * as Layer from "effect/Layer";
 import * as Exit from "effect/Exit";
 import * as Stream from "effect/Stream";
@@ -133,7 +135,7 @@ it.effect(
         );
       });
       yield* make("contabo", true);
-      yield* make("hub", false, "hub");
+      const hub = yield* make("hub", false, "hub");
       const mac = yield* make("macbook", false, "spoke");
       const input = {
         instanceId,
@@ -146,14 +148,26 @@ it.effect(
       expect(own.interaction?.type).toBe("credentials");
       const stranger = yield* mac.manageSignIn({ operation: "read", input }, "client-two");
       expect(stranger.interaction).toBeNull();
+      expect(stranger.flowId).toBeNull();
+      expect(stranger.flowEpoch).toBe(flow.flowEpoch);
       const denied = yield* mac
         .cancel({ ...input, flowId: flow.flowId! }, "client-two")
         .pipe(Effect.exit);
       expect(Exit.isFailure(denied)).toBe(true);
-      expect((yield* mac.cancel({ ...input, flowId: flow.flowId! }, "client-one")).phase).toBe(
-        "cancelled",
-      );
+      expect(
+        (yield* mac.manageSignIn(
+          {
+            operation: "cancel",
+            input: { ...input, flowId: null, flowEpoch: stranger.flowEpoch! },
+          },
+          "client-two",
+        )).phase,
+      ).toBe("cancelled");
       const retry = yield* mac.start(input, "client-one");
+      const stale = yield* mac
+        .cancel({ ...input, flowEpoch: stranger.flowEpoch! }, "client-two")
+        .pipe(Effect.flip);
+      expect(stale.detail).toContain("no longer active");
       yield* controller.subscribe("hub:macbook:client-one").pipe(
         Stream.filter((state) => state.flowId === retry.flowId && state.phase === "waiting"),
         Stream.runHead,
@@ -193,6 +207,34 @@ it.effect(
       expect(adopted).toBe(true);
       expect(completed.interaction).toBeNull();
       expect(completed.message).toBe("Sign-in complete.");
+      const legacy = yield* PeerChannels.PeerChannels.pipe(Effect.provide(PeerChannels.layer));
+      yield* legacy.register(
+        {
+          ...ProviderMachineAuth,
+          payload: Schema.Struct({
+            owner: Schema.String,
+            // Older peers require a respond-capable ID on every cancel.
+            request: Schema.Struct({
+              operation: Schema.Literal("cancel"),
+              input: Schema.Struct({
+                instanceId: ProviderInstanceId,
+                targetEnvironmentId: Schema.optionalKey(EnvironmentId),
+                flowId: Schema.String,
+              }),
+            }),
+          }),
+        },
+        () => Effect.die("Legacy decoder should reject before running the handler"),
+      );
+      peers.set("contabo", legacy);
+      for (const service of [hub, mac]) {
+        const incompatible = yield* service
+          .cancel({ ...input, flowId: null }, "client-two")
+          .pipe(Effect.flip);
+        expect(incompatible.detail).toBe(
+          "Update Cogenly on the other machine to use this sign-in action.",
+        );
+      }
     }).pipe(
       Effect.scoped,
       Effect.provide(

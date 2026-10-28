@@ -864,7 +864,6 @@ export function DraftHeroHeadline({
         environmentId={draftThread.environmentId}
         threadId={draftThread.threadId}
         draftId={draftId}
-        size="sm"
       />
     ) : (
       <WorkHeroCrumbText crumb={breadcrumb.project} />
@@ -887,7 +886,6 @@ export function DraftHeroHeadline({
               environmentId={draftThread.environmentId}
               threadId={draftThread.threadId}
               draftId={draftId}
-              size="sm"
             />
           ) : null}
         </>

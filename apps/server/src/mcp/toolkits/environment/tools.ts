@@ -18,6 +18,7 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import {
   EnvironmentId,
   MACHINE_HEALTH_FIX_MAX_ITEMS,
+  MachineHealthFixAction,
   MachineHealthFixResult,
   MachineHealthReport,
   MachineSecurityStatus,
@@ -157,7 +158,7 @@ const MachineHealthTool = Tool.make("machine_health", {
   ...shared,
   dependencies: [...shared.dependencies, MachineHealth.MachineHealth],
   description:
-    "Read machine health and suggested fixes. Omit environmentId for this machine; paired IDs come from machines_list. reachable:false means the peer did not answer. Apply supported fixes with machine_health_fix on their owning machine.",
+    'Read machine health and suggested fixes. Omit environmentId for this machine; paired IDs come from machines_list. reachable:false means the peer did not answer. Apply supported fixes (update-machine, stop-runs, run-now, retry-sync, setup-sandbox) with machine_health_fix on their owning machine. With "Fix problems automatically" on (the default), the machine already applies retry-sync and stop-runs (sparing live sessions) itself and only alerts on failure.',
   parameters: Schema.Struct({
     environmentId: Schema.optionalKey(
       EnvironmentId.annotate({
@@ -177,7 +178,7 @@ const MachineHealthFixTool = Tool.make("machine_health_fix", {
     MachineHealthFixes.MachineHealthFixes,
   ],
   description:
-    "Apply machine_health fixes: stop-runs (legacy resume), run-now, retry-sync, setup-sandbox, or discard-quarantined. Omitted itemKeys fixes all actionable items except discard-quarantined, which needs its explicit key and preserves local data. Manual/sign-in items need investigation. Recheck machine_health afterward.",
+    "Apply machine_health fixes: update-machine (background service update to the newest paired version, only on request), stop-runs (legacy resume), run-now, retry-sync, setup-sandbox, or discard-quarantined. Omitted itemKeys fixes all actionable items except discard-quarantined, which needs its explicit key and preserves local data. Manual/sign-in items need investigation; action turn-off-provider turns off an unwanted sign-in provider on that machine only. Recheck machine_health afterward.",
   parameters: Schema.Struct({
     environmentId: Schema.optionalKey(
       EnvironmentId.annotate({
@@ -188,6 +189,12 @@ const MachineHealthFixTool = Tool.make("machine_health_fix", {
       Schema.Array(TrimmedNonEmptyString)
         .check(Schema.isMinLength(1), Schema.isMaxLength(MACHINE_HEALTH_FIX_MAX_ITEMS))
         .annotate({ description: "Item `key`s from machine_health for that machine." }),
+    ),
+    action: Schema.optionalKey(
+      MachineHealthFixAction.annotate({
+        description:
+          "fix (default) runs each item's fix. turn-off-provider turns off the provider of each named sign-in item on that machine only, when the owner would rather not sign it in there; it stays on for their other machines. Requires itemKeys.",
+      }),
     ),
   }),
   success: MachineHealthFixResult,

@@ -37,6 +37,7 @@ const PortableProvider = Schema.NullOr(
     driver: ProviderDriverKind,
     displayName: Schema.optionalKey(Schema.String),
     accentColor: Schema.optionalKey(Schema.String),
+    /** Older builds sent it; it is per machine now, so it is read and ignored. */
     enabled: Schema.optionalKey(Schema.Boolean),
     position: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
     accountIdentity: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
@@ -85,7 +86,6 @@ export function encodeProviderSettings(
     ...(identity ? { accountIdentity: identity } : {}),
     ...(instance.displayName === undefined ? {} : { displayName: instance.displayName }),
     ...(instance.accentColor === undefined ? {} : { accentColor: instance.accentColor }),
-    ...(instance.enabled === undefined ? {} : { enabled: instance.enabled }),
     environment: (instance.environment ?? []).flatMap((entry) =>
       entry.sensitive ||
       entry.valueRedacted ||
@@ -123,7 +123,9 @@ export function applyProviderSettings(
     driver: remote.driver,
     ...(remote.displayName === undefined ? {} : { displayName: remote.displayName }),
     ...(remote.accentColor === undefined ? {} : { accentColor: remote.accentColor }),
-    ...(remote.enabled === undefined ? {} : { enabled: remote.enabled }),
+    // On or off is this machine's choice: turning a provider off here (say,
+    // one that isn't signed in on this machine) never turns it off elsewhere.
+    ...(current?.enabled === undefined ? {} : { enabled: current.enabled }),
     // Anything already received from a peer is re-filtered here: a poisoned
     // document written before this allowlist (or by a compromised peer) must
     // never reach the provider or terminal environment. Every machine-local

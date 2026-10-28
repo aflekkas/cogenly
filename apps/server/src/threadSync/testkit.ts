@@ -1,3 +1,4 @@
+import * as MachineResources from "../resourceTelemetry/MachineResources.ts";
 import * as RepositoryHandoff from "./RepositoryHandoff.ts";
 import {
   CommandId,
@@ -91,6 +92,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
   },
   realFiling = false,
   lifecycle?: {
+    readonly resources?: import("@cogenly/contracts").MachineResourcesSnapshot;
     readonly legacyDelegation?: boolean;
     readonly afterLaunch?: () => Effect.Effect<void>;
     readonly git?: Git.GitVcsDriver["Service"];
@@ -452,7 +454,16 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
         ThreadLaunchRouting.layer,
         forkOptions === undefined ? Layer.empty : ThreadFork.layer,
       ).pipe(
-        Layer.provide(providerCatalog),
+        Layer.provide(
+          Layer.merge(
+            providerCatalog,
+            lifecycle?.resources === undefined
+              ? Layer.empty
+              : Layer.succeed(MachineResources.MachineResources, {
+                  read: Effect.succeed(lifecycle.resources),
+                }),
+          ),
+        ),
         Layer.provideMerge(ThreadTransfer.layer),
         Layer.provide(
           lifecycle?.git === undefined

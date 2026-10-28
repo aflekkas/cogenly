@@ -1,6 +1,6 @@
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
-import { ChevronDownIcon, XIcon } from "lucide-react";
+import { XIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 
 import { cn } from "~/lib/utils";
@@ -307,27 +307,6 @@ function Dot({ className, ...props }: ComponentProps<"span">) {
   );
 }
 
-// Decorative: the row itself is the control, so this only matches Dismiss's box.
-function ToggleIcon({ expanded }: { expanded: boolean }) {
-  return (
-    <Button
-      render={<span aria-hidden />}
-      size="icon-xs"
-      variant="ghost"
-      tabIndex={-1}
-      className="pointer-events-none"
-    >
-      {/* Turns in place, in step with the disclosure it toggles. */}
-      <ChevronDownIcon
-        className={cn(
-          "size-3.5 transition-[rotate] duration-200 ease-standard motion-reduce:transition-none",
-          !expanded && "rotate-180",
-        )}
-      />
-    </Button>
-  );
-}
-
 function Dismiss({ className, children, ...props }: ComponentProps<typeof Button>) {
   return (
     <Button size="icon-xs" variant="ghost" className={className} {...props}>
@@ -353,6 +332,5 @@ export const ComposerBanner = {
   Count,
   Body,
   Dot,
-  ToggleIcon,
   Dismiss,
 };

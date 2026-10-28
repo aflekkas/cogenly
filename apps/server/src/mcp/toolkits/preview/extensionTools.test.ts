@@ -34,6 +34,8 @@ const extension: BrowserExtension = {
   version: "1.0.0",
   description: "",
   manifestVersion: 3,
+  hasAction: true,
+  state: "loaded",
   enabled: true,
   source: { type: "webStore" },
   permissions: [],
@@ -77,6 +79,7 @@ const mcpClient = McpSchema.McpServerClient.of({
 });
 
 const installs: string[] = [];
+const reloads: string[] = [];
 const opened: unknown[] = [];
 const server = McpHttpServer.toolkitRegistration(
   PreviewStandardToolkit,
@@ -94,6 +97,11 @@ const server = McpHttpServer.toolkitRegistration(
           Effect.sync(() => {
             installs.push(input.source);
             return { profileId: "default", extension, updated: false };
+          }),
+        reload: (input) =>
+          Effect.sync(() => {
+            reloads.push(input.id);
+            return { profileId: "default", extension, updated: true };
           }),
         pageUrl: (input) => Effect.succeed(`chrome-extension://${input.id}/popup.html`),
       }),
@@ -158,11 +166,31 @@ it.effect("keeps installs to a live thread turn, while a finished turn can still
   }),
 );
 
-it.effect("opens an extension's popup as a new tab through the preview broker", () =>
+it.effect("clicks an extension's popup action on the current host through the preview broker", () =>
   Effect.gen(function* () {
     opened.length = 0;
     const result = yield* call("browser_extension_open", thread(live), { id, page: "popup" });
     expect(result.text).toContain('"tabId":"tab-1"');
+    expect(opened).toEqual([{ id, page: "popup" }]);
+  }),
+);
+
+it.effect("reloads through the registry only in a live agent turn", () =>
+  Effect.gen(function* () {
+    reloads.length = 0;
+    const result = yield* call("browser_extension_reload", thread(live), { id });
+    expect(result.text).toContain('"updated":true');
+    expect(reloads).toEqual([id]);
+    const late = yield* call("browser_extension_reload", thread(ended), { id });
+    expect(late.text).toContain("no longer owns an active thread run");
+    expect(reloads).toEqual([id]);
+  }),
+);
+
+it.effect("opens options as a normal extension tab", () =>
+  Effect.gen(function* () {
+    opened.length = 0;
+    yield* call("browser_extension_open", thread(live), { id, page: "options" });
     expect(opened).toEqual([
       { url: `chrome-extension://${id}/popup.html`, reuseExistingTab: false, profileId: "default" },
     ]);

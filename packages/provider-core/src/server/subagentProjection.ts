@@ -28,18 +28,30 @@ function trimmed(value: string | null | undefined): string | undefined {
   return result && result.length > 0 ? result : undefined;
 }
 
+/** Thread titles elsewhere (Work handoffs) stop at the same length. */
+const SUBAGENT_TITLE_MAX_LENGTH = 200;
+
+/**
+ * A subagent thread's title: its given title, else the first line of its
+ * prompt, else `<parent> subagent <n>`. Kept whole up to a generous cap: the
+ * clients truncate titles to the room they have, so a clipped "..." here would
+ * only cut a title that fits.
+ */
 export function subagentThreadTitle(input: {
   readonly parentTitle: string;
   readonly title?: string | null;
   readonly prompt: string;
   readonly ordinal: number;
 }): string {
-  const detail = trimmed(input.title) ?? trimmed(input.prompt);
+  const promptLine = input.prompt
+    .split("\n")
+    .map((line) => line.replace(/^#+\s*/, "").trim())
+    .find((line) => line.length > 0);
+  const detail = trimmed(input.title) ?? promptLine;
   if (detail === undefined) {
     return `${input.parentTitle} subagent ${input.ordinal}`;
   }
-  const clipped = detail.length > 72 ? `${detail.slice(0, 69)}...` : detail;
-  return clipped;
+  return detail.replace(/\s+/g, " ").slice(0, SUBAGENT_TITLE_MAX_LENGTH).trim();
 }
 
 export function makeSubagentChildThread(input: {

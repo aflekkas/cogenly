@@ -11,6 +11,7 @@ import {
   BrowserExtensionInstallResult,
   BrowserExtensionPage,
   BrowserExtensionRemoveInput,
+  BrowserExtensionReloadInput,
   BrowserExtensionToggleInput,
   BrowserExtensionsListInput,
   BrowserExtensionsListResult,
@@ -413,7 +414,7 @@ const PreviewRecordingStopTool = safeBrowserTool(
 const extensionDependencies = [...dependencies, BrowserExtensions.BrowserExtensions];
 const BrowserExtensionsListTool = Tool.make("browser_extensions_list", {
   description:
-    "List profile extensions with versions, enabled state, sources, permissions/sites and popup/options pages, and loadError from the last load (no Chrome launch). Default profile is the user's. A profile with enabled extensions opens new tabs in Cogenly's full Chrome (all APIs, streamed into the desktop panel, separate storage); existing native desktop tabs stay put and native tabs return once none are enabled. Incognito and isolated tabs lack extensions. Changes restart and close profile server tabs. Reinstall an unpacked folder to pick up rebuilt files.",
+    "List profile extensions with versions, enabled state, sources, permissions/sites, popup/options pages, and loaded or loadError (no Chrome launch or download-lock wait). Default profile is the user's. Extensions run only in Cogenly's full Chrome per profile, streamed into web and desktop panels with separate storage; open a server tab in the extension profile first. Native Electron, incognito and isolated tabs lack extensions; remote tabs run in their owning environment. Changes restart and close profile server tabs. Use browser_extension_reload for rebuilt unpacked folders. Snapshots see open shadow roots, not closed ones (use screenshots or the host's APIs); computer_* sees extension surfaces only as pixels.",
   parameters: BrowserExtensionsListInput,
   success: BrowserExtensionsListResult,
   failure: Schema.Union([BrowserExtensionError, OrchestratorMcpFailure]),
@@ -425,7 +426,7 @@ const BrowserExtensionsListTool = Tool.make("browser_extensions_list", {
 
 const BrowserExtensionInstallTool = Tool.make("browser_extension_install", {
   description:
-    "Install/update an enabled extension from a verified Chrome Web Store URL/32-letter ID or local unpacked absolute path. Other remote sources refused. Returns loadError if Chrome fails to load it; browsing continues without it. Extensions can access pages with vault fills; install only needed ones. Use browser_extensions_list for access/platform support; changes restart profile server tabs. No extra approval.",
+    "Install/update an enabled extension from a verified Chrome Web Store URL/32-letter ID or local unpacked absolute path. Other remote sources refused. Returns installing at once while Chrome loads it in the background; browser_extensions_list then reports loaded or loadError, and browsing continues without a failed one. Extensions can access pages with vault fills; install only needed ones. Use browser_extensions_list for access/platform support; changes restart profile server tabs. No extra approval.",
   parameters: BrowserExtensionInstallInput,
   success: BrowserExtensionInstallResult,
   failure: Schema.Union([BrowserExtensionError, OrchestratorMcpFailure]),
@@ -433,6 +434,15 @@ const BrowserExtensionInstallTool = Tool.make("browser_extension_install", {
 })
   .annotate(Tool.OpenWorld, true)
   .annotate(Tool.Destructive, false);
+
+const BrowserExtensionReloadTool = Tool.make("browser_extension_reload", {
+  description:
+    "Reload an unpacked extension from its original folder to pick up changed files and manifest metadata, keeping its ID and Chrome storage. Restarts that profile's server browser and refreshes its worker. Web Store extensions must be reinstalled to update them.",
+  parameters: BrowserExtensionReloadInput,
+  success: BrowserExtensionInstallResult,
+  failure: Schema.Union([BrowserExtensionError, OrchestratorMcpFailure]),
+  dependencies: extensionDependencies,
+}).annotate(Tool.Destructive, false);
 
 const BrowserExtensionToggleTool = Tool.make("browser_extension_toggle", {
   description:
@@ -457,7 +467,7 @@ const BrowserExtensionRemoveTool = Tool.make("browser_extension_remove", {
 const BrowserExtensionOpenTool = browserTool(
   Tool.make("browser_extension_open", {
     description:
-      "Open installed popup/options or a relative extension path in its profile, then use preview actions. No-popup code-only toolbar actions cannot be clicked. Popup-as-tab sees itself as active, so keep target pages in another tab. Snapshot content-script effects in the same profile. open:false stays background; tabId reuses a profile tab. See browser_extensions_list for platform limits.",
+      "Use an installed extension. For page popup, sidePanel or action, tabId is the host tab (default: current web tab); Cogenly clicks its toolbar action as Chrome would (popup, onClicked or openPanelOnActionClick) and returns hostTabId and surfaceTabId. Drive the surface with preview_* on surfaceTabId; a reopened side panel reuses its host's slot and closing the host closes its surfaces. Fallback surface pages carry a notice since active-tab semantics differ. options or a relative path (e.g. dashboard.html) opens a normal extension tab: tabId reuses a tab, open:false stays background. See browser_extensions_list for platform limits.",
     parameters: Schema.Struct({
       id: BrowserExtensionId,
       page: BrowserExtensionPage,
@@ -474,6 +484,7 @@ const BrowserExtensionOpenTool = browserTool(
 const extensionTools = [
   BrowserExtensionsListTool,
   BrowserExtensionInstallTool,
+  BrowserExtensionReloadTool,
   BrowserExtensionToggleTool,
   BrowserExtensionRemoveTool,
   BrowserExtensionOpenTool,

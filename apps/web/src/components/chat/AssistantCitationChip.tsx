@@ -118,11 +118,11 @@ export function AssistantCitationChip({
   const composerSourceLink = (
     <Link
       {...sourceLinkProps}
-      className="inline-flex h-full min-w-0 items-center gap-[0.33em] rounded-sm text-inherit no-underline focus-visible:outline-2 focus-visible:outline-foreground"
+      className="inline-flex h-full min-w-0 items-center gap-[0.33em] rounded-chip-inner text-inherit no-underline focus-visible:outline-2 focus-visible:outline-foreground"
       aria-label={`View cited assistant text: ${label}`}
     >
       <QuoteIcon aria-hidden="true" />
-      <ContextChipLabel className="max-w-[16em]">{label}</ContextChipLabel>
+      <ContextChipLabel>{label}</ContextChipLabel>
     </Link>
   );
   if (!composer) {

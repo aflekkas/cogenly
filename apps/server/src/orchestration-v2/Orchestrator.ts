@@ -10485,6 +10485,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       for (const subagentId of new Set(command.subagentIds)) {
         const subagent = projection.subagents.find((candidate) => candidate.id === subagentId);
         if (subagent === undefined || !isOrchestrationV2WorkActive(subagent.status)) continue;
+        // An unavailable owner is not evidence that its child stopped.
+        if (
+          command.keepLiveSessions === true &&
+          subagent.childThreadId !== null &&
+          unreachable.has(subagent.childThreadId)
+        )
+          continue;
         const runProviderThreadId = projection.runs.find(
           (run) => run.id === subagent.runId,
         )?.providerThreadId;

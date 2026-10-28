@@ -6,7 +6,7 @@ join one hub. Paired machines sync project names, instructions, archive state,
 repository remotes and source links, agent profiles, fallback chains and
 scheduled-task configuration, and every conversation. They also sync your
 settings, including appearance, keybindings,
-notification preferences, composer behavior and provider configuration. Provider IDs, names, colours, enabled state, order, custom models and non-secret environment variables follow you too. Settings that describe one machine
+notification preferences, composer behavior and provider configuration. Provider IDs, names, colours, order, custom models and non-secret environment variables follow you too; whether a provider is on stays per machine. Settings that describe one machine
 stay on it: CLI paths and sign-in credentials, folders such as the projects root,
 storage and backups, background activity, and devices. Changes made while a
 machine is offline catch up when it reconnects. A machine on an older version
@@ -19,6 +19,11 @@ online hub, or this machine when the hub is offline; existing agents keep the ma
 The owner must be online to save the edit; an offline notice identifies which machine to reconnect.
 Changes never start a second copy. Provider sign-ins and an agent's current fallback position stay on the
 owner.
+
+Work on the computer you are using carries no machine label. A thread, agent or
+subagent that runs on another machine shows a small cloud on its provider icon;
+hover it for the machine's name. Machine pickers list this one as **This
+computer**.
 
 Repository checkouts and worktrees stay local, but every machine lists all of a
 project's repositories. One that is not on this machine yet is marked as needing
@@ -254,6 +259,12 @@ sign-in opens its sign-in. Anything else opens a new chat with the problem
 filled in, so an agent can investigate and fix it once you send it. A paired
 machine that can't be reached is shown from what this machine last saw of it.
 
+**Fix problems automatically**, on by default in each machine's health section,
+has that machine run the safe fixes itself: it retries stuck sync and stops
+runs that lost their provider session (a long run that is still working is
+left alone). You only hear about these when an automatic fix fails. Problems
+that need you, such as a sign-in or a machine update, wait for you or an agent.
+
 For invalid incoming thread history, health offers **Discard quarantined changes for
 <thread>**, with the incoming item count and size. Its Fix discards only those held
 changes, keeping the thread's local data so later changes can sync. Review the named
@@ -288,8 +299,12 @@ provider that needs sign-in, a failed scheduled task, or a paired machine that
 hasn't been reachable for 10 minutes. A problem has to last about two minutes
 before it alerts, and it alerts once when it starts and once when it clears.
 Problems of one kind on one machine share an alert with a count, such as stuck
-runs in several threads. The alert's **Fix** works as it does in Settings →
-Machines; click its title for the details.
+runs in several threads. A problem that needs you, such as a sign-in, pops up
+once; after that it stays listed in the machine's health until it changes. For a
+provider that isn't signed in on one machine, the alert and that machine's health
+also offer **Turn off on** the machine's name, which works from any of your
+machines and leaves the provider on everywhere else. The alert's **Fix** works
+as it does in Settings → Machines; click its title for the details.
 To also get alerts as a Slack DM or an email, turn the channel on in
 Settings → Machines, choose the connected Slack or Google integration, and send
 a test. Channels are set per machine, so set them on your laptop too if you want

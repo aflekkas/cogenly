@@ -62,7 +62,7 @@ const ScheduledTaskResult = OrchestratorMcpScheduleTaskResult.mapFields((fields)
 
 const OrchestratorCapabilitiesTool = Tool.make("orchestrator_capabilities", {
   description:
-    "Read the live provider/model catalog, custom models, inherited settings and available orchestration. Subscription usage includes state, tightest remainingPercent, window resets and stale (>30m). Online paired machines carry their own catalog or catalogError; use their IDs with delegation/launch tools.",
+    "Read the live provider/model catalog, custom models, inherited settings and available orchestration. Subscription usage includes state, tightest remainingPercent, window resets and stale (>30m). Paired machines carry optional cached resources (cores, load, memory, disk, active work) for placement and pacing; online ones carry their own catalog or catalogError; use their IDs with delegation/launch tools.",
   success: OrchestratorMcpCapabilitiesResult,
   failure: OrchestratorMcpFailure,
   failureMode: "return",

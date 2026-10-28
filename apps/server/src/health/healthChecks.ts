@@ -176,13 +176,14 @@ export const directlyFixableItemKeys = (report: MachineHealthReport) =>
     .map((entry) => entry.key)
     .slice(0, MACHINE_HEALTH_FIX_MAX_ITEMS);
 
-/** Equal when only the observation time or uptime moved, so subscribers aren't woken for noise. */
+/** Equal when only observation time, uptime or on-demand resources moved, so subscribers aren't woken for noise. */
 export const sameReportContent = (left: MachineHealthReport, right: MachineHealthReport) =>
   reportContentKey(left) === reportContentKey(right);
 
 const reportContentKey = (report: MachineHealthReport) =>
-  JSON.stringify({ ...report, observedAt: null, uptimeSeconds: null }, (_key, value: unknown) =>
-    DateTime.isDateTime(value) ? DateTime.toEpochMillis(value) : value,
+  JSON.stringify(
+    { ...report, observedAt: null, uptimeSeconds: null, resources: null },
+    (_key, value: unknown) => (DateTime.isDateTime(value) ? DateTime.toEpochMillis(value) : value),
   );
 
 // ---------------------------------------------------------------------------

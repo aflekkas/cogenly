@@ -78,6 +78,7 @@ import {
   MonitorIcon,
   MonitorSmartphoneIcon,
   MoonIcon,
+  PuzzleIcon,
   RotateCcwIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -112,6 +113,8 @@ import {
   threadForksIntoProjects,
   threadProjectFolderId,
 } from "../projectLabels/projectLabels.logic";
+import { projectsByUse } from "../projectLabels/projectOrder.logic";
+import { useProjectLastUsedAt } from "../projectLabels/useProjectLastUsed";
 import { useMergeDuplicateProjects } from "../projectLabels/useMergeDuplicateProjects";
 import { useThreadRepository } from "../projectLabels/useThreadRepository";
 import { cloneableRepositoryRows } from "../projectLabels/repositoryPicker.logic";
@@ -122,6 +125,7 @@ import {
   useMoveThreadToFolder,
 } from "../projectLabels/useMoveThreadToFolder";
 import { machineMoveTargetsForThreads, threadsRunOnName } from "../machines/machines.logic";
+import { LOCAL_MACHINE_LABEL, pairedMachineChoice } from "../machines/machineBadge.logic";
 import { useEnvironmentMachineList } from "../machines/useMachines";
 import { useMoveThreadsToMachine } from "../machines/useMoveToMachine";
 import { useForkToMachine } from "../machines/useForkToMachine";
@@ -272,7 +276,7 @@ import {
   scrollCommandPaletteRowIntoView,
 } from "./CommandPaletteResults";
 import { sourceControlIcon } from "~/sourceControlPresentation";
-import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
+import { MachineGlyph } from "./MachineBadge";
 import { Checkbox } from "./ui/checkbox";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { ProjectFilePicker } from "./files/ProjectFilePicker";
@@ -756,6 +760,7 @@ function OpenCommandPaletteDialog(props: {
     [activeThread],
   );
   const activeFolderDirectory = useProjectLabelDirectory(activeFolderEnvironmentIds);
+  const projectLastUsedAt = useProjectLastUsedAt();
   const threadRepositoryOf = useThreadRepository();
   const canMoveActiveThread = useAtomValue(
     serverEnvironment.moveThreadProjectFolder.permissionAtom(activeThread?.environmentId ?? null),
@@ -1976,16 +1981,17 @@ function OpenCommandPaletteDialog(props: {
   ): CommandPaletteActionItem => ({
     kind: "action",
     value,
-    searchTerms: [option.label, option.environmentId, option.isPrimary ? "this device" : ""],
-    title: option.label,
-    // Named by the machine, never its environment ID.
-    ...(option.isConnected
-      ? option.isPrimary
-        ? { description: "This machine" }
-        : {}
-      : { description: option.status }),
+    searchTerms: [option.label, option.environmentId, option.isPrimary ? "this computer" : ""],
+    // This computer is named as such; other machines by name, never their environment ID.
+    title: option.isPrimary ? LOCAL_MACHINE_LABEL : option.label,
+    ...(option.isConnected ? {} : { description: option.status }),
     disabled: !option.isConnected,
-    icon: <EnvironmentMachineIcon kind={option.machine} className={ITEM_ICON_CLASS} />,
+    icon: (
+      <MachineGlyph
+        machine={option.isPrimary ? null : { name: option.label, online: option.isConnected }}
+        className={ITEM_ICON_CLASS}
+      />
+    ),
     keepOpen: true,
     run: async () => {
       run(option.environmentId);
@@ -2315,7 +2321,8 @@ function OpenCommandPaletteDialog(props: {
           {
             value: "folders",
             label: "Projects",
-            items: folderState.options.map((entry) => ({
+            // Recently used projects first, as the pickers list them.
+            items: projectsByUse(folderState.options, projectLastUsedAt).map((entry) => ({
               kind: "action" as const,
               value: `move-folder:${entry.key}`,
               searchTerms: [entry.label.name],
@@ -2375,13 +2382,17 @@ function OpenCommandPaletteDialog(props: {
     const thread = activeThread;
     const owners = [thread.source.ownerMachine];
     for (const target of machineMoveTargetsForThreads(activeMachineList, owners)) {
+      // This computer is named as such; other machines by name, with a cloud.
+      const targetMachine = pairedMachineChoice(target, primaryEnvironmentId);
+      const targetName = targetMachine === null ? "this computer" : target.name;
+      const targetIcon = <MachineGlyph machine={targetMachine} className={ITEM_ICON_CLASS} />;
       actionItems.push({
         kind: "action",
         value: `action:fork-thread-to-machine:${target.environmentId}`,
-        searchTerms: ["fork", "copy conversation", "machine", target.name],
-        title: `Fork to ${target.name}`,
+        searchTerms: ["fork", "copy conversation", "machine", target.name, targetName],
+        title: `Fork to ${targetName}`,
         ...(target.online ? {} : { description: "Offline" }),
-        icon: <EnvironmentMachineIcon kind={target.icon} className={ITEM_ICON_CLASS} />,
+        icon: targetIcon,
         disabled: !canForkToMachine || !canOperateActiveThread || !target.online,
         run: async () => {
           await forkToMachine({
@@ -2394,10 +2405,17 @@ function OpenCommandPaletteDialog(props: {
       actionItems.push({
         kind: "action",
         value: `action:move-thread-to-machine:${target.environmentId}`,
-        searchTerms: ["move to machine", "move thread", "machine", "hand off", target.name],
-        title: `Move thread to ${target.name}`,
+        searchTerms: [
+          "move to machine",
+          "move thread",
+          "machine",
+          "hand off",
+          target.name,
+          targetName,
+        ],
+        title: `Move thread to ${targetName}`,
         ...(target.online ? {} : { description: "Offline" }),
-        icon: <EnvironmentMachineIcon kind={target.icon} className={ITEM_ICON_CLASS} />,
+        icon: targetIcon,
         disabled: !canMoveActiveThreadToMachine || !canOperateActiveThread || !target.online,
         run: async () => {
           await moveThreadsToMachine({
@@ -2884,6 +2902,22 @@ function OpenCommandPaletteDialog(props: {
       });
     }
   }
+
+  actionItems.push({
+    kind: "action",
+    value: "action:manage-browser-extensions",
+    searchTerms: ["browser extensions", "chrome extensions", "add-ons", "plugins", "web store"],
+    title: "Manage browser extensions",
+    icon: <PuzzleIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({
+        to: "/settings/integrations",
+        hash: "browser-extensions",
+        replace: pathname === "/settings/integrations",
+        hashScrollIntoView: false,
+      });
+    },
+  });
 
   actionItems.push({
     kind: "action",
@@ -4455,17 +4489,19 @@ function ProjectSearchDescription(props: {
   readonly workspaceRoot: string;
 }) {
   if (!props.grouped) {
-    // The machine tag stays whole (up to half the row); the path gives way.
+    // A project on this computer is its path; another machine's leads with a
+    // cloud and the machine's name, which stays whole (up to half the row)
+    // while the path gives way.
+    if (props.location.kind === "local") {
+      return <span className="min-w-0 truncate">{props.workspaceRoot}</span>;
+    }
     return (
       <span className="flex min-w-0 items-center gap-1">
         <span className="inline-flex max-w-1/2 shrink-0 items-center gap-1">
-          {props.location.kind === "remote" ? (
-            <EnvironmentMachineIcon
-              aria-hidden
-              kind={props.location.machine}
-              className={COMMAND_PALETTE_META_ICON_CLASS}
-            />
-          ) : null}
+          <MachineGlyph
+            machine={{ name: props.location.label, online: true }}
+            className={COMMAND_PALETTE_META_ICON_CLASS}
+          />
           <span className="truncate">{props.location.label}</span>
         </span>
         <CommandPaletteMetaDot />

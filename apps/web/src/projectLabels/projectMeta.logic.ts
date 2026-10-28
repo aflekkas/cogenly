@@ -13,6 +13,7 @@ import {
   projectRepositoryCount,
   scopedRepositoryKey,
   threadProjectFolderId,
+  workThreadFolder,
   type EnvironmentProjectLabel,
   type ProjectLabelKey,
 } from "./projectLabels.logic";
@@ -337,6 +338,27 @@ export function workThreadDisplayProject(input: {
       scopedRepositoryKey(repository.environmentId, repository.projectId),
     ) ?? null
   );
+}
+
+/**
+ * The project a thread's header names, the same one its sidebar row does:
+ * Work follows workThreadFolder (as Work mode's rows), a chat or an agent
+ * conversation its filing. Null for "No project", or a folder unknown here.
+ */
+export function threadHeaderProject(
+  thread: Parameters<typeof workThreadFolder>[0],
+  input: {
+    readonly isWork: boolean;
+    /** Work in a real repository, not its project's folder. */
+    readonly inRepository: boolean;
+    readonly directory: Parameters<typeof workThreadFolder>[1];
+  },
+): EnvironmentProjectLabel | null {
+  if (input.isWork) return workThreadFolder(thread, input.directory, () => input.inRepository);
+  const folderId = threadProjectFolderId(thread);
+  return folderId === null
+    ? null
+    : (input.directory.byKey.get(projectLabelKey(thread.environmentId, folderId)) ?? null);
 }
 
 /**

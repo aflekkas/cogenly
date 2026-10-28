@@ -44,7 +44,6 @@ import {
 import {
   AuthOrchestrationOperateScope,
   DEFAULT_SERVER_SETTINGS,
-  type EnvironmentMachineKind,
   type ScopedThreadRef,
   type ThreadId,
 } from "@cogenly/contracts";
@@ -150,7 +149,7 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import {
   useEnvironmentIdentities,
   useConnectedEnvironmentIds,
-  useEnvironmentMachines,
+  useEnvironmentConnectionPhases,
   usePrimaryEnvironmentId,
 } from "../state/environments";
 import { readThreadShell, useProjects, useQuietThreadShells } from "../state/entities";
@@ -169,7 +168,7 @@ import type { SidebarThreadSummary } from "../types";
 import { isScratchProject } from "@cogenly/client-runtime/state/projects";
 import type { EnvironmentProject } from "@cogenly/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
-import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
+import { MachineBadge } from "./MachineBadge";
 import {
   buildDraftActionMenuItems,
   buildRepositoryActionMenuItems,
@@ -276,15 +275,19 @@ import { openCreateProjectDialog } from "../projectLabels/CreateProjectDialogHos
 import { usePendingProjectFolderStore } from "../projectLabels/pendingProjectFolders";
 import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "../projectLabels/useProjectLabels";
+import { orderProjectsByUse } from "../projectLabels/projectOrder.logic";
+import { readProjectLastUsedAt } from "../projectLabels/useProjectLastUsed";
 import { useThreadRepository } from "../projectLabels/useThreadRepository";
 import { useRepositoryNames } from "../projectLabels/useRepositoryNames";
 import { ProjectFolderIcon, type ProjectIconProject } from "../projectLabels/ProjectFolderMark";
+import { machineMoveTargetsForThreads, threadsRunOnName } from "../machines/machines.logic";
 import {
-  machineIconKind,
-  machineMoveTargetsForThreads,
-  threadOwnerMachine,
-  threadsRunOnName,
-} from "../machines/machines.logic";
+  describeRemoteMachine,
+  nameLocalMachine,
+  resolveRemoteMachine,
+  threadRunsOn,
+  type RemoteMachine,
+} from "../machines/machineBadge.logic";
 import { useMachineDirectory } from "../machines/useMachines";
 import { useMoveThreadsToMachine } from "../machines/useMoveToMachine";
 import { useForkToMachine } from "../machines/useForkToMachine";
@@ -466,6 +469,7 @@ function SidebarProviderStack(props: {
   thread: SidebarThreadSummary;
   providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
   selected: boolean;
+  remoteMachine: RemoteMachine | null;
 }) {
   const stack = resolveThreadProviderStack(props.thread);
   const currentInstanceId = stack[stack.length - 1]!;
@@ -475,15 +479,19 @@ function SidebarProviderStack(props: {
     currentEntry,
     props.providerEntryByInstanceId.values(),
   );
+  // The current provider's avatar carries the cloud for work on another machine.
   const current = (
-    <ProviderInstanceIcon
-      driverKind={currentEntry.driverKind}
-      displayName={currentEntry.displayName}
-      accentColor={currentEntry.accentColor}
-      showBadge={showInstanceBadge}
-      size="sm"
-      indicatorBackground="var(--provider-stack-ring)"
-    />
+    <span className="relative inline-flex">
+      <ProviderInstanceIcon
+        driverKind={currentEntry.driverKind}
+        displayName={currentEntry.displayName}
+        accentColor={currentEntry.accentColor}
+        showBadge={showInstanceBadge}
+        size="sm"
+        indicatorBackground="var(--provider-stack-ring)"
+      />
+      <MachineBadge placement="corner" surface="sidebar" machine={props.remoteMachine} />
+    </span>
   );
   const ringClassName = props.selected
     ? "[--provider-stack-ring:var(--state-selected-fill)]"
@@ -1387,8 +1395,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   wokeAt: string | null;
   isActive: boolean;
   jumpLabel: string | null;
-  environmentLabel: string | null;
-  environmentMachine: EnvironmentMachineKind;
+  // The other machine that runs the thread, null on this computer. Primitives
+  // so the memoized row skips renders while it holds.
+  remoteMachineName: string | null;
+  remoteMachineOnline: boolean;
   project: EnvironmentProject | null;
   projectDisplayName: string | null;
   // The agent that started this work thread; null for the user's own threads.
@@ -1579,6 +1589,17 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     showInstanceBadge && providerEntry
       ? `${modelLabel} · ${providerEntry.displayName}`
       : modelLabel;
+  const remoteMachine = useMemo(
+    () =>
+      props.remoteMachineName === null
+        ? null
+        : { name: props.remoteMachineName, online: props.remoteMachineOnline },
+    [props.remoteMachineName, props.remoteMachineOnline],
+  );
+  const providerAvatarLabel =
+    remoteMachine === null
+      ? providerModelLabel
+      : `${providerModelLabel}. ${describeRemoteMachine(remoteMachine)}`;
 
   const handleClick = useCallback(
     (event: ReactMouseEvent) => {
@@ -2310,29 +2331,18 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 </span>
               </span>
             ) : null}
-            {/* The environment the thread runs in, always named (even with
-                  one machine), then the provider glyph, which names the model.
-                  Both sit in the shortcut slot so they read as one group: left
-                  outside it, the slot's minimum width opened a gap before a
-                  lone glyph. */}
+            {/* The provider glyph names the model; a cloud on its corner marks
+                  work that runs on another machine. It sits in the shortcut
+                  slot: left outside it, the slot's minimum width opened a gap
+                  before a lone glyph. */}
             <span className="ml-auto inline-flex min-w-0 items-center">
               <SidebarShortcutSlot label={props.jumpLabel}>
-                {props.environmentLabel ? (
-                  <span className="inline-flex min-w-0 max-w-24 items-center gap-1">
-                    <EnvironmentMachineIcon
-                      aria-hidden
-                      kind={props.environmentMachine}
-                      className="size-3 shrink-0"
-                    />
-                    <span className="truncate">{props.environmentLabel}</span>
-                  </span>
-                ) : null}
                 <Tooltip>
                   <TooltipTrigger
                     render={
                       <span
                         role="img"
-                        aria-label={`Model: ${providerModelLabel}`}
+                        aria-label={`Model: ${providerAvatarLabel}`}
                         className="inline-flex shrink-0 items-center"
                       />
                     }
@@ -2341,9 +2351,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       thread={thread}
                       providerEntryByInstanceId={props.providerEntryByInstanceId}
                       selected={isCardSelected}
+                      remoteMachine={remoteMachine}
                     />
                   </TooltipTrigger>
-                  <TooltipPopup side="top">{providerModelLabel}</TooltipPopup>
+                  <TooltipPopup side="top">{providerAvatarLabel}</TooltipPopup>
                 </Tooltip>
               </SidebarShortcutSlot>
             </span>
@@ -2369,8 +2380,8 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   thread: SidebarThreadSummary;
   project: EnvironmentProject | null;
   projectDisplayName: string | null;
-  environmentLabel: string | null;
-  environmentMachine: EnvironmentMachineKind;
+  remoteMachineName: string | null;
+  remoteMachineOnline: boolean;
   providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
   isHighlighted: boolean;
   isRouteActive: boolean;
@@ -2461,6 +2472,14 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
               </PanOnHoverText>
             </PendingTitleSlot>
             <span id={`${props.resultId}-pr`} className="contents"></span>
+            <MachineBadge
+              placement="inline"
+              machine={
+                props.remoteMachineName === null
+                  ? null
+                  : { name: props.remoteMachineName, online: props.remoteMachineOnline }
+              }
+            />
             <span className="w-8 shrink-0 text-right text-xs text-muted-foreground/55 tabular-nums">
               {threadTimeLabel(thread)}
             </span>
@@ -2614,7 +2633,6 @@ export default function Sidebar() {
       ),
     [environments],
   );
-  const environmentMachineById = useEnvironmentMachines();
   const projectGroups = useSidebarProjectGroups();
   const projectGroupsRef = useRef(projectGroups);
   projectGroupsRef.current = projectGroups;
@@ -2692,18 +2710,26 @@ export default function Sidebar() {
   const machineDirectory = useMachineDirectory(labelEnvironmentIds);
   const moveThreadsToMachine = useMoveThreadsToMachine();
   const forkToMachine = useForkToMachine();
-  // The machine a row names: the paired machine that runs a replica, else its environment.
+  // The other machine a row's cloud names, null for work on this computer,
+  // resolved the same way as useRemoteMachine.
+  const connectionPhaseById = useEnvironmentConnectionPhases();
   const runsOnFor = (thread: Pick<EnvironmentThreadShell, "environmentId" | "source">) => {
-    const owner = threadOwnerMachine(
-      machineDirectory.get(thread.environmentId) ?? null,
-      thread.source.ownerMachine,
-    );
-    return owner
-      ? { label: owner.name, machine: machineIconKind(owner) }
-      : {
-          label: environmentLabelById.get(thread.environmentId) ?? null,
-          machine: environmentMachineById.get(thread.environmentId) ?? "server",
-        };
+    const runsOn = threadRunsOn(thread);
+    const directName = environmentLabelById.get(runsOn) ?? null;
+    const directPhase = connectionPhaseById.get(runsOn) ?? null;
+    const paired = machineDirectory
+      .get(thread.environmentId)
+      ?.machines.find((machine) => machine.environmentId === runsOn);
+    const machine = resolveRemoteMachine({
+      runsOn,
+      localEnvironmentId: primaryEnvironmentId,
+      direct:
+        directName === null || directPhase === null
+          ? null
+          : { name: directName, phase: directPhase },
+      paired: paired === undefined ? null : { name: paired.name, online: paired.online },
+    });
+    return { name: machine?.name ?? null, online: machine?.online ?? true };
   };
   // Chats | Work | Agents: the list below shows one mode's threads at a time.
   const sidebarModes = useSidebarModeState({
@@ -4551,7 +4577,7 @@ export default function Sidebar() {
       const moveTargets = machineMoveTargetsForThreads(moveMachineList, moveOwners);
       const machineItems = machineMenuItems(
         {
-          targets: moveTargets,
+          targets: nameLocalMachine(moveTargets, primaryEnvironmentId),
           canMove:
             moveEnvironmentId !== null &&
             appAtomRegistry.get(
@@ -4887,6 +4913,8 @@ export default function Sidebar() {
           projectLabelDirectory,
           threadRepositoryOf(thread),
         );
+        // Recently used projects lead the move menu, as they lead the pickers.
+        const folderOrder = orderProjectsByUse(folderState.options, readProjectLastUsedAt());
         const machineList = machineDirectory.get(thread.environmentId) ?? null;
         const machineTargets = machineMoveTargetsForThreads(machineList, [
           thread.source.ownerMachine,
@@ -4941,11 +4969,12 @@ export default function Sidebar() {
                   name: folderState.current.label.name,
                 },
                 removable: folderState.removable,
-                options: folderState.options.map((entry) => ({
+                options: [...folderOrder.recent, ...folderOrder.rest].map((entry, index) => ({
                   id: entry.label.id,
                   name: entry.label.name,
                   color: entry.label.color,
                   blockedReason: folderState.blocked.get(entry.key),
+                  startsGroup: index > 0 && index === folderOrder.recent.length,
                 })),
                 // A project's own chat can't go into a new project either.
                 inRepository: folderState.inRepository || folderState.projectHome,
@@ -4955,7 +4984,7 @@ export default function Sidebar() {
                 forks: threadForksIntoProjects(thread),
               },
               machines: {
-                targets: machineTargets,
+                targets: nameLocalMachine(machineTargets, primaryEnvironmentId),
                 canFork: appAtomRegistry.get(
                   serverEnvironment.forkThreadToMachine.permissionAtom(thread.environmentId),
                 ),
@@ -5529,8 +5558,8 @@ export default function Sidebar() {
                             `${thread.environmentId}:${thread.projectId}`,
                           ) ?? null
                         }
-                        environmentLabel={runsOn.label}
-                        environmentMachine={runsOn.machine}
+                        remoteMachineName={runsOn.name}
+                        remoteMachineOnline={runsOn.online}
                         providerEntryByInstanceId={
                           providerEntriesByEnvironment.get(thread.environmentId) ??
                           EMPTY_PROVIDER_ENTRIES
@@ -5706,8 +5735,8 @@ export default function Sidebar() {
                         wokeAt={threadWokeAt(thread, { now: snoozeNow })}
                         isActive={routeThreadKey === threadKey}
                         jumpLabel={showJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null}
-                        environmentLabel={runsOn.label}
-                        environmentMachine={runsOn.machine}
+                        remoteMachineName={runsOn.name}
+                        remoteMachineOnline={runsOn.online}
                         project={
                           projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null
                         }

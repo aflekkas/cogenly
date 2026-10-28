@@ -1,12 +1,22 @@
 import { ComposerSelectControl } from "./chat/ComposerControl";
-import { COMPOSER_CONTEXT_TOOLTIP, ComposerContextLabel } from "./ComposerContextLabel";
+import {
+  COMPOSER_CONTEXT_TOOLTIP,
+  ComposerContextLabel,
+  ComposerContextStatic,
+} from "./ComposerContextLabel";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "./ui/tooltip";
 import type { EnvironmentId } from "@cogenly/contracts";
 import { ScaleIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
-import { type EnvironmentOption, resolveEnvironmentOptionTitle } from "./BranchToolbar.logic";
-import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
+import { usePrimaryEnvironmentId } from "../state/environments";
+import {
+  type EnvironmentOption,
+  environmentOptionMachine,
+  resolveEnvironmentOptionName,
+  resolveEnvironmentOptionTitle,
+} from "./BranchToolbar.logic";
+import { MachineChoice, MachineGlyph } from "./MachineBadge";
 import { useComposerMenuProps } from "./chat/composerEventScope";
 import {
   Select,
@@ -18,22 +28,13 @@ import {
 } from "./ui/select";
 
 /**
- * One "Run on" choice, as both the Select and the run-context menu list it.
- * A paired machine that is offline stays pickable; the launch then offers to
- * run here instead.
+ * One "Run on" choice, as both the Select and the run-context menu list it:
+ * "This computer", or another machine's name with a cloud. A paired machine
+ * that is offline stays pickable; the launch then offers to run here instead.
  */
 export function EnvironmentOptionContent({ option }: { option: EnvironmentOption }) {
-  const offline = option.pairedMachine?.online === false;
-  return (
-    <span className="flex min-w-0 items-center gap-1.5">
-      <EnvironmentMachineIcon
-        kind={option.machine}
-        className={offline ? "size-3 shrink-0 opacity-50" : "size-3 shrink-0"}
-      />
-      <span className="min-w-0 truncate">{option.label}</span>
-      {offline ? <span className="shrink-0 text-muted-foreground">offline</span> : null}
-    </span>
-  );
+  const localEnvironmentId = usePrimaryEnvironmentId();
+  return <MachineChoice machine={environmentOptionMachine(option, localEnvironmentId)} />;
 }
 
 interface BranchToolbarEnvironmentSelectorProps {
@@ -54,9 +55,17 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   onEnvironmentChange,
 }: BranchToolbarEnvironmentSelectorProps) {
   const composerFloatingLayerProps = useComposerMenuProps();
+  const localEnvironmentId = usePrimaryEnvironmentId();
   const activeEnvironment = useMemo(() => {
     return availableEnvironments.find((env) => env.environmentId === environmentId) ?? null;
   }, [availableEnvironments, environmentId]);
+  const activeMachine =
+    activeEnvironment === null
+      ? null
+      : environmentOptionMachine(activeEnvironment, localEnvironmentId);
+  const activeTitle = activeEnvironment
+    ? resolveEnvironmentOptionTitle(activeEnvironment, localEnvironmentId)
+    : "Run on";
 
   const environmentItems = useMemo(
     () => [
@@ -65,36 +74,27 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
         : []),
       ...availableEnvironments.map((env) => ({
         value: env.environmentId,
-        label: env.label,
+        label: resolveEnvironmentOptionName(env, localEnvironmentId),
       })),
     ],
-    [availableEnvironments, autoEnvironmentLabel, onAutoEnvironment],
+    [availableEnvironments, autoEnvironmentLabel, onAutoEnvironment, localEnvironmentId],
   );
 
-  // The static label carries the xs control's height (h-7 sm:h-6) as well as
-  // its padding: the composer context strip has no min-height of its own, and
-  // the glass seam joining it to the composer assumes a fixed strip height, so
-  // a shorter label would drag the seam out of line whenever this label is the
-  // only thing in the strip.
   if (envLocked || onEnvironmentChange === undefined) {
     const lockedRow = (
-      <span
-        className="inline-flex h-7 min-w-0 max-w-full items-center gap-1 border border-transparent px-1.75 font-normal text-muted-foreground text-xs sm:h-6"
-        data-composer-context-control
-      >
-        <EnvironmentMachineIcon
-          kind={activeEnvironment?.machine ?? "server"}
-          className="size-3 shrink-0"
-        />
-        <ComposerContextLabel>{activeEnvironment?.label ?? "Run on"}</ComposerContextLabel>
-      </span>
+      <ComposerContextStatic>
+        <MachineGlyph machine={activeMachine} className="size-3" />
+        <ComposerContextLabel>
+          {activeEnvironment === null
+            ? "Run on"
+            : resolveEnvironmentOptionName(activeEnvironment, localEnvironmentId)}
+        </ComposerContextLabel>
+      </ComposerContextStatic>
     );
     return (
       <Tooltip>
         <TooltipTrigger render={lockedRow} />
-        <TooltipPopup {...COMPOSER_CONTEXT_TOOLTIP}>
-          {activeEnvironment ? resolveEnvironmentOptionTitle(activeEnvironment) : "Run on"}
-        </TooltipPopup>
+        <TooltipPopup {...COMPOSER_CONTEXT_TOOLTIP}>{activeTitle}</TooltipPopup>
       </Tooltip>
     );
   }
@@ -123,18 +123,14 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
           {autoEnvironmentLabel ? (
             <ScaleIcon className="size-3 shrink-0" aria-hidden="true" />
           ) : (
-            <EnvironmentMachineIcon
-              kind={activeEnvironment?.machine ?? "server"}
-              className="size-3 shrink-0"
-            />
+            <MachineGlyph machine={activeMachine} className="size-3" />
           )}
           <ComposerContextLabel>
             <SelectValue />
           </ComposerContextLabel>
         </TooltipTrigger>
         <TooltipPopup {...COMPOSER_CONTEXT_TOOLTIP}>
-          {autoEnvironmentLabel ??
-            (activeEnvironment ? resolveEnvironmentOptionTitle(activeEnvironment) : "Run on")}
+          {autoEnvironmentLabel ?? activeTitle}
         </TooltipPopup>
       </Tooltip>
       <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>

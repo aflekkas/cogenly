@@ -29,11 +29,13 @@ it("preserves shared instructions and bounds every availability combination in U
           expect(tools.includes("device_open")).toBe(device);
           expect(tools.includes("computer_press")).toBe(computer === "darwin");
           expect(tools.includes("terminal_run")).toBe(terminal);
+          // 4,000 bytes per entry is Codex's hard cap; the total is our own budget
+          // against instruction creep, so raise it only with a reason.
           for (const entry of Object.values(context))
             expect(Buffer.byteLength(entry.value)).toBeLessThanOrEqual(4_000);
           expect(
             Object.values(context).reduce((sum, entry) => sum + Buffer.byteLength(entry.value), 0),
-          ).toBeLessThan(10_000);
+          ).toBeLessThan(10_250);
         }
       }
     }

@@ -1,10 +1,12 @@
-import { useEnvironmentMachineList } from "../../machines/useMachines";
-import { threadOwnerMachine } from "../../machines/machines.logic";
-import { Badge } from "../ui/badge";
+import {
+  describeRemoteMachine,
+  LOCAL_MACHINE_LABEL,
+  threadRunsOn,
+} from "../../machines/machineBadge.logic";
+import { useRemoteMachine } from "../../machines/useRemoteMachine";
 import { scopedThreadKey, scopeThreadRef } from "@cogenly/client-runtime/environment";
 import {
   NodeId,
-  resolveEnvironmentMachineKind,
   ThreadId,
   type EnvironmentId,
   type OrchestrationV2Subagent,
@@ -42,8 +44,7 @@ import { threadEnvironment } from "~/state/threads";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { buildThreadRouteParams } from "~/threadRoutes";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
-import { useThreadRunner } from "~/machines/useThreadRunner";
-import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
+import { MachineGlyph } from "../MachineBadge";
 import { StopGlyph } from "../StopGlyph";
 import {
   revealInFileExplorerLabelForKind,
@@ -385,7 +386,11 @@ function ThreadDetailsMenuContent(props: {
     reportFailure: false,
   });
   const source = shell?.source;
-  const runner = useThreadRunner(props.environmentId, source?.ownerMachine);
+  // Null on this computer.
+  const runner = useRemoteMachine(
+    shell === null ? props.environmentId : threadRunsOn(shell),
+    props.environmentId,
+  );
 
   const openThread = (threadId: string) => {
     props.onNavigate();
@@ -470,13 +475,8 @@ function ThreadDetailsMenuContent(props: {
         {/* The machine that runs the thread, which for a replica is another
             paired machine. The chat header does not name it. */}
         <ThreadDetailsRow
-          icon={
-            <EnvironmentMachineIcon
-              kind={runner?.kind ?? resolveEnvironmentMachineKind(serverConfig ?? null)}
-              className={THREAD_DETAILS_PANEL_ICON_CLASS}
-            />
-          }
-          label={runner?.name ?? serverConfig?.environment.label ?? "This machine"}
+          icon={<MachineGlyph machine={runner} className={THREAD_DETAILS_PANEL_ICON_CLASS} />}
+          label={runner?.name ?? LOCAL_MACHINE_LABEL}
           secondary={runner?.online === false ? "offline" : null}
         />
         {revealLabel !== null && workspacePath !== null ? (
@@ -537,9 +537,14 @@ const ROW_TRAILING_HIDE_CLASS =
  */
 function useThreadAgentRowRenderer(props: {
   readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
   readonly onOpenThread: (threadId: string) => void;
 }) {
   const [stoppingKey, setStoppingKey] = useState<string | null>(null);
+  // Agents without a thread of their own (native subagents, workflow steps) run
+  // in this thread's provider session, so on the machine that runs it.
+  const parentShell = useThreadShell(scopeThreadRef(props.environmentId, props.threadId));
+  const parentRunsOn = parentShell === null ? props.environmentId : threadRunsOn(parentShell);
   const providers = useServerConfigs().get(props.environmentId)?.providers;
   const markColorByInstanceId = useMemo(
     () => resolveProviderInstanceAccentColors(providers ?? []),
@@ -581,6 +586,7 @@ function useThreadAgentRowRenderer(props: {
   return (row: ThreadAgentRow) => (
     <ThreadAgentListRow
       environmentId={props.environmentId}
+      parentRunsOn={parentRunsOn}
       key={row.key}
       row={row}
       providers={providers}
@@ -746,6 +752,8 @@ function ThreadAgentsGroup(props: {
  */
 function ThreadAgentListRow(props: {
   readonly environmentId: EnvironmentId;
+  /** The machine that runs the parent thread, for rows without a thread of their own. */
+  readonly parentRunsOn: EnvironmentId;
   readonly row: ThreadAgentRow;
   readonly providers: ReadonlyArray<ServerProvider> | undefined;
   readonly accentColor: string | undefined;
@@ -758,10 +766,11 @@ function ThreadAgentListRow(props: {
   const child = useThreadShell(
     row.threadId === null ? null : scopeThreadRef(props.environmentId, ThreadId.make(row.threadId)),
   );
-  const machines = useEnvironmentMachineList(
-    child?.source.ownerMachine == null ? null : props.environmentId,
+  // A delegated task's child thread names its machine; otherwise the parent's.
+  const machine = useRemoteMachine(
+    child === null ? props.parentRunsOn : threadRunsOn(child),
+    props.environmentId,
   );
-  const machine = threadOwnerMachine(machines, child?.source.ownerMachine);
   const [workflowOpen, setWorkflowOpen] = useState(false);
   const provider = props.providers?.find((entry) => entry.instanceId === row.providerInstanceId);
   const driver = (row.driver ?? provider?.driver ?? null) as ProviderDriverKind | null;
@@ -812,20 +821,13 @@ function ThreadAgentListRow(props: {
         provider={provider}
         accentColor={props.accentColor}
         tone={threadAgentDotTone(row)}
+        remoteMachine={machine}
       />
     ),
-    label: (
-      <span className="flex min-w-0 items-center gap-2">
-        <span className="truncate">{row.title}</span>
-        {machine === null ? null : (
-          <Badge variant="outline" size="sm">
-            <span className="max-w-32 truncate">{machine.name}</span>
-          </Badge>
-        )}
-      </span>
-    ),
+    label: <span className="truncate">{row.title}</span>,
     trailing,
-    "aria-description": row.statusLabel,
+    "aria-description":
+      machine === null ? row.statusLabel : `${row.statusLabel}. ${describeRemoteMachine(machine)}`,
   };
   const isWorkflow = row.members.length > 0;
   return (
@@ -856,7 +858,7 @@ function ThreadAgentListRow(props: {
           }
         />
         <TooltipPopup side="left">
-          {machine === null ? when : `${when} · Runs on ${machine.name}`}
+          {machine === null ? when : `${when}. ${describeRemoteMachine(machine)}`}
         </TooltipPopup>
       </Tooltip>
       {stopTarget !== null ? (
@@ -889,6 +891,7 @@ function ThreadAgentListRow(props: {
             {row.members.map((member) => (
               <ThreadAgentListRow
                 environmentId={props.environmentId}
+                parentRunsOn={props.parentRunsOn}
                 key={member.key}
                 row={member}
                 providers={props.providers}

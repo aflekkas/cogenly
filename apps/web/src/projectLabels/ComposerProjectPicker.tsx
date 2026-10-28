@@ -11,6 +11,11 @@ import {
   type ComposerControlSize,
 } from "../components/chat/ComposerControl";
 import {
+  COMPOSER_CONTEXT_TOOLTIP,
+  ComposerContextLabel,
+  ComposerContextStatic,
+} from "../components/ComposerContextLabel";
+import {
   Combobox,
   ComboboxEmpty,
   ComboboxItem,
@@ -37,6 +42,8 @@ import {
   threadProjectFolderId,
 } from "./projectLabels.logic";
 import { HeroProjectSuffix } from "./HeroProjectSuffix";
+import { hasProjectNamed, orderProjectsByUse, rankProjectMatches } from "./projectOrder.logic";
+import { useProjectLastUsedAt } from "./useProjectLastUsed";
 import { HERO_INLINE_ICON_STYLE, ProjectFolderIcon } from "./ProjectFolderMark";
 import { ProjectPickerRow } from "./ProjectPickerRow";
 import { useComposerProjectFolder } from "./useComposerProjectFolder";
@@ -45,7 +52,7 @@ import { pickNoProjectForWork } from "./workNoProjectPicks";
 import { HeroName, HeroPickerButton } from "../components/chat/HeroHeadline";
 import { WorkHeroCrumbText } from "../components/chat/WorkHeroSentence";
 
-type ProjectOption =
+type ProjectOption = (
   | {
       readonly kind: "project";
       readonly key: string;
@@ -56,12 +63,16 @@ type ProjectOption =
   /** "No project" while in none; "Remove from project", the way out, while in one. */
   | { readonly kind: "none"; readonly key: "none"; readonly label: string }
   | { readonly kind: "new"; readonly key: "new" }
-  | { readonly kind: "create"; readonly key: "create"; readonly name: string };
+  | { readonly kind: "create"; readonly key: "create"; readonly name: string }
+) & {
+  /** A hairline above the row, where a new group starts. */
+  readonly divider: boolean;
+};
 
 /**
- * The composer's project chip, inside a collapsible `ComposerControl`: the project's
- * mark and name, or No project. Every composer with a project picker draws this, so
- * a narrow composer collapses each to its icon alike.
+ * A project chip for a composer toolbar, inside a collapsible `ComposerControl`: the
+ * project's mark and name, or No project, collapsing to its icon when narrow. The
+ * agent builder files its agent with it; a chat picks its project in the tray instead.
  */
 export function ComposerProjectChip({
   project,
@@ -90,6 +101,24 @@ export function ComposerProjectChip({
         </span>
       </span>
       <ComposerControlChevron size={size} />
+    </>
+  );
+}
+
+/**
+ * The project as the composer tray names it, beside the machine: its mark and
+ * a label that compacts to the mark with the machine's when the tray is narrow.
+ */
+function ComposerProjectTrayContent({ project }: { project: EnvironmentProjectLabel | null }) {
+  return (
+    <>
+      {/* A picked project fades in where the last one was. */}
+      <ProjectFolderIcon key={project?.key ?? "none"} project={project} className="swap-motion" />
+      <ComposerContextLabel>
+        <span key={project?.key ?? "none"} className="swap-motion">
+          {project ? project.label.name : "No project"}
+        </span>
+      </ComposerContextLabel>
     </>
   );
 }
@@ -132,20 +161,23 @@ export function useComposerProjectPickerState(
     thread?.source.agent === undefined &&
     !(thread !== null && isProjectChatThread(thread, directory.labels));
 
+  const namesProject = isChat || isWorkDraft;
   return {
     directory,
     thread,
     draftSurface,
     current,
     isWorkDraft,
-    canPickProject: canMove && (isChat || isWorkDraft),
+    /** The composer tray names this thread's project, picker or not. */
+    namesProject,
+    canPickProject: canMove && namesProject,
   };
 }
 
 /**
- * The composer toolbar's project control: which project this chat belongs to.
- * A draft keeps its pick until it is sent (PendingProjectFolderCoordinator
- * files the new thread); an existing chat moves right away, with Undo.
+ * Which project this chat belongs to, picked before it starts. A draft keeps
+ * its pick until it is sent (PendingProjectFolderCoordinator files the new
+ * thread); a started chat that was never written in moves right away, with Undo.
  *
  * A Work draft can be given a project too. Until one is picked it shows its
  * repository's project, which Work follows; the Work hero answers a pick by
@@ -156,24 +188,24 @@ export function ComposerProjectPicker(props: {
   readonly threadId: ThreadId;
   /** Set on the new-chat screen, where the draft says whether this is a chat. */
   readonly draftId: DraftId | null;
-  readonly size: ComposerControlSize;
   readonly disabled?: boolean;
   /** Looks as usual but does not open, for a moment too brief to dim it for. */
   readonly locked?: boolean;
   /**
+   * `tray` sits beside the machine picker under the composer, and names the
+   * project without a picker once `readOnly`, as the machine does.
    * `hero` is the new-chat greeting's " · in <project>" tail: the same picker,
    * opened from the project's name, and nothing to click without a project.
    * `headline` is the project half of the Work hero's "What should we build
    * in <project> / <repo>?", reading "No project" without one.
    */
-  readonly appearance?: "toolbar" | "hero" | "headline";
+  readonly appearance: "tray" | "hero" | "headline";
+  /** The chat has started, so its project no longer changes here. */
+  readonly readOnly?: boolean;
 }) {
   const { environmentId, threadId } = props;
-  const { directory, thread, isWorkDraft, current, canPickProject } = useComposerProjectPickerState(
-    environmentId,
-    threadId,
-    props.draftId,
-  );
+  const { directory, thread, isWorkDraft, current, namesProject, canPickProject } =
+    useComposerProjectPickerState(environmentId, threadId, props.draftId);
   const canCreate = useAtomValue(
     serverEnvironment.createProjectLabel.permissionAtom(environmentId),
   );
@@ -188,44 +220,78 @@ export function ComposerProjectPicker(props: {
     () => projectLabelsOn(directory.active, environmentId),
     [directory.active, environmentId],
   );
+  const lastUsedAt = useProjectLastUsedAt();
+  const noneLabel = current === null ? "No project" : "Remove from project";
   const options = useMemo((): ProjectOption[] => {
-    // "No project" is a choice like any project, so it leads the list;
-    // creating one is the lone action at the end. For Work it moves the draft
-    // to a repository in no project (DraftHeroHeadline).
-    const needle = query.trim().toLowerCase();
-    const result: ProjectOption[] =
-      needle === ""
-        ? [
-            {
-              kind: "none",
-              key: "none",
-              label: current === null ? "No project" : "Remove from project",
-            },
-          ]
-        : [];
-    for (const entry of projects) {
-      if (needle !== "" && !entry.label.name.toLowerCase().includes(needle)) continue;
+    // The projects most likely to be picked lead: recently used, then the
+    // rest by name. "No project" is not a project, so it sits apart at the
+    // end with creating one. For Work it moves the draft to a repository in
+    // no project (DraftHeroHeadline).
+    const searching = query.trim() !== "";
+    const { recent, rest } = orderProjectsByUse(projects, lastUsedAt);
+    const result: ProjectOption[] = [];
+    const pushProject = (entry: EnvironmentProjectLabel, divider: boolean) =>
       result.push({
         kind: "project",
         key: entry.key,
         id: entry.label.id,
         name: entry.label.name,
         project: entry,
+        divider,
       });
+    if (searching) {
+      for (const entry of rankProjectMatches([...recent, ...rest], query))
+        pushProject(entry, false);
+    } else {
+      for (const entry of recent) pushProject(entry, false);
+      rest.forEach((entry, index) => pushProject(entry, index === 0 && recent.length > 0));
+    }
+    const offersNone =
+      !searching || rankProjectMatches([{ label: { name: noneLabel } }], query).length > 0;
+    if (offersNone) {
+      result.push({ kind: "none", key: "none", label: noneLabel, divider: result.length > 0 });
     }
     if (canCreate) {
-      if (needle === "") result.push({ kind: "new", key: "new" });
-      else if (!projects.some((entry) => entry.label.name.toLowerCase() === needle)) {
-        result.push({ kind: "create", key: "create", name: query.trim() });
+      const divider = !offersNone && result.length > 0;
+      if (!searching) result.push({ kind: "new", key: "new", divider });
+      else if (!hasProjectNamed(projects, query)) {
+        result.push({ kind: "create", key: "create", name: query.trim(), divider });
       }
     }
     return result;
-  }, [canCreate, current, projects, query]);
+  }, [canCreate, lastUsedAt, noneLabel, projects, query]);
+  const chosenOption = useMemo(
+    (): ProjectOption =>
+      current === null
+        ? { kind: "none", key: "none", label: noneLabel, divider: false }
+        : {
+            kind: "project",
+            key: current.key,
+            id: current.label.id,
+            name: current.label.name,
+            project: current,
+            divider: false,
+          },
+    [current, noneLabel],
+  );
 
   const isHeadline = props.appearance === "headline";
+  const isTray = props.appearance === "tray";
   const headlineIcon = (
     <ProjectFolderIcon project={current} className="inline-block" style={HERO_INLINE_ICON_STYLE} />
   );
+  const triggerLabel = current ? `Project: ${current.label.name}` : "No project";
+  if (isTray && (props.readOnly || !canPickProject)) {
+    if (!namesProject) return null;
+    return (
+      <Tooltip>
+        <TooltipTrigger render={<ComposerContextStatic />}>
+          <ComposerProjectTrayContent project={current} />
+        </TooltipTrigger>
+        <TooltipPopup {...COMPOSER_CONTEXT_TOOLTIP}>{triggerLabel}</TooltipPopup>
+      </Tooltip>
+    );
+  }
   if (!canPickProject) {
     // The Work hero still names its project when it cannot be changed here.
     return isHeadline ? (
@@ -303,7 +369,6 @@ export function ComposerProjectPicker(props: {
     }
   };
 
-  const triggerLabel = current ? `Project: ${current.label.name}` : "No project";
   const isHero = props.appearance === "hero";
   const inSentence = isHero || isHeadline;
   const isChosen = (option: ProjectOption) =>
@@ -316,7 +381,8 @@ export function ComposerProjectPicker(props: {
       items={options}
       filteredItems={options}
       autoHighlight
-      value={null}
+      // The current pick, so the list opens with it highlighted.
+      value={chosenOption}
       open={open}
       onOpenChange={(next, details) => {
         if (!next && details.reason === "item-press") return;
@@ -348,7 +414,7 @@ export function ComposerProjectPicker(props: {
             <ComboboxTrigger
               disabled={props.disabled}
               aria-label={`In ${current.label.name}. Move to project`}
-              render={<HeroPickerButton weight="medium" />}
+              render={<HeroPickerButton />}
             >
               <HeroName text={current.label.name} icon={headlineIcon} chevron />
             </ComboboxTrigger>
@@ -361,14 +427,16 @@ export function ComposerProjectPicker(props: {
               <ComboboxTrigger
                 disabled={props.disabled}
                 aria-label={triggerLabel}
-                data-composer-project-picker=""
-                render={<ComposerControl size={props.size} collapsible />}
+                data-composer-context-control
+                // The machine picker's trigger, so the tray's two choices match.
+                render={<ComposerControl size="xs" className="min-w-0 max-w-full" />}
               />
             }
           >
-            <ComposerProjectChip project={current} size={props.size} />
+            <ComposerProjectTrayContent project={current} />
+            <ComposerControlChevron size="xs" />
           </TooltipTrigger>
-          <TooltipPopup side="top">
+          <TooltipPopup {...COMPOSER_CONTEXT_TOOLTIP}>
             {forks ? "Fork into project…" : "Move to project…"}
           </TooltipPopup>
         </Tooltip>
@@ -395,8 +463,7 @@ export function ComposerProjectPicker(props: {
               value={option}
               hideIndicator
               tone={option.kind === "new" || option.kind === "create" ? "action" : "default"}
-              // One hairline sets the create action apart from the choices.
-              divider={(option.kind === "new" || option.kind === "create") && options.length > 1}
+              divider={option.divider}
               disabled={busy || (option.kind === "create" && option.name.length > 200)}
             >
               <ProjectOptionRow option={option} chosen={isChosen(option)} />
