@@ -28,19 +28,16 @@ import {
   SERVICE_STATE_FILE,
   SERVICE_RESTART_PENDING_FILE,
   SERVICE_STOP_MARKER_FILE,
+  PREPARED_TIMEOUT_MS,
 } from "./cloud/serviceProtocol.ts";
 
+import {
+  CHILD_SHUTDOWN_GRACE_MS,
+  LAUNCHER_SHUTDOWN_GRACE_MS,
+  ShutdownDeadline,
+} from "./shutdownDeadline.ts";
+
 const HANDOFF_DELAY_MS = 2_000;
-/**
- * How long a trial has to report prepared. Migrations and the open-time
- * `PRAGMA optimize` count toward it and scale with the database: tens of GB on
- * a cold page cache take minutes. They run synchronously on the child's main
- * thread, so it cannot report progress meanwhile. A missed window rolls back
- * the database, so the next attempt pays the same cost. Crashes are caught at
- * exit; this only bounds a trial that is alive but stuck.
- */
-export const PREPARED_TIMEOUT_MS = 30 * 60_000;
-const TERMINATE_GRACE_MS = 5_000;
 
 /**
  * The boot unit is `Type=notify` with `WatchdogSec=60` and
@@ -564,7 +561,7 @@ async function terminateChild(
 ): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
   child.kill(signal);
-  const force = setTimeout(() => child.kill("SIGKILL"), TERMINATE_GRACE_MS);
+  const force = setTimeout(() => child.kill("SIGKILL"), CHILD_SHUTDOWN_GRACE_MS);
   try {
     await waitForExit(child);
   } finally {
@@ -590,6 +587,13 @@ export class Launcher {
   readonly #completion = Promise.withResolvers<void>();
   readonly #backupSpaceProbe: Partial<BackupSpaceProbe> | undefined;
   readonly #notifier = new LauncherNotifier();
+  readonly #children = new Set<NodeChildProcess.ChildProcess>();
+  readonly #shutdownDeadline = new ShutdownDeadline(LAUNCHER_SHUTDOWN_GRACE_MS, () => {
+    process.stderr.write("[service-launcher] Graceful shutdown timed out; forcing exit.\n");
+    // Includes children being terminated by an in-flight update transition.
+    for (const child of this.#children) child.kill("SIGKILL");
+    process.exit(0);
+  });
 
   constructor(
     baseDir: string,
@@ -613,6 +617,7 @@ export class Launcher {
       await this.#completion.promise;
     } finally {
       this.#notifier.stop();
+      this.#shutdownDeadline.dispose();
       process.off("SIGTERM", onSigterm);
       process.off("SIGINT", onSigint);
     }
@@ -638,6 +643,7 @@ export class Launcher {
   }
 
   async stop(signal: NodeJS.Signals): Promise<void> {
+    this.#shutdownDeadline.start();
     // This must happen synchronously at signal receipt. A queued update
     // transition may already be terminating the active child, and that child
     // needs to see the marker in its shutdown finalizer. KillMode=mixed also
@@ -683,11 +689,7 @@ export class Launcher {
     // CLI writing the marker and writing the new state still runs the old
     // version, and the marker has to outlive it.
     await NodeFSP.rm(stopMarkerPath(this.#baseDir), { force: true }).catch(() => undefined);
-    const restartPending = restartPendingPath(this.#baseDir);
-    const awaitedVersion = await NodeFSP.readFile(restartPending, "utf8").catch(() => undefined);
-    if (awaitedVersion?.trim() === this.#state.activeVersion) {
-      await NodeFSP.rm(restartPending, { force: true }).catch(() => undefined);
-    }
+    await this.#clearRestartPending();
     const update = this.#state.update;
     if (update?.status !== "pending") {
       if (update !== undefined) {
@@ -705,6 +707,14 @@ export class Launcher {
       return;
     }
     await this.#startTrial(update);
+  }
+
+  async #clearRestartPending(): Promise<void> {
+    const restartPending = restartPendingPath(this.#baseDir);
+    const awaitedVersion = await NodeFSP.readFile(restartPending, "utf8").catch(() => undefined);
+    if (awaitedVersion?.trim() === this.#state.activeVersion) {
+      await NodeFSP.rm(restartPending, { force: true }).catch(() => undefined);
+    }
   }
 
   async #startTrial(pending: PendingServiceUpdate): Promise<void> {
@@ -745,8 +755,13 @@ export class Launcher {
       env: { ...process.env, [SERVICE_LAUNCHER_CONTEXT_ENV]: JSON.stringify(context) },
       stdio: ["inherit", "inherit", "inherit", "ipc"],
     });
+    this.#children.add(child);
+    child.once("exit", () => this.#children.delete(child));
     await new Promise<void>((resolve, reject) => {
-      const onError = (error: Error) => reject(error);
+      const onError = (error: Error) => {
+        this.#children.delete(child);
+        reject(error);
+      };
       child.once("error", onError);
       child.once("spawn", () => {
         child.removeListener("error", onError);
@@ -895,6 +910,9 @@ export class Launcher {
     await writeServiceState(this.#statePath, next);
     this.#state = next;
     child.role = "active";
+    // A deferred CLI update still had the previous activeVersion at recovery.
+    // Clear its marker only after the trial is durably committed.
+    await this.#clearRestartPending();
     await discardDatabaseBackup(this.#baseDir, committed.id).catch(() => undefined);
     await sendMessage(child.process, { type: "committed", updateId: committed.id });
   }

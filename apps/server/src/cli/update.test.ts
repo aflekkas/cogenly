@@ -2,6 +2,9 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as Effect from "effect/Effect";
+import * as Console from "effect/Console";
+import * as ConfigProvider from "effect/ConfigProvider";
+import { parseServiceState } from "../cloud/serviceProtocol.ts";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
@@ -304,3 +307,109 @@ describe("service update preflight", () => {
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
+
+it.effect.each([false, true])(
+  "non-interactive update stages the release and restarts only with --yes (%s)",
+  (assumeYes) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const console = yield* Console.Console;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-update-nontty-" });
+      const baseDir = path.join(root, "owner's home");
+      const version = packageJson.version;
+      const runtime = path.join(baseDir, "runtime/versions", version);
+      const unit = path.join(root, ".config/systemd/user/cogenly.service");
+      const stateFile = path.join(baseDir, "runtime/service-state.json");
+      yield* fs.makeDirectory(runtime, { recursive: true });
+      yield* fs.writeFileString(path.join(runtime, "cogenly"), "");
+      yield* fs.writeFileString(path.join(runtime, ".install-complete"), version);
+      yield* fs.makeDirectory(path.dirname(unit), { recursive: true });
+      yield* fs.writeFileString(unit, "old unit");
+      yield* fs.writeFileString(stateFile, JSON.stringify({ protocol: 3, activeVersion: "0.0.1" }));
+      const commands: string[] = [];
+      const output: unknown[] = [];
+      yield* runUpdate({
+        baseDir,
+        logsDir: path.join(root, "logs"),
+        serverRuntimeStatePath: path.join(root, "runtime-state.json"),
+        channel: undefined,
+        requestedVersion: version,
+        allowDowngrade: false,
+        assumeYes,
+        interactive: false,
+      }).pipe(
+        Effect.provideService(Console.Console, {
+          ...console,
+          log: (...values) => {
+            output.push(...values);
+          },
+        }),
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.succeed(
+              ConfigProvider.ConfigProvider,
+              ConfigProvider.fromUnknown({ HOME: root, PATH: "" }),
+            ),
+            Layer.mock(BootService.BootService)({
+              status: Effect.succeed({
+                supported: true,
+                installed: true,
+                current: false,
+                installedVersion: "0.0.1",
+                installedBaseDir: baseDir,
+                unitPath: unit,
+                logPath: path.join(root, "logs/boot-service.log"),
+              }),
+            }),
+            Layer.succeed(HostProcess.Platform, "linux" as const),
+            Layer.succeed(HostProcess.Architecture, "arm64" as const),
+            Layer.succeed(HostProcess.IsExecutable, true),
+            Layer.succeed(HostProcess.Environment, {
+              HOME: root,
+              PATH: "",
+              COGENLY_RELEASE_BASE_URL: "https://example.invalid/releases",
+            }),
+            Layer.succeed(ProcessRunner.ProcessRunner, {
+              run: (input) => {
+                commands.push(`${input.command} ${input.args.join(" ")}`);
+                return Effect.succeed({
+                  code: ChildProcessSpawner.ExitCode(0),
+                  stdout: input.args.includes("--version")
+                    ? `cogenly v${version}`
+                    : input.args.includes("__service-preflight")
+                      ? JSON.stringify({ status: "ready", version, launcherProtocol: 3 })
+                      : input.command === "loginctl"
+                        ? "yes"
+                        : "",
+                  stderr: "",
+                  timedOut: false,
+                  stdoutTruncated: false,
+                  stderrTruncated: false,
+                  stdoutInvalidUtf8: false,
+                  stderrInvalidUtf8: false,
+                });
+              },
+            }),
+            FetchHttpClient.layer,
+          ),
+        ),
+      );
+      expect(commands.some((command) => command === "systemctl --user stop cogenly.service")).toBe(
+        assumeYes,
+      );
+      expect(
+        commands.some((command) => command === "systemctl --user restart cogenly.service"),
+      ).toBe(assumeYes);
+      expect(yield* fs.exists(path.join(baseDir, "runtime/.restart-pending"))).toBe(!assumeYes);
+      expect(parseServiceState(yield* fs.readFileString(stateFile))).toMatchObject({
+        activeVersion: "0.0.1",
+        update: { targetVersion: version, status: "pending" },
+      });
+      if (!assumeYes) {
+        const command = `cogenly service restart --base-dir '${baseDir.replaceAll("'", "'\\''")}'`;
+        expect(output.join("\n")).toContain(`To activate this update afterwards, run: ${command}`);
+        expect(output.join("\n")).toContain("Background service still running 0.0.1");
+      }
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);

@@ -24,7 +24,9 @@ reports as broken.
 and the service to it. Restarting interrupts running agent turns, terminals,
 and remote clients, so it asks first; answer no and the service keeps running
 the old version until you run `cogenly service restart`. Pass `--yes` from a
-script. A server you started by hand is left running; stop and start it again
+script. Without an interactive terminal, it installs the release and prints
+an exact `cogenly service restart --base-dir ...` command; the service keeps
+running its current version until you run that command. A server you started by hand is left running; stop and start it again
 to pick up the new version. Wait for any remote update already in progress
 before updating; to match a remote client's version, follow
 [Updating Cogenly](./updating.md).

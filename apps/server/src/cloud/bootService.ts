@@ -28,6 +28,7 @@ import {
 } from "./pinnedRuntime.ts";
 import {
   SERVICE_LAUNCHER_PROTOCOL,
+  PREPARED_TIMEOUT_MS,
   SERVICE_RESTART_PENDING_FILE,
   SERVICE_STATE_FILE,
   compareExactServiceVersions,
@@ -36,6 +37,8 @@ import {
   serviceStateHasPendingUpdate,
   type ServiceState,
 } from "./serviceProtocol.ts";
+
+import { SERVICE_STOP_TIMEOUT_SECONDS } from "../shutdownDeadline.ts";
 
 const BOOT_SERVICE_NAME = "cogenly";
 const BOOT_SERVICE_UNIT_FILE = `${BOOT_SERVICE_NAME}.service`;
@@ -161,7 +164,7 @@ export function renderBootServiceUnit(
     "NotifyAccess=all",
     "WatchdogSec=60",
     "TimeoutStartSec=180",
-    "TimeoutStopSec=30",
+    `TimeoutStopSec=${SERVICE_STOP_TIMEOUT_SECONDS}`,
     "WorkingDirectory=%h",
     `Environment=COGENLY_HOME=${quoteSystemdValue(plan.baseDir)}`,
     ...(options?.environmentPath === undefined
@@ -212,11 +215,8 @@ export function renderBootServicePlist(
 ): string {
   // KeepAlive + ThrottleInterval mirror Restart=always + RestartSec=5. launchd
   // has no StartLimitBurst analog; a hard crash loop respawns every 5s forever.
-  // ExitTimeOut 90 matches systemd's default TimeoutStopSec. A plain stop
-  // completes within the launcher's 5s child grace, but a stop that queues
-  // behind an in-flight update transition can take much longer; launchd's
-  // system-defined default (5s on current macOS) would SIGKILL the launcher
-  // (and, with it, the process group) mid-handoff.
+  // Give the launcher's bounded shutdown time to finish before launchd
+  // reaps its process group, matching the systemd stop timeout.
   // ProcessType Interactive opts out of background-job resource throttling.
   // AbandonProcessGroup stays at its default (false): launchd reaps leftover
   // process-group members only when the launcher itself exits (the analog of
@@ -254,7 +254,7 @@ export function renderBootServicePlist(
     `  <key>ThrottleInterval</key>`,
     `  <integer>5</integer>`,
     `  <key>ExitTimeOut</key>`,
-    `  <integer>90</integer>`,
+    `  <integer>${SERVICE_STOP_TIMEOUT_SECONDS}</integer>`,
     `  <key>ProcessType</key>`,
     `  <string>Interactive</string>`,
     `  <key>StandardOutPath</key>`,
@@ -282,12 +282,13 @@ export interface BootServiceStep {
 }
 
 /**
- * Stop commands block until the service manager gives up: 90s by default for
- * systemd's TimeoutStopSec, and ExitTimeOut=90 in the rendered plist. This
- * must stay above both, or the runner cancels the stop mid-shutdown and the
- * next step races a still-loaded service.
+ * Stop commands wait for the manager's 30s limit, or 90s in legacy units and
+ * plists. Leave a margin so the runner never races a still-loaded service.
  */
-const STOP_STEP_TIMEOUT = Duration.seconds(120);
+const STOP_STEP_TIMEOUT = Duration.seconds(Math.max(SERVICE_STOP_TIMEOUT_SECONDS, 90) + 30);
+// Type=notify startup allows 180s and extensions while backing up/migrating.
+// Do not mistake a healthy trial for a failed restart at the runner's 60s default.
+const RESTART_STEP_TIMEOUT = Duration.millis(PREPARED_TIMEOUT_MS + 5 * 60_000);
 
 /**
  * Platform service-manager integration as data: paths, a pure renderer, and
@@ -350,6 +351,7 @@ function systemdManager(input: {
         step: "starting the service",
         command: "systemctl",
         args: ["--user", "restart", BOOT_SERVICE_UNIT_FILE],
+        timeout: RESTART_STEP_TIMEOUT,
       },
     ],
     restart: [
@@ -357,6 +359,7 @@ function systemdManager(input: {
         step: "restarting the service after a failed update",
         command: "systemctl",
         args: ["--user", "restart", BOOT_SERVICE_UNIT_FILE],
+        timeout: RESTART_STEP_TIMEOUT,
       },
     ],
     deactivate: [
@@ -1191,7 +1194,16 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
             .replace(/\nEnvironment=COGENLY_TZ=.*$/m, "");
     const problems: BootServiceProblem[] =
       detectedManager.kind === "systemd" ? [...(yield* readSystemdProblems(true))] : [];
-    if (yield* fs.exists(restartPendingPath)) problems.push("restart-pending");
+    const restartPending = yield* fs.readFileString(restartPendingPath).pipe(Effect.option);
+    // The marker is written before staging a deferred update. A committed
+    // trial proves that target ran, even if marker cleanup was interrupted.
+    const committedTarget =
+      state?.update?.status === "committed" && state.update.targetVersion === state.activeVersion
+        ? state.activeVersion
+        : undefined;
+    if (Option.isSome(restartPending) && restartPending.value.trim() !== committedTarget) {
+      problems.push("restart-pending");
+    }
     return {
       supported: true,
       installed: true,

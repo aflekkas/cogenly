@@ -435,6 +435,8 @@ const belongsToBootService = Effect.fn("cli.update.belongs_to_boot_service")(fun
   return false;
 });
 
+const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+
 export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   readonly baseDir: string;
   readonly dbPath?: string;
@@ -444,6 +446,7 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   readonly requestedVersion: string | undefined;
   readonly allowDowngrade: boolean;
   readonly assumeYes: boolean;
+  readonly interactive?: boolean;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -670,6 +673,7 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
       ? ""
       : `${currentVersion} → ${targetVersion}${targetChannel === "prod" ? "" : ` (${targetChannel})`}`,
   );
+  const restartCommand = `cogenly service restart --base-dir ${shellQuote(input.baseDir)}`;
   let restartService = false;
   if (serviceInstalled && !serviceCurrent) {
     yield* Console.log(
@@ -677,7 +681,7 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
     );
     if (input.assumeYes) {
       restartService = true;
-    } else if (process.stdin.isTTY && process.stdout.isTTY) {
+    } else if (input.interactive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY)) {
       restartService = yield* Prompt.run(
         Prompt.Confirm({
           message: "Restart the background service once the download is verified?",
@@ -686,7 +690,7 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
       ).pipe(Effect.catchTags({ QuitError: () => Effect.succeed(false) }));
     } else {
       yield* Console.log(
-        "  Not a terminal, so the service keeps running its current version. Rerun with --yes to restart it now, or run `cogenly service restart` later.",
+        `  No interactive terminal: installing without restarting the service. Pass --yes to restart during an update. To activate this update afterwards, run: ${restartCommand}`,
       );
     }
   }
@@ -779,7 +783,7 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
     yield* Console.log(`  Background service already on ${targetVersion}`);
   } else if (serviceInstalled) {
     yield* Console.log(
-      `  Background service still running ${serviceVersion ?? "an unknown version"}. Run \`cogenly service restart\` when you are ready to switch it to ${targetVersion}.`,
+      `  Background service still running ${serviceVersion ?? "an unknown version"}. Run \`${restartCommand}\` when you are ready to switch it to ${targetVersion}.`,
     );
   } else if (status.installed && !servesThisHome) {
     yield* Console.log(

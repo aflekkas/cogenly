@@ -1,5 +1,15 @@
 import type { ServerSelfUpdateOutcome } from "@cogenly/contracts";
 
+/**
+ * How long a trial has to report prepared. Migrations and the open-time
+ * `PRAGMA optimize` count toward it and scale with the database: tens of GB on
+ * a cold page cache take minutes. They run synchronously on the child's main
+ * thread, so it cannot report progress meanwhile. A missed window rolls back
+ * the database, so the next attempt pays the same cost. Crashes are caught at
+ * exit; this only bounds a trial that is alive but stuck.
+ */
+export const PREPARED_TIMEOUT_MS = 30 * 60_000;
+
 // Protocol 3 requires the standalone executable layout. Bump when runtimePaths
 // or the installed runtime tree changes incompatibly; launchers survive self-updates.
 export const SERVICE_LAUNCHER_PROTOCOL = 3 as const;
@@ -11,8 +21,8 @@ export const SERVICE_STATE_FILE = "service-state.json";
 export const SERVICE_STOP_MARKER_FILE = ".service-stopping";
 /** Written by `cogenly update` when the unit was repointed at a new version but the
     running service was deliberately left on the old one. The launcher removes
-    it when it starts (whoever restarted the service), so while it exists the
-    service is known to be behind its unit and status reports it that way. */
+    it when that version starts or its trial commits. Status also recognizes a
+    committed target if marker cleanup was interrupted. */
 export const SERVICE_RESTART_PENDING_FILE = ".restart-pending";
 
 export interface PendingServiceUpdate {

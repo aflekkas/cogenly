@@ -105,7 +105,9 @@ cogenly update <client-version>
 
 Replace `<client-version>` with the version shown in the notice. The command
 asks before restarting the background service; if you decline, run
-`cogenly service restart` when you are ready. For a server you started by hand,
+`cogenly service restart` when you are ready. Over non-interactive SSH, use
+`cogenly update <client-version> --yes` to restart as part of the update, or
+run the restart command printed by the update afterwards. For a server you started by hand,
 stop it and start it again afterwards with your usual options such as `--host`
 or `--tailscale-serve`.
 

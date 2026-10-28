@@ -2,6 +2,11 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
+import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
+import * as TestClock from "effect/testing/TestClock";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
@@ -234,4 +239,157 @@ it.effect.each([true, false])(
       expect(commands.some((command) => command.includes("stop"))).toBe(start);
       expect(yield* fs.readFileString(unit)).toContain("0.3.3");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+const successfulProcess = (stdout = ""): ProcessRunner.ProcessRunOutput => ({
+  code: ChildProcessSpawner.ExitCode(0),
+  stdout,
+  stderr: "",
+  timedOut: false,
+  stdoutTruncated: false,
+  stderrTruncated: false,
+  stdoutInvalidUtf8: false,
+  stderrInvalidUtf8: false,
+});
+
+const serviceTestRuntime = (root: string, runner: ProcessRunner.ProcessRunner["Service"]) =>
+  Layer.mergeAll(
+    Layer.succeed(
+      ConfigProvider.ConfigProvider,
+      ConfigProvider.fromUnknown({ HOME: root, PATH: "" }),
+    ),
+    Layer.succeed(HostProcess.Platform, "linux" as const),
+    Layer.succeed(HostProcess.UserId, 1000),
+    Layer.succeed(HostProcess.IsExecutable, true),
+    Layer.succeed(HostProcess.Environment, { HOME: root, PATH: "" }),
+    Layer.succeed(ProcessRunner.ProcessRunner, runner),
+    FetchHttpClient.layer,
+  );
+
+const installedServiceFixture = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const root = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-service-status-" });
+  const baseDir = path.join(root, "home");
+  const runtime = path.join(baseDir, "runtime/versions/0.3.7");
+  const unitPath = path.join(root, ".config/systemd/user/cogenly.service");
+  const logPath = path.join(root, "logs/boot-service.log");
+  yield* fs.makeDirectory(runtime, { recursive: true });
+  yield* fs.writeFileString(path.join(runtime, "cogenly"), "");
+  yield* fs.writeFileString(path.join(runtime, ".install-complete"), "0.3.7");
+  yield* fs.makeDirectory(path.dirname(unitPath), { recursive: true });
+  yield* fs.writeFileString(
+    unitPath,
+    renderBootServiceUnit(
+      {
+        program: [path.join(runtime, "cogenly"), "__service-launcher"],
+        baseDir,
+        unitPath,
+        logPath,
+      },
+      { environmentPath: "/usr/bin:/bin" },
+    ),
+  );
+  return {
+    fs,
+    path,
+    root,
+    baseDir,
+    logPath,
+    stateFile: path.join(baseDir, "runtime/service-state.json"),
+    marker: path.join(baseDir, "runtime/.restart-pending"),
+  };
+});
+
+it.effect.each([
+  { activeVersion: "0.3.6", status: "pending", marker: "0.3.7", expected: true },
+  { activeVersion: "0.3.7", status: "committed", marker: "0.3.7", expected: false },
+  { activeVersion: "0.3.6", status: "rolled-back", marker: "0.3.7", expected: true },
+  { activeVersion: "0.3.7", status: "committed", marker: "0.3.8", expected: true },
+  { activeVersion: "0.3.7", status: undefined, marker: "0.3.7", expected: true },
+])("computes deferred restart status from the committed target: %j", (scenario) =>
+  Effect.gen(function* () {
+    const { fs, path, root, baseDir, logPath, stateFile, marker } = yield* installedServiceFixture;
+    yield* fs.writeFileString(
+      stateFile,
+      JSON.stringify({
+        protocol: 3,
+        activeVersion: scenario.activeVersion,
+        ...(scenario.status === undefined
+          ? {}
+          : {
+              update: {
+                id: "update",
+                fromVersion: "0.3.6",
+                targetVersion: "0.3.7",
+                status: scenario.status,
+                ...(scenario.status === "pending"
+                  ? { dbPath: path.join(baseDir, "userdata/statev2.sqlite") }
+                  : {}),
+              },
+            }),
+      }),
+    );
+    yield* fs.writeFileString(marker, `${scenario.marker}\n`);
+    const result = yield* Effect.gen(function* () {
+      const service = yield* BootService.make({
+        baseDir,
+        logsDir: path.dirname(logPath),
+        cliVersion: "0.3.7",
+      });
+      return yield* service.status;
+    }).pipe(
+      Effect.provide(
+        serviceTestRuntime(root, {
+          run: (input) =>
+            Effect.succeed(
+              successfulProcess(input.args.includes("is-enabled") ? "enabled" : "yes"),
+            ),
+        }),
+      ),
+    );
+    expect(result.problems?.includes("restart-pending")).toBe(scenario.expected);
+    expect(result.current).toBe(!scenario.expected);
+    // Status is read-only, even when it recognizes a stale marker.
+    expect(yield* fs.exists(marker)).toBe(true);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("waits for a healthy startup longer than 60 seconds without starting recovery", () =>
+  Effect.gen(function* () {
+    const { path, root, baseDir, logPath } = yield* installedServiceFixture;
+    const starting = yield* Deferred.make<void>();
+    const ready = yield* Deferred.make<void>();
+    let starts = 0;
+    const restart = Effect.gen(function* () {
+      const service = yield* BootService.make({
+        baseDir,
+        logsDir: path.dirname(logPath),
+        cliVersion: "0.3.7",
+      });
+      return yield* service.restart;
+    }).pipe(
+      Effect.provide(
+        serviceTestRuntime(root, {
+          run: (input) => {
+            if (!input.args.includes("restart")) return Effect.succeed(successfulProcess());
+            starts++;
+            // Model the external process with the same timeout the real runner applies.
+            return Deferred.succeed(starting, undefined).pipe(
+              Effect.andThen(Deferred.await(ready)),
+              Effect.as(successfulProcess()),
+              Effect.timeout(input.timeout ?? Duration.seconds(60)),
+              Effect.orDie,
+            );
+          },
+        }),
+      ),
+    );
+    const fiber = yield* Effect.forkChild(restart);
+    yield* Deferred.await(starting);
+    yield* TestClock.adjust("90 seconds");
+    yield* Deferred.succeed(ready, undefined);
+    expect(yield* Fiber.join(fiber)).toBe(true);
+    expect(starts).toBe(1);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );

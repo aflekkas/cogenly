@@ -6,6 +6,8 @@ import * as Schema from "effect/Schema";
 import { Command, GlobalFlag } from "effect/cli";
 import * as CliError from "effect/cli/CliError";
 
+import { SERVER_SHUTDOWN_GRACE_MS, ShutdownDeadline } from "../shutdownDeadline.ts";
+
 import * as ServerConfig from "../config.ts";
 import { runServer } from "../server.ts";
 import { type CliServerFlags, resolveServerConfig, sharedServerCommandFlags } from "./config.ts";
@@ -23,6 +25,26 @@ const runServerCommand = (
   Effect.gen(function* () {
     const logLevel = yield* GlobalFlag.LogLevel;
     const config = yield* resolveServerConfig(flags, logLevel, options);
+    // Run before the server scope closes: a stalled finalizer must not keep
+    // foreground servers (or service children) alive indefinitely.
+    yield* Effect.acquireRelease(
+      Effect.sync(() => {
+        const deadline = new ShutdownDeadline(SERVER_SHUTDOWN_GRACE_MS, () => {
+          process.stderr.write("Graceful server shutdown timed out; forcing exit.\n");
+          process.exit(0);
+        });
+        const onSignal = () => deadline.start();
+        process.on("SIGTERM", onSignal);
+        process.on("SIGINT", onSignal);
+        return { deadline, onSignal };
+      }),
+      ({ deadline, onSignal }) =>
+        Effect.sync(() => {
+          process.off("SIGTERM", onSignal);
+          process.off("SIGINT", onSignal);
+          deadline.dispose();
+        }),
+    );
     return yield* runServer.pipe(Effect.provideService(ServerConfig.ServerConfig, config));
   });
 

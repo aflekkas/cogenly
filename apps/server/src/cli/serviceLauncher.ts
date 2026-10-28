@@ -17,11 +17,17 @@ export const serviceLauncherCommand = Command.make("__service-launcher").pipe(
   Command.unlisted,
   Command.withHandler(() =>
     Effect.sync(() => {
-      runServiceLauncher().catch((cause: unknown) => {
-        const error = cause instanceof Error ? cause : new Error(String(cause));
-        process.stderr.write(`[service-launcher] ${error.message}\n`);
-        process.exitCode = 1;
-      });
+      runServiceLauncher()
+        .then(() => {
+          // The launcher has stopped its child and released its signal handlers.
+          // Stray IPC or notification-helper handles must not keep the unit alive.
+          process.exit(0);
+        })
+        .catch((cause: unknown) => {
+          const error = cause instanceof Error ? cause : new Error(String(cause));
+          process.stderr.write(`[service-launcher] ${error.message}\n`);
+          process.exit(1);
+        });
     }),
   ),
 );
