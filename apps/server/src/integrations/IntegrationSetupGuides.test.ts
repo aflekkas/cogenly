@@ -36,3 +36,28 @@ it("Google setup preserves once-only credentials and handles Testing/publication
   expect(guide.instructions).toContain("Publish does nothing");
   expect(guide.instructions).toContain("Search Console");
 });
+
+it("assigns setup work to the agent for every catalog service", () => {
+  for (const service of [
+    "google-workspace",
+    "slack",
+    "github",
+    "linear",
+    "notion",
+    "wispr-flow",
+    "fathom",
+    "custom",
+  ]) {
+    const guide = integrationSetupGuide(service);
+    expect(guide.instructions).toContain("Find the fastest path");
+    expect(guide.instructions).toContain("browser, CLI, APIs");
+    expect(guide.instructions).toContain("never paste long manual instructions");
+    expect(guide.instructions).toContain("every paired environment");
+    expect(guide.instructions).toContain("integration_setup_progress");
+  }
+  const google = integrationSetupGuide("google").instructions;
+  expect(google).toContain("invalid_client");
+  expect(google).toContain("rotate it yourself");
+  expect(google).toContain("gcloud services enable");
+  expect(google).toContain("vault_capture");
+});

@@ -24,11 +24,12 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as ServerConfig from "../../config.ts";
+import * as DirectEndpoints from "../../environment/DirectEndpoints.ts";
 import * as Credentials from "../IntegrationCredentials.ts";
 import { selectCallbackOrigin, type SignInOrigin } from "../SignInOrigin.ts";
 import { isLoopbackHost } from "@cogenly/shared/preview";
 import * as HostProcess from "@cogenly/shared/HostProcess";
-import { isGrantRejection } from "./GrantRejection.ts";
+import { isClientRejection, isGrantRejection } from "./GrantRejection.ts";
 import { runtimeSearchDirectories } from "./RuntimeInstaller.ts";
 import * as Runner from "./LocalMcpRunner.ts";
 import {
@@ -43,6 +44,8 @@ import {
 export class LocalIntegrations extends Context.Service<
   LocalIntegrations,
   {
+    readonly clientAvailable?: Effect.Effect<boolean, IntegrationError>;
+    readonly setupRedirectUris?: Effect.Effect<ReadonlyArray<string>>;
     readonly prepare: (
       input: GoogleWorkspaceAddInput,
       source?: { readonly fromAgent?: boolean | undefined; readonly origin?: string | undefined },
@@ -119,13 +122,15 @@ const mapLocalError = (cause: Runner.LocalMcpError) =>
   new IntegrationError({
     operation: "run local server",
     reason:
-      cause.reason === "missing_runtime"
-        ? "local_runtime_missing"
-        : cause.reason === "sign_in_required"
-          ? "sign_in_required"
-          : cause.reason === "protocol"
-            ? "upstream_error"
-            : "upstream_unreachable",
+      typeof cause.cause === "string" && isClientRejection(cause.cause)
+        ? "google_client_rejected"
+        : cause.reason === "missing_runtime"
+          ? "local_runtime_missing"
+          : cause.reason === "sign_in_required"
+            ? "sign_in_required"
+            : cause.reason === "protocol"
+              ? "upstream_error"
+              : "upstream_unreachable",
     cause: cause.reason === "protocol" && typeof cause.cause === "string" ? cause.cause : cause,
   });
 
@@ -149,6 +154,7 @@ const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const config = yield* ServerConfig.ServerConfig;
+  const endpoints = yield* Effect.serviceOption(DirectEndpoints.DirectEndpoints);
   const crypto = yield* Crypto.Crypto;
   const lock = yield* Semaphore.make(1);
   const authLock = yield* Semaphore.make(1);
@@ -159,6 +165,21 @@ const make = Effect.gen(function* () {
     Config.withDefault(""),
     Effect.orDie,
   );
+  const callbackOrigins = Effect.gen(function* () {
+    const advertised = Option.isSome(endpoints) ? yield* endpoints.value.resolve() : [];
+    return [
+      ...new Set(
+        [
+          configuredOrigin,
+          ...advertised.flatMap((endpoint) =>
+            endpoint.httpBaseUrl.startsWith("https:") ? [new URL(endpoint.httpBaseUrl).origin] : [],
+          ),
+          `http://localhost:${config.port}`,
+          `http://127.0.0.1:${config.port}`,
+        ].filter(Boolean),
+      ),
+    ];
+  });
   const ambient = yield* Config.all({
     PATH: Config.String("PATH").pipe(Config.withDefault("")),
     HOME: Config.String("HOME").pipe(Config.withDefault("")),
@@ -199,6 +220,10 @@ const make = Effect.gen(function* () {
     }
   >();
   const active = new Map<string, ProjectLabelId | null | undefined>();
+  const activeClients = new Map<
+    string,
+    { readonly clientId: string; readonly clientSecret: string }
+  >();
   // In-flight requests may still hold an old definition after a committed edit or deletion.
   // Only the replacement supplied by that mutation may start the account again.
   const replacements = new Map<string, string | null>();
@@ -252,25 +277,31 @@ const make = Effect.gen(function* () {
         scopeProjectId: labelId,
         approvedItems: [],
       };
-      const json = yield* credentials
-        .resolve("google-oauth-client.value", destination)
-        .pipe(Effect.mapError(credentialError));
-      if (json._tag === "Some") {
-        const decoded = googleClientFromJson(json.value);
-        if (decoded._tag === "Some") return decoded.value;
+      const items = yield* (credentials.googleClientItems ?? Effect.succeed([])).pipe(
+        Effect.mapError(credentialError),
+      );
+      for (const item of new Set(["google-oauth-client", ...items])) {
+        const resolve = (field: string) =>
+          credentials
+            .resolve(`${item}.${field}`, destination)
+            .pipe(Effect.mapError(credentialError));
+        const json = yield* resolve("value");
+        if (json._tag === "Some") {
+          const decoded = googleClientFromJson(json.value);
+          if (decoded._tag === "Some") return decoded.value;
+        }
+        const id = yield* resolve("username");
+        const secret = yield* resolve("password");
+        if (id._tag === "Some" && secret._tag === "Some" && id.value && secret.value)
+          return { clientId: id.value, clientSecret: secret.value };
       }
-      const id = yield* credentials
-        .resolve("google-oauth-client.username", destination)
-        .pipe(Effect.mapError(credentialError));
-      const secret = yield* credentials
-        .resolve("google-oauth-client.password", destination)
-        .pipe(Effect.mapError(credentialError));
-      if (id._tag === "None" || secret._tag === "None" || !id.value || !secret.value)
-        return yield* new IntegrationError({
-          operation: "connect Google",
-          reason: "google_client_missing",
-        });
-      return { clientId: id.value, clientSecret: secret.value };
+      // An older setup may only retain the client inside its account's vault grant.
+      const previous = yield* googleTokens.reusableClient ?? Effect.succeed(Option.none());
+      if (Option.isSome(previous)) return previous.value;
+      return yield* new IntegrationError({
+        operation: "connect Google",
+        reason: "google_client_missing",
+      });
     });
   const browserOriginFile = (id: string) => path.join(directoryFor(id), "browser-origin.json");
   const signInProvenance = (id: string) =>
@@ -350,7 +381,14 @@ const make = Effect.gen(function* () {
           });
         if (active.has(integration.id)) {
           const state = (yield* runner.status(integration.id))?.state;
+          const currentClient = integration.local ? yield* client(labelId) : undefined;
+          const previousClient = activeClients.get(integration.id);
+          const clientUnchanged =
+            !currentClient ||
+            (currentClient.clientId === previousClient?.clientId &&
+              currentClient.clientSecret === previousClient?.clientSecret);
           if (
+            clientUnchanged &&
             active.get(integration.id) === labelId &&
             (state === "running" || state === "starting" || state === "failed")
           )
@@ -459,6 +497,7 @@ const make = Effect.gen(function* () {
           .start({ ...spec, secrets: processSecrets })
           .pipe(Effect.mapError(mapLocalError));
         active.set(integration.id, labelId);
+        activeClients.set(integration.id, secrets);
         if (failures.delete(integration.id)) yield* changed;
       }).pipe(
         Effect.tapError((error) =>
@@ -486,6 +525,14 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       if (!isCurrent(integration)) return;
       const decoded = decodeAuthResult(result);
+      if (
+        decoded._tag === "Some" &&
+        decoded.value.content.some((block) => isClientRejection(block.text ?? ""))
+      )
+        return yield* new IntegrationError({
+          operation: "Google OAuth client rejected; rotate it in the console",
+          reason: "google_client_rejected",
+        });
       if (decoded._tag === "None") return;
       const now = yield* Clock.currentTimeMillis;
       prune(now);
@@ -549,13 +596,23 @@ const make = Effect.gen(function* () {
       return result;
     });
   return LocalIntegrations.of({
+    setupRedirectUris: callbackOrigins.pipe(
+      Effect.map((origins) => origins.map((origin) => `${origin}${GOOGLE_CALLBACK_PATH}`)),
+    ),
+    clientAvailable: client().pipe(
+      Effect.as(true),
+      Effect.catchIf(
+        (error) => error.reason === "google_client_missing",
+        () => Effect.succeed(false),
+      ),
+    ),
     prepare: (input, source) =>
       Effect.gen(function* () {
         const origin = yield* validOrigin(
           configuredOrigin ||
             input.callbackOrigin ||
             (source?.fromAgent
-              ? `http://localhost:${config.port}`
+              ? (yield* callbackOrigins)[0]!
               : (source?.origin ?? input.callbackOrigin ?? `http://localhost:${config.port}`)),
         );
         yield* client();
@@ -569,6 +626,7 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             replacements.set(id, replacement ? definitionKey(replacement) : null);
             active.delete(id);
+            activeClients.delete(id);
             for (const [key, account] of credentialCapabilities)
               if (account === id) credentialCapabilities.delete(key);
             failures.delete(id);
@@ -593,7 +651,13 @@ const make = Effect.gen(function* () {
     status: (id) =>
       runner
         .status(id)
-        .pipe(Effect.map((status): LocalStatus | undefined => status ?? failures.get(id))),
+        .pipe(
+          Effect.map((status): LocalStatus | undefined =>
+            status && isClientRejection(status.stderrTail)
+              ? { ...status, state: "failed", reason: "google_client_rejected" }
+              : (status ?? failures.get(id)),
+          ),
+        ),
     redirectUri: (integration, source) =>
       Effect.gen(function* () {
         const origin =

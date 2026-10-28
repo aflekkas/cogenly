@@ -25,6 +25,10 @@ const json = Schema.fromJsonString(GoogleGrant);
 export class GoogleTokenStore extends Context.Service<
   GoogleTokenStore,
   {
+    readonly reusableClient?: (share: boolean) => Effect.Effect<
+      Option.Option<{ readonly clientId: string; readonly clientSecret: string }>,
+      IntegrationError
+    >;
     readonly read: (id: string) => Effect.Effect<Option.Option<GoogleGrant>, IntegrationError>;
     readonly write: (id: string, grant: GoogleGrant) => Effect.Effect<void, IntegrationError>;
     readonly remove: (id: string) => Effect.Effect<void, IntegrationError>;
@@ -42,6 +46,36 @@ export const layer = Layer.effect(
     const storage = (cause: unknown) =>
       new IntegrationError({ operation: "store Google grant in vault", reason: "storage", cause });
     return GoogleTokenStore.of({
+      reusableClient: (share) => Effect.gen(function* () {
+        const { items } = yield* vault.list({});
+        for (const item of items.filter((item) => item.name.startsWith("google-grant-"))) {
+          const result = yield* vault.use({
+            itemId: item.id,
+            field: "value",
+            caller: { kind: "server" },
+            action: "resolve",
+          });
+          if (result.status !== "allowed" || !result.value) continue;
+          const grant = Schema.decodeUnknownOption(json)(result.value);
+          if (Option.isSome(grant)) {
+            const client = {
+              clientId: grant.value.credentials.client_id,
+              clientSecret: grant.value.credentials.client_secret,
+            };
+            if (!client.clientId || !client.clientSecret) continue;
+            // Older accounts may have retained the client only in their local grant.
+            // Recover a portable client item so paired machines can reuse that setup.
+            if (share && !items.some((item) => item.name === "google-oauth-client"))
+              yield* vault.create({
+                name: "google-oauth-client", type: "api_key", scopeProjectId: null,
+                allowedDomains: ["accounts.google.com"],
+                secretFields: { value: JSON.stringify({ client_id: client.clientId, client_secret: client.clientSecret }) },
+              });
+            return Option.some(client);
+          }
+        }
+        return Option.none();
+      }).pipe(Effect.mapError(storage)),
       read: (id) =>
         Effect.gen(function* () {
           const item = yield* itemFor(id);
@@ -70,6 +104,7 @@ export const layer = Layer.effect(
             yield* vault.create({
               name: `google-grant-${id}`,
               type: "api_key",
+              portability: "machine",
               scopeProjectId: null,
               allowedDomains: ["accounts.google.com", "oauth2.googleapis.com"],
               secretFields,

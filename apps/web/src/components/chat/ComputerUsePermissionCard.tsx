@@ -21,7 +21,7 @@ import { cn } from "../../lib/utils";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { AnimatedHeight } from "../AnimatedHeight";
 import { Button } from "../ui/button";
-import { ThreadPromptCard } from "./ThreadPromptCard";
+import { ThreadPromptCard, ThreadPromptDetails } from "./ThreadPromptCard";
 import { WorkLogRow } from "./WorkLog";
 
 /** How long after opening System Settings a still-missing grant offers a relaunch. */
@@ -153,7 +153,11 @@ function PermissionPrompt({
           The agent uses it for {entry.neededFor}. Turn it on once in System Settings; no restart is
           needed.
         </p>
-        {hostAppNote ? <p className="text-sm text-muted-foreground">{hostAppNote}</p> : null}
+        {hostAppNote ? (
+          <ThreadPromptDetails>
+            <p className="text-sm text-muted-foreground">{hostAppNote}</p>
+          </ThreadPromptDetails>
+        ) : null}
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <Button disabled={!canRequest || pending} onClick={onRequest}>

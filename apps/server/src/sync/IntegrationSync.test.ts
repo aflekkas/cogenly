@@ -133,6 +133,38 @@ const paired = Effect.gen(function* () {
 });
 
 describe("integration definitions between paired machines", () => {
+  it.live("shares the fixed Google preset without copying the source machine's callback", () =>
+    Effect.gen(function* () {
+      const { hub, spoke } = yield* paired;
+      const original: StoredIntegration = {
+        ...definition("integration:google", "google-work"),
+        displayName: "Google",
+        accountLabel: "work",
+        transport: "local",
+        url: "https://accounts.google.com",
+        auth: undefined,
+        local: {
+          preset: "google-workspace",
+          version: "2.1.2",
+          callbackOrigin: "https://hub.example.com",
+        },
+      };
+      yield* hub.store(original);
+      yield* exchange(hub, spoke);
+      const received = yield* spoke.read(original.id);
+      expect(received).toMatchObject({
+        id: original.id,
+        transport: "local",
+        accountLabel: "work",
+        local: { preset: "google-workspace", version: "2.1.2" },
+      });
+      expect(received?.local?.callbackOrigin).not.toBe("https://hub.example.com");
+      expect((yield* hub.state.get("integration", original.id))?.fields.local).toEqual({
+        preset: "google-workspace",
+        version: "2.1.2",
+      });
+    }).pipe(Effect.scoped),
+  );
   it.live("only the originating machine upgrades an old document's missing credential fields", () =>
     Effect.gen(function* () {
       const { hub, spoke } = yield* paired;

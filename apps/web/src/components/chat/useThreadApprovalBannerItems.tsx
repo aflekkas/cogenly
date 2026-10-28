@@ -9,6 +9,7 @@ import { agentWorkspaceRpc } from "~/rpc/agents";
 import { threadApprovals } from "~/rpc/threadApprovals";
 import { useOrchestrationCommand } from "~/state/use-orchestration-command";
 import { Button } from "../ui/button";
+import { ThreadPromptDetails } from "./ThreadPromptCard";
 import type { ComposerBannerStackItem } from "./ComposerBannerStack";
 
 const NO_APPROVALS = Atom.make<ReadonlyArray<AgentApproval>>([]).pipe(
@@ -66,7 +67,16 @@ export function useThreadApprovalBannerItems(
           priority: "urgent",
           icon: <KeyRoundIcon />,
           title: description.title,
-          description: description.details.join(" "),
+          description: (
+            <div className="min-w-0">
+              <p className="truncate">{description.details[0]}</p>
+              <ThreadPromptDetails>
+                {description.details.map((detail) => (
+                  <p key={detail}>{detail}</p>
+                ))}
+              </ThreadPromptDetails>
+            </div>
+          ),
           actions: (
             <>
               <Button

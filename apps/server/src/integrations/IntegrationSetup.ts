@@ -227,10 +227,9 @@ const appClient = (input: SetupInput, problem?: string): IntegrationSetupAction 
     case "google-workspace":
       return {
         ...base,
-        title: "Set up your Google OAuth client",
+        title: "Connecting Google Workspace",
         message:
-          problem ??
-          "Google needs an OAuth client of your own. It takes about five minutes in Google Cloud; then paste its client ID and secret here. Every Google account you connect uses it.",
+          problem ?? "Your agent is setting up Google. You only need to sign in and allow access.",
         steps: googleSteps(input.redirectUri),
       };
     case "slack":
@@ -342,6 +341,11 @@ const credentialProblem = (input: SetupInput, notAllowed: boolean): IntegrationS
 export const setupActionFor = (input: SetupInput): IntegrationSetupAction | undefined => {
   const { service } = titleOf(input);
   switch (input.reason) {
+    case "google_client_rejected":
+      return appClient(
+        input,
+        "Your agent will rotate the rejected client secret in Google Cloud and retry.",
+      );
     case "google_client_missing":
       return appClient(input);
     case "local_runtime_missing": {

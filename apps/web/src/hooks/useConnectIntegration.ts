@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { type AgentChatRequest, useStartAgentChat } from "~/hooks/useStartAgentChat";
 
 const SETUP_STEPS =
-  "Read integration_setup_guide first and follow it. If the service needs an OAuth client secret or an API key, ask me for it with request_secret and keep it in the vault; never ask me to paste one in chat. Verify the connection with integration_test when you're done.";
+  "Read integration_setup_guide first and follow it. Find the fastest path. Reuse existing integrations and vault clients from all paired machines first. Do browser, CLI and API setup yourself; ask me only for sign-ins, approvals and choices only I can make. Keep manual instructions collapsed. Complete setup across all paired environments in the same card. Verify the connection with integration_test when you're done.";
 
 /**
  * The setup chat for one integration: titled for the service, or for adding one

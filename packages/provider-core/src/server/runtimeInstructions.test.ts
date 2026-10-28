@@ -142,7 +142,7 @@ describe("integrations context line", () => {
   it("says provider connectors are off only when there is a line to add it to", () => {
     const connected = [{ name: "linear", displayName: "Linear", status: "connected" as const }];
     expect(buildIntegrationsContextLine(connected, ["notion"], true)).toBe(
-      "Connected integrations: linear (Linear). Use integration_tools / integration_call. Also available to connect: notion. When the user asks for one of these, do not just say it isn't connected: offer to connect it, read integration_setup_guide, then start the connect flow with integration_add (its catalogId) and give the user the sign-in link it returns. Use Cogenly integrations. The provider's own MCP servers, connectors, plugins and apps are off; only MCP servers checked into the repository still load.",
+      "Connected integrations: linear (Linear). Use integration_tools / integration_call. Also available to connect: notion. When the user asks for one of these, do not just say it isn't connected: offer to connect it, read integration_setup_guide, then start the connect flow with integration_add (its catalogId) and let the inline card handle sign-in. Find the fastest path: reuse existing local and shared setup, do browser, CLI and API steps yourself, and ask only for sign-ins, approvals and owner-only choices. Never paste long manual instructions first. Complete setup across every paired environment. Use Cogenly integrations. The provider's own MCP servers, connectors, plugins and apps are off; only MCP servers checked into the repository still load.",
     );
     expect(buildIntegrationsContextLine(connected, ["notion"])).not.toContain("turned off");
     expect(buildIntegrationsContextLine([], [], true)).toBe("");
@@ -191,14 +191,14 @@ describe("integrations context line", () => {
     expect(
       buildIntegrationsContextLine([], ["google-workspace (Gmail, Calendar, Drive)", "slack"]),
     ).toBe(
-      "Integrations available to connect: google-workspace (Gmail, Calendar, Drive), slack. When the user asks for one of these, do not just say it isn't connected: offer to connect it, read integration_setup_guide, then start the connect flow with integration_add (its catalogId) and give the user the sign-in link it returns.",
+      "Integrations available to connect: google-workspace (Gmail, Calendar, Drive), slack. When the user asks for one of these, do not just say it isn't connected: offer to connect it, read integration_setup_guide, then start the connect flow with integration_add (its catalogId) and let the inline card handle sign-in. Find the fastest path: reuse existing local and shared setup, do browser, CLI and API steps yourself, and ask only for sign-ins, approvals and owner-only choices. Never paste long manual instructions first. Complete setup across every paired environment.",
     );
     const line = buildIntegrationsContextLine(
       [{ name: "linear", displayName: "Linear", status: "connected" }],
       ["notion"],
     );
     expect(line).toBe(
-      "Connected integrations: linear (Linear). Use integration_tools / integration_call. Also available to connect: notion. When the user asks for one of these, do not just say it isn't connected: offer to connect it, read integration_setup_guide, then start the connect flow with integration_add (its catalogId) and give the user the sign-in link it returns.",
+      "Connected integrations: linear (Linear). Use integration_tools / integration_call. Also available to connect: notion. When the user asks for one of these, do not just say it isn't connected: offer to connect it, read integration_setup_guide, then start the connect flow with integration_add (its catalogId) and let the inline card handle sign-in. Find the fastest path: reuse existing local and shared setup, do browser, CLI and API steps yourself, and ask only for sign-ins, approvals and owner-only choices. Never paste long manual instructions first. Complete setup across every paired environment.",
     );
     expect(line).not.toContain("\n");
   });

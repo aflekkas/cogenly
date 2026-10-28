@@ -83,14 +83,14 @@ there; a grant made on a laptop must not widen what the always-on hub's agents
 may fill. An item arrives with the default policy (`ask`). Later revisions keep
 the local policy. A policy-only edit writes nothing.
 
-An item is machine-only when its `portability` column says so, when a
-`transport: "local"` integration references it (`google-oauth-client` by name,
-and any `{{credential:…}}` in a local integration's config), or when its
-account credential is machine-only ([vaultPortability.ts](../../apps/server/src/vault/vaultPortability.ts)).
-Local integrations run a command here with those secrets. Their sign-in files
-live in the state directory, never in the vault, so they never sync. Making an
-item machine-only stops later revisions. Machines that already have a copy keep
-it.
+An item is machine-only when its `portability` column says so, when a local
+integration explicitly references it, or when its account credential is
+machine-only ([vaultPortability.ts](../../apps/server/src/vault/vaultPortability.ts)).
+The fixed Google preset shares its OAuth client and definition, while each
+machine keeps its `google-grant-*` account grant local. Its managed runtime
+owns refresh, so sharing that grant would create competing refreshers. Making
+an item machine-only stops later revisions; machines that already have a copy
+keep it.
 
 ## Integration sign-ins
 

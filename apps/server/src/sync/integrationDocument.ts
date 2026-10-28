@@ -4,7 +4,11 @@ import { parseCredentialRef } from "../integrations/IntegrationCredentials.ts";
 import * as Schema from "effect/Schema";
 
 /** Why a definition stays on this machine; never include its potentially secret URL. */
-export function integrationNotSyncedReason(integration: Pick<Integration, "transport" | "url">) {
+export function integrationNotSyncedReason(
+  integration: Pick<Integration, "transport" | "url" | "local">,
+) {
+  if (integration.transport === "local" && integration.local?.preset === "google-workspace")
+    return undefined;
   if (integration.transport !== "http") return "Not synced: command runners are machine-local.";
   try {
     const url = new URL(integration.url);
@@ -49,7 +53,10 @@ export const IntegrationFields = Schema.Struct({
   name: Integration.fields.name,
   displayName: Integration.fields.displayName,
   hint: Integration.fields.hint,
-  transport: Schema.Literal("http"),
+  transport: Schema.Literals(["http", "local"]),
+  local: Schema.optional(
+    Schema.Struct({ preset: Schema.Literal("google-workspace"), version: Schema.String }),
+  ),
   url: Integration.fields.url.check(
     Schema.makeFilter(
       (url) => integrationNotSyncedReason({ transport: "http", url }) === undefined,
@@ -88,7 +95,15 @@ export const integrationFields = (
         name: integration.name,
         displayName: integration.displayName,
         hint: integration.hint,
-        transport: "http",
+        transport: integration.transport,
+        ...(integration.local?.preset === "google-workspace"
+          ? {
+              local: {
+                preset: integration.local.preset,
+                version: integration.local.version,
+              },
+            }
+          : {}),
         url: integration.url,
         auth:
           integration.auth === undefined

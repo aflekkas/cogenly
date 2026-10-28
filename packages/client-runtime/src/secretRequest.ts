@@ -1,9 +1,59 @@
 import type {
+  IntegrationSetupAction,
   LoginRequestAnswerInput,
   OrchestrationV2LoginRequest,
   OrchestrationV2TurnItem,
   SecretRequestAnswerInput,
 } from "@cogenly/contracts";
+
+const GOOGLE_SETUP_STAGES = [
+  ["project", "Project"],
+  ["apis", "APIs"],
+  ["consent", "Consent screen"],
+  ["oauth_client", "OAuth client"],
+  ["sign_in", "Sign in"],
+] as const;
+
+/** Live sign-in or completion supersedes progress recorded before the client existed. */
+export function integrationSetupStages(
+  setup: IntegrationSetupAction | undefined,
+  connected: boolean,
+) {
+  const stage =
+    connected || setup?.type === "sign_in"
+      ? "sign_in"
+      : (setup?.progress?.stage ??
+        (setup?.type === "install_runtime" ? "oauth_client" : "project"));
+  const active = GOOGLE_SETUP_STAGES.findIndex(([id]) => id === stage);
+  return GOOGLE_SETUP_STAGES.map(([id, label], index) => ({
+    id,
+    label,
+    state:
+      connected || index < active
+        ? ("complete" as const)
+        : index === active
+          ? setup?.progress?.waitingForUser || setup?.type === "sign_in"
+            ? ("waiting" as const)
+            : ("active" as const)
+          : ("pending" as const),
+  }));
+}
+
+/** Unknown, offline and unsynced machines never count as completed setup. */
+export function integrationMachineCompletion(
+  machines: ReadonlyArray<{ readonly name: string; readonly status: string }>,
+) {
+  const connected = machines.filter((machine) => machine.status === "connected");
+  const pending = machines.filter((machine) => machine.status !== "connected");
+  return {
+    complete: machines.length > 0 && pending.length === 0,
+    pending,
+    message:
+      connected.length === 0
+        ? "Connecting your machines"
+        : `Connected on ${connected.map((machine) => machine.name).join(connected.length === 2 ? " and " : ", ")}`,
+  };
+}
 
 export type SecretRequestItem = Extract<
   OrchestrationV2TurnItem,

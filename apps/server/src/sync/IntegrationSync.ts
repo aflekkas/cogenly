@@ -14,6 +14,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Machines from "../machines/Machines.ts";
+import * as ServerConfig from "../config.ts";
 import { StoredIntegration } from "../integrations/StoredIntegration.ts";
 import { SharedState } from "./SharedState.ts";
 import {
@@ -48,6 +49,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const shared = yield* SharedState;
   const machines = yield* Machines.Machines;
+  const config = yield* Effect.serviceOption(ServerConfig.ServerConfig);
   const changes = yield* PubSub.unbounded<void>();
   const alias = (id: string) =>
     sql<Alias>`SELECT shared_name,local_name,applied_version FROM integration_sync_state WHERE integration_id=${id}`;
@@ -162,7 +164,17 @@ const make = Effect.gen(function* () {
       ...(fields.iconUrl === undefined ? {} : { iconUrl: fields.iconUrl }),
       hint: fields.hint,
       url: fields.url,
-      transport: "http",
+      transport: fields.transport,
+      ...(fields.transport === "local" && fields.local
+        ? {
+            local: {
+              ...fields.local,
+              callbackOrigin:
+                current?.local?.callbackOrigin ??
+                `http://localhost:${Option.isSome(config) ? config.value.port : 4773}`,
+            },
+          }
+        : {}),
       enabled: fields.enabled,
       scope: fields.scope,
       createdAt: fields.createdAt,

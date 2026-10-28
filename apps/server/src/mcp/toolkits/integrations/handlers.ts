@@ -81,7 +81,7 @@ const byName = (name: string, fail: (cause: unknown) => OrchestratorMcpFailure) 
       return yield* new OrchestratorMcpFailure({
         code: "invalid_request",
         message:
-          "No connected integration with that name is available in this project. If the user wants this service, offer to connect it: read integration_setup_guide, then call integration_add with its catalogId (slack, github, linear, notion, google-workspace, wispr-flow or fathom) and give the user the sign-in link it returns, instead of only reporting that it is not connected.",
+          "No connected integration with that name is available in this project. If the user wants this service, offer to connect it: read integration_setup_guide, then call integration_add with its catalogId (slack, github, linear, notion, google-workspace, wispr-flow or fathom) and let the inline card handle sign-in. Reuse local and shared setup first and do the console work yourself.",
       });
     }
     return found.integration;
@@ -112,6 +112,17 @@ const finishSetup = (
   );
 
 export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
+  integration_setup_progress: McpToolAccess.writesWithCapability((input) =>
+    Effect.gen(function* () {
+      const requests = yield* Effect.serviceOption(SetupRequests.IntegrationSetupRequests);
+      if (Option.isNone(requests))
+        return yield* new OrchestratorMcpFailure({
+          code: "invalid_request",
+          message: "No inline setup card is available.",
+        });
+      return yield* requests.value.progress(yield* Invocation.McpInvocationContext, input);
+    }),
+  ),
   integration_install_runtime: McpToolAccess.writesEnvironment((input) =>
     Effect.gen(function* () {
       const scope = yield* Invocation.McpInvocationContext;

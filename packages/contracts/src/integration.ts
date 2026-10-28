@@ -1,7 +1,8 @@
 import * as Schema from "effect/Schema";
-import { IsoDateTime, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { EnvironmentId, IsoDateTime, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { IntegrationCatalogAuthKind, IntegrationCatalogId } from "./integrationCatalog.ts";
 import { ProjectLabelId } from "./projectLabel.ts";
+import { makePeerChannel } from "./machine.ts";
 
 /**
  * A Cogenly-managed integration: one upstream MCP server every provider
@@ -294,7 +295,30 @@ export const IntegrationSetupStep = Schema.Struct({
 });
 export type IntegrationSetupStep = typeof IntegrationSetupStep.Type;
 
+export const IntegrationSetupStage = Schema.Literals([
+  "project",
+  "apis",
+  "consent",
+  "oauth_client",
+  "sign_in",
+]);
+export type IntegrationSetupStage = typeof IntegrationSetupStage.Type;
+
+/** The stage the agent is working on, persisted with the inline setup card. */
+export const IntegrationSetupProgress = Schema.Struct({
+  stage: IntegrationSetupStage,
+  waitingForUser: Schema.optional(Schema.Literals(["sign_in", "allow"])),
+});
+
+export const IntegrationSetupProgressInput = Schema.Struct({
+  catalogId: IntegrationCatalogId,
+  accountLabel: Schema.optional(IntegrationAccountLabel),
+  progress: IntegrationSetupProgress,
+});
+export type IntegrationSetupProgressInput = typeof IntegrationSetupProgressInput.Type;
+
 const setupActionBase = {
+  progress: Schema.optional(IntegrationSetupProgress),
   /** A short heading, e.g. "Sign in to Linear". */
   title: Schema.String,
   /** One or two plain sentences on what is wrong or missing. */
@@ -563,6 +587,7 @@ export class IntegrationError extends Schema.TaggedError<IntegrationError>()("In
     "client_id_required",
     /** The Google preset needs the owner's OAuth client in the vault. */
     "google_client_missing",
+    "google_client_rejected",
     /** A managed local server's runtime (e.g. uvx) is not installed. */
     "local_runtime_missing",
   ]),
@@ -632,9 +657,27 @@ export const IntegrationRemoveInput = Schema.Struct({ name: IntegrationName });
 export type IntegrationRemoveInput = typeof IntegrationRemoveInput.Type;
 
 export const IntegrationSetupGuideInput = Schema.Struct({ service: TrimmedNonEmptyString });
+export const IntegrationSetupEnvironmentInfo = Schema.Struct({
+  redirectUris: Schema.Array(Schema.String),
+  googleRedirectUris: Schema.Array(Schema.String),
+  googleClientAvailable: Schema.Boolean,
+});
+export const IntegrationSetupInfoChannel = makePeerChannel({
+  name: "integrations.setup-info",
+  scope: "sync:replicate",
+  payload: Schema.Struct({}),
+  success: IntegrationSetupEnvironmentInfo,
+});
+export const IntegrationSetupEnvironment = Schema.Struct({
+  environmentId: EnvironmentId,
+  name: Schema.String,
+  online: Schema.Boolean,
+  info: Schema.optional(IntegrationSetupEnvironmentInfo),
+});
 export const IntegrationSetupGuideResult = Schema.Struct({
   service: Schema.String,
   instructions: Schema.String,
+  environments: Schema.optional(Schema.Array(IntegrationSetupEnvironment)),
   /** Notes earlier agents recorded on this service's existing integrations; also opening `instructions`. */
   existingSetupNotes: Schema.optional(
     Schema.Array(

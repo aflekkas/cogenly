@@ -4,9 +4,8 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 /**
  * The vault item LocalIntegrations reads for the Google preset's OAuth client.
- * It is machine-only by name, whether or not the integration exists yet: the
- * owner stores it before adding the integration, and a copy that synced in
- * between could not be taken back.
+ * The fixed Google preset shares its Web OAuth client. Account grants stay
+ * local because the managed Python runtime owns their refresh lifecycle.
  */
 export const LOCAL_GOOGLE_CLIENT_ITEM = "google-oauth-client";
 
@@ -30,7 +29,7 @@ export const loadMachineOnlyRules = Effect.fn("Vault.loadMachineOnlyRules")(func
   const integrations = yield* sql<{
     payload_json: string;
   }>`SELECT payload_json FROM integrations WHERE deleted_at IS NULL AND json_extract(payload_json, '$.transport') = 'local'`;
-  const localIntegrationItems = new Set([LOCAL_GOOGLE_CLIENT_ITEM]);
+  const localIntegrationItems = new Set<string>();
   for (const row of integrations)
     for (const match of row.payload_json.matchAll(CREDENTIAL_REF)) {
       const ref = (match[1] ?? "").trim();
@@ -55,6 +54,8 @@ export const effectivePortability = (
   readonly reason?: VaultPortabilityReason;
 } => {
   if (item.portability === "machine") return { portability: "machine" };
+  if (item.name.startsWith("google-grant-"))
+    return { portability: "machine", reason: "local_integration" };
   if (rules.localIntegrationItems.has(item.name))
     return { portability: "machine", reason: "local_integration" };
   if (rules.machineCredentialItems.has(item.id))

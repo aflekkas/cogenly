@@ -47,17 +47,28 @@ import * as Handlers from "../../mcp/toolkits/integrations/handlers.ts";
 import { IntegrationsToolkit } from "../../mcp/toolkits/integrations/tools.ts";
 
 const fixture = new URL("./fixtures/fake-mcp.mjs", import.meta.url).pathname;
-const credentials = (missing = false, format: "json" | "login" = "json", project?: string) =>
+const credentials = (
+  missing = false,
+  format: "json" | "login" = "json",
+  project?: string,
+  clientFixture?: { name: string; secret: string },
+) =>
   Layer.succeed(Credentials.IntegrationCredentials, {
+    googleClientItems: Effect.succeed(clientFixture ? [clientFixture.name] : []),
     resolve: (ref, destination) =>
       Effect.succeed(
-        missing || (project !== undefined && destination.scopeProjectId !== project)
+        missing ||
+          (project !== undefined && destination.scopeProjectId !== project) ||
+          (clientFixture !== undefined && !ref.startsWith(`${clientFixture.name}.`))
           ? Option.none<string>()
           : format === "json"
             ? ref.endsWith("value")
               ? Option.some(
                   JSON.stringify({
-                    web: { client_id: "fake-client-id", client_secret: "fake-client-secret" },
+                    web: {
+                      client_id: "fake-client-id",
+                      client_secret: clientFixture?.secret ?? "fake-client-secret",
+                    },
                   }),
                 )
               : Option.none<string>()
@@ -78,6 +89,7 @@ const testLayer = (
   callbacks?: Array<string>,
   installer?: Layer.Layer<Installer.RuntimeInstaller>,
   credentialProject?: string,
+  clientFixture?: { name: string; secret: string },
 ) => {
   const grants = new Map<string, GoogleTokens.GoogleGrant>();
   const grant: GoogleTokens.GoogleGrant = {
@@ -156,7 +168,7 @@ const testLayer = (
     NodeServices.layer,
     NodeCrypto.layer,
     FetchHttpClient.layer,
-    credentials(missing, format, credentialProject),
+    credentials(missing, format, credentialProject, clientFixture),
     // Remote OAuth tokens are only read once a remote sign-in completes, which no test here does.
     Layer.mock(Tokens.IntegrationTokens)({
       attached: Effect.succeed([]),
@@ -1149,3 +1161,71 @@ it.live.each([false, true])(
     );
   },
 );
+
+describe("Google client reuse", () => {
+  it.live.each(["google-oauth-client", "google-oauth-client-from-Cloud-server"])(
+    "reuses %s and restarts after secret rotation",
+    (name) => {
+      const specs: Runner.LocalMcpSpec[] = [];
+      const clientFixture = { name, secret: "old-client-secret" };
+      return Effect.gen(function* () {
+        yield* runMigrations;
+        const gateway = yield* Integrations.Integrations;
+        const local = yield* Local.LocalIntegrations;
+        expect((yield* gateway.setupGuide("google")).instructions).toContain(
+          "An existing Google OAuth client is available",
+        );
+        const result = yield* gateway.create({ preset: "google-workspace", accountLabel: "work" });
+        yield* local.start(result.integration);
+        expect(specs.at(-1)?.env.GOOGLE_OAUTH_CLIENT_SECRET).toBe("old-client-secret");
+        clientFixture.secret = "rotated-client-secret";
+        yield* local.start(result.integration);
+        expect(specs.at(-1)?.env.GOOGLE_OAUTH_CLIENT_SECRET).toBe("rotated-client-secret");
+        const before = (yield* gateway.list()).integrations.length;
+        const reused = yield* gateway.connectFromCatalog(
+          { catalogId: "google-workspace", accountLabel: "work" },
+          { origin: { origin: "http://localhost:4773", fromAgent: true } },
+        );
+        expect(reused.integration?.id).toBe(result.integration.id);
+        expect((yield* gateway.list()).integrations).toHaveLength(before);
+      }).pipe(
+        Effect.provide(
+          testLayer(
+            specs,
+            false,
+            "json",
+            false,
+            false,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            clientFixture,
+          ),
+        ),
+        Effect.scoped,
+      );
+    },
+  );
+
+  it.live("directs a rejected client secret to console rotation", () =>
+    Effect.gen(function* () {
+      yield* runMigrations;
+      const gateway = yield* Integrations.Integrations;
+      const result = yield* gateway.create({ preset: "google-workspace", accountLabel: "work" });
+      const row = (yield* gateway.list()).integrations.find(
+        (row) => row.integration.id === result.integration.id,
+      );
+      expect(row?.setup).toMatchObject({ type: "oauth_client", catalogId: "google-workspace" });
+      expect(row?.setup?.message).toContain("rotate");
+    }).pipe(
+      Effect.provide(
+        testLayer([], false, "json", false, false, {
+          state: "failed",
+          tail: "invalid_client: rejected secret",
+        }),
+      ),
+      Effect.scoped,
+    ),
+  );
+});

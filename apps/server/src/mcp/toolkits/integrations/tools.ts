@@ -3,6 +3,7 @@ import {
   IntegrationInstallRuntimeResult,
   IntegrationSetupGuideInput,
   IntegrationSetupGuideResult,
+  IntegrationSetupProgressInput,
   IntegrationTestResult,
   IntegrationAgentListResult,
   IntegrationAgentResult,
@@ -36,6 +37,13 @@ const shared = {
 };
 
 export const IntegrationsToolkit = Toolkit.make(
+  Tool.make("integration_setup_progress", {
+    ...shared,
+    parameters: IntegrationSetupProgressInput,
+    success: Schema.Void,
+    description:
+      "Update the existing setup card as you complete each stage. Call integration_add first, then report the active stage: project, apis, consent, oauth_client, sign_in. Earlier stages are complete. Use waitingForUser only for a Google sign-in or final Allow action; do every console, CLI and API step yourself. Never report a stage complete until verified.",
+  }).annotate(Tool.Destructive, false),
   Tool.make("integration_install_runtime", {
     ...shared,
     parameters: IntegrationInstallRuntimeInput,
@@ -48,7 +56,7 @@ export const IntegrationsToolkit = Toolkit.make(
     parameters: IntegrationSetupGuideInput,
     success: IntegrationSetupGuideResult,
     description:
-      "Read agent setup instructions for Gmail/Google Workspace, Wispr Flow, Slack, GitHub, Linear, Notion, Fathom or any MCP server by URL or command. Call this before connecting or repairing a service; it opens with the setup notes earlier agents left on that service's existing integrations, so reuse what they created. Do the setup yourself end to end in the collaborative browser, console work included, without asking first; the user only handles a password or 2FA you can't fill from the vault, and the final OAuth consent.",
+      "Read agent setup instructions for Gmail/Google Workspace, Wispr Flow, Slack, GitHub, Linear, Notion, Fathom or any MCP server by URL or command. Call this before connecting or repairing a service; it opens with the setup notes earlier agents left on that service's existing integrations, so reuse what they created. Find the fastest path. Reuse local and shared clients first. Do every step you can yourself with the browser, CLI or APIs across all paired environments; never paste long manual instructions first; the user only handles a password or 2FA you can't fill from the vault, and the final OAuth consent.",
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false),

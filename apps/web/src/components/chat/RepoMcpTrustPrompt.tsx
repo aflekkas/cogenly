@@ -6,7 +6,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { DisclosurePanel } from "../ui/disclosure";
 import { Button } from "../ui/button";
-import { ThreadPromptCard } from "./ThreadPromptCard";
+import { ThreadPromptCard, ThreadPromptDetails } from "./ThreadPromptCard";
 
 /** A repository's local execution consent stays visible after the agent finishes. */
 export function RepoMcpTrustPrompt({
@@ -35,21 +35,23 @@ export function RepoMcpTrustPrompt({
                   : "Local MCP servers not trusted"}
             </p>
             <p className="text-xs text-muted-foreground">{prompt.remote}</p>
-            <ul className="space-y-1 text-sm">
-              {prompt.servers.map((server) => (
-                <li key={server.name}>
-                  <span className="font-medium">{server.name}</span>:{" "}
-                  <code className="break-all">
-                    {[server.command, ...server.args].map((arg) => JSON.stringify(arg)).join(" ")}
-                  </code>
-                </li>
-              ))}
-            </ul>
-            <p className="text-xs text-muted-foreground">
-              Trust makes these servers available on your next turn. Changes to their definitions
-              need your trust again.
-            </p>
-            <div className="flex gap-2">
+            <ThreadPromptDetails>
+              <ul className="space-y-1 text-sm">
+                {prompt.servers.map((server) => (
+                  <li key={server.name}>
+                    <span className="font-medium">{server.name}</span>:{" "}
+                    <code className="break-all">
+                      {[server.command, ...server.args].map((arg) => JSON.stringify(arg)).join(" ")}
+                    </code>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs text-muted-foreground">
+                Trust makes these servers available on your next turn. Changes to their definitions
+                need your trust again.
+              </p>
+            </ThreadPromptDetails>
+            <div className="flex flex-wrap gap-2">
               {[
                 { trust: true, label: "Trust" },
                 { trust: false, label: "Don't trust" },

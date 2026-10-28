@@ -49,6 +49,8 @@ export interface CredentialDestination {
 export class IntegrationCredentials extends Context.Service<
   IntegrationCredentials,
   {
+    /** OAuth client items, including names assigned to copies received from a peer. */
+    readonly googleClientItems?: Effect.Effect<ReadonlyArray<string>, IntegrationCredentialError>;
     /**
      * The secret for `ref` when it may go to `destination`: the item's allowed
      * domains include its host, or the owner approved the item for it. None
@@ -100,6 +102,18 @@ const isVaultField = Schema.is(VaultField);
 const makeVault = Effect.gen(function* () {
   const vault = yield* Vault.Vault;
   return IntegrationCredentials.of({
+    googleClientItems: vault.list({}).pipe(
+      Effect.map(({ items }) =>
+        items
+          .filter(
+            (item) => /google.*oauth.*client/i.test(item.name) && item.scopeProjectId === null,
+          )
+          .map((item) => item.name),
+      ),
+      Effect.mapError(
+        (cause) => new IntegrationCredentialError({ ref: "google-oauth-client", cause }),
+      ),
+    ),
     resolve: (ref, destination) => {
       const parsed = parseCredentialRef(ref);
       if (parsed === undefined || parsed.item.length === 0 || !isVaultField(parsed.field)) {

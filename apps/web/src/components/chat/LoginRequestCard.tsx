@@ -24,7 +24,7 @@ import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
-import { ThreadPromptCard } from "./ThreadPromptCard";
+import { ThreadPromptCard, ThreadPromptDetails } from "./ThreadPromptCard";
 
 const FIELD_LABELS: Readonly<Record<LoginRequestField, string>> = {
   username: "Username or email",
@@ -50,6 +50,7 @@ const NO_AUTOFILL = {
  * are never logged, toasted or persisted here, and clear once sent.
  */
 export function PendingLoginRequestForm(props: {
+  readonly onToggle?: ((collapsed: boolean) => void) | undefined;
   readonly environmentId: EnvironmentId;
   readonly item: SecretRequestItem;
   readonly login: OrchestrationV2LoginRequest;
@@ -126,101 +127,107 @@ export function PendingLoginRequestForm(props: {
           </p>
           <p className="text-xs text-muted-foreground">{site.host}</p>
           {item.reason.trim() ? (
-            <p className="text-sm text-muted-foreground">{item.reason}</p>
+            <p className="truncate text-sm text-muted-foreground">{item.reason}</p>
           ) : null}
         </div>
       </div>
-      <div className="flex min-w-0 flex-col gap-2.5">
-        {login.fields.map((field) => (
-          <div key={field} className="flex min-w-0 flex-col gap-1">
-            <label htmlFor={`${formId}-${field}`} className="text-xs text-muted-foreground">
-              {FIELD_LABELS[field]}
-            </label>
-            {field === "note" ? (
-              <Textarea
-                {...fieldProps(field)}
-                value={draft.note}
-                placeholder="Optional"
-                onChange={(event) => setDraft({ ...draft, note: event.currentTarget.value })}
-              />
-            ) : (
-              <Input
-                {...fieldProps(field)}
-                // Masked text rather than a password field: browsers offer to
-                // save any submitted password, and the vault keeps this one.
-                type="text"
-                className={field === "username" ? undefined : "[-webkit-text-security:disc]"}
-                value={
-                  field === "username"
-                    ? draft.username
-                    : field === "password"
-                      ? draft.password
-                      : draft.totpSecret
-                }
-                placeholder={field === "totp" ? "Optional" : undefined}
-                onChange={(event) => {
-                  const value = event.currentTarget.value;
-                  setDraft(
+      <ThreadPromptDetails
+        onToggle={props.onToggle}
+        action
+        label={updating ? "Update login" : "Sign in"}
+      >
+        <div className="flex min-w-0 flex-col gap-2.5">
+          {login.fields.map((field) => (
+            <div key={field} className="flex min-w-0 flex-col gap-1">
+              <label htmlFor={`${formId}-${field}`} className="text-xs text-muted-foreground">
+                {FIELD_LABELS[field]}
+              </label>
+              {field === "note" ? (
+                <Textarea
+                  {...fieldProps(field)}
+                  value={draft.note}
+                  placeholder="Optional"
+                  onChange={(event) => setDraft({ ...draft, note: event.currentTarget.value })}
+                />
+              ) : (
+                <Input
+                  {...fieldProps(field)}
+                  // Masked text rather than a password field: browsers offer to
+                  // save any submitted password, and the vault keeps this one.
+                  type="text"
+                  className={field === "username" ? undefined : "[-webkit-text-security:disc]"}
+                  value={
                     field === "username"
-                      ? { ...draft, username: value }
+                      ? draft.username
                       : field === "password"
-                        ? { ...draft, password: value }
-                        : { ...draft, totpSecret: value },
-                  );
-                }}
-              />
-            )}
-          </div>
-        ))}
-      </div>
-      {updating ? (
-        <p className="text-xs text-muted-foreground">
-          Saved into {login.updateItemName ?? "this login"}. Anything left blank keeps its saved
-          value.
-        </p>
-      ) : (
-        <label className="flex min-w-0 items-center gap-2 text-sm text-foreground">
-          <Checkbox
-            checked={draft.keep}
-            disabled={submitting}
-            onCheckedChange={(checked) => setDraft({ ...draft, keep: checked === true })}
-          />
-          Save to vault
-          <span className="text-xs text-muted-foreground">
-            {draft.keep
-              ? `Agents can sign in to ${site.host} next time`
-              : "Removed after this task"}
-          </span>
-        </label>
-      )}
-      {error !== null ? (
-        <p id={errorId} role="alert" className="text-xs text-destructive">
-          {error}
-        </p>
-      ) : null}
-      <div className="flex min-w-0 items-center justify-between gap-2">
-        <p
-          id={privacyId}
-          className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
-        >
-          <ShieldCheckIcon className="size-3.5 shrink-0" aria-hidden />
-          {LOGIN_REQUEST_PRIVACY_NOTE}
-        </p>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost-muted"
-            disabled={submitting}
-            onClick={() => void send({ type: "decline" })}
-          >
-            Skip
-          </Button>
-          <Button type="submit" size="sm" disabled={submitting || problem !== null}>
-            {updating ? "Update" : "Submit"}
-          </Button>
+                        ? draft.password
+                        : draft.totpSecret
+                  }
+                  placeholder={field === "totp" ? "Optional" : undefined}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setDraft(
+                      field === "username"
+                        ? { ...draft, username: value }
+                        : field === "password"
+                          ? { ...draft, password: value }
+                          : { ...draft, totpSecret: value },
+                    );
+                  }}
+                />
+              )}
+            </div>
+          ))}
         </div>
-      </div>
+        {updating ? (
+          <p className="text-xs text-muted-foreground">
+            Saved into {login.updateItemName ?? "this login"}. Anything left blank keeps its saved
+            value.
+          </p>
+        ) : (
+          <label className="flex min-w-0 items-center gap-2 text-sm text-foreground">
+            <Checkbox
+              checked={draft.keep}
+              disabled={submitting}
+              onCheckedChange={(checked) => setDraft({ ...draft, keep: checked === true })}
+            />
+            Save to vault
+            <span className="text-xs text-muted-foreground">
+              {draft.keep
+                ? `Agents can sign in to ${site.host} next time`
+                : "Removed after this task"}
+            </span>
+          </label>
+        )}
+        {error !== null ? (
+          <p id={errorId} role="alert" className="text-xs text-destructive">
+            {error}
+          </p>
+        ) : null}
+        <div className="flex min-w-0 items-center justify-between gap-2">
+          <p
+            id={privacyId}
+            className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
+          >
+            <ShieldCheckIcon className="size-3.5 shrink-0" aria-hidden />
+            {LOGIN_REQUEST_PRIVACY_NOTE}
+          </p>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost-muted"
+              disabled={submitting}
+              onClick={() => void send({ type: "decline" })}
+            >
+              Skip
+            </Button>
+            <Button type="submit" size="sm" disabled={submitting || problem !== null}>
+              {updating ? "Update" : "Submit"}
+            </Button>
+          </div>
+        </div>
+      </ThreadPromptDetails>
     </ThreadPromptCard>
   );
 }

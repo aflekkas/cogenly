@@ -37,10 +37,12 @@ another account, such as personal Gmail and work Gmail.
 ## Gmail and Google Workspace
 
 Google Workspace connects Gmail, Calendar, Drive, Docs and Sheets. The first
-connection needs a Google Cloud OAuth client. The agent creates it in the
+connection reuses a Google Cloud OAuth client from your vault or a paired
+machine. If none exists, the agent creates it in the
 browser panel: a project named Cogenly, the five APIs, a published consent
 screen, and a Web application client with the right redirect address, saved to
-your vault. Then choose **Sign in** on the card and pick the Google account to
+your vault. The client works across your paired machines. Choose **Sign in**
+on the card for each machine and pick the Google account to
 connect. A Workspace organization may also need an administrator's approval.
 
 Setup happens on the machine running Cogenly. The agent can install uv there
@@ -107,7 +109,8 @@ Web connections also share account labels, enabled state and project access.
 API keys and private endpoints work on the other machine once their vault items
 arrive. Settings explains when a connection cannot sync and offers **Set up on
 <machine>** for your other paired machines. Local programs, their installed
-packages and Google's local sign-ins need setup on each machine.
+packages and Google's account sign-ins need setup on each machine. The same
+setup card offers each remaining sign-in and shows where it is connected.
 
 Claude and Codex can use integrations connected during a running chat, including
 ones arriving from another machine, without restarting the chat. Ask the agent

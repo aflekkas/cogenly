@@ -7,6 +7,7 @@ import {
   integrationCatalogEntryFor,
   integrationIcon,
   INTEGRATION_CATALOG,
+  type IntegrationSetupEnvironmentInfo,
   type IntegrationCallResult,
   type IntegrationAddInput,
   type IntegrationCatalogConnectInput,
@@ -400,6 +401,7 @@ export function tokenRefreshAt(expiresAt: number | null, issuedAtMs: number | nu
 export class Integrations extends Context.Service<
   Integrations,
   {
+    readonly setupInfo?: Effect.Effect<typeof IntegrationSetupEnvironmentInfo.Type>;
     /** The service's setup guide, opening with notes left on its existing integrations. */
     readonly setupGuide: (
       service: string,
@@ -2279,11 +2281,65 @@ const make = (options: IntegrationsOptions = {}) =>
           );
 
     const service: Integrations["Service"] = Integrations.of({
-      setupGuide: (service) =>
+      setupInfo: Effect.gen(function* () {
+        const existing = yield* rows().pipe(Effect.orElseSucceed(() => []));
+        const google = existing.filter((row) => row.local?.preset === "google-workspace");
+        const googleRedirectUris = [
+          ...new Set([
+            ...(Option.isSome(local)
+              ? yield* (
+                  local.value.setupRedirectUris ??
+                    local.value
+                      .redirectUri(undefined, { fromAgent: true })
+                      .pipe(Effect.map((uri) => [uri]))
+                )
+              : []),
+            ...google.map(
+              (row) => `${row.local!.callbackOrigin}/oauth/integrations/google/callback`,
+            ),
+          ]),
+        ];
+        return {
+          googleRedirectUris,
+          redirectUris: [
+            ...new Set(
+              [
+                ...googleRedirectUris.map((uri) =>
+                  uri.replace(
+                    "/oauth/integrations/google/callback",
+                    "/oauth/integrations/callback",
+                  ),
+                ),
+                ...existing.flatMap((row) => remoteRedirectUri(row.browserOrigin) ?? []),
+                remoteRedirectUri(undefined),
+              ].filter((uri): uri is string => uri !== undefined),
+            ),
+          ],
+          googleClientAvailable:
+            Option.isSome(local) && local.value.clientAvailable !== undefined
+              ? yield* local.value.clientAvailable.pipe(Effect.orElseSucceed(() => false))
+              : false,
+        };
+      }),
+      setupGuide: (serviceName) =>
         rows().pipe(
           // A guide without notes still beats no guide when the store can't be read.
           Effect.orElseSucceed(() => []),
-          Effect.map((existing) => integrationSetupGuide(service, existing)),
+          Effect.flatMap((existing) =>
+            Effect.gen(function* () {
+              const guide = integrationSetupGuide(serviceName, existing);
+              const environments = yield* peers.setupEnvironments ?? Effect.succeed([]);
+              const info = yield* service.setupInfo!;
+              const available =
+                info.googleClientAvailable ||
+                environments.some((environment) => environment.info?.googleClientAvailable);
+              return {
+                ...guide,
+                environments,
+                instructions: `${available && guide.service === "google-workspace" ? "An existing Google OAuth client is available locally or on a paired machine. Reuse it through vault sync and integration_add; do not create another client.\n\n" : ""}${guide.instructions}\n\nRegister the exact ${guide.service === "google-workspace" ? "googleRedirectUris" : "redirectUris"} from environments for every machine. Local redirect URIs: ${(guide.service === "google-workspace" ? info.googleRedirectUris : info.redirectUris).join(" ")}. Offline machines stay pending until checked.`,
+              };
+            }),
+          ),
         ),
       list: (options) =>
         rows().pipe(
@@ -3048,6 +3104,12 @@ const make = (options: IntegrationsOptions = {}) =>
       connectFromCatalog: (request, options) =>
         Effect.gen(function* () {
           const entry = integrationCatalogEntry(request.catalogId);
+          const existing = (yield* rows()).find(
+            (integration) =>
+              integrationCatalogEntryFor(integration)?.id === request.catalogId &&
+              integration.accountLabel === request.accountLabel,
+          );
+          if (existing) return yield* service.prepareSignIn(existing.id, options.origin);
           const resolution = resolveCatalogConnect(request, {
             existingNames: new Set((yield* rows()).map((integration) => integration.name)),
             requestOrigin: options.origin.origin,

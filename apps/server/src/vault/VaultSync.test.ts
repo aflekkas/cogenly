@@ -585,15 +585,13 @@ describe("vault sync between paired machines", () => {
           secretFields: { value: "runner-secret" },
         })).item;
         expect(local.portability).toBe("machine");
-        expect(google).toMatchObject({
-          portability: "machine",
-          portabilityReason: "local_integration",
-        });
+        expect(google.portability).toBe("shared");
+        expect(yield* spoke.state.get("vault", google.id)).toBeDefined();
         expect(runner).toMatchObject({
           portability: "machine",
           portabilityReason: "local_integration",
         });
-        for (const id of [local.id, google.id, runner.id])
+        for (const id of [local.id, runner.id])
           expect(yield* spoke.state.get("vault", id)).toBeUndefined();
 
         // Switching an item to machine-only stops later revisions; the copy elsewhere stays.
@@ -1277,10 +1275,19 @@ describe("machine-only rules", () => {
         },
       )})`;
       const rules = yield* loadMachineOnlyRules();
-      expect([...rules.localIntegrationItems].toSorted()).toEqual([
-        "Client",
-        LOCAL_GOOGLE_CLIENT_ITEM,
-      ]);
+      expect([...rules.localIntegrationItems]).toEqual(["Client"]);
+      expect(
+        effectivePortability(
+          { id: "v:google", name: LOCAL_GOOGLE_CLIENT_ITEM, portability: "shared" },
+          rules,
+        ),
+      ).toEqual({ portability: "shared" });
+      expect(
+        effectivePortability(
+          { id: "v:grant", name: "google-grant-account", portability: "shared" },
+          rules,
+        ),
+      ).toEqual({ portability: "machine", reason: "local_integration" });
       expect([...rules.machineCredentialItems]).toEqual(["vault:pinned"]);
       const of = (id: string, name: string, portability = "shared") =>
         effectivePortability({ id, name, portability }, rules);

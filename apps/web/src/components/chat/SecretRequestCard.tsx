@@ -23,7 +23,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { PendingLoginRequestForm } from "./LoginRequestCard";
-import { ThreadPromptCard } from "./ThreadPromptCard";
+import { ThreadPromptCard, ThreadPromptDetails } from "./ThreadPromptCard";
 import { WorkLogRow } from "./WorkLog";
 
 /**
@@ -70,13 +70,25 @@ export function SecretRequestCard(props: {
   }
   if (item.login) {
     return (
-      <PendingLoginRequestForm environmentId={props.environmentId} item={item} login={item.login} />
+      <PendingLoginRequestForm
+        environmentId={props.environmentId}
+        item={item}
+        login={item.login}
+        onToggle={props.onToggle}
+      />
     );
   }
-  return <PendingSecretRequestForm environmentId={props.environmentId} item={item} />;
+  return (
+    <PendingSecretRequestForm
+      environmentId={props.environmentId}
+      item={item}
+      onToggle={props.onToggle}
+    />
+  );
 }
 
 function PendingSecretRequestForm(props: {
+  readonly onToggle?: ((collapsed: boolean) => void) | undefined;
   readonly environmentId: EnvironmentId;
   readonly item: SecretRequestItem;
 }) {
@@ -141,59 +153,63 @@ function PendingSecretRequestForm(props: {
         <label htmlFor={inputId} className="text-sm font-medium text-foreground">
           {item.label}
         </label>
-        {item.reason.trim() ? <p className="text-sm text-muted-foreground">{item.reason}</p> : null}
+        {item.reason.trim() ? (
+          <p className="truncate text-sm text-muted-foreground">{item.reason}</p>
+        ) : null}
       </div>
-      <div className="flex min-w-0 items-center gap-2">
-        <div className="min-w-0 flex-1">
-          <Input
-            id={inputId}
-            // Masked text rather than a password field: browsers offer to
-            // save any submitted password, and this is not a login.
-            type="text"
-            className="[-webkit-text-security:disc]"
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-            spellCheck={false}
-            // Password managers otherwise offer to save or fill this field.
-            data-1p-ignore
-            data-lpignore="true"
-            data-bwignore
-            placeholder={item.placeholder ?? SECRET_REQUEST_DEFAULT_PLACEHOLDER}
-            value={secret}
-            disabled={submitting}
-            aria-invalid={error !== null || undefined}
-            aria-describedby={error !== null ? `${privacyId} ${errorId}` : privacyId}
-            onChange={(event) => setSecret(event.currentTarget.value)}
-          />
+      <ThreadPromptDetails action label="Enter securely" onToggle={props.onToggle}>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <Input
+              id={inputId}
+              // Masked text rather than a password field: browsers offer to
+              // save any submitted password, and this is not a login.
+              type="text"
+              className="[-webkit-text-security:disc]"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              // Password managers otherwise offer to save or fill this field.
+              data-1p-ignore
+              data-lpignore="true"
+              data-bwignore
+              placeholder={item.placeholder ?? SECRET_REQUEST_DEFAULT_PLACEHOLDER}
+              value={secret}
+              disabled={submitting}
+              aria-invalid={error !== null || undefined}
+              aria-describedby={error !== null ? `${privacyId} ${errorId}` : privacyId}
+              onChange={(event) => setSecret(event.currentTarget.value)}
+            />
+          </div>
+          <Button type="submit" disabled={submitting || secret.trim().length === 0}>
+            Save securely
+          </Button>
         </div>
-        <Button type="submit" disabled={submitting || secret.trim().length === 0}>
-          Save securely
-        </Button>
-      </div>
-      {error !== null ? (
-        <p id={errorId} role="alert" className="text-xs text-destructive">
-          {error}
-        </p>
-      ) : null}
-      <div className="flex min-w-0 items-center justify-between gap-2">
-        <p
-          id={privacyId}
-          className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
-        >
-          <ShieldCheckIcon className="size-3.5 shrink-0" aria-hidden />
-          {SECRET_REQUEST_PRIVACY_NOTE}
-        </p>
-        <Button
-          type="button"
-          size="xs"
-          variant="ghost-muted"
-          disabled={submitting}
-          onClick={() => void send({ type: "decline" })}
-        >
-          Decline
-        </Button>
-      </div>
+        {error !== null ? (
+          <p id={errorId} role="alert" className="text-xs text-destructive">
+            {error}
+          </p>
+        ) : null}
+        <div className="flex min-w-0 items-center justify-between gap-2">
+          <p
+            id={privacyId}
+            className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
+          >
+            <ShieldCheckIcon className="size-3.5 shrink-0" aria-hidden />
+            {SECRET_REQUEST_PRIVACY_NOTE}
+          </p>
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost-muted"
+            disabled={submitting}
+            onClick={() => void send({ type: "decline" })}
+          >
+            Decline
+          </Button>
+        </div>
+      </ThreadPromptDetails>
     </ThreadPromptCard>
   );
 }

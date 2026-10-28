@@ -10,6 +10,7 @@ import {
 import { cn } from "../../lib/utils";
 import { observeVisibleAnimation } from "../../lib/visibleAnimation";
 import { DisclosureChevron, DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
+import { Button } from "../ui/button";
 
 const GroupedRows = createContext(false);
 
@@ -260,11 +261,13 @@ export function WorkLogDetails({
  */
 export function WorkLogDisclosure({
   label,
+  action = false,
   defaultOpen = false,
   onToggle,
   children,
 }: {
   label: string;
+  action?: boolean;
   defaultOpen?: boolean;
   onToggle?: ((collapsed: boolean) => void) | undefined;
   children: ReactNode;
@@ -272,20 +275,37 @@ export function WorkLogDisclosure({
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="flex min-w-0 flex-col">
-      <DisclosureTrigger
-        open={open}
-        reveal
-        variant="quiet"
-        className="w-fit"
-        onClick={(event) => {
-          event.stopPropagation();
-          onToggle?.(open);
-          setOpen(!open);
-        }}
-        onKeyDown={(event) => event.stopPropagation()}
-      >
-        {label}
-      </DisclosureTrigger>
+      {action ? (
+        <div className="w-fit">
+          <Button
+            type="button"
+            size="sm"
+            aria-expanded={open}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggle?.(open);
+              setOpen(!open);
+            }}
+          >
+            {label}
+          </Button>
+        </div>
+      ) : (
+        <DisclosureTrigger
+          open={open}
+          reveal
+          variant="quiet"
+          className="w-fit"
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggle?.(open);
+            setOpen(!open);
+          }}
+          onKeyDown={(event) => event.stopPropagation()}
+        >
+          {label}
+        </DisclosureTrigger>
+      )}
       <DisclosurePanel open={open}>
         <div className="pt-1">{children}</div>
       </DisclosurePanel>

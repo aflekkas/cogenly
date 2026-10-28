@@ -96,7 +96,7 @@ const inputsHelp = (
   mode: IntegrationCatalogAuthKind,
   accountLabel: string | undefined,
 ) => {
-  const docs = `Read integration_setup_guide with service "${entry.id}" and perform setup yourself.`;
+  const docs = `Read integration_setup_guide with service "${entry.id}" and find the fastest path: reuse local and shared setup, do browser, CLI and API steps yourself, and ask only for sign-ins, approvals and owner-only choices. Complete every paired environment.`;
   if (mode === "api_key") {
     const label = entry.auth.find((auth) => auth.kind === mode)?.label ?? "API key";
     const host = new URL(entry.url).hostname;

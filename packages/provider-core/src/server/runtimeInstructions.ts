@@ -81,7 +81,7 @@ function integrationsLine(
   const availableText =
     available.length === 0
       ? ""
-      : `${integrations.length === 0 ? "Integrations available" : "Also available"} to connect: ${available.map(toSingleLine).join(", ")}. When the user asks for one of these, do not just say it isn't connected: offer to connect it, read integration_setup_guide, then start the connect flow with integration_add (its catalogId) and give the user the sign-in link it returns.`;
+      : `${integrations.length === 0 ? "Integrations available" : "Also available"} to connect: ${available.map(toSingleLine).join(", ")}. When the user asks for one of these, do not just say it isn't connected: offer to connect it, read integration_setup_guide, then start the connect flow with integration_add (its catalogId) and let the inline card handle sign-in. Find the fastest path: reuse existing local and shared setup, do browser, CLI and API steps yourself, and ask only for sign-ins, approvals and owner-only choices. Never paste long manual instructions first. Complete setup across every paired environment.`;
   if (integrations.length === 0) return availableText;
   const nameOf = (integration: IntegrationContextEntry) => {
     const hint = integration.hint?.trim() ?? "";

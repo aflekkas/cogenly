@@ -14,6 +14,7 @@ import {
   type IntegrationConnectResult,
   type IntegrationId,
   type AgentApprovalAction,
+  type IntegrationSetupProgressInput,
 } from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -41,6 +42,10 @@ const failed = () =>
 export class IntegrationSetupRequests extends Context.Service<
   IntegrationSetupRequests,
   {
+    readonly progress: (
+      scope: McpInvocationScope,
+      input: IntegrationSetupProgressInput,
+    ) => Effect.Effect<void, OrchestratorMcpFailure>;
     readonly finish: (
       scope: McpInvocationScope,
       result: IntegrationConnectResult,
@@ -174,7 +179,10 @@ const make = Effect.gen(function* () {
       const current = (yield* integrations.list()).integrations.find(matches);
       if (current?.status === "connected") return result;
       const threadId = scope.thread.threadId;
-      const records = yield* threads.getThreadRecords(threadId, ["runs"]);
+      const records = yield* threads.getThreadRecords(threadId, ["runs", "turnItems"], {
+        turnItemTypes: ["secret_request"],
+        messageRoles: [],
+      });
       const run = records.runs.find(
         (run) =>
           !Threads.isTerminalRunStatus(run.status) &&
@@ -182,12 +190,23 @@ const make = Effect.gen(function* () {
       );
       if (!run || !run.rootNodeId) return yield* failed();
       const key = yield* crypto.randomUUIDv4();
-      const turnItemId = TurnItemId.make(`turn-item:integration-setup:${key}`);
+      const catalogId =
+        result.setup?.catalogId ??
+        (result.integration ? integrationCatalogEntryFor(result.integration)?.id : undefined);
+      const previous = records.turnItems.find(
+        (item) =>
+          item.type === "secret_request" &&
+          item.secretStatus === "pending" &&
+          ((result.integration && item.integrationSetup?.integrationId === result.integration.id) ||
+            (item.integrationSetup?.setup?.catalogId === catalogId &&
+              item.integrationSetup?.accountLabel === accountLabel)),
+      );
+      const turnItemId = previous?.id ?? TurnItemId.make(`turn-item:integration-setup:${key}`);
       const integration = result.integration;
       const record = (secretStatus: "pending" | "saved" | "cancelled") =>
         threads.dispatch({
           type: "secret_request.record",
-          commandId: CommandId.make(`${turnItemId}:${secretStatus}`),
+          commandId: CommandId.make(`${turnItemId}:${key}:${secretStatus}`),
           threadId,
           runId: run.id,
           nodeId: run.rootNodeId!,
@@ -195,6 +214,7 @@ const make = Effect.gen(function* () {
           label: integration ? `Connect ${integration.displayName}` : result.setup!.title,
           reason: "Complete integration setup here. The agent will continue when it connects.",
           integrationSetup: {
+            ...(previous?.type === "secret_request" ? previous.integrationSetup : {}),
             ...(integration ? { integrationId: integration.id } : {}),
             ...(result.setup ? { setup: result.setup } : {}),
             ...(accountLabel ? { accountLabel } : {}),
@@ -205,6 +225,9 @@ const make = Effect.gen(function* () {
       waitingCalls.set(turnItemId, delivered);
       return yield* Effect.gen(function* () {
         yield* record("pending");
+        // Console work belongs to the agent; only account consent waits on the owner.
+        if (result.setup && result.setup.type !== "sign_in")
+          return { ...result, signIn: undefined };
         const connected = yield* integrations.subscribe().pipe(
           Stream.map((list) => list.integrations.find(matches)),
           Stream.filter(
@@ -257,6 +280,45 @@ const make = Effect.gen(function* () {
       }),
     );
   return IntegrationSetupRequests.of({
+    progress: (scope, input) =>
+      Effect.gen(function* () {
+        if (!scope.thread) return yield* failed();
+        const threadId = scope.thread.threadId;
+        const records = yield* threads.getThreadRecords(threadId, ["turnItems"], {
+          turnItemTypes: ["secret_request"],
+          messageRoles: [],
+        });
+        const item = records.turnItems.find(
+          (item) =>
+            item.type === "secret_request" &&
+            item.secretStatus === "pending" &&
+            item.integrationSetup?.setup?.catalogId === input.catalogId &&
+            item.integrationSetup.accountLabel === input.accountLabel,
+        );
+        if (
+          !item ||
+          item.type !== "secret_request" ||
+          !item.integrationSetup?.setup ||
+          !item.runId ||
+          !item.nodeId
+        )
+          return yield* failed();
+        yield* threads.dispatch({
+          type: "secret_request.record",
+          commandId: CommandId.make(yield* crypto.randomUUIDv4()),
+          threadId,
+          runId: item.runId,
+          nodeId: item.nodeId,
+          turnItemId: item.id,
+          label: item.label,
+          reason: item.reason,
+          secretStatus: "pending",
+          integrationSetup: {
+            ...item.integrationSetup,
+            setup: { ...item.integrationSetup.setup, progress: input.progress },
+          },
+        });
+      }).pipe(Effect.mapError(() => failed())),
     finish,
     waitForApproval,
     resume,

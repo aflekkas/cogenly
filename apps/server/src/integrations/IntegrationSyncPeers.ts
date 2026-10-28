@@ -10,14 +10,19 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import * as Option from "effect/Option";
 import type * as Scope from "effect/Scope";
 
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import type * as Machines from "../machines/Machines.ts";
 import type * as VaultSync from "../vault/VaultSync.ts";
 import type * as VaultSyncCapture from "../vault/VaultSyncCapture.ts";
+import { IntegrationSetupInfoChannel, type IntegrationSetupEnvironment } from "@cogenly/contracts";
 
 export interface SignInPeers {
+  readonly setupEnvironments?: Effect.Effect<
+    ReadonlyArray<typeof IntegrationSetupEnvironment.Type>
+  >;
   /** The machine a sign-in made here should name as its only refresher. */
   readonly defaultRefreshOwner: Effect.Effect<string>;
   /** A machine's name for messages; another machine's id is never shown. */
@@ -48,6 +53,10 @@ export const make = (self: string) =>
     const current = Ref.get(bound);
     return IntegrationSyncPeers.of({
       self,
+      setupEnvironments: Effect.flatMap(
+        current,
+        (peers) => peers.setupEnvironments ?? Effect.succeed([]),
+      ),
       defaultRefreshOwner: Effect.flatMap(current, (peers) => peers.defaultRefreshOwner),
       label: (environmentId) => Effect.flatMap(current, (peers) => peers.label(environmentId)),
       sharing: Effect.flatMap(current, (peers) => peers.sharing),
@@ -77,7 +86,32 @@ export const signInPeers = (input: {
   readonly machines: Machines.Machines["Service"];
   readonly vaultSync: VaultSync.VaultSync["Service"];
   readonly capture: VaultSyncCapture.VaultSyncCapture["Service"];
+  readonly setupInfo?: Effect.Effect<typeof IntegrationSetupInfoChannel.success.Type>;
 }): SignInPeers => ({
+  setupEnvironments: Effect.gen(function* () {
+    const view = yield* input.machines.list;
+    return yield* Effect.forEach(
+      view.machines.filter((machine) => machine.pairing !== "revoked"),
+      (machine) =>
+        Effect.gen(function* () {
+          const info =
+            machine.environmentId === input.self
+              ? input.setupInfo
+              : machine.online
+                ? input.machines
+                    .call(machine.environmentId, IntegrationSetupInfoChannel, {})
+                    .pipe(Effect.option, Effect.map(Option.getOrUndefined))
+                : undefined;
+          return {
+            environmentId: machine.environmentId,
+            name: machine.name,
+            online: machine.online,
+            ...(info ? { info: yield* info } : {}),
+          };
+        }),
+      { concurrency: "unbounded" },
+    );
+  }).pipe(Effect.orElseSucceed(() => [])),
   defaultRefreshOwner: Effect.gen(function* () {
     const view = yield* input.machines.list;
     if (view.link._tag !== "spoke") return input.self;

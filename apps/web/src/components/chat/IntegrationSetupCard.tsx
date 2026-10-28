@@ -5,6 +5,10 @@ import {
 } from "@cogenly/contracts";
 import type { SecretRequestItem } from "@cogenly/client-runtime/secret-request";
 import {
+  integrationSetupStages,
+  integrationMachineCompletion,
+} from "@cogenly/client-runtime/secret-request";
+import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@cogenly/client-runtime/state/runtime";
@@ -19,7 +23,9 @@ import { openSignInPage } from "../settings/openIntegrationSignIn";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { IntegrationSourceIcon } from "./ComposerSourcesPicker";
-import { ThreadPromptCard } from "./ThreadPromptCard";
+import { ThreadPromptCard, ThreadPromptDetails } from "./ThreadPromptCard";
+import { Spinner } from "../ui/spinner";
+import { useIntegrationSetupMachines } from "./useIntegrationSetupMachines";
 import { WorkLogCollapse, WorkLogRow } from "./WorkLog";
 
 /** The card reads the destination environment, including after consent in an external browser. */
@@ -36,6 +42,8 @@ export function IntegrationSetupCard({
 }) {
   const query = useEnvironmentQuery(integrationsRpc.list({ environmentId, input: {} }));
   const target = item.integrationSetup;
+  const machineQuery = useIntegrationSetupMachines(environmentId, target);
+  const completion = integrationMachineCompletion(machineQuery.data?.machines ?? []);
   const summary = query.data?.integrations.find((summary) =>
     target?.integrationId
       ? summary.integration.id === target.integrationId
@@ -44,7 +52,12 @@ export function IntegrationSetupCard({
   );
   // The live account wins over the step recorded when the card was posted.
   const setup = summary !== undefined ? summary.setup : target?.setup;
-  const catalogId = setup?.catalogId;
+  const catalogId = setup?.catalogId ?? target?.setup?.catalogId;
+  const google = catalogId === "google-workspace";
+  const nextMachine = machineQuery.data?.machines.find(
+    (machine) => machine.status === "needs_sign_in",
+  );
+  const signInEnvironment = nextMachine?.environmentId ?? environmentId;
   const saveKey = useOrchestrationCommand(integrationsRpc.saveApiKey, { reportFailure: false });
   const saveClient = useOrchestrationCommand(integrationsRpc.saveOAuthClient, {
     reportFailure: false,
@@ -52,9 +65,10 @@ export function IntegrationSetupCard({
   const install = useOrchestrationCommand(integrationsRpc.installRuntime, { reportFailure: false });
   const signIn = useOrchestrationCommand(integrationsRpc.beginSignIn, { reportFailure: false });
   const update = useOrchestrationCommand(integrationsRpc.update, { reportFailure: false });
-  const canSignIn = useAtomValue(integrationsRpc.beginSignIn.permissionAtom(environmentId));
+  const canSignIn = useAtomValue(integrationsRpc.beginSignIn.permissionAtom(signInEnvironment));
   const canUpdate = useAtomValue(integrationsRpc.update.permissionAtom(environmentId));
   const [pending, setPending] = useState(false);
+  const [openedOn, setOpenedOn] = useState<EnvironmentId | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Until the user toggles it, the editor follows the account's current step: a "fix" opens it.
   const [editingChoice, setEditing] = useState<boolean | null>(null);
@@ -68,7 +82,11 @@ export function IntegrationSetupCard({
   };
   const editing = editingChoice ?? setup?.type === "fix";
   const connected = summary?.status === "connected";
-  if (item.secretStatus !== "pending" || connected || visibility !== "local")
+  if (
+    (item.secretStatus !== "pending" && item.secretStatus !== "saved") ||
+    (completion.complete && machineQuery.data?.ready) ||
+    visibility !== "local"
+  )
     return (
       <WorkLogRow
         data-v2-item-type={item.type}
@@ -79,17 +97,24 @@ export function IntegrationSetupCard({
             <PlugIcon className="size-3.5 text-icon-muted" aria-hidden />
           )
         }
-        label={`${item.label} · ${connected || item.secretStatus === "saved" ? "Connected" : visibility !== "local" ? "Continue in the original thread" : "Setup ended"}`}
+        label={`${google ? "Google Workspace" : item.label} · ${completion.complete ? completion.message : visibility !== "local" ? "Continue in the original thread" : "Setup ended"}`}
       />
     );
   const integration = summary?.integration;
+  const signInIntegration = nextMachine?.summary?.integration ?? integration;
   const start = () => {
     setPending(true);
     setError(null);
     void openSignInPage(async () => {
-      if (!integration) return null;
-      const result = await signIn({ environmentId, input: { id: integration.id } });
-      if (result._tag === "Success") return result.value.authorizationUrl;
+      if (!signInIntegration) return null;
+      const result = await signIn({
+        environmentId: signInEnvironment,
+        input: { id: signInIntegration.id },
+      });
+      if (result._tag === "Success") {
+        setOpenedOn(signInEnvironment);
+        return result.value.authorizationUrl;
+      }
       if (!isAtomCommandInterrupted(result))
         setError(integrationErrorText(squashAtomCommandFailure(result)));
       return null;
@@ -157,143 +182,223 @@ export function IntegrationSetupCard({
           />
         </span>
         <div className="flex min-w-0 flex-col gap-1">
-          <p className="text-sm font-medium text-foreground">{item.label}</p>
-          <p className="text-sm text-muted-foreground [overflow-wrap:anywhere]">
-            {summary?.message ?? setup?.message ?? item.reason}
+          <p className="text-sm font-medium text-foreground">
+            {google ? "Connecting Google Workspace" : item.label}
+          </p>
+          <p className="truncate text-xs text-muted-foreground">
+            {connected
+              ? completion.message
+              : google
+                ? "Your agent is setting up Google. Sign in when asked."
+                : (summary?.message ?? setup?.message ?? item.reason)}
           </p>
         </div>
       </div>
-      {setup?.type === "api_key" || setup?.type === "oauth_client" ? (
-        <div className="flex flex-col gap-2">
-          {setup.type === "oauth_client" ? (
-            <>
-              {setup.steps.map((step) => (
-                <p key={step.text} className="text-xs text-muted-foreground">
-                  {step.text}
-                  {step.url ? (
-                    <Button
-                      size="xs"
-                      variant="link"
-                      onClick={() => void openSignInPage(() => Promise.resolve(step.url ?? null))}
-                    >
-                      Open
-                    </Button>
-                  ) : null}
-                  {step.copy ? <code>{step.copy.value}</code> : null}
-                </p>
-              ))}
-              <label className="text-xs text-muted-foreground">
-                Client ID
-                <Input
-                  value={clientId ?? ""}
-                  onChange={(event) => setClientId(event.currentTarget.value)}
+      {google ? (
+        <ol className="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs" aria-label="Setup progress">
+          {integrationSetupStages(
+            connected
+              ? { type: "sign_in", title: "Sign in", message: "" }
+              : setup
+                ? { ...setup, progress: target?.setup?.progress ?? setup.progress }
+                : undefined,
+            completion.complete && machineQuery.data?.ready === true,
+          ).map((stage) => (
+            <li
+              key={stage.id}
+              className="flex items-center gap-1 text-muted-foreground transition-opacity duration-(--motion-duration-fast)"
+              aria-current={
+                stage.state === "active" || stage.state === "waiting" ? "step" : undefined
+              }
+            >
+              {stage.state === "complete" ? (
+                <CheckIcon className="size-3" aria-hidden />
+              ) : stage.state === "active" ? (
+                <Spinner size="xs" />
+              ) : (
+                <span
+                  className="size-3 rounded-full border border-current opacity-40"
+                  aria-hidden
                 />
-              </label>
-            </>
-          ) : null}
-          <label className="text-xs text-muted-foreground">
-            {setup.type === "api_key" ? setup.label : "Client secret"}
-            <Input
-              type="password"
-              autoComplete="off"
-              value={credential}
-              onChange={(event) => setCredential(event.currentTarget.value)}
-            />
-          </label>
+              )}
+              {stage.label}
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      {nextMachine || (!connected && setup?.type === "sign_in") ? (
+        <div>
+          <Button size="sm" disabled={pending || !signInIntegration || !canSignIn} onClick={start}>
+            {openedOn === signInEnvironment
+              ? "Allow access"
+              : nextMachine && nextMachine.environmentId !== environmentId
+                ? `Sign in on ${nextMachine.name}`
+                : google
+                  ? "Sign in to Google"
+                  : "Sign in"}
+          </Button>
+        </div>
+      ) : null}
+      {connected && !completion.complete ? (
+        <p className="text-xs text-muted-foreground">
+          {completion.pending
+            .map(
+              (machine) =>
+                `${machine.name}: ${machine.status === "needs_sign_in" ? "sign-in needed" : machine.status}`,
+            )
+            .join(" · ")}
+        </p>
+      ) : null}
+      <ThreadPromptDetails
+        key={`${setup?.type}:${target?.setup?.progress?.stage ?? "manual"}`}
+        label="Do it yourself"
+        onToggle={onToggle}
+      >
+        {setup?.type === "api_key" || setup?.type === "oauth_client" ? (
+          <div className="flex flex-col gap-2">
+            {setup.type === "oauth_client" ? (
+              <>
+                {setup.steps.map((step) => (
+                  <p key={step.text} className="text-xs text-muted-foreground">
+                    {step.text}
+                    {step.url ? (
+                      <Button
+                        size="xs"
+                        variant="link"
+                        onClick={() => void openSignInPage(() => Promise.resolve(step.url ?? null))}
+                      >
+                        Open
+                      </Button>
+                    ) : null}
+                    {step.copy ? (
+                      <span className="flex min-w-0 items-center gap-2">
+                        {step.copy.label !== "Scopes" ? (
+                          <code className="min-w-0 flex-1 truncate">{step.copy.value}</code>
+                        ) : null}
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          onClick={() => void navigator.clipboard.writeText(step.copy!.value)}
+                        >
+                          Copy {step.copy.label === "Scopes" ? "scopes" : step.copy.label}
+                        </Button>
+                      </span>
+                    ) : null}
+                  </p>
+                ))}
+                <label className="text-xs text-muted-foreground">
+                  Client ID
+                  <Input
+                    value={clientId ?? ""}
+                    onChange={(event) => setClientId(event.currentTarget.value)}
+                  />
+                </label>
+              </>
+            ) : null}
+            <label className="text-xs text-muted-foreground">
+              {setup.type === "api_key" ? setup.label : "Client secret"}
+              <Input
+                type="password"
+                autoComplete="off"
+                value={credential}
+                onChange={(event) => setCredential(event.currentTarget.value)}
+              />
+            </label>
+            <div>
+              <Button
+                size="sm"
+                disabled={pending || !canUpdate || !credential.trim()}
+                onClick={() => void save()}
+              >
+                Save securely
+              </Button>
+            </div>
+          </div>
+        ) : setup?.type === "install_runtime" ? (
           <div>
             <Button
               size="sm"
-              disabled={pending || !canUpdate || !credential.trim()}
-              onClick={() => void save()}
+              disabled={pending || !setup.canInstall || !canUpdate}
+              onClick={() => {
+                setPending(true);
+                void install({ environmentId, input: { runtime: setup.runtime } })
+                  .then((result) => {
+                    if (result._tag === "Failure" && !isAtomCommandInterrupted(result))
+                      setError(integrationErrorText(squashAtomCommandFailure(result)));
+                  })
+                  .finally(() => setPending(false));
+              }}
             >
-              Save securely
+              Install runtime
             </Button>
           </div>
-        </div>
-      ) : setup?.type === "install_runtime" ? (
-        <div>
-          <Button
-            size="sm"
-            disabled={pending || !setup.canInstall || !canUpdate}
-            onClick={() => {
-              setPending(true);
-              void install({ environmentId, input: { runtime: setup.runtime } })
-                .then((result) => {
-                  if (result._tag === "Failure" && !isAtomCommandInterrupted(result))
-                    setError(integrationErrorText(squashAtomCommandFailure(result)));
-                })
-                .finally(() => setPending(false));
-            }}
-          >
-            Install runtime
-          </Button>
-        </div>
-      ) : (
-        <>
-          <div className="flex items-center gap-2">
-            <Button size="sm" disabled={pending || !integration || !canSignIn} onClick={start}>
-              {pending ? "Opening sign-in…" : "Sign in"}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={pending || !canUpdate}
-              onClick={() => edit(!editing)}
-            >
-              Fix
-            </Button>
-          </div>
-          <WorkLogCollapse open={editing}>
-            {integration ? (
-              <div className="flex flex-col gap-2">
-                <label className="text-xs text-muted-foreground">
-                  Server URL
-                  <Input
-                    value={url ?? integration.url}
-                    onChange={(event) => setUrl(event.currentTarget.value)}
-                  />
-                </label>
-                {integration.auth?.type === "oauth" ? (
-                  <>
-                    <label className="text-xs text-muted-foreground">
-                      Client ID (if required)
-                      <Input
-                        value={clientId ?? integration.auth.clientId ?? ""}
-                        onChange={(event) => setClientId(event.currentTarget.value)}
-                      />
-                    </label>
-                    <label className="text-xs text-muted-foreground">
-                      OAuth scopes
-                      <Input
-                        value={scope ?? integration.auth.scope ?? ""}
-                        onChange={(event) => setScope(event.currentTarget.value)}
-                      />
-                    </label>
-                  </>
-                ) : null}
-                <div>
-                  <Button size="sm" disabled={pending || !canUpdate} onClick={() => void save()}>
-                    Save change
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={pending}
-                    onClick={() => {
-                      setUrl(null);
-                      setClientId(null);
-                      setScope(null);
-                      edit(false);
-                    }}
-                  >
-                    Cancel
-                  </Button>
+        ) : (
+          <>
+            <div className="flex items-center gap-2">
+              <Button size="sm" disabled={pending || !integration || !canSignIn} onClick={start}>
+                {pending ? "Opening sign-in…" : "Sign in"}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={pending || !canUpdate}
+                onClick={() => edit(!editing)}
+              >
+                Fix
+              </Button>
+            </div>
+            <WorkLogCollapse open={editing}>
+              {integration ? (
+                <div className="flex flex-col gap-2">
+                  <label className="text-xs text-muted-foreground">
+                    Server URL
+                    <Input
+                      value={url ?? integration.url}
+                      onChange={(event) => setUrl(event.currentTarget.value)}
+                    />
+                  </label>
+                  {integration.auth?.type === "oauth" ? (
+                    <>
+                      <label className="text-xs text-muted-foreground">
+                        Client ID (if required)
+                        <Input
+                          value={clientId ?? integration.auth.clientId ?? ""}
+                          onChange={(event) => setClientId(event.currentTarget.value)}
+                        />
+                      </label>
+                      <label className="text-xs text-muted-foreground">
+                        OAuth scopes
+                        <Input
+                          value={scope ?? integration.auth.scope ?? ""}
+                          onChange={(event) => setScope(event.currentTarget.value)}
+                        />
+                      </label>
+                    </>
+                  ) : null}
+                  <div>
+                    <Button size="sm" disabled={pending || !canUpdate} onClick={() => void save()}>
+                      Save change
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={pending}
+                      onClick={() => {
+                        setUrl(null);
+                        setClientId(null);
+                        setScope(null);
+                        edit(false);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            ) : null}
-          </WorkLogCollapse>
-        </>
-      )}
+              ) : null}
+            </WorkLogCollapse>
+          </>
+        )}
+      </ThreadPromptDetails>
       {error ? (
         <p role="alert" className="text-xs text-destructive">
           {error}

@@ -8,6 +8,7 @@ import {
 } from "@cogenly/contracts";
 
 const REASON_TEXT: Readonly<Record<IntegrationError["reason"], string>> = {
+  google_client_rejected: "Your agent will rotate the rejected Google client secret and retry.",
   google_client_missing: "Ask an agent to configure your Google OAuth client.",
   local_runtime_missing:
     "uv isn't installed on the machine running Cogenly. Install it, then try again.",
