@@ -7,6 +7,23 @@ import {
 } from "./orchestrationInstructions.ts";
 
 describe("T3 orchestration provider instructions", () => {
+  it("paces steps by resources without capping parallel agents", () => {
+    assert.include(COGENLY_ORCHESTRATION_INSTRUCTIONS, "When work can run in parallel");
+    assert.include(COGENLY_ORCHESTRATION_INSTRUCTIONS, "orchestrator_capabilities.machines");
+    assert.include(
+      COGENLY_ORCHESTRATION_INSTRUCTIONS,
+      "stagger heavy steps such as builds, test suites and browser runs on a busy machine",
+    );
+    assert.include(COGENLY_ORCHESTRATION_INSTRUCTIONS, "There is no fixed agent cap");
+    assert.notMatch(
+      COGENLY_ORCHESTRATION_INSTRUCTIONS,
+      /migrate-dev-db|Chromium|including the hub/,
+    );
+    assert.notMatch(
+      COGENLY_ORCHESTRATION_INSTRUCTIONS,
+      /at most \d|one heavy job|maximum .*agents/i,
+    );
+  });
   it("distinguishes delegated subagents from ordinary top-level threads", () => {
     assert.include(COGENLY_ORCHESTRATION_INSTRUCTIONS, "Use `delegate_task`");
     assert.include(COGENLY_ORCHESTRATION_INSTRUCTIONS, "ordinary top-level Cogenly conversations");

@@ -187,6 +187,7 @@ export class TerminalManager extends Context.Service<
       readonly terminalId: string;
       readonly sinceOffset?: number;
     }) => Effect.Effect<AgentTerminalResult, TerminalError>;
+    readonly activeAgentCount: Effect.Effect<number>;
     readonly listAgents: (threadId: string) => Effect.Effect<ReadonlyArray<TerminalSummary>>;
     readonly killAgent: (input: {
       readonly threadId: string;
@@ -3702,6 +3703,14 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   });
 
   return TerminalManager.of({
+    activeAgentCount: SynchronizedRef.get(managerStateRef).pipe(
+      Effect.map(
+        (state) =>
+          [...state.sessions.values()].filter(
+            (session) => session.agent !== undefined && session.process !== null,
+          ).length,
+      ),
+    ),
     runAgent,
     waitAgent,
     readAgent,
