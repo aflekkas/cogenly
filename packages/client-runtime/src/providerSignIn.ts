@@ -153,7 +153,7 @@ export type ProviderSignInStep =
   | { readonly kind: "ready" }
   | { readonly kind: "choose-method"; readonly methods: NonNullable<ProviderAuthState["methods"]> }
   | { readonly kind: "starting" }
-  /** Another client runs this machine's sign-in; this one only watches. */
+  /** Another client runs this machine's sign-in; this one can watch or cancel. */
   | { readonly kind: "elsewhere" }
   /** Claude: open the page, then paste the code it shows. */
   | {
@@ -191,6 +191,7 @@ const ACTIVE_PHASES: ReadonlySet<ProviderAuthState["phase"]> = new Set([
 
 export const isProviderSignInActive = (step: ProviderSignInStep) =>
   step.kind === "starting" ||
+  step.kind === "elsewhere" ||
   step.kind === "code" ||
   step.kind === "device-code" ||
   step.kind === "browser" ||

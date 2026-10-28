@@ -557,3 +557,47 @@ it.effect("profile import stops owned sessions and gates access until credential
     );
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
+
+it.effect.each([null, undefined])(
+  "cancels the active flow from another client with flowId %s",
+  (flowId) =>
+    Effect.gen(function* () {
+      const { controller, started, phase } = yield* makeHarness;
+      const flow = yield* controller.start("owner");
+      yield* Deferred.await(started);
+      const hidden = yield* phase("waiting", "other");
+      assert.isNull(hidden.flowId);
+      assert.isNull(hidden.interaction);
+      const cancelled = yield* controller.cancel("other", flowId);
+      assert.strictEqual(cancelled.phase, "cancelled");
+      const observed = yield* phase("cancelled", "other");
+      assert.strictEqual(observed.flowId, cancelled.flowId);
+      assert.strictEqual(cancelled.flowId, flow.flowId);
+      assert.strictEqual((yield* phase("cancelled")).flowId, flow.flowId);
+      assert.strictEqual((yield* controller.start("other")).phase, "starting");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("a delayed elsewhere cancel cannot stop a replacement flow", () =>
+  Effect.gen(function* () {
+    const { controller, phase } = yield* makeHarness;
+    const first = yield* controller.start("owner");
+    const observed = yield* phase("waiting", "other");
+    assert.isNull(observed.flowId);
+    assert.isString(observed.flowEpoch);
+    assert.notStrictEqual(observed.flowEpoch, first.flowId);
+    yield* controller.cancel("owner", first.flowId!);
+    const replacement = yield* controller.start("new-owner");
+    assert.notStrictEqual(replacement.flowEpoch, observed.flowEpoch);
+    const stale = yield* controller.cancel("other", null, observed.flowEpoch).pipe(Effect.exit);
+    assert.strictEqual(stale._tag, "Failure");
+    const current = yield* phase("waiting", "other");
+    assert.strictEqual(current.flowEpoch, replacement.flowEpoch);
+    assert.isNull(current.flowId);
+    const cancelled = yield* controller.cancel("other", null, current.flowEpoch);
+    assert.strictEqual(cancelled.phase, "cancelled");
+    assert.strictEqual(cancelled.flowId, replacement.flowId);
+    const ended = yield* controller.cancel("other", null, current.flowEpoch).pipe(Effect.exit);
+    assert.strictEqual(ended._tag, "Failure");
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);

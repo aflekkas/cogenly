@@ -55,6 +55,7 @@ import {
   THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS,
 } from "./chat/threadDetailsPanelStyles";
 import { ComposerControl } from "./chat/ComposerControl";
+import { ComposerProjectPicker } from "../projectLabels/ComposerProjectPicker";
 import {
   Menu,
   MenuGroup,
@@ -109,6 +110,12 @@ interface BranchToolbarProps {
   onEnvironmentChange?: (environmentId: EnvironmentId) => void;
   composerControlsHostRef?: (element: HTMLDivElement | null) => void;
   contextStripVisible?: boolean;
+  /** Names the chat's project after the machine, picked before the chat starts. */
+  showProject?: boolean;
+  /** The chat has started, so its project is named without a picker. */
+  projectReadOnly?: boolean;
+  /** Keeps a draft's project picker shut while its first send reads the pick. */
+  projectLocked?: boolean;
 }
 
 function showWorkspaceContextMenu(event: ReactMouseEvent, workspacePath: string) {
@@ -624,6 +631,9 @@ export const BranchToolbar = memo(function BranchToolbar({
   onEnvironmentChange,
   composerControlsHostRef,
   contextStripVisible = true,
+  showProject = false,
+  projectReadOnly = false,
+  projectLocked = false,
 }: BranchToolbarProps) {
   const branchSelectorRef = useRef<BranchToolbarBranchSelectorHandle>(null);
   const threadRef = useMemo(
@@ -852,6 +862,17 @@ export const BranchToolbar = memo(function BranchToolbar({
             />
           ) : null}
         </div>
+      ) : null}
+
+      {showProject ? (
+        <ComposerProjectPicker
+          appearance="tray"
+          environmentId={environmentId}
+          threadId={threadId}
+          draftId={draftId ?? null}
+          readOnly={projectReadOnly}
+          locked={projectLocked}
+        />
       ) : null}
 
       {composerControlsHostRef ? (

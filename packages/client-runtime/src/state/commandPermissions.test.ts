@@ -75,6 +75,9 @@ describe("command permissions", () => {
     WS_METHODS.browserExtensionInstall,
     WS_METHODS.browserExtensionRemove,
     WS_METHODS.browserExtensionToggle,
+    WS_METHODS.browserExtensionReload,
+    WS_METHODS.browserExtensionOpenSurface,
+    WS_METHODS.browserExtensionsSubscribe,
   ])("%s checks the destination browser grant for profile data", (method) =>
     Effect.scoped(
       Effect.gen(function* () {

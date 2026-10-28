@@ -23,7 +23,7 @@ import { cn } from "~/lib/utils";
  * span with tabIndex for a tooltip) gets the focus outline.
  */
 const contextChipVariants = cva(
-  "inline-flex h-[1.41em] max-w-full items-center gap-[0.33em] rounded-[0.5em] border px-[0.5em] align-middle font-medium text-[0.86em] leading-none [&_svg]:block [&_svg]:size-[1.17em] [&_svg]:shrink-0 [&_svg]:self-center [button&,a&,[data-popup-open]&]:cursor-pointer [button&,a&]:transition-colors [button&,a&]:motion-reduce:transition-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-foreground disabled:cursor-default",
+  "inline-flex h-[1.41em] max-w-full items-center gap-[0.33em] rounded-chip border px-[0.5em] align-middle font-medium text-[0.86em] leading-none [&_svg]:block [&_svg]:size-[1.17em] [&_svg]:shrink-0 [&_svg]:self-center [button&,a&,[data-popup-open]&]:cursor-pointer [button&,a&]:transition-colors [button&,a&]:motion-reduce:transition-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-foreground disabled:cursor-default",
   {
     defaultVariants: { kind: "neutral" },
     variants: {
@@ -116,12 +116,38 @@ function ContextChip({ className, kind, state, render, ...props }: ContextChipPr
   });
 }
 
-/** The chip's text. Truncates to the chip's width. */
+/** The chip's text. Every kind truncates at the same width, or the chip's, if narrower. */
 function ContextChipLabel({ className, ...props }: React.ComponentProps<"span">) {
   return (
     <span
-      className={cn("block min-w-0 self-center truncate leading-tight", className)}
+      className={cn("block min-w-0 max-w-[20em] self-center truncate leading-tight", className)}
       data-slot="context-chip-label"
+      {...props}
+    />
+  );
+}
+
+/** Secondary text after the label, such as an attachment's size or upload progress. */
+function ContextChipMeta({ className, ...props }: React.ComponentProps<"span">) {
+  return (
+    <span
+      className={cn(
+        "block shrink-0 self-center text-[0.86em] leading-none tabular-nums",
+        className,
+      )}
+      data-slot="context-chip-meta"
+      {...props}
+    />
+  );
+}
+
+/** A thumbnail in the icon slot, sized like the icons. */
+function ContextChipThumbnail({ className, alt = "", ...props }: React.ComponentProps<"img">) {
+  return (
+    <img
+      alt={alt}
+      className={cn("block size-[1.17em] shrink-0 rounded-chip-inner object-cover", className)}
+      data-slot="context-chip-thumbnail"
       {...props}
     />
   );
@@ -131,7 +157,7 @@ function ContextChipLabel({ className, ...props }: React.ComponentProps<"span">)
 function ContextChipAction({ className, render, ...props }: useRender.ComponentProps<"button">) {
   const defaultProps = {
     className: cn(
-      "ml-[0.17em] inline-flex size-[1.17em] shrink-0 cursor-pointer items-center justify-center rounded-sm text-current transition-colors hover:bg-(--context-chip-accent,var(--color-foreground))/17 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none [&_svg]:size-[0.85em]",
+      "ml-[0.17em] inline-flex size-[1.17em] shrink-0 cursor-pointer items-center justify-center rounded-chip-inner text-current transition-colors hover:bg-(--context-chip-accent,var(--color-foreground))/17 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none [&_svg]:size-[0.85em]",
       className,
     ),
     "data-slot": "context-chip-action",
@@ -144,4 +170,11 @@ function ContextChipAction({ className, render, ...props }: useRender.ComponentP
   });
 }
 
-export { ContextChip, ContextChipAction, ContextChipLabel, type ContextChipKind };
+export {
+  ContextChip,
+  ContextChipAction,
+  ContextChipLabel,
+  ContextChipMeta,
+  ContextChipThumbnail,
+  type ContextChipKind,
+};

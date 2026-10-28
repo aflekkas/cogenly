@@ -63,14 +63,15 @@ export function HeroPhrase(props: { readonly children: ReactNode }) {
 /**
  * A name in the sentence that opens a picker, underlined so it reads as a
  * choice. Pass it as a trigger's `render`; the visible name is its accessible
- * name, so the sentence reads naturally. Work's names are normal weight; the
- * chat greeting's project passes `weight="medium"`.
+ * name, so the sentence reads naturally. Names are medium weight over the
+ * sentence's normal weight, so the choices stand out; a placeholder such as
+ * "No project" keeps that weight and only reads muted.
  */
 export function HeroPickerButton({ className, ...props }: ComponentProps<typeof InlineButton>) {
   return (
     <InlineButton
       tone="picker"
-      weight="normal"
+      weight="medium"
       {...props}
       className={cn("pointer-events-auto min-w-0 max-w-full shrink align-baseline", className)}
     />
@@ -94,7 +95,8 @@ export function HeroName(props: {
     <>
       <span
         className={cn(
-          "block min-w-0 max-w-[14em] truncate",
+          // Medium in pickers and read-only alike, so both halves of the sentence match.
+          "block min-w-0 max-w-[14em] truncate font-medium",
           props.placeholder && "text-muted-foreground",
         )}
       >

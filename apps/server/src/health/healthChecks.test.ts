@@ -111,6 +111,19 @@ describe("worstStatus", () => {
     const first = buildReport({ ...base, observedAt: now, uptimeSeconds: 10 });
     const later = buildReport({ ...base, observedAt: ago(-30_000), uptimeSeconds: 40 });
     assert.isTrue(sameReportContent(first, later));
+    assert.isTrue(
+      sameReportContent(first, {
+        ...later,
+        resources: {
+          sampledAt: 1,
+          cpuCores: 4,
+          loadAverage1m: 1,
+          loadAverage5m: 0,
+          availableMemoryBytes: 1000,
+          totalMemoryBytes: 2000,
+        },
+      }),
+    );
     const changed = buildReport({
       ...base,
       observedAt: now,

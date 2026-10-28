@@ -1,5 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { ProviderDriverKind, ProviderInstanceId, ProjectId } from "@cogenly/contracts";
+import * as Option from "effect/Option";
+import { providerSettingsCodec } from "./providerSettingsDocument.ts";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -245,11 +247,12 @@ describe("settings sync between paired machines", () => {
         yield* mac.sync.sync(hub.environmentId);
         yield* hub.reconcile;
         const copied = (yield* hub.settings.getSettings).providerInstances[id];
+        // On or off stays per machine.
+        expect(copied?.enabled).toBeUndefined();
         expect(copied).toMatchObject({
           driver,
           displayName: "Personal",
           accentColor: "blue",
-          enabled: true,
           environment: [{ name: "LANG", value: "C", sensitive: false }],
           config: {
             customModels: ["private-model"],
@@ -272,3 +275,98 @@ describe("settings sync between paired machines", () => {
     20000,
   );
 });
+
+it.live(
+  "upgraded settings sync preserves old-peer disabled providers and pending metadata edits",
+  () =>
+    Effect.gen(function* () {
+      const newer = yield* start("mixed-new", "cloud-server", ProjectId.make("mixed-new"));
+      const older = yield* start("mixed-old", "computer", ProjectId.make("mixed-old"));
+      yield* pair(newer, older);
+      const id = ProviderInstanceId.make("codex");
+      const driver = ProviderDriverKind.make("codex");
+      const key = `provider:${id}`;
+      const original = {
+        driver,
+        enabled: false,
+        displayName: "Original",
+        position: 0,
+        environment: [],
+        customModels: [],
+      };
+      const baseline = {
+        driver,
+        enabled: false,
+        displayName: "Original",
+        config: { customModels: [], homePath: "/mixed-version/no-login" },
+      };
+      yield* newer.settings.updateSettings({ providerInstances: { [id]: baseline } });
+      yield* older.settings.updateSettings({ providerInstances: { [id]: baseline } });
+      yield* newer.state.write("settings", "universal", { [key]: original });
+      const sql = yield* newer.run(SqlClient.SqlClient);
+      // Persisted before upgrade: enabled was still part of the shared base.
+      yield* sql`INSERT INTO settings_sync_base(document_id,scope,key,value_json)
+      VALUES ('universal','',${key},${JSON.stringify(original)})`;
+      yield* older.sync.sync(newer.environmentId);
+      const incoming = {
+        ...original,
+        displayName: "Remote rename",
+        customModels: ["remote-model"],
+      };
+      yield* older.state.write("settings", "universal", { [key]: incoming });
+      yield* older.sync.sync(newer.environmentId);
+      expect((yield* newer.state.get("settings", "universal"))?.fields[key]).toEqual(incoming);
+      yield* newer.reconcile;
+      expect((yield* newer.settings.getSettings).providerInstances[id]).toMatchObject({
+        enabled: false,
+        displayName: "Remote rename",
+        config: { customModels: ["remote-model"] },
+      });
+      const countChanges = sql<{ count: number }>`SELECT count(*) AS count FROM shared_changes`;
+      const before = yield* countChanges;
+      yield* newer.reconcile;
+      expect(yield* countChanges).toEqual(before);
+
+      // A local enable edit changes only the local machine, without echoing the document.
+      const current = (yield* newer.settings.getSettings).providerInstances[id]!;
+      yield* newer.settings.updateSettings({
+        providerInstances: { [id]: { ...current, enabled: true } },
+      });
+      yield* newer.reconcile;
+      expect(yield* countChanges).toEqual(before);
+      // A real metadata edit must retain the last shared false even though local is true.
+      yield* newer.settings.updateSettings({
+        providerInstances: { [id]: { ...current, enabled: true, displayName: "New local name" } },
+      });
+      yield* newer.reconcile;
+      yield* older.sync.sync(newer.environmentId);
+      const value = (yield* older.state.get("settings", "universal"))!.fields[key];
+      const decoded = providerSettingsCodec.decode(value);
+      if (Option.isNone(decoded) || decoded.value === null)
+        return yield* Effect.die("Missing provider");
+      const remote = decoded.value;
+      // Frozen receiver behavior from origin/main: rebuild from remote.enabled,
+      // dropping local enabled:false when the document omits it.
+      yield* older.settings.updateSettings({
+        providerInstances: {
+          [id]: {
+            driver: remote.driver,
+            ...(remote.displayName === undefined ? {} : { displayName: remote.displayName }),
+            ...(remote.enabled === undefined ? {} : { enabled: remote.enabled }),
+            environment: remote.environment,
+            config: { customModels: remote.customModels },
+          },
+        },
+      });
+      expect((yield* older.settings.getSettings).providerInstances[id]).toMatchObject({
+        enabled: false,
+        displayName: "New local name",
+        config: { customModels: ["remote-model"] },
+      });
+      expect((yield* newer.settings.getSettings).providerInstances[id]?.enabled).toBe(true);
+      const settled = yield* countChanges;
+      yield* newer.reconcile;
+      expect(yield* countChanges).toEqual(settled);
+    }).pipe(Effect.scoped),
+  20000,
+);

@@ -145,6 +145,8 @@ import {
   type ComposerBannerStackContent,
   type ComposerBannerStackItem,
 } from "./ComposerBannerStack";
+import { partitionUrgentNotices } from "./composerStackBudget.logic";
+import { ComposerTray } from "./ComposerTray";
 import { ComposerStackColumn } from "./ComposerStackColumn";
 import { formatAttachmentSize } from "@cogenly/client-runtime/state/attachments";
 import {
@@ -388,10 +390,6 @@ import { LAYOUT_MOTION_DURATION, readPanelAnimationsActive } from "../../panelAn
 import { useAtomCommand } from "../../state/use-atom-command";
 import { readEnvironmentScope } from "../../state/session";
 import { serverEnvironment } from "../../state/server";
-import {
-  ComposerProjectPicker,
-  useComposerProjectPickerState,
-} from "../../projectLabels/ComposerProjectPicker";
 import { useComposerProjectFolder } from "../../projectLabels/useComposerProjectFolder";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
 
@@ -4698,26 +4696,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const iconOnlyBlockCount = composerControlsCollapsed
     ? restingControlsIconOnlyBlockCount
     : expandedControlsLayout.iconOnlyBlockCount;
-  const { canPickProject } = useComposerProjectPickerState(
-    routeThreadRef.environmentId,
-    activeThreadId,
-    routeKind === "draft" ? draftId : null,
-  );
-  const showProjectPicker = activeThreadId !== null && canPickProject;
   const showSourcesPicker = activeThreadId !== null;
   const restingProviderTraitsPicker = renderProviderTraitsPicker({
     ...providerTraitsPickerInput,
     size: composerControlsCollapsed ? "xs" : "sm",
     // Traits is the first block, so it hides once every block after it has
-    // (mode, then project and sources for a thread).
+    // (mode, then sources for a thread).
     hidden:
       composerControlsHidden ||
-      restingHiddenBlockCount >
-        (planModeUiEnabled ? 1 : 0) + (showProjectPicker ? 1 : 0) + (showSourcesPicker ? 1 : 0),
+      restingHiddenBlockCount > (planModeUiEnabled ? 1 : 0) + (showSourcesPicker ? 1 : 0),
   });
-  // Sources folds right after the project, which sits after it. A picker whose trigger folds
-  // away (or unfolds, when it sits on the overflow trigger) closes rather than float off nothing.
-  const sourcesBlockFolded = restingHiddenBlockCount > (showProjectPicker ? 1 : 0);
+  // Sources is the last block, so it folds first. A picker whose trigger folds away (or
+  // unfolds, when it sits on the overflow trigger) closes rather than float off nothing.
+  const sourcesBlockFolded = restingHiddenBlockCount > 0;
   const sourcesPickerOpen =
     sourcesPicker.open &&
     !composerControlsHidden &&
@@ -4752,7 +4743,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ...(showSourcesPicker
       ? [
           {
-            // Folds once the project has; the overflow menu then offers it.
+            // Folds first; the overflow menu then offers it.
             id: "sources",
             content: (
               <ComposerSourcesPicker
@@ -4768,31 +4759,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           },
         ]
       : []),
-    // Last, so the project folds first, before sources or the model and effort controls.
-    ...(showProjectPicker
-      ? [
-          {
-            id: "project",
-            content: (
-              <ComposerProjectPicker
-                environmentId={routeThreadRef.environmentId}
-                threadId={activeThreadId}
-                draftId={routeKind === "draft" ? draftId : null}
-                size={composerControlsCollapsed ? "xs" : "sm"}
-                // A draft's first send has already read its pick, so one made mid-send
-                // would be dropped; it stays shut without dimming for that moment.
-                locked={isSendBusy && routeKind === "draft"}
-              />
-            ),
-          },
-        ]
-      : []),
   ];
-  // The project picker has no overflow entry; it only hides.
   const hiddenRestingBlockIds = restingBlockDefs
     .slice(restingBlockDefs.length - restingHiddenBlockCount)
-    .map((def) => def.id)
-    .filter((id) => id !== "project");
+    .map((def) => def.id);
   const composerControls = showProviderUnavailable ? (
     <ComposerControl
       type="button"
@@ -5004,9 +4974,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         content: activityStackContent,
       }
     : null;
-  const bannerStackItems = activityStackItem
-    ? [activityStackItem, ...props.bannerItems]
-    : props.bannerItems;
+  const bannerStackNotices = partitionUrgentNotices(
+    activityStackItem ? [activityStackItem, ...props.bannerItems] : props.bannerItems,
+  );
   useEffect(() => {
     if (activeTasksProgress === null || activeTaskSteps === null) {
       setIsTasksDrawerOpen(false);
@@ -5958,20 +5928,38 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         : null}
       <ComposerBanner.Dock>
         <ComposerStackColumn>
+          {/* Farthest to nearest the composer: notices and running activity,
+              the queue, progress, then whatever waits on the user's decision. */}
           <ComposerBannerStack
             key={activeThreadId}
             className="relative z-0"
-            items={bannerStackItems}
-            attachedBelow={props.queuedRunsControl}
+            items={bannerStackNotices.rest}
           />
+          {props.queuedRunsControl}
           <AttachmentPresence
             show={!activityStackItem && Boolean(shownSyncPhase || inlineTasksBadge)}
             swapKey={shownSyncPhase ? `sync:${shownSyncPhase}` : "tasks"}
           >
-            <ComposerBanner.Root data-chat-composer-activity-strip="true">
+            <ComposerTray.Root data-chat-composer-activity-strip="true">
               {shownSyncPhase ? <ComposerActivityRow phase={shownSyncPhase} /> : inlineTasksBadge}
-            </ComposerBanner.Root>
+            </ComposerTray.Root>
           </AttachmentPresence>
+          {/* The tab and the open task list share one surface; the list grows under it. */}
+          <AttachmentPresence show={showTasksDrawer || showTasksTab} swapKey="tasks">
+            {(showTasksDrawer || showTasksTab) && activeTasksProgress && activeTaskSteps ? (
+              <ComposerTasksPanel
+                expanded={showTasksDrawer}
+                onToggle={toggleTasksDrawerStable}
+                progress={activeTasksProgress}
+                steps={activeTaskSteps}
+              />
+            ) : null}
+          </AttachmentPresence>
+          <ComposerBannerStack
+            key={`${activeThreadId}:urgent`}
+            className="relative z-0"
+            items={bannerStackNotices.urgent}
+          />
           <AttachmentPresence
             show={showComposerTopDrawer && (!isTasksDrawerOpen || hasBlockingComposerTopDrawer)}
             swapKey={pendingUserInputs.length > 0 ? "pending-user-input" : "plan-follow-up"}
@@ -6079,17 +6067,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 </div>
               ) : null}
             </ComposerBanner.Root>
-          </AttachmentPresence>
-          {/* The tab and the open task list share one surface; the list grows under it. */}
-          <AttachmentPresence show={showTasksDrawer || showTasksTab} swapKey="tasks">
-            {(showTasksDrawer || showTasksTab) && activeTasksProgress && activeTaskSteps ? (
-              <ComposerTasksPanel
-                expanded={showTasksDrawer}
-                onToggle={toggleTasksDrawerStable}
-                progress={activeTasksProgress}
-                steps={activeTaskSteps}
-              />
-            ) : null}
           </AttachmentPresence>
         </ComposerStackColumn>
       </ComposerBanner.Dock>
