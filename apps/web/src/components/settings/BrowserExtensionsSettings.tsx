@@ -91,7 +91,7 @@ function BrowserExtensionsRow({ environmentId }: { readonly environmentId: Envir
                 <div
                   key={extension.id}
                   className={cn(
-                    "flex items-start gap-3 px-3 py-2",
+                    "flex items-center gap-3 px-3 py-2",
                     index > 0 && "border-t border-border/60",
                   )}
                 >
@@ -115,7 +115,11 @@ function BrowserExtensionsRow({ environmentId }: { readonly environmentId: Envir
                       checked={extension.enabled}
                       onCheckedChange={(checked) => void setEnabled(extension.id, checked)}
                     />
-                    <Button size="xs" variant="ghost" onClick={() => void remove(extension)}>
+                    <Button
+                      size="sm"
+                      variant="ghost-destructive"
+                      onClick={() => void remove(extension)}
+                    >
                       Remove
                     </Button>
                   </div>

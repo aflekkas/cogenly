@@ -65,16 +65,19 @@ function LicenseNoticeRow({
     <Collapsible open={open} onOpenChange={onOpenChange}>
       <article>
         <div className="flex min-h-10 items-center interactive hover:bg-muted/35 sm:min-h-9">
-          <CollapsibleTrigger className="flex min-h-10 min-w-0 flex-1 items-center gap-2.5 px-3 text-left sm:min-h-9 sm:px-4">
+          <CollapsibleTrigger className="flex min-h-10 min-w-0 flex-1 items-center gap-2.5 rounded-md px-3 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:min-h-9 sm:px-4">
             <DisclosureChevron />
-            <span className="flex min-w-0 flex-1 items-baseline gap-2">
-              <span className="truncate font-medium text-foreground">{entry.name}</span>
-              {entry.version ? (
-                <code className="shrink-0 text-xs text-muted-foreground">{entry.version}</code>
-              ) : null}
-            </span>
-            <span className="max-w-[42%] shrink-0 truncate text-xs text-muted-foreground">
-              {entry.license} · {formatLicenseBundles(entry.bundles)}
+            {/* Narrow pages stack the license under the name instead of squeezing both. */}
+            <span className="flex min-w-0 flex-1 flex-col gap-0.5 @min-[36rem]/settings-page:flex-row @min-[36rem]/settings-page:items-baseline @min-[36rem]/settings-page:gap-4">
+              <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                <span className="truncate font-medium text-foreground">{entry.name}</span>
+                {entry.version ? (
+                  <code className="shrink-0 text-xs text-muted-foreground">{entry.version}</code>
+                ) : null}
+              </span>
+              <span className="min-w-0 truncate text-xs text-muted-foreground @min-[36rem]/settings-page:max-w-[42%] @min-[36rem]/settings-page:shrink-0">
+                {entry.license} · {formatLicenseBundles(entry.bundles)}
+              </span>
             </span>
           </CollapsibleTrigger>
           {entry.sourceUrl ? (
@@ -164,14 +167,19 @@ function LicenseManifestError({ message, onRetry }: { message: string; onRetry: 
 }
 
 export function OpenSourceLicensesPanel() {
+  // Each attempt is a fresh mount, so a retry starts from "loading" without an effect setting it.
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => setAttempt((value) => value + 1), []);
+  return <OpenSourceLicensesSection key={attempt} onRetry={retry} />;
+}
+
+function OpenSourceLicensesSection({ onRetry }: { readonly onRetry: () => void }) {
   const [state, setState] = useState<LicenseManifestState>({ status: "loading" });
   const [query, setQuery] = useState("");
   const [openEntryKey, setOpenEntryKey] = useState<string | null>(null);
-  const [requestVersion, setRequestVersion] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    setState({ status: "loading" });
     void loadLicenseManifest().then(
       (manifest) => {
         if (!cancelled) setState({ status: "ready", manifest });
@@ -187,14 +195,13 @@ export function OpenSourceLicensesPanel() {
     return () => {
       cancelled = true;
     };
-  }, [requestVersion]);
+  }, []);
 
   const entries = state.status === "ready" ? state.manifest.entries : [];
   const filteredEntries = useMemo(
     () => filterThirdPartyLicenseEntries(entries, query),
     [entries, query],
   );
-  const retry = useCallback(() => setRequestVersion((value) => value + 1), []);
 
   return (
     <>
@@ -237,7 +244,7 @@ export function OpenSourceLicensesPanel() {
             </div>
           </>
         ) : state.status === "error" ? (
-          <LicenseManifestError message={state.message} onRetry={retry} />
+          <LicenseManifestError message={state.message} onRetry={onRetry} />
         ) : (
           <SettingsRow title="Loading open-source notices…" role="status" />
         )}

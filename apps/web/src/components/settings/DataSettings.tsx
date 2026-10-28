@@ -103,19 +103,28 @@ function DataSettingsPanel({
     ReadonlyMap<string, ExportValidation | { failed: string } | "running">
   >(new Map());
 
-  const refreshRecent = useCallback(async () => {
-    if (environmentId === null || !canExport) return;
-    const listed = await listExports({ environmentId, input: {} });
+  const showListed = useCallback((listed: Awaited<ReturnType<typeof listExports>>) => {
     if (listed._tag === "Success") {
       setRecent(listed.value.exports);
       setRecentError(null);
     } else if (!isAtomCommandInterrupted(listed)) {
       setRecentError(failureMessage(listed));
     }
-  }, [canExport, environmentId, listExports]);
+  }, []);
+  const refreshRecent = useCallback(async () => {
+    if (environmentId === null || !canExport) return;
+    showListed(await listExports({ environmentId, input: {} }));
+  }, [canExport, environmentId, listExports, showListed]);
   useEffect(() => {
-    void refreshRecent();
-  }, [refreshRecent]);
+    if (environmentId === null || !canExport) return;
+    let cancelled = false;
+    void listExports({ environmentId, input: {} }).then((listed) => {
+      if (!cancelled) showListed(listed);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [canExport, environmentId, listExports, showListed]);
 
   const run = async () => {
     if (environmentId === null || include.size === 0 || running) return;
@@ -243,7 +252,11 @@ function DataSettingsPanel({
         <SettingsSection
           id="data-exports-recent"
           title="Recent exports"
-          footer="Check reads an export back and confirms every record is intact. It changes nothing. Cogenly can't import exports yet."
+          footer={
+            recent !== null && recent.length > 0
+              ? "Check reads an export back and confirms every record is intact. It changes nothing. Cogenly can't import exports yet."
+              : undefined
+          }
         >
           {recentError !== null ? (
             <SettingsRow title="Couldn't list exports" description={recentError} />

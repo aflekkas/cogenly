@@ -58,3 +58,19 @@ export function resourceHistoryCpuScaleMax(
 ): number {
   return Math.max(1, ...buckets.map((bucket) => bucket.avgCpuPercent));
 }
+
+/**
+ * Why the resource monitor isn't running, said once. When the server's own process
+ * sampling failed too, its distinct reasons join the monitor's and the line says where
+ * the missing numbers went, instead of each section repeating the same error.
+ */
+export function resourceMonitorUnavailableText(
+  reason: string,
+  fallbackUnavailableReasons: ReadonlyArray<string> | null,
+): string {
+  if (fallbackUnavailableReasons === null) return reason;
+  const reasons = [...new Set([reason, ...fallbackUnavailableReasons].map((text) => text.trim()))]
+    .filter((text) => text.length > 0)
+    .map((text) => (/[.!?]$/.test(text) ? text : `${text}.`));
+  return `${reasons.join(" ")} Live processes and resource history show here once it runs.`;
+}

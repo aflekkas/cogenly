@@ -36,7 +36,6 @@ import { cn } from "../../lib/utils";
 import { serverEnvironment } from "../../state/server";
 import { useEnvironments } from "../../state/environments";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { SearchInput } from "../ui/search-input";
@@ -56,6 +55,7 @@ import {
   isKnownWhenVariable,
   keybindingConflictLabels,
   keybindingFromKeyboardEvent,
+  keycapLabel,
   parseWhenExpressionDraft,
   groupKeybindingRows,
   type KeybindingCommandOption,
@@ -65,8 +65,10 @@ import {
   unknownWhenVariables,
   whenAstToExpression,
   whenNodeRemoveLabel,
+  whenSummary,
 } from "./KeybindingsSettings.logic";
 import { SettingsGroup } from "./SettingsGroup";
+import { SettingsTag } from "./SettingsStatus";
 import {
   SettingsEmpty,
   SettingsRow,
@@ -79,9 +81,10 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useAtomCommand } from "../../state/use-atom-command";
 
 function KeybindingPill({ value }: { value: string }) {
-  // Keys dedupe repeated parts; a literal "+" in a shortcut splits into empty strings.
+  // A literal "+" key ends the binding in "++"; React keys dedupe repeated parts.
+  const tokens = value.endsWith("++") ? [...value.slice(0, -2).split("+"), "+"] : value.split("+");
   const seenParts = new Map<string, number>();
-  const parts = value.split("+").map((part) => {
+  const parts = tokens.map((part) => {
     const seen = seenParts.get(part) ?? 0;
     seenParts.set(part, seen + 1);
     return { part, key: seen === 0 ? part : `${part}-${seen}` };
@@ -89,23 +92,7 @@ function KeybindingPill({ value }: { value: string }) {
   return (
     <KbdGroup>
       {parts.map(({ part, key }) => (
-        <Kbd key={key}>
-          {part === "mod"
-            ? navigator.platform.toLowerCase().includes("mac")
-              ? "⌘"
-              : "Ctrl"
-            : part === "shift"
-              ? "⇧"
-              : part === "alt"
-                ? navigator.platform.toLowerCase().includes("mac")
-                  ? "⌥"
-                  : "Alt"
-                : part === "ctrl"
-                  ? "⌃"
-                  : part.length === 1
-                    ? part.toUpperCase()
-                    : part}
-        </Kbd>
+        <Kbd key={key}>{keycapLabel(part, navigator.platform)}</Kbd>
       ))}
     </KbdGroup>
   );
@@ -323,7 +310,7 @@ function WhenExpressionRemoveButton({
             type="button"
             variant="ghost"
             size="icon-sm"
-            className={cn("size-7", className)}
+            className={className}
             aria-label={label}
             onClick={onRemove}
           />
@@ -783,12 +770,10 @@ function KeybindingKeyControl({
   row,
   editor,
   isSaving,
-  pillClassName,
 }: {
   row: KeybindingRow;
   editor: KeybindingRowEditor;
   isSaving: boolean;
-  pillClassName?: string | undefined;
 }) {
   const { keyDraft, isRecording, isDirty, isWhenDraftValid, setDraft, save, captureKeybinding } =
     editor;
@@ -806,17 +791,14 @@ function KeybindingKeyControl({
         </Button>
       ) : null}
       {showPill ? (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="keys"
           onClick={() => setDraft({ isRecording: true })}
           aria-label={`Edit shortcut for ${commandLabel(row.command)}: ${formatShortcutLabel(row.binding.shortcut)}`}
-          className={cn(
-            "inline-flex h-8 cursor-pointer items-center rounded-md border border-transparent px-1.5 sm:h-7 outline-none transition-colors hover:border-border/70 state-hover focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring/24",
-            pillClassName,
-          )}
         >
           <KeybindingPill value={row.key} />
-        </button>
+        </Button>
       ) : (
         <Input
           data-keybinding-capture=""
@@ -837,7 +819,11 @@ function KeybindingKeyControl({
   );
 }
 
-/** Quiet inline trigger beside a binding's title showing its when clause; opens the expression builder. */
+/**
+ * Quiet inline trigger beside a binding's title showing its when clause in
+ * plain words (the raw expression when it has none); opens the expression
+ * builder, which shows and edits the expression itself.
+ */
 function WhenClauseControl({
   label,
   expression,
@@ -853,19 +839,20 @@ function WhenClauseControl({
   onChange: (value: KeybindingWhenNode | undefined) => void;
   onValidityChange: (valid: boolean) => void;
 }) {
+  const summary = whenSummary(value);
   return (
     <Popover>
       <PopoverTrigger
         render={<Button variant="ghost-muted" size="micro" className="min-w-0 shrink" />}
         aria-label={`Edit when clause for ${label}`}
       >
-        {expression ? (
+        {summary !== null ? (
+          <span className="truncate font-normal">{summary}</span>
+        ) : (
           <>
-            <span className="shrink-0 font-normal text-muted-foreground/70">when</span>
+            <span className="shrink-0 font-normal">when</span>
             <span className="truncate font-mono font-normal">{expression}</span>
           </>
-        ) : (
-          <span className="font-normal">Always</span>
         )}
         <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />
       </PopoverTrigger>
@@ -929,11 +916,7 @@ function KeybindingRowMenu({
 
 function KeybindingSourceBadge({ source }: { source: KeybindingRow["source"] }) {
   if (source === "Default") return null;
-  return (
-    <Badge variant="outline" size="sm">
-      {source}
-    </Badge>
-  );
+  return <SettingsTag>{source}</SettingsTag>;
 }
 
 /** The command label, its source badge and its when clause on one line. */
@@ -1000,12 +983,7 @@ function KeybindingSettingsRow(props: KeybindingRowProps) {
             onReset={onReset}
             onRemove={onRemove}
           />
-          <KeybindingKeyControl
-            row={row}
-            editor={editor}
-            isSaving={isSaving}
-            pillClassName="-mr-1.5"
-          />
+          <KeybindingKeyControl row={row} editor={editor} isSaving={isSaving} />
         </div>
       }
     />

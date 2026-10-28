@@ -15,7 +15,6 @@ import { useState } from "react";
 import { integrationSetupRequest, useConnectIntegration } from "~/hooks/useConnectIntegration";
 import { useStartAgentChat } from "~/hooks/useStartAgentChat";
 import { AnimatedHeight } from "~/components/AnimatedHeight";
-import { cn } from "~/lib/utils";
 import { DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
@@ -36,8 +35,8 @@ import {
   scopeLabel,
   testResultReason,
   testResultToolsText,
-  type IntegrationStatusView,
 } from "./integrationServices.logic";
+import { SettingsStatusText } from "./SettingsStatus";
 import { SettingsGroup } from "./SettingsGroup";
 import {
   SettingsMasterDetail,
@@ -145,22 +144,6 @@ export function IntegrationServicesSettings() {
   );
 }
 
-/** Healthy and off rows read fine from their text; only trouble gets a dot, as on Providers. */
-function IntegrationStatusDot({ tone }: { readonly tone: IntegrationStatusView["tone"] }) {
-  if (tone !== "warning" && tone !== "error") return null;
-  return (
-    <span className="flex h-[1.45em] shrink-0 items-center">
-      <span
-        aria-hidden
-        className={cn(
-          "size-1.5 shrink-0 rounded-full",
-          tone === "error" ? "bg-destructive" : "bg-warning",
-        )}
-      />
-    </span>
-  );
-}
-
 /** One account in the list: the service, its account and status, and its on/off switch. */
 function IntegrationListRow({
   environmentId,
@@ -219,13 +202,12 @@ function IntegrationListRow({
         </SettingsAttentionTitle>
       }
       description={
-        <>
-          <IntegrationStatusDot tone={status.tone} />
+        <SettingsStatusText tone={status.tone}>
           <span className="line-clamp-2 [overflow-wrap:anywhere]">
             <span ref={statusRef}>{status.label}</span>
             {account ? ` · ${account}` : null}
           </span>
-        </>
+        </SettingsStatusText>
       }
       trailing={
         <Switch
@@ -387,13 +369,12 @@ function IntegrationDetail({
       <SettingsRow
         title="Status"
         description={
-          <span className="flex min-w-0 items-baseline gap-1.5">
-            <IntegrationStatusDot tone={status.tone} />
+          <SettingsStatusText tone={status.tone}>
             <span ref={statusRef}>{status.label}</span>
-            {status.toolCount !== null ? (
-              <span>· {status.toolCount === 1 ? "1 tool" : `${status.toolCount} tools`}</span>
-            ) : null}
-          </span>
+            {status.toolCount !== null
+              ? ` · ${status.toolCount === 1 ? "1 tool" : `${status.toolCount} tools`}`
+              : null}
+          </SettingsStatusText>
         }
         control={
           <div className="flex items-center justify-end gap-1">

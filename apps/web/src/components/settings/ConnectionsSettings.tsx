@@ -74,6 +74,7 @@ import {
   canRevokeOtherClients,
   isQrShareableEndpoint,
   isWslSettingsRowVisible,
+  revokeOtherClientsConfirmation,
   selectQrEndpointOption,
   togglePairingScopeSelection,
 } from "./ConnectionsSettings.logic";
@@ -139,7 +140,7 @@ import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Alert, AlertDescription } from "../ui/alert";
-import { Badge } from "../ui/badge";
+import { SettingsStatusBadge, SettingsTag } from "./SettingsStatus";
 import { Button } from "../ui/button";
 import { DisclosureChevron } from "../ui/disclosure";
 import { AnimatedHeight } from "../AnimatedHeight";
@@ -729,7 +730,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
         <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
           {shareablePairingUrl && canCopyToClipboard ? (
             <Button
-              size="xs"
+              size="sm"
               variant="outline"
               aria-expanded={isQrPanelOpen}
               aria-controls={qrPanelId}
@@ -751,14 +752,14 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
                 <CopyButton
                   {...pairingCopyProps(credential, "code")}
                   label="Copy pairing code"
-                  size="xs"
+                  size="sm"
                   variant="outline"
                 >
                   Copy code
                 </CopyButton>
               )
             ) : (
-              <DialogTrigger render={<Button size="xs" variant="outline" />}>
+              <DialogTrigger render={<Button size="sm" variant="outline" />}>
                 {shareablePairingUrl ? "Show link" : "Show code"}
               </DialogTrigger>
             )}
@@ -817,7 +818,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
             </DialogPopup>
           </Dialog>
           <Button
-            size="xs"
+            size="sm"
             variant="destructive-outline"
             disabled={!canRevoke || revokingPairingLinkId === pairingLink.id}
             onClick={() => void onRevoke(pairingLink.id)}
@@ -975,11 +976,7 @@ const ConnectedClientListRow = memo(function ConnectedClientListRow({
               pingClassName={isLive ? "bg-success/60 duration-2000" : null}
             />
             <h3 className="text-sm font-medium text-foreground">{primaryLabel}</h3>
-            {clientSession.current ? (
-              <Badge size="sm" variant="outline">
-                This device
-              </Badge>
-            ) : null}
+            {clientSession.current ? <SettingsTag>This device</SettingsTag> : null}
           </div>
           <p className="text-xs text-muted-foreground">
             {deviceInfoBits.length > 0 ? (
@@ -994,7 +991,7 @@ const ConnectedClientListRow = memo(function ConnectedClientListRow({
         <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
           {!clientSession.current ? (
             <Button
-              size="xs"
+              size="sm"
               variant="destructive-outline"
               disabled={!canRevoke || revokingClientSessionId === clientSession.sessionId}
               onClick={() => void onRevokeSession(clientSession.sessionId)}
@@ -1073,10 +1070,17 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
   return (
     <div className="flex items-center gap-2">
       <Button
-        size="xs"
+        size="sm"
         variant="destructive-outline"
         disabled={isRevokingOtherClients || !canRevokeOtherClients(clientSessions)}
-        onClick={() => void onRevokeOtherClients()}
+        onClick={async () => {
+          // Fail closed: no mounted confirm host means nothing is revoked.
+          const confirmed = await requestConfirmDialog(
+            revokeOtherClientsConfirmation(clientSessions),
+            { variant: "destructive" },
+          );
+          if (confirmed === true) onRevokeOtherClients();
+        }}
       >
         {isRevokingOtherClients ? "Revoking…" : "Revoke all others"}
       </Button>
@@ -1094,8 +1098,8 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
       >
         <DialogTrigger
           render={
-            <Button size="xs" variant="default">
-              <PlusIcon className="size-3" />
+            <Button size="sm" variant="default">
+              <PlusIcon />
               Pair a device
             </Button>
           }
@@ -1317,19 +1321,13 @@ const AdvertisedEndpointListRow = memo(function AdvertisedEndpointListRow({
             <TooltipPopup side="top">{endpoint.httpBaseUrl}</TooltipPopup>
           </Tooltip>
           {!isAvailable ? (
-            <Badge size="sm" variant="outline">
-              Setup required
-            </Badge>
+            <SettingsStatusBadge tone="warning">Setup required</SettingsStatusBadge>
           ) : null}
         </div>
         <div className="ml-auto flex min-h-6 shrink-0 items-center justify-end gap-2">
-          {isDefault ? (
-            <Badge size="sm" variant="info">
-              Default
-            </Badge>
-          ) : null}
+          {isDefault ? <SettingsStatusBadge tone="info">Default</SettingsStatusBadge> : null}
           {!isDefault ? (
-            <Button size="xs" variant="outline" onClick={() => onSetDefault(endpoint)}>
+            <Button size="sm" variant="outline" onClick={() => onSetDefault(endpoint)}>
               Set as default
             </Button>
           ) : null}
@@ -1697,7 +1695,7 @@ function SavedBackendListRow({
             <Button
               type="button"
               variant="ghost-muted"
-              size="icon-xs"
+              size="icon-sm"
               disabled={isRemoving}
               aria-label={`More actions for ${environment.label}`}
             />
@@ -3338,7 +3336,7 @@ export function ConnectionsSettings() {
           : "Reach this machine from your tailnet over HTTPS. Turn it on in Settings → Machines."
       }
       control={
-        <Button size="xs" variant="outline" render={<Link to="/settings/machines" />}>
+        <Button size="sm" variant="outline" render={<Link to="/settings/machines" />}>
           Open Machines
         </Button>
       }
@@ -3518,7 +3516,7 @@ export function ConnectionsSettings() {
                       }
                     />
                   ) : primaryServerUpdateState.status === "idle" && primaryServerConfig ? (
-                    <span className="text-xs text-muted-foreground">Up to date</span>
+                    <SettingsStatusBadge tone="success">Up to date</SettingsStatusBadge>
                   ) : undefined
                 }
               />

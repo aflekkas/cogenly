@@ -291,11 +291,12 @@ function ManagedCodexSetup({
     awaitingProvider !== null &&
     !authenticated &&
     (auth?.phase === "succeeded" || awaitingProvider === "handoff");
-  useEffect(() => {
-    if (authenticated || auth?.phase === "failed" || auth?.phase === "cancelled") {
-      setAwaitingProvider(null);
-    }
-  }, [authenticated, auth?.phase]);
+  if (
+    awaitingProvider !== null &&
+    (authenticated || auth?.phase === "failed" || auth?.phase === "cancelled")
+  ) {
+    setAwaitingProvider(null);
+  }
   useEffect(() => {
     if (awaitingProvider && auth?.phase === "succeeded") {
       void refreshProviders({ environmentId, input: { instanceId } });
@@ -375,21 +376,20 @@ function ManagedCodexSetup({
     importedAttempt.current = attemptId;
     void transferProfile(handoffQuery.data.profile);
   }, [handoff, handoffQuery.data, transferProfile]);
-  useEffect(() => {
-    if (!handoff) return;
-    if (
-      handoffQuery.error ||
+  // A handoff that failed on the primary machine ends here, during render.
+  if (
+    handoff &&
+    (handoffQuery.error ||
       (handoffQuery.data?.phase === "auth" &&
-        ["failed", "cancelled"].includes(handoffQuery.data.state.phase))
-    ) {
-      setError(
-        handoffQuery.data?.phase === "auth"
-          ? (handoffQuery.data.state.message ?? "ChatGPT sign-in could not finish. Try again.")
-          : "ChatGPT sign-in on the primary machine was interrupted. Try again.",
-      );
-      setHandoff(null);
-    }
-  }, [handoff, handoffQuery.data, handoffQuery.error]);
+        ["failed", "cancelled"].includes(handoffQuery.data.state.phase)))
+  ) {
+    setError(
+      handoffQuery.data?.phase === "auth"
+        ? (handoffQuery.data.state.message ?? "ChatGPT sign-in could not finish. Try again.")
+        : "ChatGPT sign-in on the primary machine was interrupted. Try again.",
+    );
+    setHandoff(null);
+  }
   const cancelSignIn = useCallback(() => {
     setAwaitingProvider(null);
     if (handoff) {

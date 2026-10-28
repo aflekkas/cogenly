@@ -1,9 +1,10 @@
 import type { AgentId, EnvironmentId, VaultItemId, VaultUsageEntry } from "@cogenly/contracts";
 
 import { MarkdownThreadLink } from "../components/chat/MarkdownThreadLink";
-import { Badge } from "../components/ui/badge";
+import { SettingsStatusBadge } from "../components/settings/SettingsStatus";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import {
+  groupVaultUsage,
   vaultActionLabel,
   vaultOutcomeLabel,
   vaultOutcomeTone,
@@ -11,8 +12,9 @@ import {
 } from "./vault.logic";
 
 /**
- * Who used which item, where, and what happened. `itemName` is passed only
- * for the all-activity view, where entries span items.
+ * Who used which item, where, and what happened, with back-to-back identical
+ * uses folded into one line. `itemName` is passed only for the all-activity
+ * view, where entries span items.
  */
 export function VaultUsageList(props: {
   readonly environmentId: EnvironmentId;
@@ -22,7 +24,7 @@ export function VaultUsageList(props: {
 }) {
   return (
     <ol className="flex flex-col gap-1.5">
-      {props.usage.map((entry) => {
+      {groupVaultUsage(props.usage).map(({ entry, count }) => {
         const itemName = props.itemName ? (
           <span className="text-foreground">
             {props.itemName(entry.itemId) ?? "a deleted item"}
@@ -34,9 +36,9 @@ export function VaultUsageList(props: {
             key={entry.id}
             className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground"
           >
-            <Badge size="sm" variant={vaultOutcomeTone(entry.outcome)}>
+            <SettingsStatusBadge tone={vaultOutcomeTone(entry.outcome)}>
               {vaultOutcomeLabel(entry.outcome)}
-            </Badge>
+            </SettingsStatusBadge>
             {saved ? (
               // The user typed it on an agent's sign-in card in that thread.
               <>
@@ -81,7 +83,10 @@ export function VaultUsageList(props: {
                 ) : null}
               </>
             )}
-            <span>· {formatRelativeTimeLabel(entry.at)}</span>
+            <span>
+              · {count > 1 ? `${count} times, latest ` : null}
+              {formatRelativeTimeLabel(entry.at)}
+            </span>
           </li>
         );
       })}

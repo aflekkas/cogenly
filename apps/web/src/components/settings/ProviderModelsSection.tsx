@@ -274,7 +274,8 @@ export function ProviderModelsSection({
     : displayModels;
 
   // The parent commits the new custom model and hands back an updated
-  // `models` list, so the row can only be scrolled to after that render.
+  // `models` list, so the row can only be scrolled to after that render. Runs
+  // after every render and returns at once unless a scroll is pending.
   useEffect(() => {
     const slug = scrollToSlugRef.current;
     if (slug === null) return;
@@ -284,7 +285,7 @@ export function ProviderModelsSection({
     if (!row) return;
     scrollToSlugRef.current = null;
     row.scrollIntoView({ block: "nearest" });
-  }, [displayModels]);
+  });
 
   const handleAdd = () => {
     if (!canManageCustomModels) return;

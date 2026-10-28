@@ -57,6 +57,7 @@ import { useSettingsScope } from "./SettingsScopeContext";
 import { TelemetryExportSettings } from "./TelemetryExportSettings";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
 import { searchableSetting } from "./settingsSearch";
+import { SettingsStatusBadge, type SettingsStatusTone } from "./SettingsStatus";
 
 const NUMBER_FORMAT = new Intl.NumberFormat();
 
@@ -99,6 +100,11 @@ function isStaleProcessSignalMessage(message: string | undefined): boolean {
   return message?.includes("not a live descendant") ?? false;
 }
 
+/** A stat still on its first read. */
+const LOADING_STAT = "…";
+/** A stat whose source reported an error, so nothing was measured. */
+const UNAVAILABLE_STAT = "Unavailable";
+
 function StatBlock({
   label,
   value,
@@ -131,15 +137,21 @@ function StatBlock({
           </Tooltip>
         ) : null}
       </div>
-      <div
-        className={cn(
-          "mt-1 truncate font-mono text-lg font-semibold tabular-nums text-foreground",
-          tone === "warning" && "text-warning-foreground",
-          tone === "danger" && "text-destructive",
-        )}
-      >
-        {value}
-      </div>
+      {value === UNAVAILABLE_STAT ? (
+        <div className="mt-1 flex h-7 items-center truncate text-sm text-muted-foreground">
+          {value}
+        </div>
+      ) : (
+        <div
+          className={cn(
+            "mt-1 truncate font-mono text-lg font-semibold tabular-nums text-foreground",
+            tone === "warning" && "text-warning-foreground",
+            tone === "danger" && "text-destructive",
+          )}
+        >
+          {value}
+        </div>
+      )}
     </div>
   );
 }
@@ -192,53 +204,75 @@ function DiagnosticsErrors({ messages }: { messages: ReadonlyArray<string | null
   );
 }
 
-function DiagnosticsTable({
-  headers,
-  children,
-  minTableWidth = "min-w-[640px]",
-  columnWidths,
+/**
+ * Cells of a column that only fits a wide page. Narrow pages drop these
+ * columns instead of scrolling the table sideways; the essentials stay.
+ */
+const SECONDARY_CELL = "hidden @min-[48rem]/settings-page:table-cell";
+
+interface DiagnosticsColumn {
+  readonly header: string;
+  /** A fixed width; the column without one takes what is left. */
+  readonly width?: string;
+  readonly align?: "start" | "end";
+  /** Hidden on a narrow page. Its `td`s take `SECONDARY_CELL` too. */
+  readonly secondary?: boolean;
+}
+
+/** The uppercase header row every diagnostics table shares. */
+function DiagnosticsTableHead({
+  columns,
+  sticky,
 }: {
-  headers: ReadonlyArray<string>;
-  children: ReactNode;
-  minTableWidth?: string;
-  columnWidths?: ReadonlyArray<string>;
+  columns: ReadonlyArray<DiagnosticsColumn>;
+  sticky: boolean;
 }) {
   return (
-    <ScrollArea
-      radius="none"
-      chainVerticalScroll
-      scrollFade
-      hideScrollbars
-      className="w-full max-w-full"
+    <thead
+      className={cn(
+        "border-b border-border/60 text-2xs uppercase tracking-widest text-muted-foreground/70",
+        sticky && "sticky top-0 z-10 bg-card",
+      )}
     >
-      <table
-        className={cn("w-full text-left text-xs", minTableWidth, columnWidths && "table-fixed")}
-      >
-        {columnWidths ? (
-          <colgroup>
-            {headers.map((header, index) => (
-              <col key={header} className={columnWidths[index]} />
-            ))}
-          </colgroup>
-        ) : null}
-        <thead className="border-b border-border/60 text-2xs uppercase tracking-widest text-muted-foreground/70">
-          <tr>
-            {headers.map((header, index) => (
-              <th
-                key={header}
-                className={cn(
-                  "whitespace-nowrap px-4 py-2.5 font-semibold first:sm:pl-5 last:sm:pr-5",
-                  !columnWidths && index === headers.length - 1 && "w-px",
-                )}
-              >
-                {header.replaceAll(" ", "\u00a0")}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border/60">{children}</tbody>
-      </table>
-    </ScrollArea>
+      <tr>
+        {columns.map((column) => (
+          <th
+            key={column.header}
+            className={cn(
+              "truncate px-3 py-2.5 font-semibold first:pl-4 last:pr-4 first:sm:pl-5 last:sm:pr-5",
+              column.width,
+              column.align === "end" && "text-right",
+              column.secondary && SECONDARY_CELL,
+            )}
+          >
+            {column.header}
+          </th>
+        ))}
+      </tr>
+    </thead>
+  );
+}
+
+/**
+ * A diagnostics table that fits its card: fixed column widths, long text
+ * truncated with the full value on hover, secondary columns dropped on a
+ * narrow page.
+ */
+function DiagnosticsTable({
+  columns,
+  stickyHeader = false,
+  children,
+}: {
+  columns: ReadonlyArray<DiagnosticsColumn>;
+  /** Keeps the header in view inside a height-capped scroller. */
+  stickyHeader?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <table className="w-full table-fixed text-left text-xs [&_td]:px-3 [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 sm:[&_td:first-child]:pl-5 sm:[&_td:last-child]:pr-5">
+      <DiagnosticsTableHead columns={columns} sticky={stickyHeader} />
+      <tbody className="divide-y divide-border/60">{children}</tbody>
+    </table>
   );
 }
 
@@ -260,6 +294,28 @@ function TraceIdCell({ traceId }: { traceId: string }) {
       <CopyButton label="Copy full trace ID" size="icon-micro" target="trace ID" value={traceId} />
     </div>
   );
+}
+
+/** A command line cut to its cell, the whole of it on hover. */
+function TruncatedCode({ value }: { value: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="block truncate font-mono">{value}</span>} />
+      <TooltipPopup side="top" variant="code">
+        {value}
+      </TooltipPopup>
+    </Tooltip>
+  );
+}
+
+/** A trace log level as the settings status vocabulary: warnings warn, errors fail. */
+function logLevelStatus(level: string): { tone: SettingsStatusTone; label: string } {
+  const normalized = level.toLowerCase();
+  if (normalized.startsWith("warn")) return { tone: "warning", label: "Warning" };
+  if (normalized === "error" || normalized === "fatal") {
+    return { tone: "error", label: normalized === "fatal" ? "Fatal" : "Error" };
+  }
+  return { tone: "neutral", label: normalized.charAt(0).toUpperCase() + normalized.slice(1) };
 }
 
 function formatProcessName(command: string): string {
@@ -329,7 +385,7 @@ function ProcessDiagnosticsTable({
   canMaintainEnvironment: boolean;
   signalingPid: number | null;
   onSignal: (pid: number, signal: ServerProcessSignal) => void;
-  emptyLabel?: string;
+  emptyLabel: string;
 }) {
   const [collapsedPids, setCollapsedPids] = useState<ReadonlySet<number>>(() => new Set());
   const visibleProcesses = useMemo(() => {
@@ -369,79 +425,67 @@ function ProcessDiagnosticsTable({
         radius="none"
         chainVerticalScroll
         scrollFade
-        hideScrollbars
         className="max-h-[min(64vh,44rem)] w-full max-w-full"
       >
-        <table className="w-full min-w-[1040px] table-fixed text-left text-xs">
-          <colgroup>
-            <col className="w-[24%]" />
-            <col className="w-[8%]" />
-            <col className="w-[10%]" />
-            <col className="w-[33%]" />
-            <col className="w-[8%]" />
-            <col className="w-[11%]" />
-            <col className="w-[6%]" />
-          </colgroup>
-          <thead className="sticky top-0 z-10 border-b border-border/60 bg-card text-2xs uppercase tracking-widest text-muted-foreground/70">
+        <DiagnosticsTable
+          stickyHeader
+          columns={[
+            { header: "Name", width: "w-[34%] @min-[48rem]/settings-page:w-[26%]" },
+            { header: "CPU", width: "w-16", align: "end" },
+            { header: "Memory", width: "w-22", align: "end" },
+            { header: "Command", secondary: true },
+            { header: "PID", width: "w-18", align: "end", secondary: true },
+            { header: "Type", width: "w-24", secondary: true },
+            { header: "Signal", width: "w-24", align: "end" },
+          ]}
+        >
+          {visibleProcesses.length === 0 ? (
             <tr>
-              <th className="px-4 py-2 font-semibold sm:pl-5">Name</th>
-              <th className="px-3 py-2 text-right font-semibold">CPU</th>
-              <th className="px-3 py-2 text-right font-semibold">Memory</th>
-              <th className="px-3 py-2 font-semibold">Command</th>
-              <th className="px-3 py-2 text-right font-semibold">PID</th>
-              <th className="px-3 py-2 font-semibold">Type</th>
-              <th className="p-2 text-right font-semibold sm:pr-4">Kill</th>
+              <td colSpan={7} className="py-4 text-muted-foreground">
+                {emptyLabel}
+              </td>
             </tr>
-          </thead>
-          <tbody className="divide-y divide-border/50">
-            {visibleProcesses.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="px-4 py-4 text-xs text-muted-foreground sm:px-5">
-                  {emptyLabel ?? "No live descendant processes found."}
-                </td>
-              </tr>
-            ) : null}
-            {visibleProcesses.map((process) => (
-              <tr key={process.pid} className="interactive hover:bg-muted/20">
-                <td className="px-4 py-2 align-middle sm:pl-5">
-                  <ProcessNameCell
-                    process={process}
-                    isExpanded={!collapsedPids.has(process.pid)}
-                    onToggle={toggleProcess}
-                  />
-                </td>
-                <td className="px-3 py-2 text-right align-middle font-mono tabular-nums">
-                  {process.cpuPercent.toFixed(1)}%
-                </td>
-                <td className="px-3 py-2 text-right align-middle font-mono tabular-nums">
-                  {formatBytes(process.rssBytes)}
-                </td>
-                <td className="px-3 py-2 align-middle text-muted-foreground">
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={<span className="block truncate">{process.command}</span>}
-                    />
-                    <TooltipPopup side="top" variant="code">
-                      {process.command}
-                    </TooltipPopup>
-                  </Tooltip>
-                </td>
-                <td className="px-3 py-2 text-right align-middle font-mono tabular-nums text-muted-foreground">
-                  {process.pid}
-                </td>
-                <td className="truncate px-3 py-2 align-middle text-muted-foreground">
-                  {formatProcessType(process)}
-                </td>
-                <td className="p-2 align-middle sm:pr-4">
-                  <ProcessSignalActions
-                    disabled={!canMaintainEnvironment || signalingPid === process.pid}
-                    onSignal={(signal) => onSignal(process.pid, signal)}
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          ) : null}
+          {visibleProcesses.map((process) => (
+            <tr key={process.pid} className="interactive hover:bg-muted/20">
+              <td className="py-2 align-middle">
+                <ProcessNameCell
+                  process={process}
+                  isExpanded={!collapsedPids.has(process.pid)}
+                  onToggle={toggleProcess}
+                />
+              </td>
+              <td className="py-2 text-right align-middle font-mono tabular-nums">
+                {process.cpuPercent.toFixed(1)}%
+              </td>
+              <td className="truncate py-2 text-right align-middle font-mono tabular-nums">
+                {formatBytes(process.rssBytes)}
+              </td>
+              <td className={cn("py-2 align-middle text-muted-foreground", SECONDARY_CELL)}>
+                <TruncatedCode value={process.command} />
+              </td>
+              <td
+                className={cn(
+                  "py-2 text-right align-middle font-mono tabular-nums text-muted-foreground",
+                  SECONDARY_CELL,
+                )}
+              >
+                {process.pid}
+              </td>
+              <td
+                className={cn("truncate py-2 align-middle text-muted-foreground", SECONDARY_CELL)}
+              >
+                {formatProcessType(process)}
+              </td>
+              <td className="py-2 align-middle">
+                <ProcessSignalActions
+                  disabled={!canMaintainEnvironment || signalingPid === process.pid}
+                  onSignal={(signal) => onSignal(process.pid, signal)}
+                />
+              </td>
+            </tr>
+          ))}
+        </DiagnosticsTable>
       </ScrollArea>
     </div>
   );
@@ -594,84 +638,74 @@ function ProcessResourceHistoryTable({
       <ScrollArea
         chainVerticalScroll
         scrollFade
-        hideScrollbars
         className="max-h-[min(64vh,44rem)] w-full max-w-full"
       >
-        <table className="w-full min-w-[980px] table-fixed text-left text-xs">
-          <colgroup>
-            <col className="w-[24%]" />
-            <col className="w-[10%]" />
-            <col className="w-[10%]" />
-            <col className="w-[10%]" />
-            <col className="w-[10%]" />
-            <col className="w-[10%]" />
-            <col className="w-[16%]" />
-            <col className="w-[10%]" />
-          </colgroup>
-          <thead className="sticky top-0 z-10 border-b border-border/60 bg-card text-2xs uppercase tracking-widest text-muted-foreground/70">
+        <DiagnosticsTable
+          stickyHeader
+          columns={[
+            { header: "Process", width: "w-[36%] @min-[48rem]/settings-page:w-[26%]" },
+            { header: "CPU time", width: "w-20", align: "end" },
+            { header: "Current", width: "w-18", align: "end" },
+            { header: "Average", width: "w-18", align: "end", secondary: true },
+            { header: "Peak", width: "w-18", align: "end" },
+            { header: "Max mem", width: "w-22", align: "end" },
+            { header: "Command", secondary: true },
+            { header: "PID", width: "w-18", align: "end", secondary: true },
+          ]}
+        >
+          {processes.length === 0 ? (
             <tr>
-              <th className="px-4 py-2 font-semibold sm:pl-5">Process</th>
-              <th className="px-3 py-2 text-right font-semibold">CPU Time</th>
-              <th className="px-3 py-2 text-right font-semibold">Current</th>
-              <th className="px-3 py-2 text-right font-semibold">Average</th>
-              <th className="px-3 py-2 text-right font-semibold">Peak</th>
-              <th className="px-3 py-2 text-right font-semibold">Max mem</th>
-              <th className="px-3 py-2 font-semibold">Command</th>
-              <th className="px-3 py-2 text-right font-semibold sm:pr-5">PID</th>
+              <td colSpan={8} className="py-4 text-muted-foreground">
+                {emptyLabel}
+              </td>
             </tr>
-          </thead>
-          <tbody className="divide-y divide-border/50">
-            {processes.length === 0 ? (
-              <tr>
-                <td colSpan={8} className="px-4 py-4 text-xs text-muted-foreground sm:px-5">
-                  {emptyLabel}
-                </td>
-              </tr>
-            ) : null}
-            {processes.map((process) => (
-              <tr key={process.processKey} className="interactive hover:bg-muted/20">
-                <td className="px-4 py-2 align-middle sm:pl-5">
-                  <ResourceHistoryProcessNameCell
-                    process={process}
-                    visualDepth={
-                      process.isServerRoot || shallowestChildDepth === null
-                        ? 0
-                        : Math.max(1, process.depth - shallowestChildDepth + 1)
-                    }
-                  />
-                </td>
-                <td className="px-3 py-2 text-right align-middle font-mono tabular-nums">
-                  {formatCpuTime(process.cpuSecondsApprox)}
-                </td>
-                <td className="px-3 py-2 text-right align-middle font-mono tabular-nums">
-                  {process.currentCpuPercent.toFixed(1)}%
-                </td>
-                <td className="px-3 py-2 text-right align-middle font-mono tabular-nums">
-                  {process.avgCpuPercent.toFixed(1)}%
-                </td>
-                <td className="px-3 py-2 text-right align-middle font-mono tabular-nums">
-                  {process.maxCpuPercent.toFixed(1)}%
-                </td>
-                <td className="px-3 py-2 text-right align-middle font-mono tabular-nums">
-                  {formatBytes(process.maxRssBytes)}
-                </td>
-                <td className="px-3 py-2 align-middle text-muted-foreground">
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={<span className="block truncate">{process.command}</span>}
-                    />
-                    <TooltipPopup side="top" variant="code">
-                      {process.command}
-                    </TooltipPopup>
-                  </Tooltip>
-                </td>
-                <td className="px-3 py-2 text-right align-middle font-mono tabular-nums text-muted-foreground sm:pr-5">
-                  {process.pid}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          ) : null}
+          {processes.map((process) => (
+            <tr key={process.processKey} className="interactive hover:bg-muted/20">
+              <td className="py-2 align-middle">
+                <ResourceHistoryProcessNameCell
+                  process={process}
+                  visualDepth={
+                    process.isServerRoot || shallowestChildDepth === null
+                      ? 0
+                      : Math.max(1, process.depth - shallowestChildDepth + 1)
+                  }
+                />
+              </td>
+              <td className="py-2 text-right align-middle font-mono tabular-nums">
+                {formatCpuTime(process.cpuSecondsApprox)}
+              </td>
+              <td className="py-2 text-right align-middle font-mono tabular-nums">
+                {process.currentCpuPercent.toFixed(1)}%
+              </td>
+              <td
+                className={cn(
+                  "py-2 text-right align-middle font-mono tabular-nums",
+                  SECONDARY_CELL,
+                )}
+              >
+                {process.avgCpuPercent.toFixed(1)}%
+              </td>
+              <td className="py-2 text-right align-middle font-mono tabular-nums">
+                {process.maxCpuPercent.toFixed(1)}%
+              </td>
+              <td className="truncate py-2 text-right align-middle font-mono tabular-nums">
+                {formatBytes(process.maxRssBytes)}
+              </td>
+              <td className={cn("py-2 align-middle text-muted-foreground", SECONDARY_CELL)}>
+                <TruncatedCode value={process.command} />
+              </td>
+              <td
+                className={cn(
+                  "py-2 text-right align-middle font-mono tabular-nums text-muted-foreground",
+                  SECONDARY_CELL,
+                )}
+              >
+                {process.pid}
+              </td>
+            </tr>
+          ))}
+        </DiagnosticsTable>
       </ScrollArea>
     </div>
   );
@@ -702,32 +736,30 @@ function AgentProcessesSection({
     reportFailure: false,
   });
   const [killingKey, setKillingKey] = useState<string | null>(null);
-  const kill = useCallback(
-    async (process: ServerAgentProcess) => {
-      const key = `${process.threadId}:${process.terminalId}`;
-      if (killingKey !== null || !readEnvironmentScope(environmentId, AuthEnvironmentMaintainScope))
-        return;
-      setKillingKey(key);
-      try {
-        const result = await killAgentProcess({
-          environmentId,
-          input: { threadId: process.threadId, terminalId: process.terminalId },
+  // Only bound to the rows' Kill buttons, so it needs no memoizing.
+  const kill = async (process: ServerAgentProcess) => {
+    const key = `${process.threadId}:${process.terminalId}`;
+    if (killingKey !== null || !readEnvironmentScope(environmentId, AuthEnvironmentMaintainScope))
+      return;
+    setKillingKey(key);
+    try {
+      const result = await killAgentProcess({
+        environmentId,
+        input: { threadId: process.threadId, terminalId: process.terminalId },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const failure = squashAtomCommandFailure(result);
+        toastManager.add({
+          type: "error",
+          title: "Could not kill the command",
+          description: failure instanceof Error ? failure.message : "The kill failed.",
         });
-        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-          const failure = squashAtomCommandFailure(result);
-          toastManager.add({
-            type: "error",
-            title: "Could not kill the command",
-            description: failure instanceof Error ? failure.message : "The kill failed.",
-          });
-        }
-        refresh();
-      } finally {
-        setKillingKey(null);
       }
-    },
-    [environmentId, killAgentProcess, killingKey, refresh],
-  );
+      refresh();
+    } finally {
+      setKillingKey(null);
+    }
+  };
   const processes = data?.processes ?? [];
   const killed = data?.killed ?? [];
   return (
@@ -736,7 +768,6 @@ function AgentProcessesSection({
       headerAction={
         <SettingsRefreshAction
           checkedAt={null}
-          idleLabel="Checking"
           refreshing={isPending}
           label="Refresh agent processes"
           onRefresh={refresh}
@@ -746,9 +777,13 @@ function AgentProcessesSection({
       <DiagnosticsErrors messages={[error]} />
       {processes.length > 0 ? (
         <DiagnosticsTable
-          headers={["Thread", "Command", "PIDs", "Started", "Kill"]}
-          minTableWidth="min-w-[760px]"
-          columnWidths={["w-[24%]", "w-[42%]", "w-[14%]", "w-[12%]", "w-[8%]"]}
+          columns={[
+            { header: "Thread", width: "w-[32%]" },
+            { header: "Command" },
+            { header: "PIDs", width: "w-28", secondary: true },
+            { header: "Started", width: "w-28", secondary: true },
+            { header: "Kill", width: "w-16", align: "end" },
+          ]}
         >
           {processes.map((process) => {
             const key = `${process.threadId}:${process.terminalId}`;
@@ -759,7 +794,7 @@ function AgentProcessesSection({
             ].filter((tag) => tag !== null);
             return (
               <tr key={key} className="interactive hover:bg-muted/15">
-                <td className="truncate px-4 py-3 align-top font-medium text-foreground sm:pl-5">
+                <td className="truncate py-3 align-top font-medium text-foreground">
                   {process.threadTitle ?? process.threadId}
                   {tags.length > 0 ? (
                     <div className="truncate text-2xs font-normal text-muted-foreground">
@@ -767,30 +802,28 @@ function AgentProcessesSection({
                     </div>
                   ) : null}
                 </td>
-                <td className="px-4 py-3 align-top text-muted-foreground">
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={<span className="block truncate font-mono">{process.command}</span>}
-                    />
-                    <TooltipPopup side="top" variant="code">
-                      {process.command}
-                    </TooltipPopup>
-                  </Tooltip>
+                <td className="py-3 align-top text-muted-foreground">
+                  <TruncatedCode value={process.command} />
                 </td>
-                <td className="truncate px-4 py-3 align-top font-mono tabular-nums text-muted-foreground">
+                <td
+                  className={cn(
+                    "truncate py-3 align-top font-mono tabular-nums text-muted-foreground",
+                    SECONDARY_CELL,
+                  )}
+                >
                   {process.pids.join(", ")}
                 </td>
-                <td className="whitespace-nowrap px-4 py-3 align-top text-muted-foreground">
+                <td className={cn("truncate py-3 align-top text-muted-foreground", SECONDARY_CELL)}>
                   {formatRelativeTimeLabel(process.startedAt)}
                 </td>
-                <td className="p-2 text-right align-top sm:pr-4">
+                <td className="py-3 text-right align-top">
                   <InlineButton
                     tone="destructive"
                     disabled={!canMaintainEnvironment || killingKey !== null}
                     aria-label={`Kill ${process.command}`}
                     onClick={() => void kill(process)}
                   >
-                    KILL
+                    Kill
                   </InlineButton>
                 </td>
               </tr>
@@ -801,28 +834,36 @@ function AgentProcessesSection({
         <EmptyRows
           loading={isPending && data === null}
           label={
-            isPending && data === null ? "Loading agent processes..." : "No agent commands running."
+            isPending && data === null ? "Loading agent processes…" : "No agent commands running."
           }
         />
       )}
       {killed.length > 0 ? (
         <DiagnosticsTable
-          headers={["Killed", "Command", "PIDs", "Why"]}
-          minTableWidth="min-w-[760px]"
-          columnWidths={["w-[14%]", "w-[50%]", "w-[14%]", "w-[22%]"]}
+          columns={[
+            { header: "Killed", width: "w-28" },
+            { header: "Command" },
+            { header: "PIDs", width: "w-28", secondary: true },
+            { header: "Why", width: "w-[28%]" },
+          ]}
         >
           {killed.map((entry) => (
             <tr key={`${entry.threadId}:${entry.terminalId}:${entry.at}`}>
-              <td className="whitespace-nowrap px-4 py-3 align-top text-muted-foreground sm:pl-5">
+              <td className="truncate py-3 align-top text-muted-foreground">
                 {formatRelativeTimeLabel(entry.at)}
               </td>
-              <td className="truncate px-4 py-3 align-top font-mono text-muted-foreground">
-                {entry.command}
+              <td className="py-3 align-top text-muted-foreground">
+                <TruncatedCode value={entry.command} />
               </td>
-              <td className="truncate px-4 py-3 align-top font-mono tabular-nums text-muted-foreground">
+              <td
+                className={cn(
+                  "truncate py-3 align-top font-mono tabular-nums text-muted-foreground",
+                  SECONDARY_CELL,
+                )}
+              >
                 {entry.pids.join(", ")}
               </td>
-              <td className="px-4 py-3 align-top text-muted-foreground sm:pr-5">
+              <td className="py-3 align-top text-muted-foreground">
                 {AGENT_PROCESS_KILL_REASONS[entry.reason]}
               </td>
             </tr>
@@ -844,7 +885,6 @@ function DiagnosticsRefreshAction({
     <SettingsRefreshAction
       {...props}
       checkedAt={checkedAt ? DateTime.formatIso(checkedAt) : null}
-      idleLabel="Checking"
     />
   );
 }
@@ -967,104 +1007,102 @@ export function DiagnosticsSettingsPanel() {
   ) {
     setExportFormEnvironmentId(environmentId);
   }
-  const signalProcess = useCallback(
-    async (pid: number, signal: ServerProcessSignal) => {
-      const targetEnvironmentId = environmentIdRef.current;
-      const process = processDataRef.current?.processes.find((entry) => entry.pid === pid);
-      if (
-        targetEnvironmentId === null ||
-        process === undefined ||
-        !readEnvironmentScope(targetEnvironmentId, AuthEnvironmentMaintainScope)
-      )
-        return;
-      if (signalingPidRef.current !== null) return;
-      signalingPidRef.current = pid;
-      setSignalingPid(pid);
-      const clearSignaling = () => {
-        signalingPidRef.current = null;
-        setSignalingPid(null);
-      };
-      if (signal === "SIGKILL") {
-        let confirmed = false;
-        try {
-          confirmed = await ensureLocalApi().dialogs.confirm(
-            `Send SIGKILL to process ${pid}? This cannot be handled by the process.`,
-            { variant: "destructive" },
-          );
-        } catch (error) {
-          clearSignaling();
-          toastManager.add({
-            type: "error",
-            title: "Could not confirm signal",
-            description: error instanceof Error ? error.message : `Failed to send ${signal}.`,
-          });
-          return;
-        }
-        if (!confirmed) {
-          clearSignaling();
-          return;
-        }
-      }
-      const currentEnvironmentId = environmentIdRef.current;
-      if (
-        currentEnvironmentId === null ||
-        currentEnvironmentId !== targetEnvironmentId ||
-        !readEnvironmentScope(currentEnvironmentId, AuthEnvironmentMaintainScope)
-      ) {
-        clearSignaling();
-        return;
-      }
-      if (
-        processDataRef.current?.processes.find((entry) => entry.pid === pid)?.startTimeMs !==
-        process.startTimeMs
-      ) {
-        clearSignaling();
-        return;
-      }
-
+  // Reads the environment and processes through refs, so it needs no memoizing.
+  const signalProcess = async (pid: number, signal: ServerProcessSignal) => {
+    const targetEnvironmentId = environmentIdRef.current;
+    const process = processDataRef.current?.processes.find((entry) => entry.pid === pid);
+    if (
+      targetEnvironmentId === null ||
+      process === undefined ||
+      !readEnvironmentScope(targetEnvironmentId, AuthEnvironmentMaintainScope)
+    )
+      return;
+    if (signalingPidRef.current !== null) return;
+    signalingPidRef.current = pid;
+    setSignalingPid(pid);
+    const clearSignaling = () => {
+      signalingPidRef.current = null;
+      setSignalingPid(null);
+    };
+    if (signal === "SIGKILL") {
+      let confirmed = false;
       try {
-        const result = await signalServerProcess({
-          environmentId: targetEnvironmentId,
-          input: { pid, startTimeMs: process.startTimeMs, signal },
+        confirmed = await ensureLocalApi().dialogs.confirm(
+          `Send SIGKILL to process ${pid}? This cannot be handled by the process.`,
+          { variant: "destructive" },
+        );
+      } catch (error) {
+        clearSignaling();
+        toastManager.add({
+          type: "error",
+          title: "Could not confirm signal",
+          description: error instanceof Error ? error.message : `Failed to send ${signal}.`,
         });
-        if (result._tag === "Failure") {
-          if (!isAtomCommandInterrupted(result)) {
-            const error = squashAtomCommandFailure(result);
-            toastManager.add({
-              type: "error",
-              title: `Could not send ${signal}`,
-              description: error instanceof Error ? error.message : `Failed to send ${signal}.`,
-            });
-          }
-          return;
-        }
-        if (!result.value.signaled) {
-          const message = Option.getOrUndefined(result.value.message);
-          refreshProcesses();
-          if (isStaleProcessSignalMessage(message)) {
-            toastManager.add({
-              type: "info",
-              title: "Process already exited",
-              description:
-                "The process is not a child of the Cogenly server. It might already have exited.",
-            });
-            return;
-          }
+        return;
+      }
+      if (!confirmed) {
+        clearSignaling();
+        return;
+      }
+    }
+    const currentEnvironmentId = environmentIdRef.current;
+    if (
+      currentEnvironmentId === null ||
+      currentEnvironmentId !== targetEnvironmentId ||
+      !readEnvironmentScope(currentEnvironmentId, AuthEnvironmentMaintainScope)
+    ) {
+      clearSignaling();
+      return;
+    }
+    if (
+      processDataRef.current?.processes.find((entry) => entry.pid === pid)?.startTimeMs !==
+      process.startTimeMs
+    ) {
+      clearSignaling();
+      return;
+    }
 
+    try {
+      const result = await signalServerProcess({
+        environmentId: targetEnvironmentId,
+        input: { pid, startTimeMs: process.startTimeMs, signal },
+      });
+      if (result._tag === "Failure") {
+        if (!isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
           toastManager.add({
             type: "error",
             title: `Could not send ${signal}`,
-            description: message ?? `Failed to send ${signal}.`,
+            description: error instanceof Error ? error.message : `Failed to send ${signal}.`,
+          });
+        }
+        return;
+      }
+      if (!result.value.signaled) {
+        const message = Option.getOrUndefined(result.value.message);
+        refreshProcesses();
+        if (isStaleProcessSignalMessage(message)) {
+          toastManager.add({
+            type: "info",
+            title: "Process already exited",
+            description:
+              "The process is not a child of the Cogenly server. It might already have exited.",
           });
           return;
         }
-        refreshProcesses();
-      } finally {
-        clearSignaling();
+
+        toastManager.add({
+          type: "error",
+          title: `Could not send ${signal}`,
+          description: message ?? `Failed to send ${signal}.`,
+        });
+        return;
       }
-    },
-    [refreshProcesses, signalServerProcess],
-  );
+      refreshProcesses();
+    } finally {
+      clearSignaling();
+    }
+  };
 
   const processDiagnosticsError = processData ? Option.getOrNull(processData.error) : null;
   const processResourceError = resourceData ? Option.getOrNull(resourceData.error) : null;
@@ -1087,6 +1125,27 @@ export function DiagnosticsSettingsPanel() {
     );
   }
 
+  // A sampler that reported an error measured nothing: its numbers read
+  // "Unavailable", never zero, and its empty tables and chart stay hidden.
+  const liveSamplingError = processDiagnosticsError?.message ?? null;
+  const historySamplingError = processResourceError?.message ?? null;
+  const liveUnmeasured =
+    liveSamplingError !== null || (processData === null && processError !== null);
+  const historyUnmeasured =
+    historySamplingError !== null || (resourceData === null && resourceError !== null);
+  // Both samplers failing is one problem, already shown in the resource monitor's row.
+  const samplingUnavailableReasons =
+    liveSamplingError !== null && historySamplingError !== null
+      ? [liveSamplingError, historySamplingError]
+      : null;
+  const liveStat = (format: (value: NonNullable<typeof processData>) => string) =>
+    liveUnmeasured ? UNAVAILABLE_STAT : processData ? format(processData) : LOADING_STAT;
+  const historyStat = (format: (value: NonNullable<typeof resourceData>) => string) =>
+    historyUnmeasured ? UNAVAILABLE_STAT : resourceData ? format(resourceData) : LOADING_STAT;
+  const traceFallback = error !== null ? UNAVAILABLE_STAT : LOADING_STAT;
+  const historyHasSamples =
+    resourceData !== null && !historyUnmeasured && resourceData.retainedSampleCount > 0;
+
   // The server's own process sampling. Shown only when the native resource monitor can't run,
   // since the monitor covers the same processes in more detail.
   const serverProcessSections = (
@@ -1105,35 +1164,41 @@ export function DiagnosticsSettingsPanel() {
         <StatsGrid>
           <StatBlock
             label="Child processes"
-            value={processData ? formatCount(processData.processCount) : "..."}
+            value={liveStat((value) => formatCount(value.processCount))}
           />
           <StatBlock
             label="CPU"
-            value={processData ? `${processData.totalCpuPercent.toFixed(1)}%` : "..."}
+            value={liveStat((value) => `${value.totalCpuPercent.toFixed(1)}%`)}
             tooltip="Total CPU across live child processes of the current server process. The desktop shell and other parent processes are not included."
           />
           <StatBlock
             label="Memory"
-            value={processData ? formatBytes(processData.totalRssBytes) : "..."}
+            value={liveStat((value) => formatBytes(value.totalRssBytes))}
             tooltip="Total resident memory across live child processes of the current server process. The desktop shell and other parent processes are not included."
           />
           <StatBlock
             label="Server PID"
-            value={processData ? String(processData.serverPid) : "..."}
+            value={
+              processData
+                ? String(processData.serverPid)
+                : processError
+                  ? UNAVAILABLE_STAT
+                  : LOADING_STAT
+            }
           />
         </StatsGrid>
-        <DiagnosticsErrors messages={[processDiagnosticsError?.message ?? null, processError]} />
-        <ProcessDiagnosticsTable
-          processes={processData?.processes ?? []}
-          canMaintainEnvironment={canMaintainEnvironment}
-          signalingPid={signalingPid}
-          onSignal={signalProcess}
-          emptyLabel={
-            isProcessInitialLoading
-              ? "Loading live processes..."
-              : "No live descendant processes found."
-          }
-        />
+        <DiagnosticsErrors messages={[liveSamplingError, processError]} />
+        {liveUnmeasured ? null : (
+          <ProcessDiagnosticsTable
+            processes={processData?.processes ?? []}
+            canMaintainEnvironment={canMaintainEnvironment}
+            signalingPid={signalingPid}
+            onSignal={signalProcess}
+            emptyLabel={
+              isProcessInitialLoading ? "Loading live processes…" : "No child processes running."
+            }
+          />
+        )}
       </SettingsSection>
 
       <SettingsSection
@@ -1155,13 +1220,13 @@ export function DiagnosticsSettingsPanel() {
       >
         <StatsGrid>
           <StatBlock
-            label="CPU Time"
-            value={resourceData ? formatCpuTime(resourceData.totalCpuSecondsApprox) : "..."}
+            label="CPU time"
+            value={historyStat((value) => formatCpuTime(value.totalCpuSecondsApprox))}
             tooltip="Approximate active CPU time for the Cogenly server root process and its descendants during the selected window. It grows only while sampled processes use CPU and older samples leave as the window moves."
           />
           <StatBlock
             label="Samples"
-            value={resourceData ? formatCount(resourceData.retainedSampleCount) : "..."}
+            value={historyStat((value) => formatCount(value.retainedSampleCount))}
             tooltip="In-memory process samples retained by the server. The server samples only while diagnostics is open, and this resets when the server restarts."
           />
           <StatBlock
@@ -1171,24 +1236,30 @@ export function DiagnosticsSettingsPanel() {
                 ? resourceData.sampleIntervalMs === 0
                   ? "On demand"
                   : formatDuration(resourceData.sampleIntervalMs)
-                : "..."
+                : resourceError
+                  ? UNAVAILABLE_STAT
+                  : LOADING_STAT
             }
           />
           <StatBlock
             label="Processes"
-            value={resourceData ? formatCount(resourceData.topProcesses.length) : "..."}
+            value={historyStat((value) => formatCount(value.topProcesses.length))}
           />
         </StatsGrid>
-        <DiagnosticsErrors messages={[processResourceError?.message ?? null, resourceError]} />
-        <ProcessResourceHistoryChart buckets={resourceData?.buckets ?? []} />
-        <ProcessResourceHistoryTable
-          processes={resourceData?.topProcesses ?? []}
-          emptyLabel={
-            isResourceInitialLoading
-              ? "Collecting process resource samples..."
-              : "No process resource samples found for this window."
-          }
-        />
+        <DiagnosticsErrors messages={[historySamplingError, resourceError]} />
+        {historyHasSamples && resourceData ? (
+          <ProcessResourceHistoryChart buckets={resourceData.buckets} />
+        ) : null}
+        {historyUnmeasured ? null : (
+          <ProcessResourceHistoryTable
+            processes={resourceData?.topProcesses ?? []}
+            emptyLabel={
+              isResourceInitialLoading
+                ? "Collecting process samples…"
+                : "No process samples in this period yet."
+            }
+          />
+        )}
       </SettingsSection>
     </>
   );
@@ -1231,15 +1302,15 @@ export function DiagnosticsSettingsPanel() {
         }
       >
         <StatsGrid>
-          <StatBlock label="Spans" value={data ? formatCount(data.recordCount) : "..."} />
+          <StatBlock label="Spans" value={data ? formatCount(data.recordCount) : traceFallback} />
           <StatBlock
             label="Failures"
-            value={data ? formatCount(data.failureCount) : "..."}
+            value={data ? formatCount(data.failureCount) : traceFallback}
             tone={data && data.failureCount > 0 ? "danger" : "default"}
           />
           <StatBlock
             label="Slow spans"
-            value={data ? formatCount(data.slowSpanCount) : "..."}
+            value={data ? formatCount(data.slowSpanCount) : traceFallback}
             tooltip={
               data
                 ? `Spans with a duration of ${formatDuration(data.slowSpanThresholdMs)} or longer.`
@@ -1249,7 +1320,7 @@ export function DiagnosticsSettingsPanel() {
           />
           <StatBlock
             label="Parse errors"
-            value={data ? formatCount(data.parseErrorCount) : "..."}
+            value={data ? formatCount(data.parseErrorCount) : traceFallback}
             tone={data && data.parseErrorCount > 0 ? "warning" : "default"}
           />
         </StatsGrid>
@@ -1268,19 +1339,26 @@ export function DiagnosticsSettingsPanel() {
 
       <SettingsSection title="Latest failures">
         {data && data.latestFailures.length > 0 ? (
-          <DiagnosticsTable headers={["Span", "Cause", "Duration", "Ended"]}>
+          <DiagnosticsTable
+            columns={[
+              { header: "Span", width: "w-[30%]" },
+              { header: "Cause" },
+              { header: "Duration", width: "w-22", align: "end" },
+              { header: "Ended", width: "w-24" },
+            ]}
+          >
             {data.latestFailures.map((failure) => (
               <tr key={`${failure.traceId}:${failure.spanId}`}>
-                <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
+                <td className="py-3 align-top font-medium text-foreground [overflow-wrap:anywhere]">
                   {failure.name}
                 </td>
-                <td className="max-w-[360px] px-4 py-3 align-top text-muted-foreground">
+                <td className="py-3 align-top text-muted-foreground [overflow-wrap:anywhere]">
                   <ExpandableText text={failure.cause} />
                 </td>
-                <td className="px-4 py-3 align-top font-mono tabular-nums">
+                <td className="py-3 text-right align-top font-mono tabular-nums">
                   {formatDuration(failure.durationMs)}
                 </td>
-                <td className="whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums text-muted-foreground last:sm:pr-5">
+                <td className="truncate py-3 align-top tabular-nums text-muted-foreground">
                   {formatRelativeNoWrap(failure.endedAt)}
                 </td>
               </tr>
@@ -1289,73 +1367,67 @@ export function DiagnosticsSettingsPanel() {
         ) : (
           <EmptyRows
             loading={isInitialLoading}
-            label={isInitialLoading ? "Loading failures..." : "No failed spans found."}
+            label={isInitialLoading ? "Loading failures…" : "No failed spans found."}
           />
         )}
       </SettingsSection>
 
       <SettingsSection title="Recent warnings and errors">
         {data && data.latestWarningAndErrorLogs.length > 0 ? (
-          <ScrollArea
-            radius="none"
-            chainVerticalScroll
-            scrollFade
-            hideScrollbars
-            className="w-full max-w-full"
+          <DiagnosticsTable
+            columns={[
+              { header: "Time", width: "w-24" },
+              { header: "Level", width: "w-22" },
+              { header: "Span", width: "w-[30%]" },
+              { header: "Message" },
+              { header: "Trace", width: "w-44", secondary: true },
+            ]}
           >
-            <table className="w-full min-w-[920px] table-fixed text-left text-xs">
-              <colgroup>
-                <col className="w-[11%]" />
-                <col className="w-[9%]" />
-                <col className="w-[24%]" />
-                <col className="w-[26%]" />
-                <col className="w-[30%]" />
-              </colgroup>
-              <thead className="border-b border-border/60 text-2xs uppercase tracking-widest text-muted-foreground/70">
-                <tr>
-                  <th className="whitespace-nowrap px-4 py-2.5 font-semibold sm:pl-5">Time</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 font-semibold">Level</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 font-semibold">Span</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 font-semibold">Message</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 font-semibold sm:pr-5">Trace</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/60">
-                {data.latestWarningAndErrorLogs.map((event) => (
-                  <tr
-                    key={`${event.traceId}:${event.spanId}:${DateTime.formatIso(event.seenAt)}:${event.message}`}
-                    className="interactive hover:bg-muted/15"
-                  >
-                    <td className="whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums text-muted-foreground sm:pl-5">
-                      {formatRelativeNoWrap(event.seenAt)}
-                    </td>
-                    <td className="px-4 py-3 align-top">
-                      <span className="inline-flex rounded bg-muted px-1.5 py-0.5 font-mono text-2xs font-medium uppercase text-foreground/80">
-                        {event.level}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 align-top">
-                      <div className="truncate font-medium text-foreground">{event.spanName}</div>
-                    </td>
-                    <td className="px-4 py-3 align-top text-muted-foreground">
-                      <ExpandableText
-                        collapsedClassName="line-clamp-2"
-                        expandLabel="Show full message"
-                        text={event.message}
+            {data.latestWarningAndErrorLogs.map((event) => {
+              const level = logLevelStatus(event.level);
+              return (
+                <tr
+                  key={`${event.traceId}:${event.spanId}:${DateTime.formatIso(event.seenAt)}:${event.message}`}
+                  className="interactive hover:bg-muted/15"
+                >
+                  <td className="truncate py-3 align-top tabular-nums text-muted-foreground">
+                    {formatRelativeNoWrap(event.seenAt)}
+                  </td>
+                  <td className="py-3 align-top">
+                    <SettingsStatusBadge tone={level.tone}>{level.label}</SettingsStatusBadge>
+                  </td>
+                  <td className="py-3 align-top">
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <div className="truncate font-medium text-foreground">
+                            {event.spanName}
+                          </div>
+                        }
                       />
-                    </td>
-                    <td className="min-w-0 whitespace-nowrap px-4 py-3 align-top text-muted-foreground sm:pr-5">
-                      <TraceIdCell traceId={event.traceId} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </ScrollArea>
+                      <TooltipPopup side="top" variant="code">
+                        {event.spanName}
+                      </TooltipPopup>
+                    </Tooltip>
+                  </td>
+                  <td className="py-3 align-top text-muted-foreground [overflow-wrap:anywhere]">
+                    <ExpandableText
+                      collapsedClassName="line-clamp-2"
+                      expandLabel="Show full message"
+                      text={event.message}
+                    />
+                  </td>
+                  <td className={cn("py-3 align-top text-muted-foreground", SECONDARY_CELL)}>
+                    <TraceIdCell traceId={event.traceId} />
+                  </td>
+                </tr>
+              );
+            })}
+          </DiagnosticsTable>
         ) : (
           <EmptyRows
             loading={isInitialLoading}
-            label={isInitialLoading ? "Loading recent logs..." : "No warnings or errors found."}
+            label={isInitialLoading ? "Loading recent logs…" : "No warnings or errors found."}
           />
         )}
       </SettingsSection>
@@ -1370,6 +1442,7 @@ export function DiagnosticsSettingsPanel() {
       <ResourceTelemetryDiagnostics
         environmentId={environmentId}
         fallback={serverProcessSections}
+        fallbackUnavailableReasons={samplingUnavailableReasons}
       />
 
       <FoldedSettingsSection
@@ -1379,21 +1452,25 @@ export function DiagnosticsSettingsPanel() {
       >
         {data && data.commonFailures.length > 0 ? (
           <DiagnosticsTable
-            headers={["Span", "Count", "Cause", "Last Seen"]}
-            minTableWidth="min-w-[760px]"
+            columns={[
+              { header: "Span", width: "w-[30%]" },
+              { header: "Count", width: "w-18", align: "end" },
+              { header: "Cause" },
+              { header: "Last seen", width: "w-24" },
+            ]}
           >
             {data.commonFailures.map((failure) => (
               <tr key={`${failure.name}:${failure.cause}`}>
-                <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
+                <td className="py-3 align-top font-medium text-foreground [overflow-wrap:anywhere]">
                   {failure.name}
                 </td>
-                <td className="px-4 py-3 align-top font-mono tabular-nums">
+                <td className="py-3 text-right align-top font-mono tabular-nums">
                   {formatCount(failure.count)}
                 </td>
-                <td className="max-w-[360px] px-4 py-3 align-top text-muted-foreground">
+                <td className="py-3 align-top text-muted-foreground [overflow-wrap:anywhere]">
                   <ExpandableText text={failure.cause} />
                 </td>
-                <td className="w-px whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums text-muted-foreground last:sm:pr-5">
+                <td className="truncate py-3 align-top tabular-nums text-muted-foreground">
                   {formatRelativeNoWrap(failure.lastSeenAt)}
                 </td>
               </tr>
@@ -1402,7 +1479,7 @@ export function DiagnosticsSettingsPanel() {
         ) : (
           <EmptyRows
             loading={isInitialLoading}
-            label={isInitialLoading ? "Loading failure groups..." : "No repeated failures found."}
+            label={isInitialLoading ? "Loading failure groups…" : "No repeated failures found."}
           />
         )}
       </FoldedSettingsSection>
@@ -1414,22 +1491,25 @@ export function DiagnosticsSettingsPanel() {
       >
         {data && data.slowestSpans.length > 0 ? (
           <DiagnosticsTable
-            headers={["Span", "Duration", "Ended", "Trace"]}
-            minTableWidth="min-w-[900px]"
-            columnWidths={["w-[44%]", "w-[14%]", "w-[12%]", "w-[30%]"]}
+            columns={[
+              { header: "Span" },
+              { header: "Duration", width: "w-22", align: "end" },
+              { header: "Ended", width: "w-24" },
+              { header: "Trace", width: "w-44", secondary: true },
+            ]}
           >
             {data.slowestSpans.map((span) => (
               <tr key={`${span.traceId}:${span.spanId}`}>
-                <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
+                <td className="py-3 align-top font-medium text-foreground [overflow-wrap:anywhere]">
                   {span.name}
                 </td>
-                <td className="px-4 py-3 align-top font-mono tabular-nums">
+                <td className="py-3 text-right align-top font-mono tabular-nums">
                   {formatDuration(span.durationMs)}
                 </td>
-                <td className="w-px whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums text-muted-foreground">
+                <td className="truncate py-3 align-top tabular-nums text-muted-foreground">
                   {formatRelativeNoWrap(span.endedAt)}
                 </td>
-                <td className="min-w-0 whitespace-nowrap px-4 py-3 align-top text-muted-foreground last:sm:pr-5">
+                <td className={cn("py-3 align-top text-muted-foreground", SECONDARY_CELL)}>
                   <TraceIdCell traceId={span.traceId} />
                 </td>
               </tr>
@@ -1438,7 +1518,7 @@ export function DiagnosticsSettingsPanel() {
         ) : (
           <EmptyRows
             loading={isInitialLoading}
-            label={isInitialLoading ? "Loading slow spans..." : "No spans found."}
+            label={isInitialLoading ? "Loading slow spans…" : "No spans found."}
           />
         )}
       </FoldedSettingsSection>
@@ -1450,25 +1530,29 @@ export function DiagnosticsSettingsPanel() {
       >
         {data && data.topSpansByCount.length > 0 ? (
           <DiagnosticsTable
-            headers={["Span", "Count", "Failures", "Average", "Max"]}
-            minTableWidth="min-w-[760px]"
-            columnWidths={["w-[48%]", "w-[13%]", "w-[13%]", "w-[13%]", "w-[13%]"]}
+            columns={[
+              { header: "Span" },
+              { header: "Count", width: "w-20", align: "end" },
+              { header: "Failures", width: "w-20", align: "end" },
+              { header: "Average", width: "w-22", align: "end" },
+              { header: "Max", width: "w-22", align: "end" },
+            ]}
           >
             {data.topSpansByCount.map((span) => (
               <tr key={span.name}>
-                <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
+                <td className="py-3 align-top font-medium text-foreground [overflow-wrap:anywhere]">
                   {span.name}
                 </td>
-                <td className="whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums">
+                <td className="truncate py-3 text-right align-top font-mono tabular-nums">
                   {formatCount(span.count)}
                 </td>
-                <td className="whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums">
+                <td className="truncate py-3 text-right align-top font-mono tabular-nums">
                   {formatCount(span.failureCount)}
                 </td>
-                <td className="whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums">
+                <td className="truncate py-3 text-right align-top font-mono tabular-nums">
                   {formatDuration(span.averageDurationMs)}
                 </td>
-                <td className="whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums last:sm:pr-5">
+                <td className="truncate py-3 text-right align-top font-mono tabular-nums">
                   {formatDuration(span.maxDurationMs)}
                 </td>
               </tr>
@@ -1477,7 +1561,7 @@ export function DiagnosticsSettingsPanel() {
         ) : (
           <EmptyRows
             loading={isInitialLoading}
-            label={isInitialLoading ? "Loading span names..." : "No spans found."}
+            label={isInitialLoading ? "Loading span names…" : "No spans found."}
           />
         )}
       </FoldedSettingsSection>

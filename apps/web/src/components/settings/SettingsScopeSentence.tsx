@@ -53,7 +53,7 @@ export function SettingsScopeSentence() {
       <p className="px-3 text-sm text-muted-foreground sm:px-4">
         {/* Sidebar layout stays on the device that set it (appearancePreferences.ts). */}
         {pathname === "/settings/appearance"
-          ? "Shared across your machines, except Sidebar layout"
+          ? "Shared across your machines, except the sidebar layout"
           : "Shared across your machines"}
       </p>
     );

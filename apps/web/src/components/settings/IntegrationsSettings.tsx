@@ -68,7 +68,6 @@ import {
 } from "~/components/device/DeviceSetup";
 import { isElectron } from "../../env";
 
-import { Badge } from "../ui/badge";
 import {
   Menu,
   MenuGroup,
@@ -119,6 +118,7 @@ import {
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
+import { SettingsTag } from "./SettingsStatus";
 import { searchableSetting } from "./settingsSearch";
 import { AgentAccessSettings } from "./AgentAccessSettings";
 import { IntegrationServicesSettings } from "./IntegrationServicesSettings";
@@ -813,16 +813,17 @@ function DeviceIntegrationControls({
         serverScoped
         settingKeys={["enableDeviceSupport"]}
         description={deviceHubDescription}
+        // The version sits under the description, so the trailing slot holds only the switch.
+        status={
+          <DeviceToolVersions
+            action={versionActions("hub")}
+            kind="hub"
+            tools={state.hosts.find((host) => host.kind === "local")?.tools}
+            {...(enabled ? { missingLabel: "Installs when first used" } : {})}
+          />
+        }
         control={
           <>
-            <span className="text-xs">
-              <DeviceToolVersions
-                action={versionActions("hub")}
-                kind="hub"
-                tools={state.hosts.find((host) => host.kind === "local")?.tools}
-                {...(enabled ? { missingLabel: "Installs when first used" } : {})}
-              />
-            </span>
             {pending === "hub" ? <DeviceHubSetupStatus state={state} pending compact /> : null}
             <Switch
               checked={enabled}
@@ -878,16 +879,16 @@ function DeviceIntegrationControls({
         serverScoped
         settingKeys={["enableAgentDeviceAccess"]}
         description={agentDeviceDescription}
+        status={
+          <DeviceToolVersions
+            action={versionActions("agent")}
+            kind="agent"
+            tools={state.hosts.find((host) => host.kind === "local")?.tools}
+            {...(agentAccessEnabled ? { missingLabel: "Installs when first used" } : {})}
+          />
+        }
         control={
           <>
-            <span className="text-xs">
-              <DeviceToolVersions
-                action={versionActions("agent")}
-                kind="agent"
-                tools={state.hosts.find((host) => host.kind === "local")?.tools}
-                {...(agentAccessEnabled ? { missingLabel: "Installs when first used" } : {})}
-              />
-            </span>
             {pending === "agent" ? <AgentDeviceSetupStatus state={state} pending compact /> : null}
             <Switch
               checked={agentAccessEnabled}
@@ -1334,9 +1335,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                 {/* Dimmed with the rest of the row, whose controls are all disabled. */}
                 {isDefault ? (
                   <span className={cn("flex", profileWritesDisabled && "opacity-64")}>
-                    <Badge size="sm" variant="info">
-                      Default
-                    </Badge>
+                    <SettingsTag>Default</SettingsTag>
                   </span>
                 ) : null}
               </span>

@@ -515,56 +515,8 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Computer use"]
         : []),
     ],
-    [
-      isTextGenerationModelDirty,
-      isBackgroundActivityDirty,
-      settings.browserDefaultViewport,
-      settings.browserDefaultZoomFactor,
-      settings.browserDefaultAppearance,
-      settings.browserRecordingFrameRate,
-      settings.browserRecordingShowKeyPresses,
-      settings.browserRecordingShowMousePresses,
-      settings.browserLinkTarget,
-      settings.diffColorScheme,
-      settings.chatWidth,
-      settings.enableAgentBrowserAccess,
-      settings.enableAgentComputerUse,
-      settings.confirmQuit,
-      settings.confirmThreadArchive,
-      settings.confirmThreadDelete,
-      settings.composerRichTextEnabled,
-      settings.dictationEnabled,
-      settings.sendShortcut,
-      settings.followUpBehavior,
-      settings.addProjectBaseDirectory,
-      settings.projectsRoot,
-      settings.defaultThreadEnvMode,
-      settings.newWorktreesStartFromOrigin,
-      settings.environmentIdentificationMode,
-      settings.contextWindowMeterEnabled,
-      settings.fontSizeCode,
-      settings.fontSizeInterface,
-      settings.fontSizePrompt,
-      settings.fontSizeTerminal,
-      settings.responseStreamingMode,
-      settings.persistComposerContextStrip,
-      settings.enableProviderUpdateChecks,
-      settings.continueThreadsAfterServerUpdate,
-      settings.autoResumeLimitedThreads,
-      settings.snoozeLimitedThreads,
-      settings.aiGreetings,
-      settings.sidebarProjectGroupingMode,
-      settings.sidebarProjectSortOrder,
-      settings.sidebarWorkingShelfEnabled,
-      settings.sidebarThreadPreviewCount,
-      settings.showSkillsInSlashMenu,
-      settings.timestampFormat,
-      settings.notificationMode,
-      settings.inAppNotificationsEnabled,
-      settings.wordWrap,
-      theme,
-      appearance,
-    ],
+    // The typography and browser helpers read many fields, so depend on the whole object.
+    [isTextGenerationModelDirty, isBackgroundActivityDirty, settings, theme, appearance],
   );
 
   const restoreDefaults = useCallback(async () => {
@@ -765,7 +717,7 @@ function BackgroundActivityAdvancedDialog({
               />
               <SettingsRow
                 title="Provider health interval"
-                description="Refresh provider availability, versions, and auth state. Model catalog updates follow Provider update checks."
+                description="Refresh provider availability, versions and sign-in state."
                 control={
                   <SettingsNumberField
                     label="provider health interval"
@@ -1044,7 +996,7 @@ export function AppearanceSettingsPanel() {
         <ChatWidthSettingRow />
         <SettingsRow
           {...searchableSetting("sidebar-layout")}
-          description="Bottom docks search at the foot of the sidebar, Top puts it under the titlebar. Only on this device."
+          description="Where search sits in the sidebar. Only on this device."
           resetAction={
             preferences.sidebarLayout !== DEFAULT_APPEARANCE_PREFERENCES.sidebarLayout ? (
               <SettingResetButton
@@ -1179,7 +1131,7 @@ function RestoreDefaultsSection({ onRestored }: { onRestored: () => void }) {
     <SettingsSection id="reset" title="Reset">
       <SettingsRow
         title="Restore default settings"
-        description="Reset preferences across Settings. Keybindings, providers and connections stay as they are. You see the list before anything changes."
+        description="Reset preferences across Settings. Keybindings, providers and connections stay. You confirm the list first."
         control={
           <Button
             size="sm"
@@ -1205,12 +1157,11 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
     { value: "mod-enter", label: `${modifierLabel} + Enter` },
   ] as const;
   const settings = useScopedSettings();
+  // Multiline prompts use the Shift variant; Keybindings lists both.
   const oppositeFollowUpShortcut =
-    settings.sendShortcut === "mod-enter-multiline"
-      ? `${modifierLabel} + Enter (${modifierLabel} + Shift + Enter when multiline)`
-      : settings.sendShortcut === "mod-enter"
-        ? `${modifierLabel} + Shift + Enter`
-        : `${modifierLabel} + Enter`;
+    settings.sendShortcut === "mod-enter"
+      ? `${modifierLabel} + Shift + Enter`
+      : `${modifierLabel} + Enter`;
   const updateSettings = useUpdateScopedSettings();
   const { environment, connectedEnvironments } = useSettingsScope();
   // The representative environment is the machine machine-local rows such as
@@ -1301,7 +1252,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
 
         <SettingsRow
           {...searchableSetting("follow-up-behavior")}
-          description={`Send follow-ups into the running turn, or hold them until it ends. ${oppositeFollowUpShortcut} does the other once.`}
+          description={`Send follow-ups into the running turn, or hold them until it ends. ${oppositeFollowUpShortcut} does the other.`}
           resetAction={
             settings.followUpBehavior !== DEFAULT_UNIFIED_SETTINGS.followUpBehavior ? (
               <SettingResetButton

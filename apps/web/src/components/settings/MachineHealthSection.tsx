@@ -53,7 +53,6 @@ import { environmentServerConfigsAtom, serverEnvironment } from "../../state/ser
 import { useEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
-import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
 import { DraftInput } from "../ui/draft-input";
@@ -74,8 +73,8 @@ import {
   canaryMachineId,
   channelTestLines,
   HEALTH_CHECK_LABELS,
-  HEALTH_STATUS_BADGE_VARIANTS,
   HEALTH_STATUS_LABELS,
+  HEALTH_STATUS_TONES,
   healthHeadline,
   machineHealthView,
   partitionHealthChecks,
@@ -89,6 +88,7 @@ import {
   useRelativeTimeTick,
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
+import { SettingsStatusBadge } from "./SettingsStatus";
 
 /** Fades an element when `status` changes, never on mount. */
 function useStatusFade<T extends HTMLElement>(status: string) {
@@ -179,16 +179,24 @@ function StatusBadge({ status }: { readonly status: MachineHealthStatus | "conne
   return (
     <span ref={node} className="flex">
       {status === "connecting" ? (
-        <Badge size="sm" variant="outline">
-          Connecting…
-        </Badge>
+        <SettingsStatusBadge tone="neutral">Connecting…</SettingsStatusBadge>
       ) : (
-        <Badge size="sm" variant={HEALTH_STATUS_BADGE_VARIANTS[status]}>
+        <SettingsStatusBadge tone={HEALTH_STATUS_TONES[status]}>
           {HEALTH_STATUS_LABELS[status]}
-        </Badge>
+        </SettingsStatusBadge>
       )}
     </span>
   );
+}
+
+/** A check's summary, dropped when its one item already says the same thing. */
+function checkDescription(check: MachineHealthCheck): string | undefined {
+  const [only, ...rest] = check.items;
+  const repeated =
+    only !== undefined &&
+    rest.length === 0 &&
+    only.title.trim().toLowerCase() === check.summary.trim().toLowerCase();
+  return repeated ? undefined : check.summary;
 }
 
 function MachineHealthSection({
@@ -328,7 +336,7 @@ function HealthReportRows({
               {HEALTH_CHECK_LABELS[check.id]}
             </SettingsAttentionTitle>
           }
-          description={check.summary}
+          description={checkDescription(check)}
           control={<StatusBadge status={check.status} />}
         >
           <AnimatedHeight>
@@ -459,17 +467,21 @@ const STATUS_ICONS = {
   unknown: { icon: CircleDashedIcon, className: "text-muted-foreground" },
 } as const satisfies Record<MachineHealthStatus, { icon: LucideIcon; className: string }>;
 
-/** A status glyph beside a title and its detail: one item, or one folded check. */
+/**
+ * A status glyph beside a title and its detail: one item, or one folded check.
+ * `actions` sit on the row's trailing edge, under the row's own control, and
+ * drop below the text on a narrow row.
+ */
 function HealthLine({
   status,
   title,
   detail,
-  children,
+  actions,
 }: {
   readonly status: MachineHealthStatus;
   readonly title: ReactNode;
   readonly detail: ReactNode;
-  readonly children?: ReactNode;
+  readonly actions?: ReactNode;
 }) {
   const marker = STATUS_ICONS[status];
   const Icon = marker.icon;
@@ -481,12 +493,16 @@ function HealthLine({
           className={cn("size-4", marker.className)}
         />
       </span>
-      <div className="min-w-0 flex-1 space-y-1.5">
-        <div>
+      <div className="flex min-w-0 flex-1 flex-col gap-2 @min-[32rem]/settings-row:flex-row @min-[32rem]/settings-row:items-center @min-[32rem]/settings-row:gap-8">
+        <div className="min-w-0 flex-1">
           <div className="text-sm text-foreground">{title}</div>
           {detail ? <p className="text-xs text-muted-foreground">{detail}</p> : null}
         </div>
-        {children}
+        {actions ? (
+          <div className="flex shrink-0 flex-wrap items-center gap-1.5 @min-[32rem]/settings-row:justify-end">
+            {actions}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -528,19 +544,22 @@ function HealthItemRow({
         status={item.status}
         title={item.title}
         detail={[item.detail, since].filter(Boolean).join(" · ")}
-      >
-        {fix !== null || open !== null || turnOff !== null ? (
-          <div className="flex flex-wrap gap-1.5">
-            {fix !== null ? <HealthActionButton action={fix} primary subject={item.title} /> : null}
-            {open !== null ? (
-              <HealthActionButton action={open} primary={fix === null} subject={item.title} />
-            ) : null}
-            {turnOff !== null ? (
-              <HealthActionButton action={turnOff} primary={false} subject={item.title} />
-            ) : null}
-          </div>
-        ) : null}
-      </HealthLine>
+        actions={
+          fix !== null || open !== null || turnOff !== null ? (
+            <>
+              {turnOff !== null ? (
+                <HealthActionButton action={turnOff} primary={false} subject={item.title} />
+              ) : null}
+              {open !== null ? (
+                <HealthActionButton action={open} primary={fix === null} subject={item.title} />
+              ) : null}
+              {fix !== null ? (
+                <HealthActionButton action={fix} primary subject={item.title} />
+              ) : null}
+            </>
+          ) : null
+        }
+      />
     </li>
   );
 }
@@ -559,7 +578,7 @@ function HealthActionButton({
   const [busy, setBusy] = useState(false);
   return (
     <Button
-      size="xs"
+      size="sm"
       variant={primary ? "default" : "outline"}
       disabled={!permitted || busy}
       aria-label={`${action.label}: ${subject}`}
@@ -646,45 +665,50 @@ function CanaryRow({
       {...searchableSetting("health-canary")}
       description={blocked === null ? description : `${description} ${blocked}`}
       control={
-        <>
-          {canary !== null ? (
-            <Select
-              value={String(canary.intervalMinutes)}
-              disabled={!editable || !canary.enabled}
-              onValueChange={(value) => {
-                const intervalMinutes = Number(value);
-                if (Number.isInteger(intervalMinutes)) {
-                  update({ health: { canary: { intervalMinutes } } });
-                }
-              }}
-            >
-              <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Canary interval">
-                <SelectValue>
-                  {
-                    canaryIntervalOptions(canary.intervalMinutes).find(
-                      (option) => option.minutes === canary.intervalMinutes,
-                    )?.label
-                  }
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup alignItemWithTrigger={false}>
-                {canaryIntervalOptions(canary.intervalMinutes).map((option) => (
-                  <SelectItem key={option.minutes} value={String(option.minutes)}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          ) : null}
-          <Switch
-            checked={canary?.enabled ?? false}
-            disabled={!editable}
-            aria-label={`Canary check on ${machine.name}`}
-            onCheckedChange={(enabled) => update({ health: { canary: { enabled } } })}
-          />
-        </>
+        <Switch
+          checked={canary?.enabled ?? false}
+          disabled={!editable}
+          aria-label={`Canary check on ${machine.name}`}
+          onCheckedChange={(enabled) => update({ health: { canary: { enabled } } })}
+        />
       }
-    />
+    >
+      {canary !== null ? (
+        <DisclosurePanel open={canary.enabled}>
+          <ChannelFields>
+            <ChannelField label="Runs">
+              <Select
+                value={String(canary.intervalMinutes)}
+                disabled={!editable}
+                onValueChange={(value) => {
+                  const intervalMinutes = Number(value);
+                  if (Number.isInteger(intervalMinutes)) {
+                    update({ health: { canary: { intervalMinutes } } });
+                  }
+                }}
+              >
+                <SelectTrigger size="sm" className="w-full" aria-label="Canary interval">
+                  <SelectValue>
+                    {
+                      canaryIntervalOptions(canary.intervalMinutes).find(
+                        (option) => option.minutes === canary.intervalMinutes,
+                      )?.label
+                    }
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup alignItemWithTrigger={false}>
+                  {canaryIntervalOptions(canary.intervalMinutes).map((option) => (
+                    <SelectItem key={option.minutes} value={String(option.minutes)}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </ChannelField>
+          </ChannelFields>
+        </DisclosurePanel>
+      ) : null}
+    </SettingsRow>
   );
 }
 
@@ -843,7 +867,7 @@ function ChannelField({
         <label htmlFor={htmlFor} className="text-xs text-muted-foreground">
           {label}
         </label>
-        {hint ? <p className="text-xs text-muted-foreground/70">{hint}</p> : null}
+        {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
       </div>
       <div className="flex w-full shrink-0 flex-col gap-1 @min-[32rem]/settings-row:w-56">
         {children}

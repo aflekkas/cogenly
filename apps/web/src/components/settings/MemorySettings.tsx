@@ -67,6 +67,13 @@ export function MemorySettings() {
     setStatus("current");
     setQuery("");
   };
+  // An empty memory offers its one action in the empty state, not twice.
+  const showsEmptyAction =
+    environmentId !== null &&
+    list.error === null &&
+    list.isLoaded &&
+    !filtered &&
+    list.facts.length === 0;
   const rememberButton = (
     <Button
       size="xs"
@@ -87,13 +94,15 @@ export function MemorySettings() {
         id="memory"
         title="Memory"
         headerAction={
-          <SettingsSectionAction
-            disabled={!actions.canWrite}
-            title={actions.canWrite ? undefined : NO_WRITE_TITLE}
-            onClick={() => setCreating(true)}
-          >
-            Remember something
-          </SettingsSectionAction>
+          showsEmptyAction ? null : (
+            <SettingsSectionAction
+              disabled={!actions.canWrite}
+              title={actions.canWrite ? undefined : NO_WRITE_TITLE}
+              onClick={() => setCreating(true)}
+            >
+              Remember something
+            </SettingsSectionAction>
+          )
         }
       >
         {environmentId === null ? (

@@ -35,8 +35,6 @@ import {
 } from "@cogenly/shared/model";
 import { cn } from "../../lib/utils";
 import { normalizeProviderAccentColor } from "../../providerInstances";
-import { Badge } from "../ui/badge";
-import { BadgeDot } from "../ui/badge-dot";
 import { Button } from "../ui/button";
 import { MorphIcon } from "~/components/MorphIcon";
 import { DraftInput } from "../ui/draft-input";
@@ -55,6 +53,7 @@ import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { ProviderAccentColorPicker } from "./ProviderAccentColorPicker";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingsStatusBadge, SettingsStatusDot, type SettingsStatusTone } from "./SettingsStatus";
 import { SettingsMasterDetailRow } from "./SettingsMasterDetail";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
 import { readCodexSetupMode } from "./CodexSetupSection.logic";
@@ -66,6 +65,13 @@ import {
 } from "./providerStatus";
 
 const ENVIRONMENT_VARIABLE_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+const PROVIDER_STATUS_TONES = {
+  ready: "success",
+  warning: "warning",
+  error: "error",
+  disabled: "neutral",
+} as const satisfies Record<ProviderStatusKey, SettingsStatusTone>;
 
 function ProviderStatusDiagnostic({
   detail,
@@ -749,13 +755,9 @@ export function ProviderInstanceCard({
     <code className="text-xs text-muted-foreground">{versionLabel}</code>
   ) : null;
 
-  // Healthy and disabled rows read fine from their text; only trouble gets a dot.
-  // The provider's own attention dot, the same primitive as the Settings dot
-  // that points here when a machine-health alert names this provider.
-  const statusDotNode =
-    statusKey === "warning" || statusKey === "error" ? (
-      <BadgeDot tone={statusKey === "error" ? "destructive" : "warning"} className="shrink-0" />
-    ) : null;
+  // Every status line leads with the shared settings tone dot, so providers
+  // read like integrations and machines.
+  const statusDotNode = <SettingsStatusDot tone={PROVIDER_STATUS_TONES[statusKey]} />;
   const needsAttention = statusKey === "warning" || statusKey === "error";
   const statusDiagnostic = hasCompatibilityWarning && needsAttention ? summary.detail : null;
   // Keep compatibility copy compact; the version popover carries the explanation.
@@ -766,10 +768,12 @@ export function ProviderInstanceCard({
         ? "Unsupported"
         : "Limited support"
     : summary.detail;
+  // The Setup section names the signed-in account per machine, so Status only
+  // repeats the email when there is no Setup section to show it.
   const editorStatusNode =
-    isAuthenticated && authEmail ? (
+    isAuthenticated && authEmail && !setup ? (
       <>
-        {needsAttention ? statusDotNode : null}
+        {statusDotNode}
         <span>Authenticated as</span>
         <ProviderAuthEmail email={authEmail} />
         {authLabel ? <span>· {authLabel}</span> : null}
@@ -918,9 +922,7 @@ export function ProviderInstanceCard({
         description={
           <>
             {/* The dot describes provider health, not the update in progress. */}
-            {statusDotNode && !updateProgress ? (
-              <span className="flex h-[1.45em] shrink-0 items-center">{statusDotNode}</span>
-            ) : null}
+            {updateProgress ? null : statusDotNode}
             <ProviderStatusDiagnostic detail={statusDiagnostic}>
               <span
                 tabIndex={statusDiagnostic ? 0 : undefined}
@@ -954,9 +956,7 @@ export function ProviderInstanceCard({
   const editorHeaderAction = (
     <div className="flex shrink-0 items-center gap-1.5">
       {driverOption?.badgeLabel ? (
-        <Badge variant="warning" size="sm" className="shrink-0">
-          {driverOption.badgeLabel}
-        </Badge>
+        <SettingsStatusBadge tone="warning">{driverOption.badgeLabel}</SettingsStatusBadge>
       ) : null}
       {versionCodeNode}
       {versionAdvisoryNode}

@@ -1043,17 +1043,16 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
 
 /* Enter motion for disclosure content that mounts when opened (inline
    "show more" panels that aren't a Collapsible, empty states): a short
-   opacity fade, no travel. Closing unmounts at once. Uses @starting-style, so
-   it runs once per mount and never on later renders. */
+   opacity fade, no travel, so it also runs under reduced motion. Closing
+   unmounts at once. Uses @starting-style, so it runs once per mount and never
+   on later renders. */
 @utility reveal-motion {
-  @media (prefers-reduced-motion: no-preference) {
-    transition-property: opacity;
-    transition-duration: 160ms;
-    transition-timing-function: --theme(--ease-drawer);
+  transition-property: opacity;
+  transition-duration: var(--motion-duration-fast);
+  transition-timing-function: --theme(--ease-out);
 
-    @starting-style {
-      opacity: 0;
-    }
+  @starting-style {
+    opacity: 0;
   }
 }
 
@@ -1888,6 +1887,21 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
      focus outline takes over, so exactly one indicator shows at a time. */
   [data-settings-page-scroll] .settings-search-target-pulse:focus {
     outline: none;
+  }
+
+  /* A settings section header shares its card's content inset. A quiet last
+     action has no border, so pull it out by its own padding: its label or
+     glyph then ends on the edge the rows' controls and status badges end on. */
+  [data-settings-header-actions] > [data-slot="button"][data-variant^="ghost"]:last-child {
+    &[data-size="xs"] {
+      margin-inline-end: calc(var(--spacing) * -2 + 1px);
+    }
+    &[data-size="icon-xs"] {
+      margin-inline-end: -5px;
+    }
+    &[data-size="icon-micro"] {
+      margin-inline-end: -4px;
+    }
   }
 
   .surface-subheader {

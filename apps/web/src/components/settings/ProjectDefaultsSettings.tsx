@@ -23,6 +23,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { toastManager } from "../ui/toast";
 import { Switch } from "../ui/switch";
 import { searchableSetting } from "./settingsSearch";
+import { SettingsTag } from "./SettingsStatus";
 import { useSettingsScope } from "./SettingsScopeContext";
 import {
   SETTINGS_PICKER_TRIGGER_CLASSNAME,
@@ -85,14 +86,7 @@ export function ProjectDefaultsSettings({ category }: { category: "models" | "ne
       serverScoped
       settingKeys={["defaultModelSelection"]}
       {...searchableSetting("default-model")}
-      description="Used for new chats and threads."
-      status={
-        unavailable
-          ? undefined
-          : settings.defaultModelSelection === null
-            ? "Automatic: the first available model until you pick one"
-            : undefined
-      }
+      description="Used for new chats and threads. Automatic uses the first available model."
       resetAction={
         settings.defaultModelSelection !== null ? (
           <SettingResetButton label="default model" onClick={() => setModel(null)} />
@@ -101,6 +95,10 @@ export function ProjectDefaultsSettings({ category }: { category: "models" | "ne
       control={
         selection && activeEntry ? (
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+            {/* Until a model is picked, the picker shows the automatic fallback. */}
+            {!unavailable && settings.defaultModelSelection === null ? (
+              <SettingsTag>Automatic</SettingsTag>
+            ) : null}
             <ProviderModelPicker
               environmentId={representative?.environmentId ?? null}
               activeInstanceId={selection.instanceId}
@@ -147,7 +145,7 @@ export function ProjectDefaultsSettings({ category }: { category: "models" | "ne
       serverScoped
       settingKeys={["defaultThreadEnvMode"]}
       {...searchableSetting("new-threads")}
-      description="A new worktree gives each thread its own branch and folder. A repository's cogenly.json applies while this is unset."
+      description="A new worktree gives each thread its own branch and folder."
       resetAction={
         settings.defaultThreadEnvMode !== null ? (
           <SettingResetButton
@@ -186,7 +184,11 @@ export function ProjectDefaultsSettings({ category }: { category: "models" | "ne
   if (category === "models") return modelRow;
 
   return (
-    <SettingsSection id="project-defaults" title="Workspace">
+    <SettingsSection
+      id="project-defaults"
+      title="Workspace"
+      footer="Until you set them here, a repository's cogenly.json decides where new threads start and which submodules they check out."
+    >
       {workspaceRow}
       <SettingsRow
         serverScoped
@@ -220,7 +222,7 @@ export function ProjectDefaultsSettings({ category }: { category: "models" | "ne
         serverScoped
         settingKeys={["worktreeSubmodules"]}
         {...searchableSetting("worktree-submodules")}
-        description="Which git submodules a new worktree checks out. A repository's cogenly.json applies while this is unset."
+        description="Which git submodules a new worktree checks out."
         resetAction={
           settings.worktreeSubmodules !== null ? (
             <SettingResetButton

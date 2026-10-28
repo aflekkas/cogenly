@@ -53,11 +53,17 @@ export function SettingsMasterDetail({
   );
 }
 
-/** The selected entry's details, scrolling on their own. */
+/**
+ * The selected entry's details, scrolling on their own. Cards inside it sit
+ * flat (border only, no raised surface), so the outer card stays the one
+ * raised layer instead of doubling its shadow.
+ */
 export function SettingsMasterDetailEditor({ children }: { readonly children: ReactNode }) {
   return (
     <ScrollArea scrollFade chainVerticalScroll className="@min-[48rem]/settings-page:h-full">
-      <div className="space-y-6 p-4">{children}</div>
+      <div className="space-y-6 p-4 [&_[data-settings-group=grouped]]:bg-transparent [&_[data-settings-group=grouped]]:bg-none [&_[data-settings-group=grouped]]:shadow-none">
+        {children}
+      </div>
     </ScrollArea>
   );
 }
@@ -111,7 +117,7 @@ export function SettingsMasterDetailRow({
         {icon}
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-2">{title}</span>
-          <span className="mt-0.5 flex items-start gap-1.5 text-xs leading-normal text-muted-foreground/80">
+          <span className="mt-0.5 flex items-start gap-1.5 text-xs leading-normal text-muted-foreground">
             {description}
           </span>
         </span>

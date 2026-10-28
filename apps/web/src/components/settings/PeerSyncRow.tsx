@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 
 import { peerSyncLabel, peerSyncTone, type PeerSyncIndicator } from "../../machines/peerSync.logic";
-import { Badge } from "../ui/badge";
 import { useStatusFade } from "./integrationStatusMotion";
+import { SettingsStatusBadge } from "./SettingsStatus";
 import { SettingsRow } from "./settingsLayout";
 
 /**
@@ -17,6 +17,7 @@ export function PeerSyncRow(props: {
   readonly children?: ReactNode;
 }) {
   const label = peerSyncLabel(props.indicator);
+  const tone = peerSyncTone(props.indicator);
   const status = useStatusFade<HTMLDivElement>(label);
   return (
     <SettingsRow
@@ -25,9 +26,9 @@ export function PeerSyncRow(props: {
       control={
         <div className="flex items-center gap-2">
           <div ref={status} className="flex" role="status">
-            <Badge size="sm" variant={peerSyncTone(props.indicator)}>
+            <SettingsStatusBadge tone={tone === "outline" ? "neutral" : tone}>
               {label}
-            </Badge>
+            </SettingsStatusBadge>
           </div>
           {props.children}
         </div>

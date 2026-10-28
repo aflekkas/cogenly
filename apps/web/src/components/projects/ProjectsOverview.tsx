@@ -206,7 +206,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
       <SettingsSection
         id="project-folders"
         title="Projects"
-        footer="Projects are optional. Make one to group several repositories, or the chats, Work and agents of a bigger effort. A single repository doesn't need one."
+        footer="Optional. Group the repositories, chats and agents of a bigger effort; a single repository doesn't need one."
         headerAction={
           <Button
             size="xs"

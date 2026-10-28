@@ -49,6 +49,7 @@ export function ProjectFaviconPickerDialog(props: {
   const { resolvedTheme } = useTheme();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const pickExternal = props.onPickExternal;
+  const onSelect = props.onSelect;
   const fileManagerName = getLocalFileManagerName(
     typeof navigator === "undefined" ? "" : navigator.platform,
   );
@@ -61,9 +62,9 @@ export function ProjectFaviconPickerDialog(props: {
         title: match.name,
         description: match.path,
         icon: <PierreEntryIcon pathValue={match.path} kind="file" theme={resolvedTheme} />,
-        run: async () => props.onSelect(match.path),
+        run: async () => onSelect(match.path),
       })),
-    [props.onSelect, resolvedTheme, result.entries, result.matchedQuery],
+    [onSelect, resolvedTheme, result.entries, result.matchedQuery],
   );
 
   return (

@@ -268,6 +268,7 @@ export function buildKeybindingRows(
       commandLabel(row.command).toLowerCase().includes(normalizedQuery) ||
       row.key.toLowerCase().includes(normalizedQuery) ||
       row.when.toLowerCase().includes(normalizedQuery) ||
+      (whenSummary(row.binding.whenAst)?.toLowerCase().includes(normalizedQuery) ?? false) ||
       row.source.toLowerCase().includes(normalizedQuery)
     );
   });
@@ -342,40 +343,149 @@ export function buildKeybindingCommandOptions(
   );
 }
 
-export function commandLabel(command: KeybindingCommand): string {
-  if (command === "composer.sendAlternate") return "Composer: Opposite Queue or Steer Action";
-  if (command === "composer.sendBackground") return "Composer: Start in Background";
-  if (command === "composer.sendAndNewThread") return "Composer: Send and Start New Thread";
-  if (command === "thread.steerQueuedMessage") return "Queue: Send First Queued Message Now";
-  if (command === "thread.editQueuedMessage") return "Queue: Edit Last Queued Message";
-  if (command === "thread.sendAllQueuedMessages") return "Queue: Send All Queued Messages Now";
-  if (command === "thread.copyReference") return "Pull request: copy link or thread ID";
+/** Labels the generated "Area: action" form can't produce. Sentence case, like the rest of settings. */
+const COMMAND_LABELS: Partial<Record<KeybindingCommand, string>> = {
+  "composer.sendAlternate": "Composer: send with the other of queue or steer",
+  "composer.sendAndNewThread": "Composer: send and start a new thread",
+  "composer.sendBackground": "Composer: start in background",
+  "thread.steerQueuedMessage": "Queue: send first queued message now",
+  "thread.editQueuedMessage": "Queue: edit last queued message",
+  "thread.sendAllQueuedMessages": "Queue: send all queued messages now",
+  "thread.copyReference": "Pull request: copy link or thread ID",
+  "thread.openParent": "Thread: go to parent",
+  // Sidebar modes are named screens, so their names keep their capitals.
+  "sidebar.mode.agents": "Sidebar: show Agents",
+  "sidebar.mode.chats": "Sidebar: show Chats",
+  "sidebar.mode.projects": "Sidebar: show Projects",
   // The mode id stays `tasks`; users know it as Work.
-  if (command === "sidebar.mode.tasks") return "Sidebar: Mode: Work";
-  if (command === "view.reopenClosed") return "Reopen Closed Tab";
-  if (command === "thread.openParent") return "Thread: Go to Parent";
+  "sidebar.mode.tasks": "Sidebar: show Work",
+  "view.reopenClosed": "Reopen closed tab",
   // Kept under its old id so stored bindings still apply; it only opens an agent's settings now.
-  if (command === "threadPanel.toggle") return "Agent Settings: Open";
-  if (command === "preview.focusUrl") return "Preview: Focus URL";
-  if (command === "terminal.toggle") return "Terminal Panel: Toggle";
+  "threadPanel.toggle": "Agent settings: open",
+  "preview.focusUrl": "Preview: focus URL",
+  "terminal.toggle": "Terminal panel: toggle",
   // Cogenly projects are repositories in the UI; Projects are context tags.
-  if (command === "chat.newWithoutProject") return "Chat: New Without Repository";
-  if (command === "projectSearch.toggle") return "Repository Search: Toggle";
+  "chat.newWithoutProject": "Chat: new without repository",
+  "projectSearch.toggle": "Repository search: toggle",
+};
+
+export function commandLabel(command: KeybindingCommand): string {
+  const fixed = COMMAND_LABELS[command];
+  if (fixed) return fixed;
   const raw = String(command);
   if (raw.startsWith("script.") && raw.endsWith(".run")) {
-    return `Run Script: ${titleCaseCommandSegment(raw.slice("script.".length, -".run".length))}`;
+    // Script ids are the repository's own names; show them as written.
+    return `Run script: ${raw.slice("script.".length, -".run".length)}`;
   }
-  return raw.split(".").map(titleCaseCommandSegment).join(": ");
+  const [area = "", ...action] = raw.split(".");
+  const words = action.flatMap(commandSegmentWords);
+  // thread.jump.1 → "Thread: jump to 1"
+  if (words[0] === "jump" && words.length === 2) words.splice(1, 0, "to");
+  const areaLabel = commandSegmentWords(area).join(" ");
+  const label = words.length > 0 ? `${areaLabel}: ${words.join(" ")}` : areaLabel;
+  return label.slice(0, 1).toUpperCase() + label.slice(1);
 }
 
-function titleCaseCommandSegment(segment: string): string {
-  const words: Array<string> = [];
-  for (const part of segment.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(/[-_\s]+/)) {
-    if (part.length > 0) {
-      words.push(part.slice(0, 1).toUpperCase() + part.slice(1));
-    }
-  }
-  return words.join(" ");
+function commandSegmentWords(segment: string): Array<string> {
+  return segment
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[-_\s]+/)
+    .filter((part) => part.length > 0)
+    .map((part) => part.toLowerCase());
+}
+
+/** Plain words for the conditions bindings use: [when true, when negated]. */
+const WHEN_VARIABLE_PHRASES: Record<string, readonly [string, string]> = {
+  terminalFocus: ["In terminal", "Outside terminal"],
+  previewFocus: ["In preview", "Outside preview"],
+  composerFocus: ["In composer", "Outside composer"],
+  editableFocus: ["In a text field", "Outside text fields"],
+  modelPickerOpen: ["Model picker open", "Model picker closed"],
+  rightPanelOpen: ["Right panel open", "Right panel closed"],
+  turnRunning: ["Turn running", "No turn running"],
+  draftThreadRoute: ["New thread", "Existing thread"],
+  isDesktop: ["Desktop app", "Browser"],
+  isWeb: ["Browser", "Desktop app"],
+  true: ["Always", "Never"],
+  false: ["Never", "Always"],
+};
+
+function whenConditionPhrase(node: KeybindingWhenNode): string | null {
+  const negated = node.type === "not";
+  const target = node.type === "not" ? node.node : node;
+  if (target.type !== "identifier") return null;
+  const phrases = WHEN_VARIABLE_PHRASES[target.name];
+  return phrases ? phrases[negated ? 1 : 0] : null;
+}
+
+function flattenWhen(node: KeybindingWhenNode, operator: "and" | "or"): KeybindingWhenNode[] {
+  return node.type === operator
+    ? [...flattenWhen(node.left, operator), ...flattenWhen(node.right, operator)]
+    : [node];
+}
+
+/**
+ * A when clause in plain words ("Outside terminal, model picker closed"), or
+ * null when it mixes operators or names a condition without a phrase, so the
+ * raw expression shows instead. No clause reads "Always".
+ */
+export function whenSummary(node: KeybindingWhenNode | undefined): string | null {
+  if (!node) return "Always";
+  const operator = node.type === "or" ? "or" : "and";
+  const phrases = flattenWhen(node, operator).map(whenConditionPhrase);
+  if (phrases.some((phrase) => phrase === null)) return null;
+  const [first = "", ...rest] = phrases as string[];
+  // Later phrases continue the sentence; proper names (Desktop app, Browser) read fine lowercased.
+  const continued = rest.map((phrase) => phrase.slice(0, 1).toLowerCase() + phrase.slice(1));
+  return [first, ...continued].join(operator === "and" ? ", " : " or ");
+}
+
+const MAC_KEYCAP_LABELS: Record<string, string> = {
+  mod: "⌘",
+  meta: "⌘",
+  ctrl: "⌃",
+  alt: "⌥",
+  shift: "⇧",
+  arrowup: "↑",
+  arrowdown: "↓",
+  arrowleft: "←",
+  arrowright: "→",
+  enter: "↩",
+  backspace: "⌫",
+  delete: "⌦",
+  esc: "Esc",
+  tab: "⇥",
+  space: "Space",
+  pageup: "PgUp",
+  pagedown: "PgDn",
+};
+
+const OTHER_KEYCAP_LABELS: Record<string, string> = {
+  mod: "Ctrl",
+  meta: "Meta",
+  ctrl: "Ctrl",
+  alt: "Alt",
+  shift: "Shift",
+  arrowup: "↑",
+  arrowdown: "↓",
+  arrowleft: "←",
+  arrowright: "→",
+  enter: "Enter",
+  backspace: "Backspace",
+  delete: "Del",
+  esc: "Esc",
+  tab: "Tab",
+  space: "Space",
+  pageup: "PgUp",
+  pagedown: "PgDn",
+};
+
+/** One part of a binding (`mod`, `shift`, `arrowup`, `k`) as its keycap reads on this platform. */
+export function keycapLabel(part: string, platform: string): string {
+  const labels = isMacPlatform(platform) ? MAC_KEYCAP_LABELS : OTHER_KEYCAP_LABELS;
+  const label = labels[part];
+  if (label) return label;
+  return part.length === 1 ? part.toUpperCase() : part.slice(0, 1).toUpperCase() + part.slice(1);
 }
 
 function normalizeShortcutKeyToken(key: string): string | null {

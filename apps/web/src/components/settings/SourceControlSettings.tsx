@@ -1,7 +1,7 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import * as Duration from "effect/Duration";
 import * as Option from "effect/Option";
-import { useEffect, useState, type ReactNode } from "react";
+import { createElement, type ReactNode } from "react";
 import type {
   BackgroundActivitySettings,
   SourceControlDiscoveryResult,
@@ -20,13 +20,11 @@ import { DEFAULT_UNIFIED_SETTINGS } from "@cogenly/contracts/settings";
 
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { cn } from "../../lib/utils";
 import { PULL_REQUEST_MERGE_METHOD_LABELS } from "~/lib/pullRequestContext";
 import { useEnvironmentQuery } from "../../state/query";
 import { sourceControlEnvironment } from "../../state/sourceControl";
-import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { DisclosureChevron } from "../ui/disclosure";
+import { DisclosureTrigger } from "../ui/disclosure";
 import { Collapsible, CollapsibleContent } from "../ui/collapsible";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Skeleton } from "../ui/skeleton";
@@ -46,8 +44,9 @@ import {
   SettingsRow,
   SettingsSearchTarget,
   SettingsSection,
-  useSettingsSearchTargetId,
+  useSearchTargetFold,
 } from "./settingsLayout";
+import { SettingsStatusBadge, SettingsStatusText, type SettingsStatusTone } from "./SettingsStatus";
 import { durationToSeconds, normalizeIntervalSeconds } from "./SettingsPanels.logic";
 import { searchableSetting, sourceControlHostSettingsSearchId } from "./settingsSearch";
 import { PullRequestGlyph } from "~/components/changeRequestIcons";
@@ -129,37 +128,28 @@ function RedactedAccount(props: { readonly account: string | null }) {
   );
 }
 
-function itemStatusDot(item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem): string {
-  if (item.status !== "available") return "bg-warning";
-  if (isProviderDiscoveryItem(item) && item.auth.status !== "authenticated") return "bg-warning";
-  return "bg-success";
+function itemStatusTone(
+  item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem,
+): SettingsStatusTone {
+  if (item.status !== "available") return "warning";
+  if (isProviderDiscoveryItem(item) && item.auth.status !== "authenticated") return "warning";
+  return "success";
 }
 
-function SourceControlItemMark({
+function SourceControlItemIcon({
   item,
 }: {
   readonly item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem;
 }) {
-  const dotClassName = itemStatusDot(item);
   const host = isProviderDiscoveryItem(item) ? sourceControlClients.find(item.kind) : undefined;
   const Icon = isProviderDiscoveryItem(item)
     ? host && sourceControlIcon(host)
     : VCS_ICONS[item.kind];
-
-  if (!Icon) {
-    return <span className={cn("size-2 shrink-0 rounded-full", dotClassName)} aria-hidden />;
-  }
-
+  if (!Icon) return null;
+  // Icon comes from a static registry, never a component made during render.
   return (
-    <span className="relative inline-flex size-5 shrink-0 items-center justify-center">
-      <Icon className="size-4.5 text-foreground/80" aria-hidden />
-      <span
-        className={cn(
-          "pointer-events-none absolute -left-0.5 -top-0.5 size-2 rounded-full ring-2 ring-background",
-          dotClassName,
-        )}
-        aria-hidden
-      />
+    <span aria-hidden className="inline-flex size-5 shrink-0 items-center justify-center">
+      {createElement(Icon, { className: "size-4.5 text-foreground/80" })}
     </span>
   );
 }
@@ -238,19 +228,13 @@ function DiscoveryItemRow({
   const auth = isProviderDiscoveryItem(item) ? item.auth : null;
   const authStatus = auth ? authPresentation(auth) : null;
   const authAccount = auth ? optionLabel(auth.account) : null;
-  const [isExpanded, setIsExpanded] = useState(false);
   const hasDetails = children !== undefined;
   const detailsLabel = item.kind === "github" ? "Accounts and token" : "Credentials";
-  const searchTargetId = useSettingsSearchTargetId();
-
-  useEffect(() => {
-    if (
-      searchTargetId === sourceControlHostSettingsSearchId(item.kind) ||
-      (item.kind === "github" && searchTargetId === searchableSetting("github-accounts").id)
-    ) {
-      setIsExpanded(true);
-    }
-  }, [item.kind, searchTargetId]);
+  // A settings search for this host (or GitHub's accounts) opens its details.
+  const [isExpanded, setIsExpanded] = useSearchTargetFold(
+    sourceControlHostSettingsSearchId(item.kind),
+    item.kind === "github" ? [searchableSetting("github-accounts").id] : [],
+  );
 
   return (
     <div className="first:rounded-t-xl last:rounded-b-xl">
@@ -258,31 +242,34 @@ function DiscoveryItemRow({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0 flex-1 space-y-1">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <SourceControlItemMark item={item} />
+              <SourceControlItemIcon item={item} />
               <span className="truncate text-sm font-medium text-foreground">{item.label}</span>
               {version ? <code className="text-xs text-muted-foreground">{version}</code> : null}
               {authStatus?.badge ? (
-                <Badge variant={authStatus.badge} size="sm">
+                <SettingsStatusBadge tone={authStatus.badge}>
                   {authStatus.label}
-                </Badge>
+                </SettingsStatusBadge>
               ) : null}
             </div>
-            <p className="flex min-w-0 flex-wrap items-center gap-x-1 text-xs leading-normal text-muted-foreground/80">
-              {itemSummary({ item, auth, authAccount })}
-            </p>
+            <SettingsStatusText
+              tone={itemStatusTone(item)}
+              className="flex text-xs text-muted-foreground"
+            >
+              <span className="flex min-w-0 flex-wrap items-center gap-x-1 leading-normal">
+                {itemSummary({ item, auth, authAccount })}
+              </span>
+            </SettingsStatusText>
           </div>
           {hasDetails ? (
             <div className="flex shrink-0 items-center sm:justify-end">
-              <Button
-                size="xs"
-                variant="ghost-muted"
-                onClick={() => setIsExpanded((open) => !open)}
-                aria-expanded={isExpanded}
+              <DisclosureTrigger
+                variant="quiet"
+                open={isExpanded}
+                onClick={() => setIsExpanded(!isExpanded)}
                 aria-label={`${isExpanded ? "Hide" : "Show"} ${item.label} ${detailsLabel.toLowerCase()}`}
               >
                 {detailsLabel}
-                <DisclosureChevron open={isExpanded} />
-              </Button>
+              </DisclosureTrigger>
             </div>
           ) : null}
         </div>
@@ -413,7 +400,7 @@ function PullRequestSettingsSection() {
                 updateSettings({ pullRequestMergeMethod: value });
             }}
           >
-            <SelectTrigger size="sm" aria-label="Default merge method">
+            <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Default merge method">
               <SelectValue>
                 {(value: string | null) =>
                   value === "merge" || value === "squash" || value === "rebase"
@@ -492,13 +479,8 @@ function DiscoverySkeletonRows({ count }: { readonly count: number }) {
     <div key={row} className="first:rounded-t-xl last:rounded-b-xl px-3 py-3 sm:px-4">
       <div className="min-w-0 flex-1 space-y-2">
         <div className="flex items-center gap-2">
-          <span className="relative inline-flex size-5 shrink-0 items-center justify-center">
+          <span className="inline-flex size-5 shrink-0 items-center justify-center">
             <Skeleton className="size-4.5" />
-            <Skeleton
-              shape="pill"
-              className="pointer-events-none absolute -left-0.5 -top-0.5 size-2"
-              aria-hidden
-            />
           </span>
           <Skeleton shape="pill" className="h-4 w-28" />
           <Skeleton shape="pill" className="h-5 w-14" />

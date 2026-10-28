@@ -13,6 +13,7 @@ import {
 } from "@cogenly/contracts";
 
 import { integrationAccountLabel } from "./integrationServices.logic";
+import type { SettingsStatusTone } from "./SettingsStatus";
 
 export const HEALTH_STATUS_LABELS = {
   ok: "Healthy",
@@ -21,12 +22,12 @@ export const HEALTH_STATUS_LABELS = {
   unknown: "Unknown",
 } as const satisfies Record<MachineHealthStatus, string>;
 
-export const HEALTH_STATUS_BADGE_VARIANTS = {
+export const HEALTH_STATUS_TONES = {
   ok: "success",
   warn: "warning",
   fail: "error",
-  unknown: "outline",
-} as const satisfies Record<MachineHealthStatus, string>;
+  unknown: "neutral",
+} as const satisfies Record<MachineHealthStatus, SettingsStatusTone>;
 
 export const HEALTH_CHECK_LABELS = {
   server: "Server",

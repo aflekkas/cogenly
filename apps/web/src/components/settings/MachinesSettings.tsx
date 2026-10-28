@@ -30,7 +30,6 @@ import { useEnvironments, type EnvironmentPresentation } from "../../state/envir
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
-import { Badge } from "../ui/badge";
 import { Button, InlineButton } from "../ui/button";
 import {
   Dialog,
@@ -57,6 +56,7 @@ import {
   SettingsSectionAction,
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
+import { SettingsStatusBadge } from "./SettingsStatus";
 
 const TAILSCALE_SENTENCE =
   "Cogenly links your machines through Tailscale, a free app that gives them a private, encrypted connection only you can use.";
@@ -362,14 +362,13 @@ function MachineRow({
         <>
           <div ref={statusNode} className="flex">
             {presence === null ? null : (
-              <Badge
-                size="sm"
-                variant={
-                  presence === "Online" ? "success" : presence === "Offline" ? "outline" : "warning"
+              <SettingsStatusBadge
+                tone={
+                  presence === "Online" ? "success" : presence === "Offline" ? "neutral" : "warning"
                 }
               >
                 {presence}
-              </Badge>
+              </SettingsStatusBadge>
             )}
           </div>
           {unpairable && canUnpair ? (
@@ -768,7 +767,7 @@ function SetupStepRow({
             <div className="flex flex-wrap gap-1.5">
               {step.action !== null ? (
                 <Button
-                  size="xs"
+                  size="sm"
                   disabled={!canRun || starting}
                   aria-label={`${step.action} on ${name}`}
                   onClick={() => void start()}
@@ -779,7 +778,7 @@ function SetupStepRow({
               ) : null}
               {handoff?._tag === "open-url" ? (
                 <Button
-                  size="xs"
+                  size="sm"
                   variant={step.action === null ? "default" : "outline"}
                   aria-label={`${handoff.label} for ${name}`}
                   onClick={() => {

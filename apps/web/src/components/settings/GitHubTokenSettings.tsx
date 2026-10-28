@@ -122,15 +122,15 @@ export function GitHubTokenSettings({
           <div className="flex shrink-0 gap-2">
             {isSaved ? (
               <Button
-                size="xs"
-                variant="outline"
+                size="sm"
+                variant="destructive-outline"
                 disabled={saving}
                 onClick={() => void save(normalizedHost, "")}
               >
                 Remove
               </Button>
             ) : null}
-            <Button type="submit" size="xs" disabled={!normalizedHost || !draft.trim() || saving}>
+            <Button type="submit" size="sm" disabled={!normalizedHost || !draft.trim() || saving}>
               Save
             </Button>
           </div>

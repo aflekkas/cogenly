@@ -15,6 +15,7 @@ export function SettingsGroup({
   return (
     <div
       {...props}
+      data-settings-group={variant}
       className={cn(
         "relative overflow-visible text-foreground",
         variant === "grouped" ? "surface-raised rounded-xl border bg-card/40" : "space-y-1",

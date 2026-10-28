@@ -1,6 +1,6 @@
 import type { AgentId } from "@cogenly/contracts";
 
-import { Badge } from "../components/ui/badge";
+import { SettingsTag } from "../components/settings/SettingsStatus";
 import { Checkbox } from "../components/ui/checkbox";
 import { Label } from "../components/ui/label";
 import { Radio, RadioGroup } from "../components/ui/radio-group";
@@ -76,11 +76,7 @@ export function VaultAccessOptions(props: {
             <span className="min-w-0">
               <span className="flex flex-wrap items-center gap-1.5">
                 {option.title}
-                {option.mode === "allow" ? (
-                  <Badge size="sm" variant="outline">
-                    Default
-                  </Badge>
-                ) : null}
+                {option.mode === "allow" ? <SettingsTag>Default</SettingsTag> : null}
               </span>
               <span className="block text-xs text-muted-foreground">{option.description}</span>
             </span>

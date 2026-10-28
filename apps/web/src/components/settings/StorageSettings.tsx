@@ -19,6 +19,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 import { Input } from "../ui/input";
 import { Collapsible, CollapsiblePanel } from "../ui/collapsible";
@@ -64,9 +65,7 @@ function WorktreesDirectoryRow() {
   return (
     <SettingsRow
       {...searchableSetting("storage-worktrees-location")}
-      description={
-        "Folder where new worktrees are created, on any drive, such as D:\\worktrees or ~/worktrees. Existing worktrees stay where they are. Leave empty to keep a project's worktrees in its folder's .worktrees and the rest in the Cogenly home folder."
-      }
+      description="Where new worktrees go, on any drive. Existing ones stay put. Empty keeps them beside each project."
       serverScoped
       settingKeys={["worktreesDirectory"]}
       resetAction={
@@ -81,6 +80,7 @@ function WorktreesDirectoryRow() {
         <Input
           key={`${scopeKey}:${settings.worktreesDirectory}`}
           aria-label="Worktree location"
+          size="sm"
           autoCapitalize="none"
           spellCheck={false}
           placeholder="Default"
@@ -532,7 +532,6 @@ function StorageUsage({ environmentId, label }: { environmentId: EnvironmentId; 
           onRefresh={() => void refresh()}
         />
       }
-      footer="Files that share disk space with copies, such as worktrees on APFS, show as Unknown."
     >
       {status === null ? (
         <SettingsRow title="Measuring disk usage…" role="status" />
@@ -545,7 +544,15 @@ function StorageUsage({ environmentId, label }: { environmentId: EnvironmentId; 
             <SettingsRow
               key={volume.id}
               title="Disk"
-              description={volume.path}
+              description={
+                // Long worktree paths truncate; the tooltip shows the whole one.
+                <Tooltip>
+                  <TooltipTrigger delay={300} render={<span className="block truncate" />}>
+                    {volume.path}
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">{volume.path}</TooltipPopup>
+                </Tooltip>
+              }
               control={
                 <span className="text-sm tabular-nums">
                   {formatBytes(volume.usedBytes)} used · {formatBytes(volume.availableBytes)} free
@@ -558,26 +565,36 @@ function StorageUsage({ environmentId, label }: { environmentId: EnvironmentId; 
             description="Cogenly's database. Cleanup never removes history."
             control={
               <span className="text-sm tabular-nums">
-                {status.databaseBytes === null ? "Unknown" : formatBytes(status.databaseBytes)}
+                {status.databaseBytes === null ? "Not measured" : formatBytes(status.databaseBytes)}
               </span>
             }
           />
           {Object.entries(STORAGE_LABELS).map(([category, title]) => {
             const usage = status.categories.find((entry) => entry.category === category);
+            // Clones (worktrees on APFS) share blocks with their copies, so their
+            // size can't be counted on its own; say why instead of "Unknown".
+            const shared = usage?.bytes === null;
+            const files = usage
+              ? `${usage.files.toLocaleString()} ${usage.files === 1 ? "file" : "files"}`
+              : null;
             return (
               <SettingsRow
                 key={category}
                 title={title}
                 description={
-                  usage
-                    ? `${usage.files.toLocaleString()} ${usage.files === 1 ? "file" : "files"}${usage.bytes === null ? " · Shares disk space" : ""}`
-                    : undefined
+                  files === null
+                    ? undefined
+                    : shared
+                      ? `${files} · Shares disk space with its copies, so it isn't counted separately`
+                      : files
                 }
                 control={
                   <span className="text-sm tabular-nums">
-                    {status.complete && usage?.bytes !== null
-                      ? formatBytes(usage?.bytes ?? 0)
-                      : "Unknown"}
+                    {!status.complete
+                      ? "Not measured"
+                      : shared
+                        ? "Shared"
+                        : formatBytes(usage?.bytes ?? 0)}
                   </span>
                 }
               />
@@ -760,6 +777,8 @@ export function StorageSettingsPanel() {
               min={1}
               max={30}
               size="sm"
+              // The same footprint as the day steppers on this page.
+              className="w-32"
               onValueCommitted={(value) => {
                 if (value !== null)
                   updateSettings({

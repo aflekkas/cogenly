@@ -32,6 +32,9 @@ const buttonVariants = cva(
           "size-11 sm:size-10 [&_svg:not([class*='size-'])]:size-5 sm:[&_svg:not([class*='size-'])]:size-4.5",
         "icon-xs":
           "[--control-radius:var(--control-radius-xs)] size-7 sm:size-6 not-in-data-[slot=input-group]:[&_svg:not([class*='size-'])]:size-4 sm:not-in-data-[slot=input-group]:[&_svg:not([class*='size-'])]:size-3.5",
+        // A shortcut's keycaps as a button (the key recorder): row height, with the
+        // keycaps nearly flush so their edge is the control's edge.
+        keys: "[--control-radius:var(--control-radius-xs)] h-8 gap-1 px-px sm:h-7",
         lg: "h-10 px-[calc(--spacing(3.5)-1px)] sm:h-9",
         micro:
           "[--control-radius:var(--control-radius-2xs)] h-5 gap-1 px-[calc(--spacing(1.5)-1px)] text-[11px] sm:text-[11px] [&_svg:not([class*='size-'])]:size-3 sm:[&_svg:not([class*='size-'])]:size-3",
@@ -100,6 +103,8 @@ function Button({ className, variant, size, render, ...props }: ButtonProps) {
   const defaultProps = {
     className: cn(buttonVariants({ className, size, variant })),
     "data-slot": "button",
+    "data-size": size ?? "default",
+    "data-variant": variant ?? "default",
     type: typeValue,
   };
 

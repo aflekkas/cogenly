@@ -22,11 +22,11 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { WorkLogDisclosure } from "../chat/WorkLog";
 import { useSelectSidebarMode } from "../sidebar/modes/useSelectSidebarMode";
 import { useAnimatedPanelHeight } from "../ui/animated-panel-height";
-import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Spinner } from "../ui/spinner";
 import { useSettingsScope } from "./SettingsScopeContext";
+import { SettingsStatusBadge, SettingsTag } from "./SettingsStatus";
 import {
   T3_IMPORT_DOCS_URL,
   T3_IMPORT_PHASE_LABELS,
@@ -307,7 +307,7 @@ export function T3ImportFlowView({
               ) : view.kind === "report" ? (
                 "Check again"
               ) : (
-                "Check what will be imported"
+                "Preview import"
               )}
             </Button>
           ) : null
@@ -398,9 +398,12 @@ function IntroSection({
       ) : null}
       {checkAction !== null || error !== null ? (
         <SettingsRow
-          title={error ? "That didn't work" : "Check first"}
+          title={error ? "That didn't work" : "Preview"}
           description={
-            error ?? "Reads T3 Code's data and lists what would come over. Nothing is written yet."
+            error ??
+            (selectable && selection.size === 0
+              ? "Pick at least one project to preview what comes over."
+              : "Reads T3 Code's data and lists what would come over. Nothing is written yet.")
           }
           status={
             scanPercent != null ? <ProgressBar percent={scanPercent} label="Checking" /> : null
@@ -423,31 +426,32 @@ function ProjectOption({
   disabled: boolean;
   onChange: (checked: boolean) => void;
 }) {
+  // The scratch workspace only carries threads, so an empty one has nothing to bring.
+  const empty = project.isScratch && project.threadCount === 0;
+  const inert = disabled || empty;
   return (
     <li>
       <label
         className={
-          disabled
+          inert
             ? "flex items-center gap-2.5 rounded-md py-1 text-sm opacity-64"
             : "flex cursor-pointer items-center gap-2.5 rounded-md py-1 text-sm"
         }
       >
         <Checkbox
-          checked={checked}
-          disabled={disabled}
+          checked={checked && !empty}
+          disabled={inert}
           onCheckedChange={(next) => onChange(next === true)}
         />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1.5">
             <span className="truncate font-medium">{project.title}</span>
             {project.isScratch ? (
-              <Badge size="sm" variant="outline">
-                Files under No project
-              </Badge>
+              <SettingsTag>Files under No project</SettingsTag>
             ) : project.existingProjectTitle ? (
-              <Badge size="sm" variant="info">
+              <SettingsStatusBadge tone="info">
                 Merges into {project.existingProjectTitle}
-              </Badge>
+              </SettingsStatusBadge>
             ) : null}
           </span>
           <span className="block truncate text-xs text-muted-foreground">
@@ -455,7 +459,7 @@ function ProjectOption({
           </span>
         </span>
         <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-          {pluralize(project.threadCount, "thread")}
+          {empty ? "Nothing to import" : pluralize(project.threadCount, "thread")}
         </span>
       </label>
     </li>
@@ -510,7 +514,7 @@ function StageSection({
                   className={includeSettings ? undefined : "opacity-64"}
                   title={change.setting}
                   description={change.detail}
-                  control={<Badge variant="outline">{SETTING_ACTION_LABELS[change.action]}</Badge>}
+                  control={<SettingsTag>{SETTING_ACTION_LABELS[change.action]}</SettingsTag>}
                 />
               ))}
             </SettingsSection>
@@ -692,9 +696,9 @@ function ReportSections({ report }: { report: T3ImportReport }) {
             title={
               <span className="flex items-center gap-1.5">
                 {project.title}
-                <Badge size="sm" variant={project.action === "merge" ? "info" : "success"}>
+                <SettingsStatusBadge tone={project.action === "merge" ? "info" : "success"}>
                   {project.action === "merge" ? `Matches ${project.projectTitle}` : "New"}
-                </Badge>
+                </SettingsStatusBadge>
               </span>
             }
             description={`${pluralize(project.threads, "thread")} · ${pluralize(project.messages, "message")} · ${pluralize(project.attachments, "attachment")} (${formatBytes(project.attachmentBytes)})`}
@@ -739,19 +743,19 @@ function ReportSections({ report }: { report: T3ImportReport }) {
                 .filter((part) => part !== null)
                 .join(" · ")}
               control={
-                <Badge
-                  variant={
+                <SettingsStatusBadge
+                  tone={
                     provider.status === "conflict"
                       ? "warning"
                       : provider.status === "create"
                         ? "success"
-                        : "outline"
+                        : "neutral"
                   }
                 >
                   {provider.status === "conflict"
                     ? "Differs"
                     : T3_PROVIDER_STATUS_LABELS[provider.status]}
-                </Badge>
+                </SettingsStatusBadge>
               }
               status={provider.status === "conflict" ? T3_PROVIDER_STATUS_LABELS.conflict : null}
             />

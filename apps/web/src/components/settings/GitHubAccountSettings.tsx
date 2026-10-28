@@ -198,7 +198,7 @@ export function GitHubAccountSettings({
                   The chosen login is no longer signed in, so the active gh login is used.
                 </p>
                 <Button
-                  size="xs"
+                  size="sm"
                   variant="outline"
                   disabled={saving}
                   onClick={() => void save(group.host, { account: null })}

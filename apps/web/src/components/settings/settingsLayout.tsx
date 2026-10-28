@@ -176,7 +176,10 @@ export function useRelativeTimeTick(intervalMs = 1_000) {
 /**
  * The heading row above a section's card: a muted title (with an optional
  * leading icon), an optional small control right after it, and the section's
- * actions on the right. `title` may be a fold's trigger.
+ * actions on the right. `title` may be a fold's trigger. The header shares the
+ * rows' inset, and a quiet (ghost) last action is pulled out by its own
+ * padding, so its label or glyph ends on the same edge as the row controls
+ * and status badges below it.
  */
 export function SettingsSectionHeader({
   title,
@@ -201,7 +204,12 @@ export function SettingsSectionHeader({
         </h2>
         {titleAction}
       </div>
-      <div className="flex min-h-7 min-w-7 items-center justify-end gap-1.5">{headerAction}</div>
+      <div
+        data-settings-header-actions
+        className="flex min-h-7 min-w-7 shrink-0 items-center justify-end gap-1.5"
+      >
+        {headerAction}
+      </div>
     </div>
   );
 }
@@ -538,7 +546,8 @@ export function SettingsUnavailableGroup({
         <InfoIcon className="mt-0.5 size-3.5 shrink-0 text-warning" />
         <p>{message}</p>
       </div>
-      <div className="[&_h3]:opacity-64 [&_p]:opacity-64">{children}</div>
+      {/* One disabled treatment: titles drop to the description's muted color. */}
+      <div className="[&_h3]:text-muted-foreground">{children}</div>
     </div>
   );
 }
@@ -553,10 +562,15 @@ export function SettingsUnavailableGroup({
  * for clarity or narrow screens instead of truncating or forcing no-wrap.
  *
  * Control sizing across settings follows three tiers so rows share a baseline:
- * - `control` slot: `size="sm"` (Button, Select, Input, NumberField) or `icon-sm`.
- * - Section `headerAction`s and buttons inside list items, cards, toolbars: `xs` / `icon-xs`.
+ * - Anything a row or list item offers at its trailing edge, or under its text
+ *   as a recovery step (Fix, Retry, Revoke): `size="sm"` (Button, Select,
+ *   Input, NumberField) or `icon-sm`. One action height inside every card.
+ * - Section `headerAction`s, toolbar filters and an empty list's one action:
+ *   quiet `xs` / `icon-xs` (`SettingsSectionAction`, `SettingsRefreshAction`).
  * - Inline affordances (reset arrows, info tooltips, table-cell buttons): `icon-micro`.
- * Dialog footers keep the app-wide default button size.
+ * Statuses are a `SettingsStatusBadge` (or `SettingsStatusText` in a line of
+ * text) and type labels a `SettingsTag`. Dialog footers keep the app-wide
+ * default button size.
  */
 export function SettingsRow({
   title,
@@ -722,9 +736,7 @@ export function SettingsRowContent({
             {titleActions}
           </div>
           {description ? (
-            <p className="max-w-xl text-xs leading-normal text-muted-foreground/80">
-              {description}
-            </p>
+            <p className="max-w-xl text-xs leading-normal text-muted-foreground">{description}</p>
           ) : null}
           {status ? <div className="pt-0.5 text-xs text-muted-foreground">{status}</div> : null}
         </div>

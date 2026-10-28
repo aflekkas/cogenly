@@ -126,16 +126,14 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   });
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
-  const [activeResultIndex, setActiveResultIndex] = useState(0);
+  const [storedResultIndex, setActiveResultIndex] = useState(0);
   const attentionByPage = useSettingsAttentionByPage();
   const searchableItems = useAvailableSettingsSearchItems(scopeSearch);
   const results = useMemo(() => searchSettings(query, searchableItems), [query, searchableItems]);
   const isSearching = query.trim().length > 0;
   const hasResults = results.length > 0;
-
-  useEffect(() => {
-    setActiveResultIndex((index) => Math.min(index, Math.max(results.length - 1, 0)));
-  }, [results.length]);
+  // A narrowed query keeps the highlight on the last result rather than past it.
+  const activeResultIndex = Math.min(storedResultIndex, Math.max(results.length - 1, 0));
 
   useEffect(() => {
     const result = results[activeResultIndex];
@@ -241,8 +239,8 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
         const key = event.key;
-        setActiveResultIndex((index) =>
-          stepSearchResultIndex(key, index, results.length, searchEdge),
+        setActiveResultIndex(
+          stepSearchResultIndex(key, activeResultIndex, results.length, searchEdge),
         );
         return;
       }

@@ -23,7 +23,7 @@ import {
   SettingsMasterDetailRow,
 } from "../components/settings/SettingsMasterDetail";
 import { SettingsEmpty, SettingsRow, SettingsSection } from "../components/settings/settingsLayout";
-import { Badge } from "../components/ui/badge";
+import { SettingsStatusBadge } from "../components/settings/SettingsStatus";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import {
@@ -169,9 +169,7 @@ function VaultLoginRow(props: {
         <span className="flex min-w-0 flex-col">
           <span className="flex min-w-0 items-center gap-1.5">
             {vaultLoginMissingUsername(item) ? (
-              <Badge size="sm" variant="warning">
-                Missing username
-              </Badge>
+              <SettingsStatusBadge tone="warning">Missing username</SettingsStatusBadge>
             ) : (
               <span className="truncate">{item.username ?? "Username saved"}</span>
             )}
@@ -242,14 +240,10 @@ function VaultLoginDetail(props: {
             : (item.username ?? "Saved, too long to show")
         }
         control={
-          <div className="flex items-center gap-1">
-            <Button size="sm" variant="ghost" disabled={disabled} onClick={props.onEdit}>
-              Edit
-            </Button>
-            <Button size="sm" variant="outline" disabled={disabled} onClick={props.onEdit}>
-              Update password
-            </Button>
-          </div>
+          // One dialog edits the username, label and password alike.
+          <Button size="sm" variant="outline" disabled={disabled} onClick={props.onEdit}>
+            Edit login
+          </Button>
         }
       >
         {vaultLoginMissingUsername(item) ? (
@@ -323,7 +317,7 @@ function VaultLoginDetail(props: {
               <li key={id} className="flex items-center justify-between gap-2">
                 <span className="truncate">{integrationName(id)}</span>
                 <Button
-                  size="xs"
+                  size="sm"
                   variant="ghost-muted"
                   disabled={disabled}
                   onClick={() => void setLinks(linked.filter((other) => other !== id))}
@@ -379,6 +373,7 @@ function AddUsername(props: {
             <Input
               id={`${props.idPrefix}-username`}
               aria-label="Username or email"
+              size="sm"
               autoFocus
               autoComplete="off"
               value={value}

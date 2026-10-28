@@ -78,36 +78,33 @@ function ComputerUsePermissionsRow({
       undefined);
 
   return (
-    <SettingsRow
-      id="computer-use-permissions"
-      title="macOS permissions"
-      description={description}
-      status={
-        computerUseAvailable(status) ? (
-          <div className="flex flex-wrap gap-x-5 gap-y-2">
-            {status.permissions.map((entry) => (
-              <div key={entry.permission} className="flex items-center gap-3">
-                <PlatformStatus
-                  compact
-                  platform={entry.title}
-                  readyLabel="Granted"
-                  status={{ ready: entry.grant === "granted", message: "Not granted" }}
-                />
-                {entry.grant === "granted" ? null : (
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    disabled={!canRequest || pending}
-                    onClick={() => void request(entry.permission).then(onRequested)}
-                  >
-                    Open System Settings
-                  </Button>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : undefined
-      }
-    />
+    <SettingsRow id="computer-use-permissions" title="macOS permissions" description={description}>
+      {computerUseAvailable(status) ? (
+        // One subrow per grant: its state on the left, its action on the row's trailing edge.
+        <ul className="space-y-2 pt-1 pb-2">
+          {status.permissions.map((entry) => (
+            <li key={entry.permission} className="flex min-h-7 items-center justify-between gap-4">
+              <PlatformStatus
+                compact
+                platform={entry.title}
+                readyLabel="Granted"
+                status={{ ready: entry.grant === "granted", message: "Not granted" }}
+              />
+              {entry.grant === "granted" ? null : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!canRequest || pending}
+                  aria-label={`Open System Settings for ${entry.title}`}
+                  onClick={() => void request(entry.permission).then(onRequested)}
+                >
+                  Open System Settings
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </SettingsRow>
   );
 }

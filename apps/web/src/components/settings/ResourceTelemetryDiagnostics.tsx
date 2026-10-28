@@ -53,11 +53,13 @@ import { toastManager } from "../ui/toast";
 import {
   resourceHistoryBarHeight,
   resourceHistoryCpuScaleMax,
+  resourceMonitorUnavailableText,
   shouldShowResourceMonitorRetry,
   visibleResourceTelemetryProcesses,
 } from "./ResourceTelemetryDiagnostics.logic";
 import { SettingsGroup } from "./SettingsGroup";
 import { SettingsRefreshAction, SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingsStatusBadge, type SettingsStatusTone } from "./SettingsStatus";
 
 const HISTORY_WINDOWS = [
   { label: "5m", windowMs: 5 * 60_000, bucketMs: 15_000 },
@@ -161,10 +163,10 @@ function booleanStateLabel(
   return "Unknown";
 }
 
-function sourceStatusTone(status: ResourceTelemetrySourceStatus): "default" | "warning" | "danger" {
-  if (status === "healthy") return "default";
+function sourceStatusTone(status: ResourceTelemetrySourceStatus): SettingsStatusTone {
+  if (status === "healthy") return "success";
   if (status === "starting" || status === "degraded") return "warning";
-  return "danger";
+  return "error";
 }
 
 function SourceStatusBadge({
@@ -182,27 +184,13 @@ function SourceStatusBadge({
     | undefined;
 }) {
   const tone = presentation?.tone ?? sourceStatusTone(status);
+  const statusText = presentation?.label ?? status;
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-3xs font-semibold uppercase tracking-widest",
-        tone === "neutral" && "border-border/70 bg-muted/45 text-muted-foreground",
-        tone === "default" && "border-success/25 bg-success/10 text-success-foreground",
-        tone === "warning" && "border-warning/30 bg-warning/10 text-warning-foreground",
-        tone === "danger" && "border-destructive/30 bg-destructive/10 text-destructive",
-      )}
-    >
-      <span
-        className={cn(
-          "size-1.5 rounded-full",
-          tone === "neutral" && "bg-muted-foreground/55",
-          tone === "default" && "bg-success",
-          tone === "warning" && "bg-warning",
-          tone === "danger" && "bg-destructive",
-        )}
-      />
-      {label} {presentation?.label ?? status}
-    </span>
+    <SettingsStatusBadge tone={tone}>
+      {label
+        ? `${label} ${statusText.toLowerCase()}`
+        : statusText.charAt(0).toUpperCase() + statusText.slice(1)}
+    </SettingsStatusBadge>
   );
 }
 
@@ -549,7 +537,6 @@ function ProcessTable({
       <ScrollArea
         chainVerticalScroll
         scrollFade
-        hideScrollbars
         className="max-h-[min(68vh,48rem)] w-full max-w-full"
       >
         <table className="w-full min-w-[1320px] table-fixed text-left text-xs">
@@ -652,12 +639,7 @@ function HistoryProcessTable({
 }) {
   return (
     <div className="border-t border-border/60">
-      <ScrollArea
-        chainVerticalScroll
-        scrollFade
-        hideScrollbars
-        className="max-h-[28rem] w-full max-w-full"
-      >
+      <ScrollArea chainVerticalScroll scrollFade className="max-h-[28rem] w-full max-w-full">
         <table className="w-full min-w-[1020px] table-fixed text-left text-xs">
           <colgroup>
             <col className="w-[24%]" />
@@ -804,13 +786,17 @@ function AttributionTable({ entries }: { entries: ReadonlyArray<ResourceAttribut
  * The native resource monitor's sections. When the monitor can't run on this machine they
  * collapse to one status row with Retry, followed by `fallback`, the server's own process
  * sampling, so the page never shows the same processes twice or a wall of empty tables.
+ * When that sampling failed too (`fallbackUnavailableReasons`), the status row says so
+ * once and `fallback` stays hidden.
  */
 export function ResourceTelemetryDiagnostics({
   environmentId,
   fallback,
+  fallbackUnavailableReasons,
 }: {
   environmentId: EnvironmentId | null;
   fallback: ReactNode;
+  fallbackUnavailableReasons: ReadonlyArray<string> | null;
 }) {
   const [windowMs, setWindowMs] = useState(15 * 60_000);
   const selectedWindow =
@@ -976,7 +962,7 @@ export function ResourceTelemetryDiagnostics({
         <SettingsSection title="Resource monitor">
           <SettingsRow
             title="The detailed monitor isn't running"
-            description={reason}
+            description={resourceMonitorUnavailableText(reason, fallbackUnavailableReasons)}
             control={
               canMaintainEnvironment ? (
                 <Button size="sm" variant="outline" disabled={isRetrying} onClick={retryCollector}>
@@ -986,7 +972,7 @@ export function ResourceTelemetryDiagnostics({
             }
           />
         </SettingsSection>
-        {fallback}
+        {fallbackUnavailableReasons === null ? fallback : null}
       </>
     );
   }
@@ -1112,7 +1098,7 @@ export function ResourceTelemetryDiagnostics({
         variant="plain"
         headerAction={
           collectorNeedsRetry ? (
-            <Button size="xs" variant="outline" disabled={isRetrying} onClick={retryCollector}>
+            <Button size="xs" variant="ghost-muted" disabled={isRetrying} onClick={retryCollector}>
               <RefreshIcon size="xs" refreshing={isRetrying} />
               Retry monitor
             </Button>

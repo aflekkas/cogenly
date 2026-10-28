@@ -3,9 +3,9 @@ import { SettingsIcon } from "lucide-react";
 import { shortcutLabelForCommand } from "../../keybindings";
 import { commandForProjectScript } from "../../projectScripts";
 import { ScriptIcon } from "../projectScriptEditor";
-import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { SettingsNote, SettingsRow } from "./settingsLayout";
+import { SettingsTag } from "./SettingsStatus";
 
 export function ProjectActionsList({
   scripts,
@@ -29,21 +29,11 @@ export function ProjectActionsList({
           <span className="flex min-w-0 items-center gap-2">
             <ScriptIcon icon={script.icon} className="size-4 shrink-0 text-muted-foreground" />
             <span className="min-w-0 truncate">{script.name}</span>
-            {script.runOnWorktreeCreate ? (
-              <Badge size="sm" variant="outline">
-                setup
-              </Badge>
-            ) : null}
-            {script.runOnSettle ? (
-              <Badge size="sm" variant="outline">
-                on settle
-              </Badge>
-            ) : null}
+            {script.runOnWorktreeCreate ? <SettingsTag>Setup</SettingsTag> : null}
+            {script.runOnSettle ? <SettingsTag>On settle</SettingsTag> : null}
             {script.previewUrl ? (
               <span className="flex max-sm:hidden">
-                <Badge size="sm" variant="outline">
-                  preview · desktop only
-                </Badge>
+                <SettingsTag>Preview · desktop only</SettingsTag>
               </span>
             ) : null}
           </span>

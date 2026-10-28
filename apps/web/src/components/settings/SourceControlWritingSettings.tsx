@@ -21,6 +21,7 @@ import {
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
+import { DisclosurePanel } from "../ui/disclosure";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
@@ -160,7 +161,7 @@ export function SourceControlWritingSettingsSection() {
           </Select>
         }
       >
-        {style.mode === "custom" ? (
+        <DisclosurePanel open={style.mode === "custom"}>
           <div className="mt-3 max-w-2xl pb-3.5">
             <Textarea
               key={style.customInstructions}
@@ -177,7 +178,7 @@ export function SourceControlWritingSettingsSection() {
               aria-label="Custom source control writing instructions"
             />
           </div>
-        ) : null}
+        </DisclosurePanel>
       </SettingsRow>
 
       <BranchNamingSettings />
