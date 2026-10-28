@@ -145,6 +145,8 @@ import {
   type ComposerBannerStackContent,
   type ComposerBannerStackItem,
 } from "./ComposerBannerStack";
+import { partitionUrgentNotices } from "./composerStackBudget.logic";
+import { ComposerTray } from "./ComposerTray";
 import { ComposerStackColumn } from "./ComposerStackColumn";
 import { formatAttachmentSize } from "@cogenly/client-runtime/state/attachments";
 import {
@@ -4972,9 +4974,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         content: activityStackContent,
       }
     : null;
-  const bannerStackItems = activityStackItem
-    ? [activityStackItem, ...props.bannerItems]
-    : props.bannerItems;
+  const bannerStackNotices = partitionUrgentNotices(
+    activityStackItem ? [activityStackItem, ...props.bannerItems] : props.bannerItems,
+  );
   useEffect(() => {
     if (activeTasksProgress === null || activeTaskSteps === null) {
       setIsTasksDrawerOpen(false);
@@ -5926,20 +5928,38 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         : null}
       <ComposerBanner.Dock>
         <ComposerStackColumn>
+          {/* Farthest to nearest the composer: notices and running activity,
+              the queue, progress, then whatever waits on the user's decision. */}
           <ComposerBannerStack
             key={activeThreadId}
             className="relative z-0"
-            items={bannerStackItems}
-            attachedBelow={props.queuedRunsControl}
+            items={bannerStackNotices.rest}
           />
+          {props.queuedRunsControl}
           <AttachmentPresence
             show={!activityStackItem && Boolean(shownSyncPhase || inlineTasksBadge)}
             swapKey={shownSyncPhase ? `sync:${shownSyncPhase}` : "tasks"}
           >
-            <ComposerBanner.Root data-chat-composer-activity-strip="true">
+            <ComposerTray.Root data-chat-composer-activity-strip="true">
               {shownSyncPhase ? <ComposerActivityRow phase={shownSyncPhase} /> : inlineTasksBadge}
-            </ComposerBanner.Root>
+            </ComposerTray.Root>
           </AttachmentPresence>
+          {/* The tab and the open task list share one surface; the list grows under it. */}
+          <AttachmentPresence show={showTasksDrawer || showTasksTab} swapKey="tasks">
+            {(showTasksDrawer || showTasksTab) && activeTasksProgress && activeTaskSteps ? (
+              <ComposerTasksPanel
+                expanded={showTasksDrawer}
+                onToggle={toggleTasksDrawerStable}
+                progress={activeTasksProgress}
+                steps={activeTaskSteps}
+              />
+            ) : null}
+          </AttachmentPresence>
+          <ComposerBannerStack
+            key={`${activeThreadId}:urgent`}
+            className="relative z-0"
+            items={bannerStackNotices.urgent}
+          />
           <AttachmentPresence
             show={showComposerTopDrawer && (!isTasksDrawerOpen || hasBlockingComposerTopDrawer)}
             swapKey={pendingUserInputs.length > 0 ? "pending-user-input" : "plan-follow-up"}
@@ -6047,17 +6067,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 </div>
               ) : null}
             </ComposerBanner.Root>
-          </AttachmentPresence>
-          {/* The tab and the open task list share one surface; the list grows under it. */}
-          <AttachmentPresence show={showTasksDrawer || showTasksTab} swapKey="tasks">
-            {(showTasksDrawer || showTasksTab) && activeTasksProgress && activeTaskSteps ? (
-              <ComposerTasksPanel
-                expanded={showTasksDrawer}
-                onToggle={toggleTasksDrawerStable}
-                progress={activeTasksProgress}
-                steps={activeTaskSteps}
-              />
-            ) : null}
           </AttachmentPresence>
         </ComposerStackColumn>
       </ComposerBanner.Dock>

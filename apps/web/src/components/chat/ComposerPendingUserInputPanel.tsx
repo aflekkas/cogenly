@@ -1,14 +1,14 @@
 import { type RuntimeRequestId, type ScopedThreadRef } from "@cogenly/contracts";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useId, useRef, useState } from "react";
 import { type PendingUserInput } from "../../session-logic";
 import {
   derivePendingUserInputProgress,
   type PendingUserInputDraftAnswer,
 } from "../../pendingUserInput";
 import { CheckIcon } from "lucide-react";
-import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { cn } from "~/lib/utils";
 import { ComposerBanner } from "./ComposerBanner";
+import { ComposerTray } from "./ComposerTray";
 import ChatMarkdown from "../ChatMarkdown";
 
 interface PendingUserInputPanelProps {
@@ -100,6 +100,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   // sending from the composer advances the active question.
   const [collapsedQuestionId, setCollapsedQuestionId] = useState<string | null>(null);
   const isCollapsed = collapsedQuestionId !== null && collapsedQuestionId === activeQuestion?.id;
+  const bodyId = useId();
 
   useEffect(() => {
     onAdvanceRef.current = onAdvance;
@@ -196,142 +197,116 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   const customAnswerActive = progress.customAnswer.trim().length > 0;
 
   return (
-    <Collapsible
-      open={!isCollapsed}
-      onOpenChange={(open) => {
-        setCollapsedQuestionId(open ? null : activeQuestion.id);
-      }}
-    >
+    <>
       {/* One inset for header, question and options: the icon-less header content
           (Root px-1 + Content ps-2, sm:ps-1.5) sets it, py-0.5 makes the top match,
           and the Body and option rows below line up their text with it. */}
-      <CollapsibleTrigger
-        render={<ComposerBanner.Row className="py-0.5" render={<button type="button" />} />}
-        title={
-          isCollapsed ? "Show the question and its options" : "Hide the question and its options"
-        }
+      <ComposerTray.Header
+        className="py-0.5"
         data-pending-user-input-toggle={isCollapsed ? "collapsed" : "expanded"}
-      >
-        <ComposerBanner.Content>
-          <span className="shrink-0 font-medium text-muted-foreground">
-            {activeQuestion.header}
-          </span>
-          {isCollapsed ? (
-            <span className="min-w-0 flex-1 truncate text-secondary-label">
-              {activeQuestion.question}
-            </span>
-          ) : null}
-        </ComposerBanner.Content>
-        <ComposerBanner.Actions>
-          {prompt.questions.length > 1 ? (
-            <span className="text-3xs font-medium text-muted-foreground tabular-nums">
-              {questionIndex + 1}/{prompt.questions.length}
-            </span>
-          ) : null}
-          <ComposerBanner.ToggleIcon expanded={!isCollapsed} />
-          {prompt.dismissible ? (
-            // Sits inside the trigger button, so stop the click from toggling
-            // the disclosure. Dismiss closes the question without a reply.
+        title={<span className="text-muted-foreground">{activeQuestion.header}</span>}
+        summary={activeQuestion.question}
+        count={
+          prompt.questions.length > 1
+            ? `${questionIndex + 1}/${prompt.questions.length}`
+            : undefined
+        }
+        actions={
+          prompt.dismissible ? (
+            // Dismiss closes the question without a reply.
             <ComposerBanner.Dismiss
-              render={<span role="button" tabIndex={0} />}
               aria-label="Dismiss question without answering"
               title="Dismiss question without answering"
               disabled={isResponding}
               data-pending-user-input-dismiss
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                onDismiss(prompt.requestId);
-              }}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter" && event.key !== " ") return;
-                event.preventDefault();
-                event.stopPropagation();
-                onDismiss(prompt.requestId);
-              }}
+              onClick={() => onDismiss(prompt.requestId)}
             />
+          ) : undefined
+        }
+        open={!isCollapsed}
+        onToggle={() => setCollapsedQuestionId(isCollapsed ? null : activeQuestion.id)}
+        toggleLabel={
+          isCollapsed ? "Show the question and its options" : "Hide the question and its options"
+        }
+        controls={bodyId}
+      />
+      <ComposerTray.Body id={bodyId} trayId={null} open={!isCollapsed} shown={!isCollapsed}>
+        {/* pb-2 keeps the last option's surface clear of the composer seam's 10px shade. */}
+        <ComposerBanner.Body className="ps-2 pe-2 pb-2 wrap-anywhere sm:ps-1.5 sm:pe-1.5">
+          <ChatMarkdown
+            text={activeQuestion.question}
+            cwd={cwd}
+            threadRef={threadRef}
+            className="text-foreground/85"
+          />
+          {activeQuestion.multiSelect ? (
+            <p className="mt-1 text-secondary-label text-xs">Select one or more options.</p>
           ) : null}
-        </ComposerBanner.Actions>
-      </CollapsibleTrigger>
-      <CollapsiblePanel>
-        <ComposerBanner.Scroll>
-          {/* pb-2 keeps the last option's surface clear of the composer seam's 10px shade. */}
-          <ComposerBanner.Body className="ps-2 pe-2 pb-2 wrap-anywhere sm:ps-1.5 sm:pe-1.5">
-            <ChatMarkdown
-              text={activeQuestion.question}
-              cwd={cwd}
-              threadRef={threadRef}
-              className="text-foreground/85"
-            />
-            {activeQuestion.multiSelect ? (
-              <p className="mt-1 text-secondary-label text-xs">Select one or more options.</p>
-            ) : null}
-            {/* Rows bleed into the Body's padding so their labels share the question's
+          {/* Rows bleed into the Body's padding so their labels share the question's
                 inset and their number hints sit under the header chevron. */}
-            <div className="-mx-1.5 mt-2 space-y-0.5">
-              {activeQuestion.options.map((option, index) => {
-                const optionValue = option.value ?? option.label;
-                const isOptimisticallySelected =
-                  optimisticSingleSelect?.questionId === activeQuestion.id &&
-                  optimisticSingleSelect.optionValue === optionValue;
-                const isSelected =
-                  isOptimisticallySelected ||
-                  (!customAnswerActive && progress.selectedOptionValues.includes(optionValue));
-                const shortcutKey = index < 9 ? index + 1 : null;
-                const className = cn(
-                  "group flex w-full items-center gap-2 rounded-md py-2 ps-1.5 pe-0.5 text-left outline-none transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/25",
-                  isSelected
-                    ? "bg-muted/55 text-foreground"
-                    : "bg-transparent text-foreground/85 hover:bg-muted/30",
-                  // A submitted answer keeps its look while it sends: the card leaves
-                  // in one fade once it lands, instead of dimming first.
-                  disabled || !canRespond
-                    ? "opacity-50 cursor-not-allowed"
-                    : isResponding
-                      ? "cursor-default"
-                      : "cursor-pointer",
-                );
-                const content = (
-                  <>
-                    <div className="min-w-0 flex-1 flex flex-col gap-0.5">
-                      <span className="text-sm font-medium">{option.label}</span>
-                      {option.description && option.description !== option.label ? (
-                        <span className="text-secondary-label text-2xs">{option.description}</span>
-                      ) : null}
-                    </div>
-                    {isSelected ? (
-                      <span className="flex size-5 shrink-0 items-center justify-center">
-                        <CheckIcon className="size-3.5 text-primary" />
-                      </span>
-                    ) : shortcutKey !== null ? (
-                      <kbd
-                        className={cn(
-                          "flex size-5 shrink-0 items-center justify-center text-3xs font-medium text-muted-foreground tabular-nums",
-                        )}
-                      >
-                        {shortcutKey}
-                      </kbd>
+          <div className="-mx-1.5 mt-2 space-y-0.5">
+            {activeQuestion.options.map((option, index) => {
+              const optionValue = option.value ?? option.label;
+              const isOptimisticallySelected =
+                optimisticSingleSelect?.questionId === activeQuestion.id &&
+                optimisticSingleSelect.optionValue === optionValue;
+              const isSelected =
+                isOptimisticallySelected ||
+                (!customAnswerActive && progress.selectedOptionValues.includes(optionValue));
+              const shortcutKey = index < 9 ? index + 1 : null;
+              const className = cn(
+                "group flex w-full items-center gap-2 rounded-md py-2 ps-1.5 pe-0.5 text-left outline-none transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/25",
+                isSelected
+                  ? "bg-muted/55 text-foreground"
+                  : "bg-transparent text-foreground/85 hover:bg-muted/30",
+                // A submitted answer keeps its look while it sends: the card leaves
+                // in one fade once it lands, instead of dimming first.
+                disabled || !canRespond
+                  ? "opacity-50 cursor-not-allowed"
+                  : isResponding
+                    ? "cursor-default"
+                    : "cursor-pointer",
+              );
+              const content = (
+                <>
+                  <div className="min-w-0 flex-1 flex flex-col gap-0.5">
+                    <span className="text-sm font-medium">{option.label}</span>
+                    {option.description && option.description !== option.label ? (
+                      <span className="text-secondary-label text-2xs">{option.description}</span>
                     ) : null}
-                  </>
-                );
-                return (
-                  <button
-                    key={`${activeQuestion.id}:${optionValue}`}
-                    type="button"
-                    disabled={disabled || isResponding}
-                    onClick={() => {
-                      handleOptionSelection(activeQuestion.id, optionValue);
-                    }}
-                    className={className}
-                  >
-                    {content}
-                  </button>
-                );
-              })}
-            </div>
-          </ComposerBanner.Body>
-        </ComposerBanner.Scroll>
-      </CollapsiblePanel>
-    </Collapsible>
+                  </div>
+                  {isSelected ? (
+                    <span className="flex size-5 shrink-0 items-center justify-center">
+                      <CheckIcon className="size-3.5 text-primary" />
+                    </span>
+                  ) : shortcutKey !== null ? (
+                    <kbd
+                      className={cn(
+                        "flex size-5 shrink-0 items-center justify-center text-3xs font-medium text-muted-foreground tabular-nums",
+                      )}
+                    >
+                      {shortcutKey}
+                    </kbd>
+                  ) : null}
+                </>
+              );
+              return (
+                <button
+                  key={`${activeQuestion.id}:${optionValue}`}
+                  type="button"
+                  disabled={disabled || isResponding}
+                  onClick={() => {
+                    handleOptionSelection(activeQuestion.id, optionValue);
+                  }}
+                  className={className}
+                >
+                  {content}
+                </button>
+              );
+            })}
+          </div>
+        </ComposerBanner.Body>
+      </ComposerTray.Body>
+    </>
   );
 });
