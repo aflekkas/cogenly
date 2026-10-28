@@ -3839,6 +3839,9 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
         environmentId={ctx.activeThreadEnvironmentId}
         item={item}
         visibility={visibility}
+        onToggle={(collapsed) => {
+          ctx.onToggleWorkEntry(row.id, collapsed);
+        }}
       />
     );
   }

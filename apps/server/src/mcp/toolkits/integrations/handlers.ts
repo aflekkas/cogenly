@@ -1,3 +1,4 @@
+import * as SetupRequests from "../../../integrations/IntegrationSetupRequests.ts";
 import {
   IntegrationAddInput,
   IntegrationError,
@@ -101,6 +102,20 @@ const addedByAgent = (fail: (cause: unknown) => OrchestratorMcpFailure) =>
     return { id: agent?.id ?? scope.thread.threadId, name: agent?.name ?? "Coding agent" };
   });
 
+/** Live runtime keeps the agent waiting on the durable inline card. */
+const finishSetup = (
+  scope: Invocation.McpInvocationScope,
+  result: import("@cogenly/contracts").IntegrationConnectResult,
+  accountLabel?: string,
+) =>
+  Effect.serviceOption(SetupRequests.IntegrationSetupRequests).pipe(
+    Effect.flatMap((requests) =>
+      Option.isSome(requests)
+        ? requests.value.finish(scope, result, accountLabel)
+        : Effect.succeed(result),
+    ),
+  );
+
 export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
   integration_native_preview: McpToolAccess.writesEnvironment(() =>
     Effect.gen(function* () {
@@ -202,7 +217,7 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
             fromAgent: true,
           })
           .pipe(Effect.mapError(catalogFailureAt(scope.httpOrigin)));
-        return withAgentNextStep(connected, context);
+        return withAgentNextStep(yield* finishSetup(scope, connected, input.accountLabel), context);
       }
       if (decoded === undefined || "preset" in decoded)
         return yield* new OrchestratorMcpFailure({
@@ -211,7 +226,19 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
         });
       const { integration } = yield* service
         .create(decoded, { addedByAgent: yield* addedByAgent(fail), fromAgent: true })
-        .pipe(Effect.mapError(fail));
+        .pipe(
+          Effect.catchTags({
+            IntegrationError: (error) =>
+              Effect.serviceOption(SetupRequests.IntegrationSetupRequests).pipe(
+                Effect.flatMap((requests) =>
+                  Option.isSome(requests)
+                    ? requests.value.approveCreate(scope, decoded, error)
+                    : Effect.fail(error),
+                ),
+              ),
+          }),
+          Effect.mapError((error) => (isIntegrationError(error) ? fail(error) : error)),
+        );
       const prepared = yield* service
         .prepareSignIn(integration.id, {
           origin: scope.httpOrigin,
@@ -219,7 +246,7 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
           callbackOrigin: input.callbackOrigin,
         })
         .pipe(Effect.mapError(fail));
-      return withAgentNextStep(prepared, context);
+      return withAgentNextStep(yield* finishSetup(scope, prepared, input.accountLabel), context);
     }),
   ),
   integration_update: McpToolAccess.writesEnvironment((input) =>
@@ -258,7 +285,19 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
             preserveScope: agent !== null,
           },
         )
-        .pipe(Effect.mapError(fail));
+        .pipe(
+          Effect.catchTags({
+            IntegrationError: (error) =>
+              Effect.serviceOption(SetupRequests.IntegrationSetupRequests).pipe(
+                Effect.flatMap((requests) =>
+                  Option.isSome(requests)
+                    ? requests.value.approveUpdate(scope, current, input, error)
+                    : Effect.fail(error),
+                ),
+              ),
+          }),
+          Effect.mapError((error) => (isIntegrationError(error) ? fail(error) : error)),
+        );
       const prepared = yield* service
         .prepareSignIn(integration.id, {
           origin: scope.httpOrigin,
@@ -266,7 +305,7 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
           callbackOrigin: input.callbackOrigin,
         })
         .pipe(Effect.mapError(fail));
-      return withAgentNextStep(prepared, { origin: scope.httpOrigin });
+      return withAgentNextStep(yield* finishSetup(scope, prepared), { origin: scope.httpOrigin });
     }),
   ),
   integration_remove: McpToolAccess.writesEnvironment((input) =>

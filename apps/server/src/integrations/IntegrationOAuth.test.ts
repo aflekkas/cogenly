@@ -1,3 +1,26 @@
+import * as AgentAccess from "../agents/AgentAccessScope.ts";
+import * as Agents from "../agents/AgentService.ts";
+import * as Work from "../work/WorkHandoffService.ts";
+import * as Schedules from "../scheduledTasks/ScheduledTaskService.ts";
+import * as AgentStore from "../agents/AgentStore.ts";
+import * as Invocation from "../mcp/McpInvocationContext.ts";
+import * as ToolAccess from "../mcp/McpToolAccess.ts";
+import { liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
+import * as IntegrationHandlers from "../mcp/toolkits/integrations/handlers.ts";
+import { IntegrationsToolkit } from "../mcp/toolkits/integrations/tools.ts";
+import * as SetupRequests from "./IntegrationSetupRequests.ts";
+import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
+import * as AgentWorkspace from "../agents/AgentWorkspaceService.ts";
+import * as ApprovalChanges from "../agents/ApprovalChanges.ts";
+import {
+  TurnItemId,
+  ProjectId,
+  ThreadId,
+  RunId,
+  NodeId,
+  ProviderInstanceId,
+  type OrchestrationV2ServerCommand,
+} from "@cogenly/contracts";
 import { loopbackHttpsPolicy } from "./https.testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -23,6 +46,7 @@ import { runMigrations } from "../persistence/Migrations.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as Vault from "../vault/Vault.ts";
 import * as Credentials from "./IntegrationCredentials.ts";
+import * as OAuth from "./IntegrationOAuth.ts";
 import { CALLBACK_PATH } from "./IntegrationOAuth.ts";
 import * as Integrations from "./Integrations.ts";
 import * as IntegrationOAuthHttp from "./integrationOAuthHttp.ts";
@@ -106,6 +130,398 @@ const whoami = (name: string) =>
   });
 
 describe("Integration OAuth sign-in", () => {
+  it.effect("approving an owner-chat edit after its turn ended applies it and wakes setup", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const mock = yield* startMockAuthServer;
+        const integration = yield* addLinear(mock, "approved-idle");
+        const service = yield* Integrations.Integrations;
+        const sql = yield* SqlClient.SqlClient;
+        const threadId = ThreadId.make("thread:approved-idle");
+        const action = {
+          actionKind: "integration_update",
+          threadId,
+          payload: {
+            id: integration.id,
+            url: integration.url,
+            transport: integration.transport,
+            headers: integration.headers,
+            accountLabel: "Work",
+          },
+        };
+        yield* sql`INSERT INTO agent_approvals(id, agent_id, action_json, status, requested_at) VALUES ('approval:idle', NULL, ${JSON.stringify(action)}, 'pending', '2026-10-26T00:00:00Z')`;
+        const sent: string[] = [];
+        const workspace = yield* AgentWorkspace.AgentWorkspaceService.pipe(
+          Effect.provide(
+            AgentWorkspace.layer.pipe(
+              Layer.provide(
+                Layer.mergeAll(
+                  Layer.succeed(Integrations.Integrations, service),
+                  Layer.mock(AgentAccess.AgentAccessScope)({}),
+                  Layer.mock(AgentStore.AgentStore)({}),
+                  Layer.mock(Agents.AgentService)({}),
+                  Layer.mock(Work.WorkHandoffService)({}),
+                  Layer.mock(Schedules.ScheduledTaskService)({}),
+                  Layer.mock(ThreadManagement.ThreadManagementService)({
+                    getThreadShell: () =>
+                      Effect.succeed(liveThreadShell(threadId, { activeRunId: null })),
+                    sendToThread: (input) =>
+                      Effect.sync(() => {
+                        sent.push(input.text);
+                        return {} as never;
+                      }),
+                  }),
+                ),
+              ),
+            ),
+          ),
+        );
+        const result = yield* workspace.approve("approval:idle");
+        expect(result.approval.status).toBe("approved");
+        expect((yield* service.list()).integrations[0]?.integration.accountLabel).toBe("Work");
+        expect(sent).toHaveLength(1);
+        expect(sent[0]).toContain("integration_update name approved-idle");
+      }),
+    ).pipe(Effect.provide(gatewayLayer())),
+  );
+
+  it.effect("a persisted card survives its ended tool call and the callback wakes its thread", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const mock = yield* startMockAuthServer;
+        const integration = yield* addLinear(mock, "durable-callback");
+        const service = yield* Integrations.Integrations;
+        const sql = yield* SqlClient.SqlClient;
+        const completed = yield* Deferred.make<void>();
+        const sent: string[] = [];
+        const item = {
+          id: TurnItemId.make("turn-item:durable-setup"),
+          type: "secret_request" as const,
+          threadId: ThreadId.make("thread:durable"),
+          runId: RunId.make("run:ended"),
+          nodeId: NodeId.make("node:ended"),
+          label: "Connect Linear",
+          reason: "Waiting for consent",
+          secretStatus: "pending" as const,
+          integrationSetup: { integrationId: integration.id },
+        };
+        yield* sql`INSERT INTO orchestration_v2_projection_turn_items (turn_item_id, thread_id, run_id, node_id, ordinal, type, status, updated_at, payload_json) VALUES (${item.id}, ${item.threadId}, ${item.runId}, ${item.nodeId}, 0, 'secret_request', 'waiting', '2026-10-26T00:00:00Z', ${JSON.stringify(item)})`;
+        yield* Layer.build(
+          SetupRequests.layer.pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                Layer.succeed(Integrations.Integrations, service),
+                ApprovalChanges.layer,
+                Layer.mock(AgentWorkspace.AgentWorkspaceService)({}),
+                Layer.mock(ThreadManagement.ThreadManagementService)({
+                  getThreadRecords: () =>
+                    Effect.succeed({
+                      thread: {
+                        projectId: ProjectId.make("project:durable"),
+                        deletedAt: null,
+                        archivedAt: null,
+                      },
+                      turnItems: [item],
+                    } as never),
+                  sendToThread: (input) =>
+                    Effect.sync(() => {
+                      sent.push(input.text);
+                      return {} as never;
+                    }),
+                  dispatch: (command) =>
+                    Effect.gen(function* () {
+                      expect(command).toMatchObject({
+                        type: "secret_request.record",
+                        secretStatus: "saved",
+                        integrationSetup: { integrationId: integration.id },
+                      });
+                      yield* sql`UPDATE orchestration_v2_projection_turn_items SET payload_json=json_set(payload_json,'$.secretStatus','saved') WHERE turn_item_id=${item.id}`.pipe(
+                        Effect.orDie,
+                      );
+                      yield* Deferred.succeed(completed, undefined);
+                      return {} as never;
+                    }),
+                }),
+              ),
+            ),
+          ),
+        );
+        const link = yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN });
+        yield* service.completeSignIn(yield* consent(link.authorizationUrl, "owner"));
+        yield* Deferred.await(completed);
+        expect(sent).toHaveLength(1);
+        expect(sent[0]).toContain("integration_test");
+        expect(sent[0]).toContain("durable-callback");
+      }),
+    ).pipe(Effect.provide(gatewayLayer())),
+  );
+
+  it.effect("keeps Wispr's public endpoint intact through creation", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const service = yield* Integrations.Integrations;
+        const result = yield* service.create({
+          name: "wispr-regression",
+          displayName: "Wispr Flow",
+          transport: "http",
+          url: "https://api.wisprflow.ai/connect/mcp",
+          auth: { type: "oauth" },
+          headers: {},
+          scope: { type: "all" },
+          hint: "",
+        });
+        expect(result.integration.url).toBe("https://api.wisprflow.ai/connect/mcp");
+        expect(result.integration.endpointRef).toBeUndefined();
+        expect((yield* (yield* Vault.Vault).list({})).items).toHaveLength(0);
+      }),
+    ).pipe(Effect.provide(gatewayLayer())),
+  );
+
+  it.effect(
+    "an owner-chat integration_update waits for inline approval then continues without a retry",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* runMigrations();
+          const mock = yield* startMockAuthServer;
+          const integration = yield* addLinear(mock, "owner-approval");
+          yield* signIn(integration.id, "owner");
+          const service = yield* Integrations.Integrations;
+          const threadId = ThreadId.make("thread:owner-approval");
+          const requested = yield* Deferred.make<void>();
+          let approved = false;
+          const changes = Context.get(
+            yield* Layer.build(ApprovalChanges.layer),
+            ApprovalChanges.ApprovalChanges,
+          );
+          const scope: Invocation.McpInvocationScope = {
+            environmentId: EnvironmentId.make("env:test"),
+            httpOrigin: COGENLY_ORIGIN,
+            requestNamespace: "owner-test",
+            thread: {
+              threadId,
+              providerInstanceId: ProviderInstanceId.make("codex"),
+              providerSessionId: "session:owner",
+            },
+            client: undefined,
+            capabilities: new Set(["orchestration"]),
+            issuedAt: 0,
+          };
+          const dependencies = Layer.mergeAll(
+            Layer.succeed(Invocation.McpInvocationContext, scope),
+            Layer.succeed(Integrations.Integrations, service),
+            Layer.succeed(ApprovalChanges.ApprovalChanges, changes),
+            Layer.mock(ThreadManagement.ThreadManagementService)({
+              getThreadShell: () => Effect.succeed(liveThreadShell(threadId)),
+            }),
+            Layer.mock(AgentStore.AgentStore)({ forThread: () => Effect.succeed(null) }),
+            Layer.mock(AgentWorkspace.AgentWorkspaceService)({
+              requestThreadIntegrationApproval: (_id, action) =>
+                Effect.gen(function* () {
+                  expect(action).toMatchObject({
+                    actionKind: "integration_update",
+                    payload: { id: integration.id, accountLabel: "Work" },
+                  });
+                  yield* Deferred.succeed(requested, undefined);
+                  return { approval: { id: "approval:owner" } as never };
+                }),
+              listApprovals: () =>
+                Effect.succeed({
+                  approvals: [
+                    { id: "approval:owner", status: approved ? "approved" : "pending" },
+                  ] as never,
+                }),
+            }),
+          );
+          const all = dependencies.pipe(
+            Layer.provideMerge(SetupRequests.layer.pipe(Layer.provide(dependencies))),
+          );
+          const toolkit = yield* IntegrationsToolkit.pipe(
+            Effect.provide(
+              ToolAccess.HandlersLayer.layer(IntegrationHandlers.layer).pipe(Layer.provide(all)),
+            ),
+          );
+          const waiting = yield* toolkit
+            .handle("integration_update", { name: integration.name, accountLabel: "Work" })
+            .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(all), Effect.forkScoped);
+          yield* Deferred.await(requested);
+          expect((yield* service.list()).integrations[0]?.integration.accountLabel).toBeUndefined();
+          // The owner's approval executes the exact proposed edit before it releases the pending call.
+          yield* service.update(
+            { id: integration.id, accountLabel: "Work" },
+            { approveCredentials: true },
+          );
+          yield* signIn(integration.id, "owner");
+          approved = true;
+          yield* changes.notify;
+          expect((yield* Fiber.join(waiting)).at(-1)?.result).toMatchObject({
+            integration: { id: integration.id, accountLabel: "Work" },
+          });
+        }),
+      ).pipe(Effect.provide(gatewayLayer())),
+  );
+
+  it.effect("the OAuth callback completes the inline card and resumes its waiting tool call", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const mock = yield* startMockAuthServer;
+        const integration = yield* addLinear(mock, "inline-callback");
+        const service = yield* Integrations.Integrations;
+        const pending = yield* Deferred.make<void>();
+        const recorded: OrchestrationV2ServerCommand[] = [];
+        const requests = yield* SetupRequests.IntegrationSetupRequests.pipe(
+          Effect.provide(
+            SetupRequests.layer.pipe(
+              Layer.provide(
+                Layer.mergeAll(
+                  Layer.succeed(Integrations.Integrations, service),
+                  Layer.mock(ThreadManagement.ThreadManagementService)({
+                    streamDomainEvents: Stream.never,
+                    getThreadRecords: () =>
+                      Effect.succeed({
+                        runs: [
+                          {
+                            id: RunId.make("run:inline"),
+                            rootNodeId: NodeId.make("node:inline"),
+                            status: "running",
+                            providerInstanceId: ProviderInstanceId.make("codex"),
+                          },
+                        ],
+                      } as never),
+                    dispatch: (command) =>
+                      Effect.gen(function* () {
+                        recorded.push(command);
+                        if (
+                          command.type === "secret_request.record" &&
+                          command.secretStatus === "pending"
+                        )
+                          yield* Deferred.succeed(pending, undefined);
+                        return {} as never;
+                      }),
+                  }),
+                  Layer.mock(AgentWorkspace.AgentWorkspaceService)({}),
+                  ApprovalChanges.layer,
+                ),
+              ),
+            ),
+          ),
+        );
+        const waiting = yield* requests
+          .finish(
+            {
+              environmentId: EnvironmentId.make("env:test"),
+              requestNamespace: "inline-test",
+              thread: {
+                threadId: ThreadId.make("thread:inline"),
+                providerInstanceId: ProviderInstanceId.make("codex"),
+                providerSessionId: "session:inline",
+              },
+              client: undefined,
+              capabilities: new Set(["orchestration"]),
+              issuedAt: 0,
+            },
+            { integration },
+          )
+          .pipe(Effect.forkScoped);
+        yield* Deferred.await(pending);
+        const link = yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN });
+        yield* service.completeSignIn(yield* consent(link.authorizationUrl, "owner"));
+        expect((yield* Fiber.join(waiting)).integration?.id).toBe(integration.id);
+        expect(
+          recorded
+            .filter((command) => command.type === "secret_request.record")
+            .map((command) => command.secretStatus),
+        ).toEqual(["pending", "saved"]);
+        expect(recorded[0]).toMatchObject({ integrationSetup: { integrationId: integration.id } });
+      }),
+    ).pipe(Effect.provide(gatewayLayer())),
+  );
+
+  it.effect(
+    "follows RFC 9728 to a different authorization-server origin and registers a public client",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* runMigrations();
+          const resource = yield* startMockAuthServer;
+          const auth = yield* startMockAuthServer;
+          resource.authorizationServerBase = auth.base;
+          const service = yield* Integrations.Integrations;
+          const integration = yield* addLinear(resource, "cross-origin");
+          const link = yield* service.beginSignIn(integration.id, {
+            origin: "http://127.0.0.1:4773",
+          });
+          const url = new URL(link.authorizationUrl);
+          expect(url.origin).toBe(new URL(auth.base).origin);
+          expect(url.searchParams.get("redirect_uri")).toBe(
+            `http://127.0.0.1:4773${CALLBACK_PATH}`,
+          );
+          expect(url.searchParams.get("resource")).toBe(`${resource.base}/mcp`);
+          expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+          expect(auth.registrationRequests).toEqual([
+            expect.objectContaining({
+              token_endpoint_auth_method: "none",
+              redirect_uris: [`http://127.0.0.1:4773${CALLBACK_PATH}`],
+            }),
+          ]);
+          expect(resource.registrations).toBe(0);
+        }),
+      ).pipe(Effect.provide(gatewayLayer())),
+  );
+
+  it.effect("surfaces DCR host, status and OAuth error in both the request and the row", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const mock = yield* startMockAuthServer;
+        mock.registrationError = {
+          status: 400,
+          error: "invalid_redirect_uri",
+          error_description: "Register the callback first",
+        };
+        const integration = yield* addLinear(mock, "registration-error");
+        const service = yield* Integrations.Integrations;
+        const error = yield* service
+          .beginSignIn(integration.id, { origin: COGENLY_ORIGIN })
+          .pipe(Effect.flip);
+        expect(error.oauthFailure).toEqual({
+          stage: "DCR",
+          host: new URL(mock.base).host,
+          status: 400,
+          error: "invalid_redirect_uri",
+          description: "Register the callback first",
+        });
+        expect(error.message).toContain("HTTP 400");
+        expect((yield* statusOf(integration.id))?.message).toBe(error.message);
+      }),
+    ).pipe(Effect.provide(gatewayLayer())),
+  );
+
+  it.effect("uses CIMD on a public HTTPS callback when the AS has no DCR", () =>
+    Effect.gen(function* () {
+      const protocol = yield* OAuth.make;
+      const registration = yield* protocol.register(
+        {
+          resource: "https://resource.example/mcp",
+          issuer: "https://auth.example",
+          authorizationEndpoint: "https://auth.example/authorize",
+          tokenEndpoint: "https://auth.example/token",
+          clientIdMetadataDocumentSupported: true,
+        },
+        `https://cogenly.example${CALLBACK_PATH}`,
+      );
+      expect(registration.registration).toEqual({
+        clientId: "https://cogenly.example/.well-known/cogenly-oauth-client",
+        authMethod: "none",
+        redirectUris: [`https://cogenly.example${CALLBACK_PATH}`],
+      });
+    }).pipe(Effect.provide(FetchHttpClient.layer)),
+  );
+
   it.effect(
     "never sends an approved resource client secret to a discovered foreign auth server",
     () =>
@@ -402,7 +818,8 @@ describe("Integration OAuth sign-in", () => {
           .beginSignIn(other.id, { origin: "http://localhost:3000", fromAgent: true })
           .pipe(Effect.result);
         expect(missing._tag).toBe("Failure");
-        if (missing._tag === "Failure") expect(missing.failure.cause).toContain("Settings");
+        if (missing._tag === "Failure")
+          expect(missing.failure.cause).toContain("inline integration card");
         const explicit = yield* restarted.beginSignIn(other.id, {
           origin: "http://localhost:3000",
           fromAgent: true,

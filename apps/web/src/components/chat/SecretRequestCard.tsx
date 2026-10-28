@@ -1,3 +1,5 @@
+import { AnimatedHeight } from "../AnimatedHeight";
+import { IntegrationSetupCard } from "./IntegrationSetupCard";
 import {
   SECRET_REQUEST_DEFAULT_PLACEHOLDER,
   SECRET_REQUEST_PRIVACY_NOTE,
@@ -29,9 +31,16 @@ import { WorkLogRow } from "./WorkLog";
 export function SecretRequestCard(props: {
   readonly environmentId: EnvironmentId;
   readonly item: SecretRequestItem;
+  readonly onToggle?: (collapsed: boolean) => void;
   readonly visibility: OrchestrationV2ProjectedTurnItem["visibility"];
 }) {
   const { item } = props;
+  if (item.integrationSetup !== undefined)
+    return (
+      <AnimatedHeight>
+        <IntegrationSetupCard {...props} />
+      </AnimatedHeight>
+    );
   const display = secretRequestDisplay(item, props.visibility);
   if (display.kind === "answered" || display.kind === "pending-elsewhere") {
     const Icon =

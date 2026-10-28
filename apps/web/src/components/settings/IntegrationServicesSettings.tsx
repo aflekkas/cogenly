@@ -447,6 +447,9 @@ function AccountRow({
           <span ref={statusRef}>{status.label}</span>
           {/* The title already names the account. */}
           {` · ${scopeLabel(integration.scope, labels)}`}
+          {summary.message ? (
+            <span className="block text-destructive">{summary.message}</span>
+          ) : null}
           {paired && summary.notSyncedReason ? ` · ${summary.notSyncedReason}` : ""}
         </>
       }

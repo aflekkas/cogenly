@@ -346,6 +346,7 @@ export interface SignInCallback {
   readonly state: string | undefined;
   readonly code: string | undefined;
   readonly error: string | undefined;
+  readonly errorDescription?: string | undefined;
   readonly iss: string | undefined;
 }
 
@@ -596,10 +597,11 @@ const CHECK_MESSAGES: Partial<Record<IntegrationError["reason"], string>> = {
 
 /** Status text owners and agents see; upstream messages are already bounded. */
 const checkMessage = (error: IntegrationError): string => {
+  if (error.oauthFailure) return error.message;
   const waiting = refreshWaitMessage(error);
   if (waiting !== undefined) return waiting;
   const { reason, cause } = error;
-  const base = CHECK_MESSAGES[reason] ?? "The request could not be completed.";
+  const base = CHECK_MESSAGES[reason] ?? error.message;
   return (reason === "upstream_error" || reason === "scope_missing") &&
     typeof cause === "string" &&
     cause.trim() !== ""
@@ -2813,15 +2815,20 @@ const make = (options: IntegrationsOptions = {}) =>
           )
             return yield* rejected;
           if (callback.error !== undefined || callback.code === undefined) {
-            yield* recordCheck(
-              integration,
-              new IntegrationError({
-                operation: "sign in",
-                reason: "upstream_error",
-                cause: `Sign-in did not finish (${(callback.error ?? "no code").slice(0, 64)}).`,
-              }),
-            );
-            return yield* rejected;
+            const error = new IntegrationError({
+              operation: "sign in",
+              reason: "upstream_error",
+              oauthFailure: {
+                stage: "authorize",
+                host: new URL(pending.server.authorizationEndpoint).host,
+                error: (callback.error ?? "no_code").slice(0, 64),
+                ...(callback.errorDescription
+                  ? { description: callback.errorDescription.slice(0, 500) }
+                  : {}),
+              },
+            });
+            yield* recordCheck(integration, error);
+            return yield* error;
           }
           const previous = integration.oauthState;
           // A reused registration's secret is the one stored with the earlier sign-in.
@@ -2853,9 +2860,11 @@ const make = (options: IntegrationsOptions = {}) =>
                   new IntegrationError({
                     operation: "complete sign in",
                     reason: "upstream_error",
+                    oauthFailure: error.oauthFailure,
                     cause: error.message,
                   }),
               ),
+              Effect.tapError((error) => recordCheck(integration, error)),
             );
           // A new sign-in anywhere replaces the shared item and picks its refresher afresh.
           const refreshOwner = yield* peers.defaultRefreshOwner;

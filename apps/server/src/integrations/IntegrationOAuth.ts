@@ -1,4 +1,8 @@
-import { IntegrationError } from "@cogenly/contracts";
+import {
+  IntegrationError,
+  IntegrationOAuthFailure,
+  integrationOAuthFailureMessage,
+} from "@cogenly/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -21,6 +25,17 @@ import { IntegrationEndpointPolicy, withPublicEndpoint } from "./RemoteEndpoint.
 
 /** Where the browser returns after consent, on the origin that started sign-in. */
 export const CALLBACK_PATH = "/oauth/integrations/callback";
+export const CLIENT_METADATA_PATH = "/.well-known/cogenly-oauth-client";
+
+/** CIMD is useful on a publicly reachable HTTPS environment; loopback clients use DCR. */
+export const clientMetadataDocument = (origin: string) => ({
+  client_id: `${origin}${CLIENT_METADATA_PATH}`,
+  client_name: "Cogenly",
+  redirect_uris: [`${origin}${CALLBACK_PATH}`],
+  grant_types: ["authorization_code", "refresh_token"],
+  response_types: ["code"],
+  token_endpoint_auth_method: "none",
+});
 
 const METADATA_TIMEOUT = Duration.seconds(10);
 const MAX_RESPONSE_BYTES = 256 * 1024;
@@ -34,6 +49,7 @@ export const OAuthServer = Schema.Struct({
   authorizationEndpoint: Schema.String,
   tokenEndpoint: Schema.String,
   registrationEndpoint: Schema.optional(Schema.String),
+  clientIdMetadataDocumentSupported: Schema.optional(Schema.Boolean),
   scopesSupported: Schema.optional(Schema.Array(Schema.String)),
   tokenEndpointAuthMethods: Schema.optional(Schema.Array(Schema.String)),
   authorizationResponseIssParameterSupported: Schema.optional(Schema.Boolean),
@@ -75,9 +91,11 @@ export interface TokenSet {
  */
 export class OAuthTokenError extends Schema.TaggedError<OAuthTokenError>()("OAuthTokenError", {
   revoked: Schema.Boolean,
+  oauthFailure: Schema.optional(IntegrationOAuthFailure),
   code: Schema.optional(Schema.String),
 }) {
   override get message(): string {
+    if (this.oauthFailure) return integrationOAuthFailureMessage(this.oauthFailure);
     return this.revoked
       ? "The sign-in was revoked or expired."
       : `The token request failed${this.code ? ` (${this.code})` : ""}.`;
@@ -93,6 +111,8 @@ const ProtectedResourceMetadata = Schema.Struct({
   scopes_supported: Schema.optional(Schema.Array(Schema.String)),
 });
 const AuthorizationServerMetadata = Schema.Struct({
+  client_id_metadata_document_supported: Schema.optional(Schema.Boolean),
+  scopes_supported: Schema.optional(Schema.Array(Schema.String)),
   issuer: Schema.String,
   authorization_endpoint: Schema.String,
   token_endpoint: Schema.String,
@@ -111,7 +131,10 @@ const TokenResponse = Schema.Struct({
   refresh_token: Schema.optional(Schema.String),
   expires_in: Schema.optional(Schema.Union([Schema.Number, Schema.NumberFromString])),
 });
-const TokenErrorResponse = Schema.Struct({ error: Schema.String });
+const TokenErrorResponse = Schema.Struct({
+  error: Schema.optional(Schema.String),
+  error_description: Schema.optional(Schema.String),
+});
 
 const decodeResourceMetadata = Schema.decodeUnknownOption(
   Schema.fromJsonString(ProtectedResourceMetadata),
@@ -122,6 +145,24 @@ const decodeServerMetadata = Schema.decodeUnknownOption(
 const decodeRegistration = Schema.decodeUnknownOption(Schema.fromJsonString(RegistrationResponse));
 const decodeToken = Schema.decodeUnknownOption(Schema.fromJsonString(TokenResponse));
 const decodeTokenError = Schema.decodeUnknownOption(Schema.fromJsonString(TokenErrorResponse));
+const responseFailure = (
+  stage: string,
+  url: string,
+  response: { status: number; text: string },
+) => {
+  const error = Option.getOrUndefined(decodeTokenError(response.text));
+  // Only protocol error fields reach the UI; never echo arbitrary response bodies.
+  const bounded = (value: string | undefined, size: number) =>
+    value?.replace(/\s+/g, " ").slice(0, size);
+  return {
+    stage,
+    host: new URL(url).host,
+    status: response.status,
+    ...(error?.error ? { error: bounded(error.error, 64) } : {}),
+    ...(error?.error_description ? { description: bounded(error.error_description, 500) } : {}),
+  };
+};
+
 const isIntegrationError = Schema.is(IntegrationError);
 
 /** `resource_metadata` from a `WWW-Authenticate: Bearer ...` challenge. */
@@ -222,7 +263,20 @@ export const make = Effect.gen(function* () {
       Effect.mapError((cause) =>
         isIntegrationError(cause)
           ? cause
-          : new IntegrationError({ operation, reason: "upstream_unreachable" }),
+          : new IntegrationError({
+              operation,
+              reason: "upstream_unreachable",
+              cause,
+              oauthFailure: {
+                stage:
+                  operation === "discover"
+                    ? "discovery"
+                    : operation === "register"
+                      ? "DCR"
+                      : "token",
+                host: new URL(request.url).host,
+              },
+            }),
       ),
     );
 
@@ -231,8 +285,10 @@ export const make = Effect.gen(function* () {
     urls: ReadonlyArray<string>,
     decode: (text: string) => Option.Option<A>,
     operation: string,
+    required = false,
   ) =>
     Effect.gen(function* () {
+      let lastFailure: IntegrationError | undefined;
       for (const url of urls) {
         const found = yield* send(
           HttpClientRequest.get(url).pipe(
@@ -240,15 +296,26 @@ export const make = Effect.gen(function* () {
           ),
           operation,
         ).pipe(
-          Effect.map((response) =>
-            response.status >= 200 && response.status < 300
-              ? decode(response.text)
-              : Option.none<A>(),
-          ),
-          Effect.orElseSucceed(() => Option.none<A>()),
+          Effect.map((response) => {
+            const decoded =
+              response.status >= 200 && response.status < 300
+                ? decode(response.text)
+                : Option.none<A>();
+            lastFailure ??= new IntegrationError({
+              operation,
+              reason: "upstream_error",
+              oauthFailure: responseFailure("discovery", url, response),
+            });
+            return decoded;
+          }),
+          Effect.catch((error) => {
+            lastFailure ??= error;
+            return Effect.succeed(Option.none<A>());
+          }),
         );
         if (Option.isSome(found)) return found;
       }
+      if (required && lastFailure) return yield* lastFailure;
       return Option.none<A>();
     });
 
@@ -318,6 +385,7 @@ export const make = Effect.gen(function* () {
         authorizationServerUrls(issuer),
         decodeServerMetadata,
         "discover",
+        true,
       );
       if (Option.isNone(metadata)) return yield* failure("discover", "no authorization server");
       const found = metadata.value;
@@ -340,6 +408,11 @@ export const make = Effect.gen(function* () {
         Option.isSome(named) && URL.parse(named.value)?.origin === endpoint.origin
           ? named.value
           : endpoint.href;
+      const hintedScope = Option.flatMapNullishOr(
+        probe,
+        (response) =>
+          /(?:^|[, ])scope="([^"]+)"/i.exec(response.headers["www-authenticate"] ?? "")?.[1],
+      );
       const scopes = Option.flatMapNullishOr(
         resourceMetadata,
         (metadata) => metadata.scopes_supported,
@@ -354,7 +427,14 @@ export const make = Effect.gen(function* () {
         ...(registrationEndpoint === undefined
           ? {}
           : { registrationEndpoint: registrationEndpoint.href }),
-        ...(Option.isSome(scopes) ? { scopesSupported: scopes.value } : {}),
+        clientIdMetadataDocumentSupported: found.client_id_metadata_document_supported === true,
+        ...(Option.isSome(hintedScope)
+          ? { scopesSupported: hintedScope.value.split(/\s+/) }
+          : Option.isSome(scopes)
+            ? { scopesSupported: scopes.value }
+            : found.scopes_supported
+              ? { scopesSupported: found.scopes_supported }
+              : {}),
         ...(found.token_endpoint_auth_methods_supported === undefined
           ? {}
           : { tokenEndpointAuthMethods: found.token_endpoint_auth_methods_supported }),
@@ -364,8 +444,24 @@ export const make = Effect.gen(function* () {
   /** Dynamic client registration (RFC 7591) as a public client using PKCE. */
   const register = (server: OAuthServer, redirectUri: string) =>
     Effect.gen(function* () {
-      if (server.registrationEndpoint === undefined)
+      if (server.registrationEndpoint === undefined) {
+        const callback = new URL(redirectUri);
+        if (
+          server.clientIdMetadataDocumentSupported &&
+          callback.protocol === "https:" &&
+          callback.pathname === CALLBACK_PATH
+        ) {
+          return {
+            registration: {
+              clientId: clientMetadataDocument(callback.origin).client_id,
+              authMethod: "none" as const,
+              redirectUris: [redirectUri],
+            },
+            clientSecret: undefined,
+          };
+        }
         return yield* new IntegrationError({ operation: "register", reason: "client_id_required" });
+      }
       const response = yield* send(
         HttpClientRequest.post(server.registrationEndpoint).pipe(
           HttpClientRequest.setHeader("accept", "application/json"),
@@ -383,10 +479,15 @@ export const make = Effect.gen(function* () {
         response.status >= 200 && response.status < 300
           ? decodeRegistration(response.text)
           : Option.none();
-      if (Option.isNone(registered)) return yield* failure("register", "rejected");
+      if (Option.isNone(registered))
+        return yield* new IntegrationError({
+          operation: "register",
+          reason: "upstream_error",
+          oauthFailure: responseFailure("DCR", server.registrationEndpoint, response),
+        });
       const { client_id, client_secret, token_endpoint_auth_method } = registered.value;
       const authMethod: ClientAuthMethod =
-        client_secret === undefined
+        token_endpoint_auth_method === "none" || client_secret === undefined
           ? "none"
           : token_endpoint_auth_method === "client_secret_post"
             ? "client_secret_post"
@@ -422,7 +523,9 @@ export const make = Effect.gen(function* () {
           body.client_secret = oauthClient.clientSecret;
       }
       const response = yield* send(HttpClientRequest.bodyUrlParams(request, body), operation).pipe(
-        Effect.mapError(() => new OAuthTokenError({ revoked: false })),
+        Effect.mapError(
+          (error) => new OAuthTokenError({ revoked: false, oauthFailure: error.oauthFailure }),
+        ),
       );
       if (response.status >= 200 && response.status < 300) {
         const decoded = decodeToken(response.text);
@@ -430,9 +533,10 @@ export const make = Effect.gen(function* () {
         return decoded.value;
       }
       const code = Option.map(decodeTokenError(response.text), (error) =>
-        error.error.slice(0, MAX_ERROR_CODE_CHARS),
+        error.error?.slice(0, MAX_ERROR_CODE_CHARS),
       );
       return yield* new OAuthTokenError({
+        oauthFailure: responseFailure("token", server.tokenEndpoint, response),
         revoked:
           (response.status === 400 || response.status === 401) &&
           Option.isSome(code) &&

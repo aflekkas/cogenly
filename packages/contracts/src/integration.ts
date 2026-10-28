@@ -488,8 +488,22 @@ export const IntegrationTestResult = Schema.Struct({
 });
 export type IntegrationTestResult = typeof IntegrationTestResult.Type;
 
+/** Bounded OAuth diagnostics, without request URLs, codes or credentials. */
+export const IntegrationOAuthFailure = Schema.Struct({
+  stage: Schema.String,
+  host: Schema.String,
+  status: Schema.optional(Schema.Number),
+  error: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.String),
+});
+export type IntegrationOAuthFailure = typeof IntegrationOAuthFailure.Type;
+
+export const integrationOAuthFailureMessage = (failure: IntegrationOAuthFailure) =>
+  `OAuth ${failure.stage} failed at ${failure.host}${failure.status === undefined ? "" : ` (HTTP ${failure.status})`}${failure.error ? `: ${failure.error}` : ""}${failure.description ? ` — ${failure.description}` : ""}.`;
+
 export class IntegrationError extends Schema.TaggedError<IntegrationError>()("IntegrationError", {
   operation: Schema.String,
+  oauthFailure: Schema.optional(IntegrationOAuthFailure),
   reason: Schema.Literals([
     "storage",
     "not_found",
@@ -514,6 +528,7 @@ export class IntegrationError extends Schema.TaggedError<IntegrationError>()("In
   cause: Schema.optional(Schema.Defect()),
 }) {
   override get message(): string {
+    if (this.oauthFailure) return integrationOAuthFailureMessage(this.oauthFailure);
     return `Could not ${this.operation} integration (${this.reason}).`;
   }
 }

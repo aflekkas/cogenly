@@ -125,6 +125,8 @@ const make = Effect.gen(function* () {
       if (run === undefined || ThreadManagementService.isTerminalRunStatus(run.status)) {
         return yield* new SecretRequestError({ reason: "agent_stopped" });
       }
+      if (item.integrationSetup !== undefined)
+        return yield* new SecretRequestError({ reason: "not_found" });
       // Store first: the card only says saved once the value is kept. Create,
       // not set: a second answer racing this one must not replace the value.
       // A value already there on a card still pending is an earlier save whose

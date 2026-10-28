@@ -9,7 +9,7 @@ import {
   type IntegrationCatalogEntry,
   type IntegrationConnectionStatus,
   type IntegrationConnectResult,
-  type IntegrationError,
+  IntegrationError,
   type IntegrationSetupAction,
   type IntegrationSetupStep,
   type IntegrationSummary,
@@ -387,21 +387,21 @@ export const setupActionFor = (input: SetupInput): IntegrationSetupAction | unde
       return retry(
         input,
         `Couldn't reach ${service}`,
-        `${service} didn't answer. Check your connection, then try again.`,
+        input.message ?? `${service} didn't answer. Check your connection, then try again.`,
         input.status === "needs_sign_in" ? "sign_in" : "test",
       );
     case "upstream_error":
       return retry(
         input,
         `${service} returned an error`,
-        `${service} answered with an error. Try again in a moment.`,
+        input.message ?? `${service} answered with an error. Try again in a moment.`,
         input.status === "needs_sign_in" ? "sign_in" : "test",
       );
     case "approval_required":
       return fix(
         input,
         "Needs your approval",
-        "This change widens access or moves a saved secret to a new server, so the owner makes it in Settings.",
+        "This change widens access or moves a saved secret to a new server, so the owner approves it inline in this thread.",
       );
     case "disabled":
       return fix(input, `${service} is turned off`, "Turn it on to let agents use it.", "enable");
@@ -485,9 +485,7 @@ export const agentNextStep = (
   },
 ): string => {
   const retry =
-    context.name === undefined
-      ? `Retry integration_add${context.entry === undefined ? "" : ` with catalogId ${context.entry.id}`}.`
-      : `Retry integration_update with name ${context.name}.`;
+    "Wait for the inline card. Cogenly notifies this thread when it connects; then run integration_test and list the tools. Do not poll or create another integration.";
   const copies =
     action.type === "oauth_client"
       ? action.steps
@@ -496,10 +494,10 @@ export const agentNextStep = (
           )
           .join("\n")
       : "";
-  return `${integrationSetupGuide(context.entry?.id ?? "custom").instructions}\n\nCurrent requirement: ${action.title}. ${action.type === "install_runtime" ? action.command : ["sign_in", "retry", "fix"].includes(action.type) ? action.message : ""} ${copies}\n${retry}`;
+  return `Use the inline integration card for approval, sign-in or a field correction. Do not send a Settings URL. ${integrationSetupGuide(context.entry?.id ?? "custom").instructions}\n\nCurrent requirement: ${action.title}. ${action.type === "install_runtime" ? action.command : ["sign_in", "retry", "fix"].includes(action.type) ? action.message : ""} ${copies}\n${retry}`;
 };
 
-/** A connect or update result for an agent: its setup action, in words and as a Settings link. */
+/** A connect or update result for an agent, with guidance for its inline card. */
 export const withAgentNextStep = (
   result: IntegrationConnectResult,
   context: { readonly origin: string | undefined; readonly accountLabel?: string | undefined },
@@ -512,7 +510,6 @@ export const withAgentNextStep = (
   );
   return {
     ...result,
-    settingsUrl,
     nextStep: agentNextStep(setup, {
       settingsUrl,
       entry: setup.catalogId === undefined ? undefined : integrationCatalogEntry(setup.catalogId),
@@ -528,7 +525,6 @@ export const agentSummary = (summary: IntegrationSummary, origin: string | undef
   const settingsUrl = settingsSetupUrl(origin, summary.integration.id);
   return {
     ...summary,
-    settingsUrl,
     nextStep: agentNextStep(summary.setup, {
       settingsUrl,
       entry: integrationCatalogEntryFor(summary.integration),
@@ -550,7 +546,7 @@ const PLAIN_FAILURES: Partial<Record<IntegrationError["reason"], string>> = {
  * fault rather than the request's.
  */
 export const agentFailureMessage = (
-  error: { readonly reason: IntegrationError["reason"]; readonly cause?: unknown },
+  error: Pick<IntegrationError, "reason" | "cause" | "oauthFailure">,
   origin: string | undefined,
 ): { readonly message: string; readonly transient: boolean } => {
   const transient =
@@ -558,6 +554,8 @@ export const agentFailureMessage = (
     error.reason === "upstream_error" ||
     error.reason === "upstream_timeout" ||
     error.reason === "upstream_unreachable";
+  if (error.oauthFailure)
+    return { message: new IntegrationError({ ...error, operation: "sign in" }).message, transient };
   const plain = PLAIN_FAILURES[error.reason];
   if (plain !== undefined) return { message: plain, transient };
   const entry =
