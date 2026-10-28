@@ -18,13 +18,6 @@ import {
 
 export type UpdateRowStatus = "current" | "available" | "updating" | "failed";
 
-export const UPDATE_ROW_STATUS_LABELS: Record<UpdateRowStatus, string> = {
-  current: "Up to date",
-  available: "Update available",
-  updating: "Updating",
-  failed: "Failed",
-};
-
 /** One component in the rail's update list. */
 export interface UpdateRowView {
   readonly key: string;
@@ -205,59 +198,73 @@ export function rowNeedsUpdate(row: Pick<UpdateRowView, "status">): boolean {
   return row.status === "available" || row.status === "failed";
 }
 
-/**
- * The popover header's line: what is updating, else what needs an update.
- * `batch` is every row that has been updating since the popover last saw
- * nothing updating, so "Updating 2 of 3" counts on as rows finish.
- */
-export function describeUpdatesSummary(input: {
-  readonly rows: ReadonlyArray<Pick<UpdateRowView, "key" | "status">>;
-  readonly batchSize: number;
-  readonly checking: boolean;
-}): string {
-  const updating = input.rows.filter((row) => row.status === "updating").length;
-  if (updating > 0) {
-    const total = Math.max(input.batchSize, updating);
-    return total === 1 ? "Updating…" : `Updating ${total - updating + 1} of ${total}…`;
-  }
-  if (input.checking) return "Checking…";
-  const needed = input.rows.filter(rowNeedsUpdate).length;
-  if (needed > 0) return `${needed} ${needed === 1 ? "update" : "updates"} available`;
-  return "Everything is up to date";
+/** "Claude", "Claude and Codex", "Claude, Codex and 2 more". */
+function listNames(names: ReadonlyArray<string>): string {
+  if (names.length <= 2) return names.join(" and ");
+  return `${names[0]}, ${names[1]} and ${names.length - 2} more`;
 }
 
 export type UpdatesHeroTone = "current" | "pending" | "busy" | "failed";
 
 /**
- * The popover's one status line, under the app's name: what the app is doing,
- * else what anything else is doing, else what needs an update. `ready` is an
- * app update downloaded and waiting for a restart.
+ * The popover's one status line, under the app's name: one sentence for the
+ * whole state. The app speaks first, then whatever is updating, failed or
+ * waiting, by name. It never counts: the rows below already show each one.
+ * `components` is one entry per row (a provider across every machine), and
+ * `ready` is an app update downloaded and waiting for a restart.
  */
 export function describeUpdatesHeroStatus(input: {
   readonly app: Pick<UpdateRowView, "status" | "detail" | "latestVersion">;
   readonly ready: boolean;
   readonly restarting: boolean;
-  readonly rows: ReadonlyArray<Pick<UpdateRowView, "key" | "status">>;
-  readonly batchSize: number;
+  readonly components: ReadonlyArray<Pick<UpdateRowView, "name" | "status">>;
   readonly checking: boolean;
 }): { readonly tone: UpdatesHeroTone; readonly label: string } {
-  const { app } = input;
+  const { app, components } = input;
+  const named = (status: UpdateRowStatus) =>
+    listNames(components.filter((row) => row.status === status).map((row) => row.name));
   if (input.restarting) return { tone: "busy", label: "Restarting soon" };
   if (app.status === "updating") return { tone: "busy", label: app.detail ?? "Updating…" };
-  const summary = describeUpdatesSummary(input);
-  if (input.rows.some((row) => row.status === "updating") || input.checking) {
-    return { tone: "busy", label: summary };
+  if (components.some((row) => row.status === "updating")) {
+    return { tone: "busy", label: `Updating ${named("updating")}…` };
   }
+  if (input.checking) return { tone: "busy", label: "Checking for updates…" };
   if (app.status === "failed") return { tone: "failed", label: app.detail ?? "Update failed" };
   if (app.status === "available" && app.latestVersion) {
     const version = /^\d/.test(app.latestVersion) ? `v${app.latestVersion}` : app.latestVersion;
     return {
       tone: "pending",
-      label: input.ready ? `${version} is ready to install` : `${version} is available`,
+      label: input.ready ? `${version} is ready. Restart to finish.` : `${version} is available`,
     };
   }
-  if (input.rows.some(rowNeedsUpdate)) return { tone: "pending", label: summary };
-  return { tone: "current", label: summary };
+  if (components.some((row) => row.status === "failed")) {
+    return { tone: "failed", label: `${named("failed")} didn't update` };
+  }
+  if (components.some((row) => row.status === "available")) {
+    return { tone: "pending", label: `Updates for ${named("available")}` };
+  }
+  return { tone: "current", label: "Everything is up to date" };
+}
+
+/** A build suffix worth hiding: "-R6996.1", "-20261027", "+abc". Not "-beta.1" or "-rc.2". */
+const BUILD_SUFFIX = /(?:-[A-Za-z]?\d[\w.]*|\+[\w.-]+)$/;
+
+/**
+ * The versions a row shows, with build suffixes dropped so "1.4.13-R6996.1 →
+ * 1.4.14-R7309.1" reads "1.4.13 → 1.4.14". A pair that differs only in its
+ * build keeps them. The row's tooltip carries the full values.
+ */
+export function shortenVersionPair(
+  current: string | null,
+  next: string | null,
+): { readonly current: string | null; readonly next: string | null } {
+  const short = (version: string | null) => version?.replace(BUILD_SUFFIX, "") ?? null;
+  const shortCurrent = short(current);
+  const shortNext = short(next);
+  if (current && next && current !== next && shortCurrent === shortNext) {
+    return { current, next };
+  }
+  return { current: shortCurrent, next: shortNext };
 }
 
 /** The newest of several "checked at" instants, or null when none parse. */
@@ -281,26 +288,4 @@ export function formatCheckedAgo(checkedAt: number, now: number): string {
   if (hours < 24) return hours === 1 ? "1 hour ago" : `${hours} hours ago`;
   const days = Math.floor(hours / 24);
   return days === 1 ? "yesterday" : `${days} days ago`;
-}
-
-/**
- * The footer's line. While the app updates beside other rows, the batch count
- * ("Updating 1 of 2…") lives here, as the hero shows the app's own progress;
- * otherwise it is how many updates are left and when they were checked.
- */
-export function describeUpdatesFooter(input: {
-  readonly app: Pick<UpdateRowView, "status">;
-  readonly rows: ReadonlyArray<Pick<UpdateRowView, "key" | "status">>;
-  readonly batchSize: number;
-  readonly checkedAgo: string | null;
-}): string {
-  const updating = input.rows.filter((row) => row.status === "updating").length;
-  if (input.app.status === "updating" && Math.max(updating, input.batchSize) > 1) {
-    return describeUpdatesSummary({ ...input, checking: false });
-  }
-  const needed = input.rows.filter(rowNeedsUpdate).length;
-  const count = needed > 0 ? `${needed} ${needed === 1 ? "update" : "updates"}` : null;
-  if (count && input.checkedAgo) return `${count} · checked ${input.checkedAgo}`;
-  if (count) return count;
-  return input.checkedAgo ? `Checked ${input.checkedAgo}` : "";
 }

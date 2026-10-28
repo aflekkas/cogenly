@@ -6,7 +6,8 @@ import { resolveStorage } from "~/lib/storage";
 /**
  * Cogenly's release notes from the public GitHub Releases API, for the rail's
  * Updates popover. Unauthenticated requests get 60 an hour per IP, so this
- * fetches only while the popover is open and at most every half hour. The last
+ * fetches only when the popover may open (app start, hovering or focusing its
+ * button, opening it) and at most every half hour. The last
  * good list is kept in localStorage, so the notes still show offline; failures
  * stay quiet and keep whatever was there.
  */
