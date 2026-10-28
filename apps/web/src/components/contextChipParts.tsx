@@ -209,6 +209,7 @@ export function FileChip(props: {
   error?: boolean;
   unresolved?: boolean;
   onOpen?: (() => void) | undefined;
+  onContextMenu?: ((event: MouseEvent<HTMLElement>) => void) | undefined;
 }) {
   const content = <FileChipContent {...props} />;
   const state = props.unresolved
@@ -222,6 +223,7 @@ export function FileChip(props: {
     "aria-label": [props.accessibleLabel, props.suffix].filter(Boolean).join(", "),
     "data-markdown-copy": props.copyMarkdown,
     "data-context-unresolved": props.unresolved ? "true" : undefined,
+    onContextMenu: props.onContextMenu,
   } as const;
   return (
     <Tooltip>
