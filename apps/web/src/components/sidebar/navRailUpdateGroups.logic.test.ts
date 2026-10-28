@@ -183,6 +183,18 @@ describe("summarizeComponent", () => {
       ),
     ).toMatchObject({ failure: "Failed on 2 machines", split: true });
   });
+
+  it("opens on each machine when several fail on the same versions", () => {
+    expect(
+      summarizeComponent(
+        on(
+          row("codex", "failed", "1", "2", "npm exited 1"),
+          row("codex", "failed", "1", "2", "EACCES"),
+        ),
+        none,
+      ),
+    ).toMatchObject({ current: "1", next: "2", failure: "Failed on 2 machines", split: true });
+  });
 });
 
 describe("collectUpdateAllTargets", () => {

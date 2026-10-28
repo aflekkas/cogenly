@@ -75,7 +75,8 @@ export function groupUpdatesByComponent<Row extends UpdateRowView>(
  * A component's one row across every machine: one version (or "old → new"),
  * one progress value and one failure line. `split` is true when the machines
  * disagree (different versions, or one failed or behind while another is
- * not), and only then does the row open on each machine. Machines updating
+ * not) or several failed, and only then does the row open on each machine,
+ * so every failure's reason and retry stays reachable. Machines updating
  * together still agree, so a batch does not split the row while it runs.
  */
 export interface ComponentSummary {
@@ -162,7 +163,8 @@ export function summarizeComponent(
     // Behind from one version: "old → new". Otherwise just where they head.
     current: froms.length === 1 ? froms[0]! : null,
     next: newest(targets),
-    split: phases.size > 1 || froms.length > 1 || targets.length > 1,
+    // Failures on several machines each carry their own reason and retry.
+    split: phases.size > 1 || froms.length > 1 || targets.length > 1 || failed.length > 1,
     percent,
     failure,
   };

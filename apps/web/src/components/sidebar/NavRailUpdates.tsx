@@ -27,7 +27,7 @@ import {
 } from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { Atom } from "effect/reactivity";
-import { CheckIcon, CloudIcon, DownloadIcon } from "lucide-react";
+import { CheckIcon, DownloadIcon } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { APP_VERSION } from "~/branding";
@@ -35,6 +35,11 @@ import { isElectron } from "~/env";
 import { useNowMinute } from "~/hooks/useNowMinute";
 import { cn } from "~/lib/utils";
 import { observeVisibleAnimation } from "~/lib/visibleAnimation";
+import {
+  isLocalMachine,
+  pairedMachineChoice,
+  type RemoteMachine,
+} from "~/machines/machineBadge.logic";
 import { refreshCogenlyReleases, useCogenlyReleases } from "~/state/cogenlyReleases";
 import { useDesktopUpdateState } from "~/state/desktopUpdate";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
@@ -49,6 +54,7 @@ import {
   resolveDesktopUpdateButtonAction,
   shouldShowLocalDesktopUpdateControl,
 } from "../desktopUpdate.logic";
+import { MachineChoice } from "../MachineBadge";
 import { useServerUpdate } from "../ServerUpdateAction";
 import { Button } from "../ui/button";
 import { DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
@@ -316,18 +322,12 @@ const ROW_CLASS_NAME =
   "group/row relative -mx-1.5 flex h-7.5 items-center gap-2 rounded-md px-1.5 transition-colors duration-(--motion-duration-fast) ease-standard hover:bg-accent";
 
 /**
- * A machine as a row label. This computer is named only here, where machines
- * are listed side by side; a remote machine carries a small cloud. The name
- * never shrinks: the versions beside it truncate first.
+ * A machine as a row label, as pickers name it: "This computer" for the
+ * primary environment, else its name with a cloud. The name never shrinks:
+ * the versions beside it truncate first.
  */
-function MachineName({ label, local }: { label: string; local: boolean }) {
-  if (local) return <span className="shrink-0 text-xs text-foreground">This computer</span>;
-  return (
-    <span className="inline-flex shrink-0 items-center gap-1 text-xs text-foreground">
-      <CloudIcon aria-hidden className="size-3 shrink-0 text-muted-foreground" />
-      {label}
-    </span>
-  );
+function MachineName({ machine }: { machine: RemoteMachine | null }) {
+  return <MachineChoice machine={machine} className="shrink-0 text-xs text-foreground" />;
 }
 
 /**
@@ -433,7 +433,7 @@ function ComponentRow({
   batch,
   updated,
   forceSplit,
-  isLocal,
+  machineOf,
   action,
   machineAction,
 }: {
@@ -442,7 +442,8 @@ function ComponentRow({
   updated: ReadonlyMap<string, UpdateRowView>;
   /** The component is missing from some machines, so the list says which. */
   forceSplit: boolean;
-  isLocal: (environmentId: EnvironmentId) => boolean;
+  /** A connected machine as a picker shows it: null for this computer. */
+  machineOf: (machine: MachineUpdateRow) => RemoteMachine | null;
   action: ReactNode;
   machineAction: (machine: MachineUpdateRow) => ReactNode;
 }) {
@@ -477,9 +478,7 @@ function ComponentRow({
           key={machine.id}
           leading={null}
           name={`${group.name} on ${machine.machineLabel}`}
-          label={
-            <MachineName label={machine.machineLabel} local={isLocal(machine.environmentId)} />
-          }
+          label={<MachineName machine={machineOf(machine)} />}
           current={machine.row.currentVersion}
           next={machine.row.status === "current" ? null : machine.row.latestVersion}
           percent={machine.row.percent ?? null}
@@ -676,10 +675,13 @@ export function NavRailUpdates({
         environment.connection.phase === "reconnecting" ||
         environment.connection.phase === "error"),
   );
-  // Only the desktop app runs on a machine of its own; a browser names every machine.
+  // The primary environment is "This computer", in the desktop app and a browser alike.
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const isLocal = (environmentId: EnvironmentId) =>
-    isElectron && environmentId === primaryEnvironmentId;
+  const machineOf = (machine: MachineUpdateRow) =>
+    pairedMachineChoice(
+      { environmentId: machine.environmentId, name: machine.machineLabel, online: true },
+      primaryEnvironmentId,
+    );
   const serverStatesAtom = useMemo(
     () =>
       Atom.make((get) =>
@@ -732,7 +734,9 @@ export function NavRailUpdates({
     return {
       environmentId: environment.environmentId,
       // Lowercase, as it is only ever read mid-sentence ("Failed on this computer").
-      label: isLocal(environment.environmentId) ? "this computer" : environment.label,
+      label: isLocalMachine(environment.environmentId, primaryEnvironmentId)
+        ? "this computer"
+        : environment.label,
       rows: [
         // The browser app's own server is the hero, not a row.
         ...(server && !isAppRow ? [{ row: server, canUpdate: target !== undefined }] : []),
@@ -995,7 +999,21 @@ export function NavRailUpdates({
   });
   const footerText = checkedAgo ? `Checked ${checkedAgo}` : "";
   const historyUrl = getDesktopUpdateReleaseHistoryUrl();
+  const showReleases = () => {
+    setPinned(true);
+    setView("releases");
+  };
+  const appUpdating = appRow.status === "updating" || restarting;
+  const hasNotes = notesReleases.length > 0;
+  // What's new holds "Earlier releases"; without notes (a dev build, or a list
+  // fetched before this release shipped) the footer keeps the way in.
+  const showHistoryLink = !hasNotes && (history.length > 0 || historyUrl !== null);
   const footerActions = [
+    showHistoryLink ? (
+      <Button key="history" size="xs" variant="ghost-muted" onClick={showReleases}>
+        Release history
+      </Button>
+    ) : null,
     countdown ? (
       <Button key="later" size="xs" variant="ghost-muted" onClick={postponeUpdateRestart}>
         Later
@@ -1010,13 +1028,6 @@ export function NavRailUpdates({
       </Button>
     ) : null,
   ].filter((action) => action !== null);
-
-  const showReleases = () => {
-    setPinned(true);
-    setView("releases");
-  };
-  const appUpdating = appRow.status === "updating" || restarting;
-  const hasNotes = notesReleases.length > 0;
 
   return (
     <>
@@ -1206,31 +1217,41 @@ export function NavRailUpdates({
                           connected.length > 1 &&
                           group.machines.length < connected.length
                         }
-                        isLocal={isLocal}
+                        machineOf={machineOf}
                         action={componentAction(group)}
                         machineAction={machineAction}
                       />
                     ))}
-                    {offline.map((environment) => (
-                      <UpdateRow
-                        key={environment.environmentId}
-                        leading={null}
-                        name={environment.label}
-                        label={
-                          <MachineName
-                            label={environment.label}
-                            local={isLocal(environment.environmentId)}
-                          />
-                        }
-                        current={null}
-                        next={null}
-                        percent={null}
-                        updating={false}
-                        highlight={false}
-                        failure={null}
-                        trail={<span className="text-xs text-muted-foreground">Offline</span>}
-                      />
-                    ))}
+                    {offline.map((environment) => {
+                      const machine = pairedMachineChoice(
+                        {
+                          environmentId: environment.environmentId,
+                          name: environment.label,
+                          online: false,
+                        },
+                        primaryEnvironmentId,
+                      );
+                      return (
+                        <UpdateRow
+                          key={environment.environmentId}
+                          leading={null}
+                          name={environment.label}
+                          label={<MachineName machine={machine} />}
+                          current={null}
+                          next={null}
+                          percent={null}
+                          updating={false}
+                          highlight={false}
+                          failure={null}
+                          // A remote machine's label already says "offline" beside its faded cloud.
+                          trail={
+                            machine === null ? (
+                              <span className="text-xs text-muted-foreground">Offline</span>
+                            ) : null
+                          }
+                        />
+                      );
+                    })}
                   </section>
                 ) : null}
                 {connected.length === 0 && offline.length === 0 ? (
