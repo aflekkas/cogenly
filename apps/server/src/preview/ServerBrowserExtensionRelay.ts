@@ -28,9 +28,35 @@ export class ExtensionPipe extends NodeEvents.EventEmitter {
   private sequence = 0;
   private readonly pending = new Map<
     number,
-    { resolve: (value: Record<string, unknown>) => void; reject: (cause: Error) => void }
+    {
+      sessionId?: string;
+      resolve: (value: Record<string, unknown>) => void;
+      reject: (cause: Error) => void;
+    }
   >();
   private readonly roots = new Map<string, string>();
+  private readonly parents = new Map<string, string>();
+  private readonly detachedSessions = new Set<string>();
+  private closed = false;
+  private readonly detached = ({ sessionId }: { sessionId: string }) => {
+    const detached = new Set([sessionId]);
+    for (const parent of detached) {
+      for (const [child, owner] of this.parents) {
+        if (owner === parent) detached.add(child);
+      }
+    }
+    for (const child of detached) {
+      this.roots.delete(child);
+      this.parents.delete(child);
+      this.detachedSessions.add(child);
+    }
+    for (const [id, pending] of this.pending) {
+      if (pending.sessionId && detached.has(pending.sessionId)) {
+        this.pending.delete(id);
+        pending.reject(new Error("Extension target detached."));
+      }
+    }
+  };
   private readonly received = (event: { sessionId: string; message: string }) => {
     const message = JSON.parse(event.message) as Message;
     if (message.id !== undefined) {
@@ -41,8 +67,12 @@ export class ExtensionPipe extends NodeEvents.EventEmitter {
       return;
     }
     const child = message.params?.sessionId;
-    if (message.method === "Target.attachedToTarget" && typeof child === "string")
+    if (message.method === "Target.attachedToTarget" && typeof child === "string") {
       this.roots.set(child, event.sessionId);
+      this.parents.set(child, message.sessionId ?? event.sessionId);
+    }
+    if (message.method === "Target.detachedFromTarget" && typeof child === "string")
+      this.detached({ sessionId: child });
     this.emit("event", message.method, message.params, message.sessionId ?? event.sessionId);
   };
   readonly cdp: CDPSession;
@@ -50,34 +80,48 @@ export class ExtensionPipe extends NodeEvents.EventEmitter {
     super();
     this.cdp = cdp;
     cdp.on("Target.receivedMessageFromTarget", this.received);
+    cdp.on("Target.detachedFromTarget", this.detached);
   }
   async send(
     method: string,
     params: Record<string, unknown> = {},
     sessionId?: string,
   ): Promise<Record<string, unknown>> {
-    if (!sessionId)
-      return this.cdp.send(
-        method as Parameters<CDPSession["send"]>[0],
-        method === "Target.attachToTarget" ? { ...params, flatten: false } : params,
-      );
+    if (this.closed) throw new Error("Extension target connection closed.");
+    if (sessionId && this.detachedSessions.has(sessionId))
+      throw new Error("Extension target detached.");
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      const root = this.roots.get(sessionId);
-      void this.cdp
-        .send("Target.sendMessageToTarget", {
-          sessionId: root ?? sessionId,
-          message: JSON.stringify({ id, method, params, ...(root ? { sessionId } : {}) }),
-        })
-        .catch((cause: Error) => {
+      this.pending.set(id, { ...(sessionId ? { sessionId } : {}), resolve, reject });
+      const root = sessionId ? this.roots.get(sessionId) : undefined;
+      const sending = sessionId
+        ? this.cdp.send("Target.sendMessageToTarget", {
+            sessionId: root ?? sessionId,
+            message: JSON.stringify({ id, method, params, ...(root ? { sessionId } : {}) }),
+          })
+        : this.cdp.send(
+            method as Parameters<CDPSession["send"]>[0],
+            method === "Target.attachToTarget" ? { ...params, flatten: false } : params,
+          );
+      void sending.then(
+        (result) => {
+          if (!sessionId) {
+            this.pending.delete(id);
+            resolve(result as Record<string, unknown>);
+          }
+        },
+        (cause: Error) => {
           this.pending.delete(id);
           reject(cause);
-        });
+        },
+      );
     });
   }
+
   async close() {
+    this.closed = true;
     this.cdp.off("Target.receivedMessageFromTarget", this.received);
+    this.cdp.off("Target.detachedFromTarget", this.detached);
     for (const pending of this.pending.values())
       pending.reject(new Error("Extension target connection closed."));
     this.pending.clear();
@@ -240,11 +284,10 @@ export async function adoptExtensionTarget(
           case "Target.setDiscoverTargets":
           case "Browser.grantPermissions":
           case "Browser.resetPermissions":
+          // A relay shares the persistent profile; Playwright's temporary download
+          // directory must never replace the owning context's download behavior.
+          case "Browser.setDownloadBehavior":
             return {};
-          case "Browser.setDownloadBehavior": {
-            const { browserContextId: _ignored, ...rest } = params;
-            return pipe.send(command.method, rest);
-          }
           default:
             throw new Error(`Unsupported extension browser command: ${command.method}`);
         }

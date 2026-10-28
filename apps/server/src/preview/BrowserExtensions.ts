@@ -199,6 +199,8 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
   const changes = yield* PubSub.unbounded<string>();
   const loadResults = new Map<string, string | undefined>();
   const loading = new Set<string>();
+  const loadRevisions = new Map<string, number>();
+  const cleanupIds = new Map<string, Set<string>>();
   const extensionPath = (profileId: string, extension: StoredExtension) =>
     path.join(profileDir(profileId), extension.id, extension.directory);
   const withLoadError = (profileId: string, stored: StoredExtension): BrowserExtension => {
@@ -730,6 +732,13 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
     shouldLoad = true,
     cleanId?: string,
   ) {
+    const revision = (loadRevisions.get(profileId) ?? 0) + 1;
+    loadRevisions.set(profileId, revision);
+    if (cleanId) {
+      const ids = cleanupIds.get(profileId) ?? new Set<string>();
+      ids.add(cleanId);
+      cleanupIds.set(profileId, ids);
+    }
     const load = shouldLoad ? loader : undefined;
     const pending = load
       ? (yield* loadable(profileId)).filter((extension) => !loadResults.has(extension.path))
@@ -737,15 +746,20 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
     for (const extension of pending) loading.add(extension.path);
     const attempt = Effect.gen(function* () {
       if (load) yield* load(profileId);
-      if (cleanId) {
+      if (cleanupIds.has(profileId)) {
         const cleanup = Effect.gen(function* () {
-          const current = (yield* readRegistry(profileId)).find((entry) => entry.id === cleanId);
-          yield* removeOldVersions(profileId, cleanId, current?.directory ?? null);
+          if (loadRevisions.get(profileId) !== revision) return;
+          const registry = yield* readRegistry(profileId);
+          for (const id of cleanupIds.get(profileId) ?? []) {
+            const current = registry.find((entry) => entry.id === id);
+            yield* removeOldVersions(profileId, id, current?.directory ?? null);
+          }
+          cleanupIds.delete(profileId);
         });
         // Background cleanup shares the mutation permit so a reload cannot publish
         // a new version between reading the registry and deleting old directories.
         // Synchronous cleanup already runs inside the caller's mutation permit.
-        yield* load && loaderScope ? gate.withPermit(cleanup) : cleanup;
+        yield* loader && loaderScope ? gate.withPermit(cleanup) : cleanup;
       }
     }).pipe(
       Effect.ensuring(
@@ -763,7 +777,7 @@ export const makeBrowserExtensions = Effect.fn("BrowserExtensions.make")(functio
       ),
     );
     yield* PubSub.publish(changes, profileId);
-    if (load && loaderScope) yield* Effect.forkIn(loadGate.withPermit(attempt), loaderScope);
+    if (loader && loaderScope) yield* Effect.forkIn(loadGate.withPermit(attempt), loaderScope);
     else yield* attempt;
   });
 

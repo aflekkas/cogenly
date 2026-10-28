@@ -28,7 +28,9 @@ export async function openExtensionSurface(
   extension: BrowserExtension,
   requested: BrowserExtensionOpenSurfaceInput["kind"],
   createPage: () => Promise<Page> = () => host.context().newPage(),
+  signal: AbortSignal = new AbortController().signal,
 ) {
+  signal.throwIfAborted();
   const context = host.context();
   const browser = context.browser();
   if (!browser)
@@ -36,6 +38,11 @@ export async function openExtensionSurface(
       "Extension surfaces require a server Chrome tab. Move the host tab to the server browser.",
     );
   const pipe = new ExtensionPipe(await browser.newBrowserCDPSession());
+  const abort = () => {
+    void pipe.close();
+  };
+  signal.addEventListener("abort", abort, { once: true });
+  if (signal.aborted) abort();
   let release = true;
   try {
     const pageSession = await context.newCDPSession(host);
@@ -57,7 +64,7 @@ export async function openExtensionSurface(
       try {
         const result = await pipe.send(
           "Runtime.evaluate",
-          { expression, awaitPromise: true, returnByValue: true },
+          { expression, awaitPromise: true, returnByValue: true, timeout: 12_000 },
           sessionId,
         );
         if (result.exceptionDetails) throw new Error("The extension worker rejected the action.");
@@ -78,6 +85,7 @@ export async function openExtensionSurface(
       const behavior = await chrome.sidePanel?.getPanelBehavior();
       return { popup, path: options?.path, enabled: options?.enabled, opensPanel: behavior?.openPanelOnActionClick };
     })()`).catch(() => undefined);
+    signal.throwIfAborted();
     const relativePath = (path: string | undefined) =>
       path?.replace(`chrome-extension://${extension.id}/`, "").replace(/^\/+/, "");
     const popup = relativePath(settings?.popup ?? extension.popupPage);
@@ -92,7 +100,7 @@ export async function openExtensionSurface(
       ),
     );
     const targets = new Map<string, ExtensionTarget>();
-    let signal: (() => void) | undefined;
+    let targetAvailable: (() => void) | undefined;
     const changed = ({ targetInfo }: { targetInfo: ExtensionTarget }) => {
       if (
         targetInfo.type !== "page" ||
@@ -108,7 +116,7 @@ export async function openExtensionSurface(
       )
         return;
       targets.set(targetInfo.targetId, targetInfo);
-      signal?.();
+      targetAvailable?.();
     };
     pipe.cdp.on("Target.targetCreated", changed);
     pipe.cdp.on("Target.targetInfoChanged", changed);
@@ -124,15 +132,15 @@ export async function openExtensionSurface(
       if (existing) return existing;
       return new Promise<ExtensionTarget | undefined>((resolve) => {
         const timer = setTimeout(() => {
-          signal = undefined;
+          targetAvailable = undefined;
           resolve(undefined);
         }, 1500);
-        signal = () => {
+        targetAvailable = () => {
           clearTimeout(timer);
-          signal = undefined;
+          targetAvailable = undefined;
           resolve(targets.values().next().value);
         };
-        if (targets.size) signal();
+        if (targets.size) targetAvailable();
       });
     };
     let target: ExtensionTarget | undefined;
@@ -156,6 +164,7 @@ export async function openExtensionSurface(
       pipe.cdp.off("Target.targetCreated", changed);
       pipe.cdp.off("Target.targetInfoChanged", changed);
     }
+    signal.throwIfAborted();
     if (target) {
       // tabs.create/openOptionsPage already belong to the original context and
       // its page listener. Only native UI targets need the second CDP client.
@@ -167,6 +176,11 @@ export async function openExtensionSurface(
         if (info?.targetInfo.targetId === target.targetId) return undefined;
       }
       const adopted = await adoptExtensionTarget(pipe, target);
+      if (signal.aborted) {
+        await adopted.page.close().catch(() => {});
+        await adopted.close();
+        signal.throwIfAborted();
+      }
       release = false;
       return {
         ...adopted,
@@ -191,9 +205,11 @@ export async function openExtensionSurface(
       );
     const page = await createPage();
     try {
+      signal.throwIfAborted();
       await page.goto(`chrome-extension://${extension.id}/${path.replace(/^\/+/, "")}`, {
         waitUntil: "domcontentloaded",
       });
+      signal.throwIfAborted();
     } catch (cause) {
       await page.close().catch(() => {});
       throw cause;
@@ -205,6 +221,7 @@ export async function openExtensionSurface(
       notice: `Opened the extension's ${kind === "popup" ? "popup" : "side panel"} as a surface page. This is not a native ${kind === "popup" ? "popup" : "side panel"}; active-tab queries can differ.`,
     };
   } finally {
+    signal.removeEventListener("abort", abort);
     if (release) await pipe.close();
   }
 }

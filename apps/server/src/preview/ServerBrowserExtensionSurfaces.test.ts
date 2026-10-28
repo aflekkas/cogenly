@@ -31,6 +31,7 @@ import * as Manager from "./Manager.ts";
 import * as Browser from "./PreviewBrowser.ts";
 import * as Extensions from "./BrowserExtensions.ts";
 import * as ServerBrowser from "./ServerBrowser.ts";
+import { ExtensionPipe } from "./ServerBrowserExtensionRelay.ts";
 import { extensionActionKind } from "./ServerBrowserExtensionSurfaces.ts";
 
 const chrome = (() => {
@@ -154,7 +155,14 @@ const rig = Effect.gen(function* () {
     path.join(folder, "content.js"),
     `chrome.runtime.onMessage.addListener((_m,_s,respond) => respond('content script reached'));`,
   );
-  const site = NodeHttp.createServer((_q, r) => r.end("<!doctype html><h1>Host page</h1>"));
+  const gate = Promise.withResolvers<NodeHttp.ServerResponse>();
+  const site = NodeHttp.createServer((q, r) => {
+    if (q.url === "/gate") {
+      gate.resolve(r);
+      return;
+    }
+    r.end("<!doctype html><h1>Host page</h1>");
+  });
   yield* Effect.promise(() => new Promise<void>((resolve) => site.listen(0, "127.0.0.1", resolve)));
   yield* Effect.addFinalizer(() =>
     Effect.promise(() => new Promise<void>((resolve) => site.close(() => resolve()))),
@@ -300,6 +308,7 @@ const rig = Effect.gen(function* () {
   const openSurface = (kind: "popup" | "sidePanel" | "action") =>
     extensions.openSurface({ id: installed.extension.id, kind, hostTabId: host.tabId!, threadId });
   return {
+    awaitGate: Effect.promise(() => gate.promise),
     extensions,
     browser: Context.get(browserContext, ServerBrowser.ServerBrowser),
     manager,
@@ -337,6 +346,40 @@ describe.skipIf(!chrome)("real Chrome extension surfaces", () => {
     vi.stubEnv("COGENLY_SERVER_BROWSER_SANDBOX", "0");
   });
   afterAll(() => vi.unstubAllEnvs());
+
+  it.live(
+    "preserves profile download settings when a native surface connects and disconnects",
+    () =>
+      provide(
+        Effect.gen(function* () {
+          const r = yield* rig;
+          const host = yield* r.manager.open({
+            threadId,
+            runtime: "server",
+            profileId: "default",
+            url: r.url,
+          });
+          yield* r.awaitTab(() => r.liveTabs.size === 2);
+          const forwarded = vi.spyOn(ExtensionPipe.prototype, "send");
+          try {
+            const popup = yield* r.extensions.openSurface({
+              id: r.id,
+              kind: "popup",
+              hostTabId: host.tabId,
+              threadId,
+            });
+            expect(popup.notice).toBeUndefined();
+            yield* r.manager.close({ threadId, tabId: popup.surfaceTabId! });
+            yield* r.awaitTab(() => !r.liveTabs.has(popup.surfaceTabId!));
+            expect(
+              forwarded.mock.calls.some(([method]) => method === "Browser.setDownloadBehavior"),
+            ).toBe(false);
+          } finally {
+            forwarded.mockRestore();
+          }
+        }),
+      ),
+  );
 
   it.live("reveals new and reused MCP surfaces while toolbar opens remain unrevealed", () =>
     provide(
@@ -376,7 +419,7 @@ describe.skipIf(!chrome)("real Chrome extension surfaces", () => {
           Stream.take(1),
           Stream.runCollect,
         );
-        expect(opened[0]?.type === "opened" && opened[0].snapshot.reveal).toBe(true);
+        expect(opened[0]?.type === "opened" && opened[0].snapshot.reveal).toBe(false);
         const agentSession = (yield* r.manager.list({ threadId })).sessions.find(
           (tab) => tab.tabId === agent.surfaceTabId,
         )!;
@@ -540,6 +583,35 @@ describe.skipIf(!chrome)("real Chrome extension surfaces", () => {
           (tab) => tab.tabId === popup.surfaceTabId,
         )!;
         expect(saved.serverRendering).toBe("stream");
+      }),
+    ),
+  );
+
+  it.live("keeps delayed extension-created tabs with their extension host across threads", () =>
+    provide(
+      Effect.gen(function* () {
+        const r = yield* rig;
+        const panel = yield* r.openSurface("sidePanel");
+        yield* r.invoke("evaluate", panel.surfaceTabId, {
+          expression: `void fetch(${JSON.stringify(r.url + "gate")}).then(() => chrome.tabs.create({url:${JSON.stringify(r.url + "delayed")}}))`,
+        });
+        const response = yield* r.awaitGate;
+        yield* r.manager.open({
+          threadId: otherThreadId,
+          runtime: "server",
+          profileId: "default",
+          url: r.url,
+        });
+        yield* r.awaitTab(() => r.liveTabs.size >= 3);
+        response.end("ready");
+        yield* r.awaitPage(r.url + "delayed");
+        const other = yield* r.manager.list({ threadId: otherThreadId });
+        expect(other.sessions).toHaveLength(1);
+        yield* r.invoke("evaluate", panel.surfaceTabId, {
+          expression: "chrome.tabs.create({url:'chrome://version'})",
+        });
+        const status = yield* r.invoke<PreviewAutomationStatus>("status", r.host.tabId!);
+        expect(status.tabs?.some((tab) => tab.url?.startsWith("chrome:"))).toBe(false);
       }),
     ),
   );

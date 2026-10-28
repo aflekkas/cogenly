@@ -285,6 +285,40 @@ describe("BrowserExtensions", () => {
     ),
   );
 
+  it.effect("retains the running version until the latest queued load settles", () =>
+    run(
+      Effect.gen(function* () {
+        const { fs, path, root, folder, writeExtension } = yield* setup;
+        const extensions = yield* makeBrowserExtensions({ rootDir: path.join(root, "store") });
+        const firstStarted = yield* Deferred.make<void>();
+        const finishFirst = yield* Deferred.make<void>();
+        const secondStarted = yield* Deferred.make<void>();
+        const finishSecond = yield* Deferred.make<void>();
+        const loadedPaths: string[] = [];
+        let loads = 0;
+        yield* extensions.registerLoader((profileId) =>
+          Effect.gen(function* () {
+            const [entry] = yield* extensions.loadable(profileId);
+            loadedPaths.push(entry!.path);
+            loads++;
+            yield* Deferred.succeed(loads === 1 ? firstStarted : secondStarted, undefined);
+            yield* Deferred.await(loads === 1 ? finishFirst : finishSecond);
+          }),
+        );
+        yield* writeExtension("1.0.0");
+        const first = yield* extensions.install({ source: folder });
+        yield* Deferred.await(firstStarted);
+        yield* writeExtension("1.1.0");
+        yield* extensions.reload({ id: first.extension.id });
+        yield* Deferred.succeed(finishFirst, undefined);
+        yield* Deferred.await(secondStarted);
+        expect(yield* fs.exists(path.join(loadedPaths[0]!, "manifest.json"))).toBe(true);
+        expect(yield* fs.exists(path.join(loadedPaths[1]!, "manifest.json"))).toBe(true);
+        yield* Deferred.succeed(finishSecond, undefined);
+      }),
+    ),
+  );
+
   it.effect("serializes background version cleanup with a concurrent reload", () =>
     run(
       Effect.gen(function* () {

@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off - Observes extension content through Playwright callbacks.
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off globalTimers:off - Observes extension content through Playwright callbacks.
 import * as NodeCrypto from "node:crypto";
 import type { Page } from "playwright-core";
 
@@ -35,6 +35,31 @@ export async function watchPopupPreferredSize(
   onSize: (size: PopupSize) => Promise<void>,
 ) {
   const key = `__cogenlyPopupSize_${NodeCrypto.randomUUID().replaceAll("-", "")}`;
+  let stopped = false;
+  let pending: PopupSize | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let applying = false;
+  let lastApplied = 0;
+  const flush = async () => {
+    timer = undefined;
+    if (stopped || applying || !pending) return;
+    const size = pending;
+    pending = undefined;
+    applying = true;
+    try {
+      await onSize(size);
+    } catch {
+      /* The page can close while resizing. */
+    } finally {
+      applying = false;
+      lastApplied = Date.now();
+      schedule();
+    }
+  };
+  const schedule = () => {
+    if (!stopped && pending && !applying && !timer)
+      timer = setTimeout(() => void flush(), Math.max(0, 100 - (Date.now() - lastApplied)));
+  };
   await page.exposeBinding(key, async (_source, value: unknown) => {
     if (
       typeof value !== "object" ||
@@ -42,13 +67,16 @@ export async function watchPopupPreferredSize(
       !("width" in value) ||
       !("height" in value) ||
       typeof value.width !== "number" ||
-      typeof value.height !== "number"
+      typeof value.height !== "number" ||
+      !Number.isFinite(value.width) ||
+      !Number.isFinite(value.height)
     )
       return;
-    await onSize({
+    pending = {
       width: Math.max(25, Math.min(800, Math.ceil(value.width))),
       height: Math.max(25, Math.min(600, Math.ceil(value.height))),
-    });
+    };
+    schedule();
   });
   const install = () =>
     page.evaluate(`(() => {
@@ -89,6 +117,9 @@ export async function watchPopupPreferredSize(
   page.on("load", loaded);
   await install();
   return async () => {
+    stopped = true;
+    pending = undefined;
+    clearTimeout(timer);
     page.off("load", loaded);
     await page.evaluate(`window[${JSON.stringify(key + "_stop")}]?.()`).catch(() => {});
   };
