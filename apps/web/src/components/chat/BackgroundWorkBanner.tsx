@@ -1,14 +1,13 @@
 import type { PendingBackgroundWorkPresentation } from "@cogenly/client-runtime/state/thread-execution";
 import { ThreadId, type EnvironmentId } from "@cogenly/contracts";
 import { ActivityIcon, BellRingIcon, BotIcon, TerminalIcon } from "lucide-react";
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import { cn } from "~/lib/utils";
 import { StopGlyph } from "../StopGlyph";
 import { Button } from "../ui/button";
-import { DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
 import { ComposerBanner } from "./ComposerBanner";
-import { composerStackBodyProps, useComposerStackFold } from "./ComposerStackColumn";
+import { ComposerTray, useComposerTrayDisclosure } from "./ComposerTray";
 import { ThreadRunningAgentsList } from "./ThreadDetailsMenu";
 import { ThreadDetailsRow } from "./ThreadDetailsSection";
 import { THREAD_DETAILS_PANEL_ICON_CLASS } from "./threadDetailsPanelStyles";
@@ -19,9 +18,6 @@ const KIND_ICON = {
   monitor: ActivityIcon,
   background_task: BellRingIcon,
 } as const;
-
-const BACKGROUND_WORK_STACK_ID = "background-work";
-const BACKGROUND_WORK_STACK_RANK = 1;
 
 /**
  * The composer strip for work a thread still runs: "Waiting on 4 subagents".
@@ -41,8 +37,8 @@ export function BackgroundWorkBanner(props: {
 }) {
   const [userOpen, setOpen] = useState(false);
   // The stack folds this list first when it runs out of room.
-  const stackFold = useComposerStackFold(BACKGROUND_WORK_STACK_ID);
-  const open = userOpen && !stackFold.folded;
+  const tray = useComposerTrayDisclosure("background-work", userOpen, setOpen);
+  const listId = useId();
   const { presentation } = props;
   // Subagents with a thread of their own show as Lineage rows; the rest (and a
   // subagent the provider gave no thread) as plain rows.
@@ -58,47 +54,24 @@ export function BackgroundWorkBanner(props: {
 
   return (
     <>
-      <ComposerBanner.Row>
-        <ComposerBanner.Icon className="h-(--composer-banner-icon-column) self-start">
-          {/* A dev server can run for hours after the agent is done, so only
-              work that will wake the agent pulses. */}
+      <ComposerTray.Header
+        icon={
+          // A dev server can run for hours after the agent is done, so only
+          // work that will wake the agent pulses.
           <span
             className={cn(
               "size-1.5 rounded-full bg-foreground",
               presentation.waiting && "animate-status-pulse",
             )}
           />
-        </ComposerBanner.Icon>
-        <ComposerBanner.Content className="whitespace-nowrap">
-          {expandable ? (
-            // The trigger inherits the banner title's type from this wrapper.
-            <span className="flex min-w-0 font-medium leading-7 sm:leading-6">
-              <DisclosureTrigger
-                open={open}
-                onClick={() => (userOpen && stackFold.folded ? stackFold.reveal() : setOpen(!open))}
-                className="min-w-0"
-              >
-                <span className="min-w-0 truncate">{presentation.title}</span>
-              </DisclosureTrigger>
-            </span>
-          ) : (
-            <span className="min-w-0 truncate font-medium leading-7 sm:leading-6">
-              {presentation.title}
-            </span>
-          )}
-          {expandable ? (
-            <span
-              aria-hidden={open}
-              className={cn(
-                "w-0 min-w-0 grow truncate text-muted-foreground transition-opacity duration-(--motion-duration-fast) ease-standard motion-reduce:transition-none @max-[400px]:sr-only",
-                open && "opacity-0",
-              )}
-            >
-              {names}
-            </span>
-          ) : null}
-        </ComposerBanner.Content>
-        <ComposerBanner.Actions>
+        }
+        title={presentation.title}
+        summary={expandable ? names : undefined}
+        open={tray.shown}
+        onToggle={expandable ? tray.toggle : undefined}
+        toggleLabel={expandable ? `${presentation.title}: ${names}` : undefined}
+        controls={expandable ? listId : undefined}
+        actions={
           <Button
             size="xs"
             variant="ghost-muted"
@@ -111,47 +84,43 @@ export function BackgroundWorkBanner(props: {
               {props.stopping ? "Stopping..." : "Stop"}
             </ComposerBanner.ActionLabel>
           </Button>
-        </ComposerBanner.Actions>
-      </ComposerBanner.Row>
+        }
+      />
       {expandable ? (
-        <div
-          {...composerStackBodyProps(
-            BACKGROUND_WORK_STACK_ID,
-            BACKGROUND_WORK_STACK_RANK,
-            userOpen,
-          )}
+        <ComposerTray.Body
+          id={listId}
+          trayId="background-work"
+          open={userOpen}
+          shown={tray.shown}
+          scrollClassName="[--composer-banner-scroll-max:min(18rem,40dvh)]"
         >
-          <DisclosurePanel open={open}>
-            <ComposerBanner.Scroll className="[--composer-banner-scroll-max:min(18rem,40dvh)]">
-              {/* The banner's own block padding closes the list; the top inset
+          {/* The banner's own block padding closes the list; the top inset
                 matches it so a hovered row has the same margin on every side. */}
-              <div className="pt-1">
-                {hasSubagents ? (
-                  <ThreadRunningAgentsList
-                    environmentId={props.environmentId}
-                    threadId={props.threadId}
-                    onOpenThread={(threadId) => props.onOpenThread(ThreadId.make(threadId))}
-                  />
-                ) : null}
-                {otherWork.length > 0 ? (
-                  <ul aria-label="Running work" className="m-0 list-none p-0">
-                    {otherWork.map((item) => {
-                      const Icon = KIND_ICON[item.kind];
-                      return (
-                        <li key={item.taskId} className="m-0 list-none p-0">
-                          <ThreadDetailsRow
-                            icon={<Icon aria-hidden className={THREAD_DETAILS_PANEL_ICON_CLASS} />}
-                            label={item.label}
-                          />
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : null}
-              </div>
-            </ComposerBanner.Scroll>
-          </DisclosurePanel>
-        </div>
+          <div className="pt-1">
+            {hasSubagents ? (
+              <ThreadRunningAgentsList
+                environmentId={props.environmentId}
+                threadId={props.threadId}
+                onOpenThread={(threadId) => props.onOpenThread(ThreadId.make(threadId))}
+              />
+            ) : null}
+            {otherWork.length > 0 ? (
+              <ul aria-label="Running work" className="m-0 list-none p-0">
+                {otherWork.map((item) => {
+                  const Icon = KIND_ICON[item.kind];
+                  return (
+                    <li key={item.taskId} className="m-0 list-none p-0">
+                      <ThreadDetailsRow
+                        icon={<Icon aria-hidden className={THREAD_DETAILS_PANEL_ICON_CLASS} />}
+                        label={item.label}
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+          </div>
+        </ComposerTray.Body>
       ) : null}
     </>
   );

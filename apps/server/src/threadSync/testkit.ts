@@ -1,3 +1,4 @@
+import * as MachineResources from "../resourceTelemetry/MachineResources.ts";
 import * as RepositoryHandoff from "./RepositoryHandoff.ts";
 import {
   CommandId,
@@ -11,6 +12,8 @@ import {
   ProjectLabelError,
   ThreadId,
   ThreadDelegatedRead,
+  ThreadReplicationApply,
+  ThreadReplicationError,
   type ServerProvider,
 } from "@cogenly/contracts";
 import * as Deferred from "effect/Deferred";
@@ -91,7 +94,9 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
   },
   realFiling = false,
   lifecycle?: {
+    readonly resources?: import("@cogenly/contracts").MachineResourcesSnapshot;
     readonly legacyDelegation?: boolean;
+    readonly refuseBulkReplication?: boolean;
     readonly afterLaunch?: () => Effect.Effect<void>;
     readonly git?: Git.GitVcsDriver["Service"];
     readonly checkoutRoot?: () => Effect.Effect<string>;
@@ -452,7 +457,16 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
         ThreadLaunchRouting.layer,
         forkOptions === undefined ? Layer.empty : ThreadFork.layer,
       ).pipe(
-        Layer.provide(providerCatalog),
+        Layer.provide(
+          Layer.merge(
+            providerCatalog,
+            lifecycle?.resources === undefined
+              ? Layer.empty
+              : Layer.succeed(MachineResources.MachineResources, {
+                  read: Effect.succeed(lifecycle.resources),
+                }),
+          ),
+        ),
         Layer.provideMerge(ThreadTransfer.layer),
         Layer.provide(
           lifecycle?.git === undefined
@@ -518,9 +532,15 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
             Layer.succeed(PeerChannels.PeerChannels, {
               ...channels,
               register: (channel, handler) =>
-                lifecycle?.legacyDelegation === true && channel.name === ThreadDelegatedRead.name
-                  ? Effect.void
-                  : channels.register(channel, handler),
+                lifecycle?.refuseBulkReplication === true &&
+                channel.name === ThreadReplicationApply.name
+                  ? channels.register(ThreadReplicationApply, () =>
+                      Effect.fail(new ThreadReplicationError({ reason: "storage" })),
+                    )
+                  : lifecycle?.legacyDelegation === true &&
+                      channel.name === ThreadDelegatedRead.name
+                    ? Effect.void
+                    : channels.register(channel, handler),
             }),
           ),
         ),

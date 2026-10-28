@@ -12,11 +12,17 @@ import {
 } from "~/components/ui/combobox";
 import type { EnvironmentProjectLabel } from "~/projectLabels/projectLabels.logic";
 import { ProjectPickerRow } from "~/projectLabels/ProjectPickerRow";
+import { orderProjectsByUse, rankProjectMatches } from "~/projectLabels/projectOrder.logic";
 import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
+import { useProjectLastUsedAt } from "~/projectLabels/useProjectLastUsed";
 
-type ProjectOption =
+type ProjectOption = (
   | { readonly kind: "folder"; readonly key: string; readonly folder: EnvironmentProjectLabel }
-  | { readonly kind: "none"; readonly key: "none" };
+  | { readonly kind: "none"; readonly key: "none" }
+) & {
+  /** A hairline above the row, where a new group starts. */
+  readonly divider: boolean;
+};
 
 const optionText = (option: ProjectOption) =>
   option.kind === "folder" ? option.folder.label.name : "No project";
@@ -55,22 +61,45 @@ export function AgentProjectPicker(props: {
   readonly "aria-label"?: string;
 }) {
   const { folders, current } = useAgentProjectFolders(props.environmentId, props.value);
+  const lastUsedAt = useProjectLastUsedAt();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const options = useMemo((): ProjectOption[] => {
-    const needle = query.trim().toLowerCase();
-    const matches: ProjectOption[] = folders
-      .filter((folder) => needle === "" || folder.label.name.toLowerCase().includes(needle))
-      .map((folder) => ({ kind: "folder", key: folder.key, folder }));
-    if (needle === "" || "no project".includes(needle)) matches.push({ kind: "none", key: "none" });
+    // Recently used projects first, then by name, as the composer's picker
+    // lists them; "No project" sits apart at the end.
+    const searching = query.trim() !== "";
+    const { recent, rest } = orderProjectsByUse(folders, lastUsedAt);
+    const folderOption = (folder: EnvironmentProjectLabel, divider = false): ProjectOption => ({
+      kind: "folder",
+      key: folder.key,
+      folder,
+      divider,
+    });
+    const matches = searching
+      ? rankProjectMatches([...recent, ...rest], query).map((folder) => folderOption(folder))
+      : [
+          ...recent.map((folder) => folderOption(folder)),
+          ...rest.map((folder, index) => folderOption(folder, index === 0 && recent.length > 0)),
+        ];
+    if (!searching || rankProjectMatches([{ label: { name: "No project" } }], query).length > 0) {
+      matches.push({ kind: "none", key: "none", divider: matches.length > 0 });
+    }
     return matches;
-  }, [folders, query]);
+  }, [folders, lastUsedAt, query]);
+  const chosenOption = useMemo(
+    (): ProjectOption =>
+      current === null
+        ? { kind: "none", key: "none", divider: false }
+        : { kind: "folder", key: current.key, folder: current, divider: false },
+    [current],
+  );
   return (
     <Combobox
       items={options}
       filteredItems={options}
       autoHighlight
-      value={null}
+      // The current pick, so the list opens with it highlighted.
+      value={chosenOption}
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
@@ -103,7 +132,7 @@ export function AgentProjectPicker(props: {
         <ComboboxEmpty>No matching project.</ComboboxEmpty>
         <ComboboxList>
           {(option: ProjectOption) => (
-            <ComboboxItem key={option.key} value={option} hideIndicator>
+            <ComboboxItem key={option.key} value={option} hideIndicator divider={option.divider}>
               {option.kind === "folder" ? (
                 <ProjectPickerRow
                   project={option.folder}

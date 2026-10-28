@@ -43,8 +43,8 @@ import {
   SearchListRowTrailing,
   searchListRowVariants,
 } from "../ui/search-list";
-import { useMachineLabel } from "../../machines/useMachineLabel";
-import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
+import { useRemoteMachine } from "../../machines/useRemoteMachine";
+import { MachineBadge } from "../MachineBadge";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { IntegrationSourceRowContent } from "./ComposerSourcesPicker";
 import { ComposerBanner } from "./ComposerBanner";
@@ -411,15 +411,14 @@ const SKILL_SOURCE_LABEL_BY_KIND: Record<ProviderSkillSourceKind, string> = {
   other: "Provider",
 };
 
-/** The machine a task or chat from another paired machine runs on. */
+/** The other machine a task or chat runs on; nothing when that is this computer. */
 function ThreadMachineBadge(props: { machineId: EnvironmentId; via: EnvironmentId }) {
-  const machine = useMachineLabel(props.machineId, props.via);
+  const machine = useRemoteMachine(props.machineId, props.via);
   if (machine === null) return null;
   return (
     <SearchListRowTrailing>
       <SearchListRowBadge>
-        <EnvironmentMachineIcon aria-hidden kind={machine.kind} />
-        {machine.name}
+        <MachineBadge placement="inline" machine={machine} showName />
       </SearchListRowBadge>
     </SearchListRowTrailing>
   );

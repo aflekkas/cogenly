@@ -196,7 +196,8 @@ function ChatRouteGlobalShortcuts() {
         command === "preview.focusUrl" ||
         command === "preview.zoomIn" ||
         command === "preview.zoomOut" ||
-        command === "preview.resetZoom"
+        command === "preview.resetZoom" ||
+        command === "preview.toggleExtensionSidePanel"
       ) {
         event.preventDefault();
         event.stopPropagation();
@@ -210,7 +211,9 @@ function ChatRouteGlobalShortcuts() {
                 ? "zoom-in"
                 : command === "preview.zoomOut"
                   ? "zoom-out"
-                  : "reset-zoom";
+                  : command === "preview.resetZoom"
+                    ? "reset-zoom"
+                    : "toggle-extension-side-panel";
         dispatchPreviewAction(action);
       }
     };

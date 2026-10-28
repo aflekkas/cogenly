@@ -60,6 +60,7 @@ export const PREVIEW_AUTOMATION_SERVER_OPERATIONS = [
   "drag",
   "permission",
   "extract",
+  "extensionOpen",
 ] as const;
 export const PreviewAutomationOperation = Schema.Literals(PREVIEW_AUTOMATION_SERVER_OPERATIONS);
 export type PreviewAutomationOperation = typeof PreviewAutomationOperation.Type;
@@ -138,6 +139,9 @@ export const PreviewAutomationTabSummary = Schema.Struct({
 export type PreviewAutomationTabSummary = typeof PreviewAutomationTabSummary.Type;
 
 export const PreviewAutomationStatus = Schema.Struct({
+  extensionSurface: Schema.optional(PreviewExtensionSurface),
+  hostTabId: Schema.optional(PreviewTabId),
+  surfaceTabId: Schema.optional(PreviewTabId),
   available: Schema.Boolean,
   /** Health of the automation connection, independent of whether the tab is visible. */
   automation: Schema.optional(
@@ -212,6 +216,7 @@ export const PreviewAutomationStatus = Schema.Struct({
         tabId: PreviewTabId,
         url: Schema.NullOr(Schema.String),
         openerTabId: Schema.optional(PreviewTabId),
+        extensionSurface: Schema.optional(PreviewExtensionSurface),
         owner: Schema.optional(PreviewAutomationTabOwner),
         ownedByCaller: Schema.optional(Schema.Boolean),
         visible: Schema.optional(Schema.Boolean),

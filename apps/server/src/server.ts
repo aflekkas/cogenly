@@ -1,3 +1,4 @@
+import * as MachineResources from "./resourceTelemetry/MachineResources.ts";
 import * as RepositoryHandoff from "./threadSync/RepositoryHandoff.ts";
 import * as RepoMcpTrust from "./integrations/RepoMcpTrust.ts";
 import * as ReadOnlySandbox from "./terminal/ReadOnlySandbox.ts";
@@ -799,6 +800,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.provideMerge(layerSourceControlProviderRegistry),
   Layer.provideMerge(layerGit),
   Layer.provideMerge(layerVcs),
+  Layer.provideMerge(MachineResources.layer.pipe(Layer.provide(HostResources.layer))),
   Layer.provideMerge(Layer.mergeAll(layerTerminal, layerPreview, layerDevice, layerComputerUse)),
   Layer.provideMerge(layerPersistence),
   // Both read a user-owned file out of the state directory and stream changes

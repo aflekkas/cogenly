@@ -144,6 +144,27 @@ export function releaseHistory(
   return history.length > 0 ? history : [...releases];
 }
 
+/**
+ * The notes the popover's What's new shows: the update on offer when there is
+ * one, else the release the user is running. Nothing when the running version
+ * has no release in the list (a dev build, or a list fetched before it shipped),
+ * so the header's version and the notes' version never disagree.
+ */
+export function whatsNewReleases(
+  incoming: ReadonlyArray<CogenlyRelease>,
+  history: ReadonlyArray<CogenlyRelease>,
+  installed: string | null,
+): CogenlyRelease[] {
+  if (incoming.length > 0) return [...incoming];
+  if (!installed || !parseVersion(installed)) return [];
+  const running = history.find(
+    (release) =>
+      parseVersion(release.version) !== null &&
+      compareReleaseVersions(release.version, installed) === 0,
+  );
+  return running ? [running] : [];
+}
+
 export function formatReleaseDate(publishedAt: string | null): string | null {
   if (!publishedAt) return null;
   const date = new Date(publishedAt);

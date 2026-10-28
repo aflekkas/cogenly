@@ -72,16 +72,20 @@ export function groupUpdatesByComponent<Row extends UpdateRowView>(
 }
 
 /**
- * A component's versions across machines, for its row: the version pair to
- * show and how far it reaches ("on 2 of 5"). One machine shows its own pair
- * and no scope, as before machines were grouped. A part count drops the word
- * "machines": the section header already says "5 machines", and the row
- * shares its width with "Updating 2 of 3".
+ * A component's one row across every machine: one version (or "old → new"),
+ * one progress value and one failure line. `split` is true when the machines
+ * disagree (different versions, or one failed or behind while another is
+ * not) or several failed, and only then does the row open on each machine,
+ * so every failure's reason and retry stays reachable. Machines updating
+ * together still agree, so a batch does not split the row while it runs.
  */
-export interface ComponentVersionSummary {
+export interface ComponentSummary {
   readonly current: string | null;
   readonly next: string | null;
-  readonly scope: string | null;
+  readonly split: boolean;
+  /** 0-100 while updating, null when the updater gives no figure. */
+  readonly percent: number | null;
+  readonly failure: string | null;
 }
 
 function newest(versions: ReadonlyArray<string>): string | null {
@@ -95,58 +99,75 @@ function newest(versions: ReadonlyArray<string>): string | null {
 const distinct = (values: ReadonlyArray<string | null>) =>
   Array.from(new Set(values.filter((value): value is string => value !== null)));
 
-export function describeComponentVersions(
-  machines: ReadonlyArray<Pick<MachineUpdateRow, "row">>,
-): ComponentVersionSummary {
-  const total = machines.length;
-  if (total === 1) {
+/**
+ * `batch` holds every row id that has been updating since nothing was, so a
+ * component updating on three machines fills its one bar as each finishes.
+ */
+export function summarizeComponent(
+  machines: ReadonlyArray<Pick<MachineUpdateRow, "id" | "machineLabel" | "row">>,
+  batch: ReadonlySet<string>,
+): ComponentSummary {
+  const updating = machines.filter(({ row }) => row.status === "updating");
+  const inBatch = machines.filter(({ id }) => batch.has(id)).length;
+  const total = Math.max(inBatch, updating.length);
+  const percent =
+    updating.length === 0
+      ? null
+      : total === 1
+        ? (updating[0]!.row.percent ?? null)
+        : ((total - updating.length) / total) * 100;
+
+  const failed = machines.filter(({ row }) => row.status === "failed");
+  const failure =
+    failed.length === 0
+      ? null
+      : machines.length === 1
+        ? failed[0]!.row.detail
+        : failed.length === 1
+          ? `Failed on ${failed[0]!.machineLabel}`
+          : `Failed on ${failed.length} machines`;
+
+  if (machines.length === 1) {
     const { row } = machines[0]!;
     return {
       current: row.currentVersion,
       next: row.status === "current" ? null : row.latestVersion,
-      scope: null,
+      split: false,
+      percent,
+      failure,
     };
   }
-  const behind = machines.filter(({ row }) => row.status !== "current");
-  if (behind.length === 0) {
-    const versions = distinct(machines.map(({ row }) => row.currentVersion));
-    if (versions.length <= 1) {
-      return {
-        current: versions[0] ?? null,
-        next: null,
-        scope: total === 2 ? "on both machines" : `on all ${total} machines`,
-      };
-    }
-    // Every machine is current by its own check, but they disagree.
-    const latest = newest(versions);
-    const onLatest = machines.filter(({ row }) => row.currentVersion === latest).length;
-    return { current: latest, next: null, scope: `on ${onLatest} of ${total}` };
-  }
-  const targets = distinct(behind.map(({ row }) => row.latestVersion));
-  const froms = distinct(behind.map(({ row }) => row.currentVersion));
-  const reach =
-    behind.length === total ? `on ${total} machines` : `on ${behind.length} of ${total}`;
-  if (targets.length === 1 && froms.length <= 1) {
-    return { current: froms[0] ?? null, next: targets[0]!, scope: reach };
-  }
-  if (targets.length === 1) {
-    // Behind from different versions: say how many already run the target.
-    const target = targets[0]!;
-    const onTarget = machines.filter(
-      ({ row }) => row.status === "current" && row.currentVersion === target,
-    ).length;
-    return { current: target, next: null, scope: `on ${onTarget} of ${total}` };
-  }
-  return { current: null, next: null, scope: `Updates ${reach}` };
-}
 
-/** The summary as one line: "1.4.12 → 1.4.13 on 2 of 3". */
-export function formatComponentVersionSummary(summary: ComponentVersionSummary): string {
-  const versions =
-    summary.current && summary.next && summary.current !== summary.next
-      ? `${summary.current} → ${summary.next}`
-      : (summary.current ?? summary.next);
-  return [versions, summary.scope].filter((part) => part).join(" ");
+  const behind = machines.filter(({ row }) => row.status !== "current");
+  const froms = distinct(behind.map(({ row }) => row.currentVersion));
+  const targets = distinct(behind.map(({ row }) => row.latestVersion));
+  const currents = distinct(machines.map(({ row }) => row.currentVersion));
+  // A machine in the batch moves with it until the batch ends, finished or not.
+  const phases = new Set(
+    machines.map(({ id, row }) =>
+      row.status === "updating" || (batch.has(id) && row.status === "current")
+        ? "batch"
+        : row.status,
+    ),
+  );
+  if (behind.length === 0) {
+    return {
+      current: newest(currents),
+      next: null,
+      split: currents.length > 1,
+      percent,
+      failure,
+    };
+  }
+  return {
+    // Behind from one version: "old → new". Otherwise just where they head.
+    current: froms.length === 1 ? froms[0]! : null,
+    next: newest(targets),
+    // Failures on several machines each carry their own reason and retry.
+    split: phases.size > 1 || froms.length > 1 || targets.length > 1 || failed.length > 1,
+    percent,
+    failure,
+  };
 }
 
 /** The machines whose update this component's row button (and "Update all") starts. */
@@ -165,50 +186,4 @@ export function collectUpdateAllTargets<Row extends UpdateRowView>(
   groups: ReadonlyArray<Pick<ComponentUpdateGroup<Row>, "machines">>,
 ): MachineUpdateRow<Row>[] {
   return groups.flatMap(componentUpdateTargets);
-}
-
-export interface ComponentProgress {
-  readonly label: string;
-  /** Machines finished out of the batch, 0-100; null for a single update. */
-  readonly percent: number | null;
-}
-
-/**
- * A component's progress across machines. `batch` holds every row id that has
- * been updating since nothing was, so "Updating 2 of 3" counts on as machines
- * finish rather than shrinking. One machine reports its own detail.
- */
-export function describeComponentProgress(
-  machines: ReadonlyArray<Pick<MachineUpdateRow, "id" | "row">>,
-  batch: ReadonlySet<string>,
-): ComponentProgress | null {
-  const updating = machines.filter(({ row }) => row.status === "updating");
-  if (updating.length === 0) return null;
-  const total = Math.max(machines.filter(({ id }) => batch.has(id)).length, updating.length);
-  if (total === 1) {
-    return {
-      label: updating[0]!.row.detail ?? "Updating",
-      percent: updating[0]!.row.percent ?? null,
-    };
-  }
-  const done = total - updating.length;
-  return { label: `Updating ${done + 1} of ${total}`, percent: (done / total) * 100 };
-}
-
-/**
- * Where the component failed: the machine and its reason when one did, else
- * how many. Null when nothing failed. Each machine's reason sits in its own
- * row under the disclosure.
- */
-export function describeComponentFailure(
-  machines: ReadonlyArray<Pick<MachineUpdateRow, "machineLabel" | "row">>,
-): string | null {
-  const failed = machines.filter(({ row }) => row.status === "failed");
-  if (failed.length === 0) return null;
-  if (machines.length === 1) return failed[0]!.row.detail;
-  if (failed.length === 1) {
-    const { machineLabel, row } = failed[0]!;
-    return row.detail ? `Failed on ${machineLabel}: ${row.detail}` : `Failed on ${machineLabel}`;
-  }
-  return `Failed on ${failed.length} of ${machines.length} machines`;
 }

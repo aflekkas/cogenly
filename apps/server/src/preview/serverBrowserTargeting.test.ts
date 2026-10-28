@@ -180,3 +180,17 @@ it("reports a panel handoff as pending while preserving the tab for retry", () =
     sessionMismatch: false,
   });
 });
+
+it("never defaults to a visible, recently used extension surface", () => {
+  const host = tab({ tabId: "host", agentId: "agent", usedAt: 1 });
+  const surface = tab({
+    tabId: "surface",
+    agentId: "agent",
+    usedAt: 100,
+    createdAt: 100,
+    viewerCount: 1,
+    extensionSurface: { hostTabId: "host" },
+  });
+  expect(pickDefaultTab([host, surface], "thread-1", "agent", unreported)).toBe(host);
+  expect(pickDefaultTab([surface], "thread-1", undefined, unreported)).toBeUndefined();
+});
