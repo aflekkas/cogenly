@@ -13,7 +13,8 @@ import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { ComposerBanner, type ComposerBannerVariant } from "./ComposerBanner";
-import { foldNotices } from "./composerStackBudget.logic";
+import { composerNoticeDistance, foldNotices } from "./composerStackBudget.logic";
+import { ComposerTray } from "./ComposerTray";
 import { observeResize } from "~/lib/observeResize";
 
 // Match the duration-220 exit transition before removing a dismissed notice.
@@ -50,16 +51,6 @@ export type ComposerBannerStackContent = Pick<
 
 type ComposerBannerStackEntry = ComposerBannerStackItem | ComposerBannerStackContent;
 
-function bannerPriority(item: ComposerBannerStackEntry) {
-  if (item.priority === "activity") {
-    return 0;
-  }
-  if (item.priority === "urgent" || item.variant === "error" || item.variant === "warning") {
-    return 1;
-  }
-  return 2;
-}
-
 const NOTICE_OVERFLOW_ID = "composer-notice-overflow";
 
 function hasStackContent(item: ComposerBannerStackEntry) {
@@ -91,51 +82,24 @@ function NoticeOverflowRow({
   readonly onToggle: () => void;
 }) {
   return (
-    <ComposerBanner.Row
-      render={<button type="button" />}
-      aria-expanded={expanded}
-      aria-label={expanded ? "Fold notices" : `Show ${count} more notice${count === 1 ? "" : "s"}`}
+    <ComposerTray.Header
       data-chat-composer-collapsed-controls="true"
-      onPointerDown={(event) => event.preventDefault()}
-      onClick={onToggle}
-    >
-      <ComposerBanner.Icon>
-        <LayersIcon />
-      </ComposerBanner.Icon>
-      <ComposerBanner.Content className="whitespace-nowrap">
-        <span className="shrink-0 font-medium leading-7 sm:leading-6">
-          {expanded ? "Fold notices" : `+${count} more`}
-        </span>
-        {summary ? (
-          <span
-            aria-hidden={expanded}
-            className={cn(
-              "w-0 min-w-0 grow truncate text-muted-foreground transition-opacity duration-(--motion-duration-fast) ease-out motion-reduce:transition-none",
-              expanded && "opacity-0",
-            )}
-          >
-            {summary}
-          </span>
-        ) : null}
-      </ComposerBanner.Content>
-      <ComposerBanner.Actions>
-        <ComposerBanner.ToggleIcon expanded={expanded} />
-      </ComposerBanner.Actions>
-    </ComposerBanner.Row>
+      icon={<LayersIcon />}
+      title={expanded ? "Fold notices" : `+${count} more`}
+      summary={summary}
+      open={expanded}
+      onToggle={onToggle}
+      toggleLabel={expanded ? "Fold notices" : `Show ${count} more notice${count === 1 ? "" : "s"}`}
+    />
   );
 }
 
 interface ComposerBannerStackProps {
   readonly className?: string;
   readonly items: ReadonlyArray<ComposerBannerStackEntry>;
-  /**
-   * Attachments that sit under the front item, nearest the composer, such as
-   * the queue: notices coming and going never move it.
-   */
-  readonly attachedBelow?: ReactNode;
 }
 
-export function ComposerBannerStack({ className, items, attachedBelow }: ComposerBannerStackProps) {
+export function ComposerBannerStack({ className, items }: ComposerBannerStackProps) {
   const [requestedExitingItemId, setExitingItemId] = useState<string | null>(null);
   const dismissTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const exitingItemId =
@@ -156,7 +120,7 @@ export function ComposerBannerStack({ className, items, attachedBelow }: Compose
   // An entry with nothing to draw never gets a card.
   const orderedItems = items
     .filter(hasStackContent)
-    .toSorted((a, b) => bannerPriority(a) - bannerPriority(b));
+    .toSorted((a, b) => composerNoticeDistance(a) - composerNoticeDistance(b));
   const frontItem = orderedItems[0];
   // From three plain notices on, all but the most important fold into one
   // "+N more" bar that opens them again (and folds them back).
@@ -221,12 +185,7 @@ export function ComposerBannerStack({ className, items, attachedBelow }: Compose
   ));
 
   if (!frontItem && !leavingFront) {
-    return (
-      <>
-        {stackedBars}
-        {attachedBelow}
-      </>
-    );
+    return <>{stackedBars}</>;
   }
   const requestDismiss = (item: ComposerBannerStackEntry) => {
     if (!("onDismiss" in item) || !item.onDismiss || exitingItemId) {
@@ -284,7 +243,6 @@ export function ComposerBannerStack({ className, items, attachedBelow }: Compose
           ) : null}
         </NoticePresenceFrame>
       </ComposerBanner.Attachment>
-      {attachedBelow}
     </>
   );
 
