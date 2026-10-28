@@ -2237,8 +2237,8 @@ function runMarkdownFileAction(
 
 /**
  * A file an agent handed the user (see `isReplyFileLink`), shown with the same
- * chip as a file the user attached. Previewable files open in the files panel
- * and keep a download button; anything else downloads from the chip itself.
+ * chip as a file the user attached, plus a download button. Previewable files
+ * open in the files panel; anything else downloads from the chip itself.
  */
 const MarkdownReplyFile = memo(function MarkdownReplyFile(props: {
   environmentId: EnvironmentId | null;
@@ -2322,7 +2322,8 @@ const MarkdownReplyFile = memo(function MarkdownReplyFile(props: {
       onContextMenu={showMenu}
     />
   );
-  if (!canPreview) return chip;
+  // Every reply file keeps the button, including ones the files panel cannot open
+  // (a `~/` path), so two cards in one reply never differ in what they offer.
   return (
     <span className="inline-flex items-center gap-0.5 align-middle">
       {chip}
