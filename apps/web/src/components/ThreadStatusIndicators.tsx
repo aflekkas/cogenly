@@ -1,9 +1,9 @@
 import { scopedThreadKey, scopeThreadRef } from "@cogenly/client-runtime/environment";
 
-import { resolveEnvironmentMachineKind } from "@cogenly/contracts";
 import { FolderGit2Icon } from "lucide-react";
-import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
-import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
+import { threadRunsOn } from "../machines/machineBadge.logic";
+import { useRemoteMachine } from "../machines/useRemoteMachine";
+import { MachineBadge } from "./MachineBadge";
 
 import { useUiStateStore } from "../uiStateStore";
 import {
@@ -123,39 +123,10 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
 }
 
 /**
- * Non-interactive trailing status icons for a thread row in compact contexts
- * like the command palette. Shows a remote environment indicator, matching
- * the sidebar's trailing indicators.
+ * Non-interactive trailing status for a thread row in compact contexts like
+ * the command palette: a cloud when another machine runs the thread.
  */
 export function ThreadRowTrailingStatus({ thread }: { thread: SidebarThreadSummary }) {
-  const environment = useEnvironment(thread.environmentId);
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
-  // No primary (the hosted app) means every thread is remote, and the machine
-  // glyph is what tells the environments apart.
-  if (thread.environmentId === primaryEnvironmentId) {
-    return null;
-  }
-  const threadEnvironmentLabel = environment?.label ?? "Remote";
-  const remoteMachine = resolveEnvironmentMachineKind(environment?.serverConfig ?? null);
-
-  return (
-    <span className="inline-flex shrink-0 items-center gap-1.5">
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <span
-              aria-label={threadEnvironmentLabel}
-              className="inline-flex items-center justify-center"
-            />
-          }
-        >
-          <EnvironmentMachineIcon
-            kind={remoteMachine}
-            className="size-3 text-muted-foreground/60"
-          />
-        </TooltipTrigger>
-        <TooltipPopup side="top">{threadEnvironmentLabel}</TooltipPopup>
-      </Tooltip>
-    </span>
-  );
+  const machine = useRemoteMachine(threadRunsOn(thread), thread.environmentId);
+  return <MachineBadge placement="inline" machine={machine} />;
 }

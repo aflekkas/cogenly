@@ -20,8 +20,11 @@ import { useEffect, useState, type ReactNode, type Ref } from "react";
 import { AgentFace } from "~/components/agents/face";
 import { avatarFaceProps } from "~/components/agents/face/agentAvatar.logic";
 import { WorkLogCollapse } from "~/components/chat/WorkLog";
+import { MachineChoice } from "~/components/MachineBadge";
 import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
+import { pairedMachineChoice } from "~/machines/machineBadge.logic";
+import { usePrimaryEnvironmentId } from "~/state/environments";
 import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
 import { canCreateProposal, scheduleInWords, type AgentProposal } from "./agentBuilder.logic";
 import { AgentProjectPicker, useAgentProjectFolders } from "./AgentProjectPicker";
@@ -106,6 +109,8 @@ export function AgentProposalCard({
   const grants = PERMISSION_OPTIONS.filter((option) =>
     proposal.permissions.includes(option.key),
   ).map((option) => option.label);
+  const localEnvironmentId = usePrimaryEnvironmentId();
+  const pickedOwner = owner.machines.find((machine) => machine.environmentId === owner.value);
   return (
     <div
       ref={ref}
@@ -176,8 +181,13 @@ export function AgentProposalCard({
           >
             <SelectTrigger size="sm">
               <SelectValue>
-                {owner.machines.find((machine) => machine.environmentId === owner.value)?.name ??
-                  "This machine"}
+                <MachineChoice
+                  machine={
+                    pickedOwner === undefined
+                      ? null
+                      : pairedMachineChoice(pickedOwner, localEnvironmentId)
+                  }
+                />
               </SelectValue>
             </SelectTrigger>
             <SelectPopup>
@@ -187,8 +197,7 @@ export function AgentProposalCard({
                   value={machine.environmentId}
                   disabled={!machine.online || machine.pairing === "revoked"}
                 >
-                  {machine.name}
-                  {machine.online ? "" : " (offline)"}
+                  <MachineChoice machine={pairedMachineChoice(machine, localEnvironmentId)} />
                 </SelectItem>
               ))}
             </SelectPopup>
