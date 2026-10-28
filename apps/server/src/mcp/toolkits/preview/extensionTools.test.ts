@@ -166,14 +166,12 @@ it.effect("keeps installs to a live thread turn, while a finished turn can still
   }),
 );
 
-it.effect("opens an extension's popup as a new tab through the preview broker", () =>
+it.effect("clicks an extension's popup action on the current host through the preview broker", () =>
   Effect.gen(function* () {
     opened.length = 0;
     const result = yield* call("browser_extension_open", thread(live), { id, page: "popup" });
     expect(result.text).toContain('"tabId":"tab-1"');
-    expect(opened).toEqual([
-      { url: `chrome-extension://${id}/popup.html`, reuseExistingTab: false, profileId: "default" },
-    ]);
+    expect(opened).toEqual([{ id, page: "popup" }]);
   }),
 );
 
@@ -186,5 +184,15 @@ it.effect("reloads through the registry only in a live agent turn", () =>
     const late = yield* call("browser_extension_reload", thread(ended), { id });
     expect(late.text).toContain("no longer owns an active thread run");
     expect(reloads).toEqual([id]);
+  }),
+);
+
+it.effect("opens options as a normal extension tab", () =>
+  Effect.gen(function* () {
+    opened.length = 0;
+    yield* call("browser_extension_open", thread(live), { id, page: "options" });
+    expect(opened).toEqual([
+      { url: `chrome-extension://${id}/popup.html`, reuseExistingTab: false, profileId: "default" },
+    ]);
   }),
 );

@@ -1,3 +1,4 @@
+import { MachineResourcesSnapshot } from "./resourceTelemetry.ts";
 import { ProjectLabelId } from "./projectLabel.ts";
 import { MachineInfo } from "./machine.ts";
 import { AgentId } from "./agent.ts";
@@ -585,6 +586,7 @@ export const OrchestratorMcpCapabilitiesResult = Schema.Struct({
     Schema.Array(
       Schema.Struct({
         ...MachineInfo.fields,
+        resources: Schema.optional(MachineResourcesSnapshot),
         /** Another online machine's providers; this machine's are `providers` below. */
         catalog: Schema.optional(Schema.Array(OrchestratorMcpMachineProvider)),
         /** Why that machine's providers could not be read. */
