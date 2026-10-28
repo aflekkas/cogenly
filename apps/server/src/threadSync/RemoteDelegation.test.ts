@@ -20,32 +20,39 @@ it.live(
   "a spoke delegates to its hub while its own replication to the hub is stuck",
   () =>
     Effect.gen(function* () {
-      const hub = yield* startThreadMachine("stuck-hub", "cloud-server", () => [], undefined, true);
+      // Refusing one thread only quarantines it; a later bulk pass can still
+      // deliver the parent. Refuse the bulk channel itself in both directions.
+      const lifecycle = { refuseBulkReplication: true };
+      const hub = yield* startThreadMachine(
+        "stuck-hub",
+        "cloud-server",
+        () => [],
+        undefined,
+        true,
+        undefined,
+        false,
+        lifecycle,
+      );
       const laptop = yield* startThreadMachine(
         "stuck-laptop",
         "computer",
         () => [],
         undefined,
         true,
+        undefined,
+        false,
+        lifecycle,
       );
       yield* pair(hub, laptop);
       const parent = Option.getOrThrow(laptop.engine);
       const config = yield* laptop.run(ServerConfig.ServerConfig);
       const projectId = ProjectId.make("scratch");
       yield* laptop.sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES (${projectId},'No project',${`${config.baseDir}/scratch`},'[]','2026-10-24T00:00:00Z','2026-10-24T00:00:00Z')`;
-      // The hub refuses the batch holding an older laptop thread on every
-      // pass, so nothing the laptop wrote after it reaches the hub.
       const at = yield* DateTime.now;
       yield* laptop.sink.write({
         events: [threadCreated("event:laptop-own", at), userMessage("event:stuck", at, "stuck")],
       });
-      yield* hub.sql`CREATE TRIGGER refuse_laptop BEFORE INSERT ON orchestration_v2_projection_messages
-        WHEN NEW.thread_id = 'thread:on-laptop' BEGIN SELECT RAISE(FAIL, 'refused'); END`;
-      // The hub quarantines the refused thread instead of failing the whole pass.
-      yield* laptop.sync.sync(hub.environmentId);
-      expect(
-        yield* hub.sql`SELECT DISTINCT thread_id FROM thread_replication_deferred WHERE reason IS NOT NULL`,
-      ).toEqual([{ thread_id: "thread:on-laptop" }]);
+      expect((yield* Effect.result(laptop.sync.sync(hub.environmentId)))._tag).toBe("Failure");
 
       const parentId = ThreadId.make("parent");
       const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" };
@@ -88,13 +95,10 @@ it.live(
           },
         ],
       });
-      yield* laptop.sql`CREATE TRIGGER refuse_hub BEFORE INSERT ON orchestration_v2_projection_threads
-        WHEN NEW.thread_id = 'thread:poison' BEGIN SELECT RAISE(FAIL, 'refused'); END`;
-      // The laptop quarantines the refused thread instead of failing the whole pass.
-      yield* hub.sync.sync(laptop.environmentId);
-      expect(
-        yield* laptop.sql`SELECT DISTINCT thread_id FROM thread_replication_deferred WHERE reason IS NOT NULL`,
-      ).toEqual([{ thread_id: "thread:poison" }]);
+      expect((yield* Effect.result(hub.sync.sync(laptop.environmentId)))._tag).toBe("Failure");
+      // A later pass must also fail after the parent has committed, independent
+      // of whether an earlier pass queued a continuation under load.
+      expect((yield* Effect.result(laptop.sync.sync(hub.environmentId)))._tag).toBe("Failure");
       const before = yield* laptop.replication.cursors(hub.environmentId);
       const accepted = yield* parent.dispatch({
         type: "delegated_task.request",
