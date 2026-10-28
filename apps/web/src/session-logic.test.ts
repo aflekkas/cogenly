@@ -1314,9 +1314,9 @@ describe("HTML renders in the timeline", () => {
     expect(rowsFor(entries, true)).toEqual([
       "message",
       "turn-fold",
-      "work",
+      "work-toggle",
       "html-render",
-      "work",
+      "work-toggle",
       "message",
     ]);
   });
