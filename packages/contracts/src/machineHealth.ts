@@ -271,7 +271,7 @@ export type MachineHealthAlertsSnapshot = typeof MachineHealthAlertsSnapshot.Typ
 export const MachineHealthRead = makePeerChannel({
   name: "health.report.v1",
   scope: AuthSyncReplicateScope,
-  payload: Schema.Struct({}),
+  payload: Schema.Struct({ includeResources: Schema.optionalKey(Schema.Boolean) }),
   success: MachineHealthReport,
   error: MachineHealthError,
 });

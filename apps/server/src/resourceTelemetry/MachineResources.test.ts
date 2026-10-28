@@ -1,3 +1,4 @@
+import * as NodeOS from "node:os";
 import { expect, it } from "@effect/vitest";
 import { MachineResourcesSnapshot } from "@cogenly/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -35,7 +36,7 @@ it.effect("samples local capacity and active work once per cache window, excludi
       const first = yield* resources.read;
       expect(isResources(first)).toBe(true);
       expect(first).toMatchObject({
-        cpuCores: 12,
+        cpuCores: NodeOS.availableParallelism(),
         availableMemoryBytes: 1000,
         activeAgentRuns: 1,
         activeAgentTerminals: 3,

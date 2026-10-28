@@ -34,7 +34,7 @@ const make = Effect.gen(function* () {
       const runs = yield* sql<{ count: number }>`SELECT COUNT(*) AS count
       FROM orchestration_v2_projection_runs r
       JOIN orchestration_v2_projection_threads t ON t.thread_id = r.thread_id
-      WHERE r.status IN ('preparing', 'starting', 'running', 'waiting', 'finalizing')
+      WHERE r.status IN ('preparing', 'starting', 'running', 'waiting')
         AND t.deleted_at IS NULL
         AND NOT EXISTS (SELECT 1 FROM thread_owners o WHERE o.thread_id = r.thread_id AND o.local = 0)`.pipe(
         NodeSqliteClient.readOnly,
@@ -42,7 +42,7 @@ const make = Effect.gen(function* () {
       );
       return {
         sampledAt: capacity.sampledAt,
-        cpuCores: capacity.cpuCount,
+        cpuCores: NodeOS.availableParallelism(),
         loadAverage1m,
         loadAverage5m,
         availableMemoryBytes: capacity.availableMemoryBytes,

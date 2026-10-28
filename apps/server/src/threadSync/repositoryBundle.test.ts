@@ -6,7 +6,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Config from "../config.ts";
 import * as Git from "../vcs/GitVcsDriver.ts";
-import { exportBundle, importBundle } from "./repositoryBundle.ts";
+import { exportBundle, importBundle, withFullBundleFallback } from "./repositoryBundle.ts";
 
 const layer = Git.layer.pipe(
   Layer.provideMerge(Config.layerTest("/tmp", { prefix: "task-bundles" })),
@@ -113,7 +113,10 @@ it.effect(
       const pushed = yield* exportBundle(source, base, true);
       expect(pushed.prerequisites).toEqual([base]);
       expect(pushed.base64).toBe("");
+      // Objects already present must work without any origin or network.
+      yield* execute(target, ["remote", "set-url", "origin", path.join(target, "offline")]);
       yield* importBundle(target, pushed);
+      yield* execute(source, ["remote", "set-url", "origin", path.join(source, "offline")]);
       yield* fs.writeFileString(path.join(source, "local.txt"), "unpublished");
       yield* execute(source, ["add", "."]);
       yield* commit(source, "local");
@@ -137,7 +140,50 @@ it.effect(
       // A target that cannot fetch the prerequisite fails clearly before accepting the delta.
       const missing = yield* fs.makeTempDirectoryScoped();
       yield* execute(missing, ["init"]);
-      expect((yield* Effect.result(importBundle(missing, delta)))._tag).toBe("Failure");
+      const rejected = yield* Effect.result(importBundle(missing, delta));
+      expect(rejected._tag).toBe("Failure");
+      if (rejected._tag === "Failure")
+        expect(rejected.failure.reason).toBe("missing-prerequisites");
+      // Launch and branch-return imports both recover with a bounded full bundle.
+      for (const branch of [undefined, "c/returned-result"]) {
+        const destination = yield* fs.makeTempDirectoryScoped();
+        yield* execute(destination, ["init"]);
+        const attempts: boolean[] = [];
+        yield* withFullBundleFallback(true, (remoteDelta) =>
+          Effect.gen(function* () {
+            attempts.push(remoteDelta);
+            yield* importBundle(
+              destination,
+              yield* exportBundle(source, head, remoteDelta),
+              branch,
+            );
+          }),
+        );
+        expect(attempts).toEqual([true, false]);
+        expect((yield* execute(destination, ["show", `${head}:local.txt`])).stdout).toBe(
+          "unpublished",
+        );
+        if (branch !== undefined)
+          expect((yield* git.resolveCommit({ cwd: destination, revision: branch })).commitSha).toBe(
+            head,
+          );
+      }
+      // Too many boundaries must never escape the wire contract's 256 cap.
+      const capped = yield* exportBundle(source, head, true).pipe(
+        Effect.provideService(Git.GitVcsDriver, {
+          ...git,
+          execute: (input) =>
+            input.operation === "delegate-origin-boundary"
+              ? Effect.succeed({
+                  stdout: Array.from({ length: 257 }, () => `-${base}`).join("\n"),
+                  stderr: "",
+                  exitCode: 0,
+                })
+              : git.execute(input),
+        }),
+      );
+      expect(capped.prerequisites).toBeUndefined();
+      yield* importBundle(missing, capped);
     }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
@@ -178,6 +224,17 @@ it.effect("keeps the 32 MiB guard on the delta rather than shared repository his
     if (legacy._tag === "Failure") expect(legacy.failure.reason).toBe("too-large");
     const delta = yield* exportBundle(source, head, true);
     expect(delta.prerequisites).toHaveLength(1);
+    const empty = yield* fs.makeTempDirectoryScoped();
+    yield* execute(empty, ["init"]);
+    const fullRetry = yield* Effect.result(
+      withFullBundleFallback(true, (remoteDelta) =>
+        Effect.gen(function* () {
+          yield* importBundle(empty, yield* exportBundle(source, head, remoteDelta));
+        }),
+      ),
+    );
+    expect(fullRetry._tag).toBe("Failure");
+    if (fullRetry._tag === "Failure") expect(fullRetry.failure.reason).toBe("too-large");
     expect(delta.base64.length).toBeLessThan(4096);
     yield* importBundle(target, delta);
     expect((yield* execute(target, ["cat-file", "-s", `${head}:large.bin`])).stdout.trim()).toBe(

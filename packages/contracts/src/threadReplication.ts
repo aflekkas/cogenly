@@ -128,6 +128,7 @@ export class ThreadRemoteError extends Schema.TaggedError<ThreadRemoteError>()(
       "busy",
       "local-changes",
       "needs-repository",
+      "missing-prerequisites",
       "behind",
     ]),
     detail: Schema.optional(Schema.String),

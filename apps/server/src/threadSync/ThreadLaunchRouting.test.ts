@@ -10,6 +10,7 @@ import {
   ProjectLabelId,
   ProviderInstanceId,
   ThreadId,
+  ThreadRemoteError,
 } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -238,9 +239,9 @@ describe("launching a thread on another machine", () => {
   );
 });
 
-it.live(
-  "waits for a new checkout before importing a delegated commit bundle",
-  () =>
+it.live.each([false, true])(
+  "launches with an unavailable target origin (catalog failure: %s)",
+  (catalogFailure) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -300,9 +301,15 @@ it.live(
           checkoutRoot: () => Effect.succeed(targetRoot),
           ensureCheckout: () =>
             Effect.gen(function* () {
+              if (ready) return;
               yield* fs.makeDirectory(targetRoot);
               yield* execute(targetRoot, ["init", "--initial-branch=main"]);
-              yield* execute(targetRoot, ["remote", "add", "origin", originRoot]);
+              yield* execute(targetRoot, [
+                "remote",
+                "add",
+                "origin",
+                path.join(root, "unavailable-origin"),
+              ]);
               ready = true;
             }).pipe(Effect.orDie),
         },
@@ -311,19 +318,57 @@ it.live(
       expect(
         Option.getOrThrow(yield* hub.remoteLaunch.catalog(target.environmentId)).repositoryTransfer,
       ).toBe("remote-delta-v1");
-      yield* addRacing(hub, true);
-      yield* addRacing(target, false);
-      const launched = yield* hub.remoteLaunch.launch(
-        target.environmentId,
-        launch(racingId, {
-          workspaceStrategy: { type: "worktree", baseRef: revision },
-          projectFolderId: ProjectLabelId.make("label:racing"),
-          repositorySource: { cwd: sourceRoot, revision },
+      let catalogReads = 0;
+      const catalog = hub.remoteLaunch.catalog;
+      // Keep the real catalog path while counting calls (or simulating a failed read).
+      const readCatalog = yield* catalog(target.environmentId);
+      yield* hub.remoteLaunch.registerCatalog(() =>
+        Effect.suspend(() => {
+          catalogReads++;
+          return catalogFailure
+            ? Effect.fail(new ThreadRemoteError({ reason: "offline" }))
+            : Effect.succeed(readCatalog);
         }),
       );
+      yield* addRacing(hub, true);
+      yield* addRacing(target, false);
+      const input = launch(racingId, {
+        workspaceStrategy: { type: "worktree", baseRef: revision },
+        projectFolderId: ProjectLabelId.make("label:racing"),
+        repositorySource: { cwd: sourceRoot, revision },
+      });
+      const launched = yield* hub.remoteLaunch.launch(target.environmentId, input);
+      yield* hub.remoteLaunch.launch(target.environmentId, input);
+      expect(catalogReads).toBe(1);
       expect(Option.isSome(launched)).toBe(true);
       expect(ready).toBe(true);
       expect((yield* git.resolveCommit({ cwd: targetRoot, revision })).commitSha).toBe(revision);
+      // Copy a stopped child's branch back into a clone missing its base as well.
+      const returnRoot = path.join(root, "return");
+      yield* fs.makeDirectory(returnRoot);
+      yield* execute(returnRoot, ["init"]);
+      yield* execute(targetRoot, ["update-ref", "refs/remotes/origin/main", revision]);
+      yield* execute(targetRoot, ["checkout", "-b", "c/task-result", revision]);
+      yield* execute(targetRoot, [
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "child result",
+      ]);
+      const returned = (yield* git.resolveCommit({ cwd: targetRoot, revision: "HEAD" })).commitSha;
+      yield* hub.sql`UPDATE projection_projects SET workspace_root = ${returnRoot} WHERE project_id = ${racingId}`;
+      yield* target.sql`UPDATE orchestration_v2_projection_threads SET payload_json = json_set(payload_json, '$.worktreePath', ${targetRoot}, '$.branch', 'c/task-result') WHERE thread_id = ${input.threadId!}`;
+      yield* hub.sql`UPDATE orchestration_v2_projection_threads SET payload_json = json_set(payload_json, '$.worktreePath', ${targetRoot}, '$.branch', 'c/task-result') WHERE thread_id = ${input.threadId!}`;
+      expect(yield* hub.remoteLaunch.copyResult(input.threadId!, "result-transfer")).toBe(
+        "c/task-result",
+      );
+      expect(
+        (yield* git.resolveCommit({ cwd: returnRoot, revision: "c/task-result" })).commitSha,
+      ).toBe(returned);
     }).pipe(
       Effect.scoped,
       Effect.provide(
