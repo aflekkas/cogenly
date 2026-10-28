@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
+import { ThreadId } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -57,6 +58,17 @@ it.effect("worktree snapshots keep active and archived owners and skip unrelated
     );
     expect(worktrees.threads.map((t) => t.id)).toEqual(["owner"]);
     expect(worktrees.archivedThreads.map((t) => t.id)).toEqual(["archived"]);
+    const owners = yield* projections.getShellSnapshot({
+      worktreesOnly: true,
+      threadIds: [ThreadId.make("owner")],
+    });
+    expect(owners.threads).toEqual(worktrees.threads);
+    expect(owners.archivedThreads).toEqual([]);
+    const archived = yield* projections.getShellSnapshot({
+      threadIds: [ThreadId.make("archived")],
+    });
+    expect(archived.threads).toEqual([]);
+    expect(archived.archivedThreads).toEqual(worktrees.archivedThreads);
     // Skipped chats must not even be decoded: corrupt unrelated history cannot
     // prevent a storage report or worktree sweep.
     yield* sql`UPDATE orchestration_v2_projection_threads SET payload_json = '{"worktreePath":null}' WHERE thread_id = 'chat'`;

@@ -342,10 +342,23 @@ const makeStorage = (box: ReturnType<typeof fixture>) =>
         list: () => Effect.succeed([{ ...project, projectId: project.id, deletedAt: null }]),
       }),
       Layer.mock(Projections.ProjectionStoreV2)({
-        // A cleanup inventory must use bounded per-owner reads, including archived owners.
         getThreadShell: (id) => {
           if (state.historyUnavailable) return Effect.die("history unavailable");
           return Effect.succeed(id === state.thread.id ? state.thread : parent);
+        },
+        // Inventory chunks include archived owners; pre-deletion rechecks stay authoritative.
+        getShellSnapshot: (options) => {
+          if (state.historyUnavailable) return Effect.die("history unavailable");
+          const selected = [state.thread, ...(parent === null ? [] : [parent])].filter((thread) =>
+            options?.threadIds?.includes(thread.id),
+          );
+          expect(options?.threadIds?.length).toBeLessThanOrEqual(8);
+          return Effect.succeed({
+            schemaVersion: 1,
+            snapshotSequence: 0,
+            threads: selected.filter((thread) => thread.archivedAt === null),
+            archivedThreads: selected.filter((thread) => thread.archivedAt !== null),
+          });
         },
       }),
       Layer.mock(Orchestrator.OrchestratorV2)({ streamDomainEvents: Stream.fromPubSub(events) }),

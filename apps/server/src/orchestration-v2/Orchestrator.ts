@@ -421,7 +421,7 @@ export class OrchestratorV2 extends Context.Service<OrchestratorV2, Orchestrator
 ) {}
 
 function nextRunOrdinal(projection: Pick<OrchestrationV2ThreadProjection, "runs">): number {
-  return projection.runs.length + 1;
+  return projection.runs.reduce((max, run) => Math.max(max, run.ordinal), 0) + 1;
 }
 
 /**
@@ -1091,7 +1091,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   // Handoff preparation explicitly reads its history after choosing a strategy.
   // This runs inside the write transaction for every command, so finished leaf
   // nodes of finished runs stay unread: busy threads hold thousands of them.
-  const readCommandProjection = (threadId: ThreadId) =>
+  const readCommandProjection = (
+    threadId: ThreadId,
+    messageDispatch?: ProjectionRecordFilter["messageDispatch"],
+  ) =>
     projectionStore
       .getThreadRecords(
         threadId,
@@ -1113,6 +1116,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           turnItemTypes: ["user_message", "error"],
           messageRoles: ["user"],
           omitSettledLeafNodes: true,
+          ...(messageDispatch === undefined ? {} : { messageDispatch }),
         },
       )
       .pipe(
@@ -1143,10 +1147,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const getProjectionWithPendingEvents = (
     threadId: ThreadId,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    messageDispatch?: ProjectionRecordFilter["messageDispatch"],
   ) =>
     Effect.gen(function* () {
       const pending = (yield* Ref.get(events)).filter((event) => event.threadId === threadId);
-      const stored = yield* Effect.option(readCommandProjection(threadId));
+      const stored = yield* Effect.option(readCommandProjection(threadId, messageDispatch));
       let projection: OrchestrationV2ThreadProjection;
       if (Option.isSome(stored)) {
         projection = stored.value;
@@ -4896,7 +4901,22 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
   ) =>
     Effect.gen(function* () {
-      let projection = yield* getProjectionWithPendingEvents(command.threadId, events);
+      const messageDispatch =
+        command.notification !== undefined ||
+        command.delegatedCompletion !== undefined ||
+        command.manualContinuationOfRunId !== undefined ||
+        command.usageLimitContinuationOfRunId !== undefined ||
+        command.restartContinuationOfRunId !== undefined
+          ? undefined
+          : {
+              messageId: command.messageId,
+              providerInstanceId: command.modelSelection?.instanceId,
+            };
+      let projection = yield* getProjectionWithPendingEvents(
+        command.threadId,
+        events,
+        messageDispatch,
+      );
       if (command.messageId.startsWith("message:delegated-task-failure:")) {
         const failures = command.notification?.delegatedFailures ?? [];
         const pending = pendingDelegatedTaskFailures(projection, failures);
@@ -5042,7 +5062,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               payload: { ...run, queueHeld: false, queueHoldReason: undefined },
             });
           }
-          projection = yield* getProjectionWithPendingEvents(command.threadId, events);
+          projection = yield* getProjectionWithPendingEvents(
+            command.threadId,
+            events,
+            messageDispatch,
+          );
         }
       }
 
@@ -5068,7 +5092,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           occurredAt: now,
           payload: thread,
         });
-        projection = yield* getProjectionWithPendingEvents(command.threadId, events);
+        projection = yield* getProjectionWithPendingEvents(
+          command.threadId,
+          events,
+          messageDispatch,
+        );
       }
       if (projection.thread.snoozedUntil != null) {
         const now = yield* DateTime.now;
@@ -5088,7 +5116,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           occurredAt: now,
           payload: thread,
         });
-        projection = yield* getProjectionWithPendingEvents(command.threadId, events);
+        projection = yield* getProjectionWithPendingEvents(
+          command.threadId,
+          events,
+          messageDispatch,
+        );
       }
       const userMessages = projection.messages.filter((message) => message.role === "user");
       const onlyMaintenanceHistory =
@@ -5096,6 +5128,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       if (
         !isNativeMaintenanceCommand(command) &&
         ((command.titleSeed !== undefined &&
+          projection.messages.length === 0 &&
           (yield* projectionStore
             .getMessageCount(command.threadId)
             .pipe(mapDispatchError(command))) === 0) ||
@@ -5125,7 +5158,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             messageId: command.messageId,
           }),
         ]);
-        projection = yield* getProjectionWithPendingEvents(command.threadId, events);
+        projection = yield* getProjectionWithPendingEvents(
+          command.threadId,
+          events,
+          messageDispatch,
+        );
       }
       const modelSelection = command.modelSelection ?? projection.thread.modelSelection;
       let dispatchMode = resolveMessageDispatchIntent(
@@ -12737,20 +12774,24 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
     if (command.type === "message.dispatch" && !isReplayedCommandId(command.commandId)) {
       const existing = yield* projectionStore
-        .getThreadShell(command.threadId)
+        .getThreadRecords(command.threadId, ["runs"], {
+          messageDispatch: { messageId: command.messageId },
+        })
         .pipe(
           Effect.mapError(
             (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
           ),
         );
       if (
-        existing !== null &&
-        existing.latestRunId === null &&
-        existing.historyOrigin === undefined &&
-        existing.projectFolderSource === "explicit"
+        existing.runs.length === 0 &&
+        existing.thread.historyOrigin === undefined &&
+        existing.thread.projectFolderSource === "explicit"
       )
         yield* membership
-          .validate({ projectId: existing.projectId, projectFolderId: existing.projectFolderId })
+          .validate({
+            projectId: existing.thread.projectId,
+            projectFolderId: existing.thread.projectFolderId,
+          })
           .pipe(
             Effect.mapError((cause) =>
               cause._tag === "ProjectRepositoryMismatchError"

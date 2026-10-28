@@ -243,8 +243,8 @@ const make = Effect.gen(function* () {
     );
 
   // A cleanup inventory need not be one atomic shell snapshot: deletion always
-  // rechecks its owners below. Release the reader between owners so this scan
-  // cannot monopolize it or flood disk reads while a command needs its history.
+  // rechecks its owners below. Share shell/fork lookups within small chunks,
+  // then release the reader and yield before admitting another chunk.
   const readThreads = Effect.fn("StorageCleanup.readThreads")(function* () {
     const owners = yield* sql<{ threadId: string }>`
       SELECT thread_id AS "threadId" FROM orchestration_v2_projection_threads
@@ -252,9 +252,12 @@ const make = Effect.gen(function* () {
       ORDER BY thread_id
     `.pipe(NodeSqliteClient.readOnly);
     const threads: Array<OrchestrationV2ThreadShell> = [];
-    for (const owner of owners) {
-      const thread = yield* projections.getThreadShell(ThreadId.make(owner.threadId));
-      if (thread !== null && thread.worktreePath !== null) threads.push(thread);
+    for (let offset = 0; offset < owners.length; offset += 8) {
+      const snapshot = yield* projections.getShellSnapshot({
+        threadIds: owners.slice(offset, offset + 8).map((owner) => ThreadId.make(owner.threadId)),
+        worktreesOnly: true,
+      });
+      threads.push(...snapshot.threads, ...snapshot.archivedThreads);
       yield* NodeSqliteClient.eventLoopTurn;
     }
     const projects = yield* projectStore.listShells();

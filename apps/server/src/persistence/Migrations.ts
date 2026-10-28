@@ -1,4 +1,4 @@
-import Migration0116 from "./Migrations/116_CommandReadIndexes.ts";
+import Migration0117 from "./Migrations/117_CommandReadIndexes.ts";
 import Migration0114 from "./Migrations/114_TurnItemTypeIndex.ts";
 import Migration0115 from "./Migrations/115_TurnItemRareTypeIndexes.ts";
 import Migration0113 from "./Migrations/113_ProjectFileSync.ts";
@@ -259,7 +259,7 @@ export const migrationEntries = [
   [113, "ProjectFileSync", Migration0113],
   [114, "TurnItemTypeIndex", Migration0114],
   [115, "TurnItemRareTypeIndexes", Migration0115],
-  [116, "CommandReadIndexes", Migration0116],
+  [117, "CommandReadIndexes", Migration0117],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

@@ -32,7 +32,7 @@ const SEEDED_AT = "2026-01-01T00:00:00.000Z";
 const send = (
   key: string,
   dispatchMode: Extract<OrchestrationV2Command, { type: "message.dispatch" }>["dispatchMode"],
-): OrchestrationV2Command => ({
+): Extract<OrchestrationV2Command, { type: "message.dispatch" }> => ({
   type: "message.dispatch",
   commandId: CommandId.make(`send:${key}`),
   threadId,
@@ -322,5 +322,69 @@ it.effect("command reads preserve filtered item ordering and settled-node semant
     expect(onlyBusy.turnItems).toEqual(
       full.turnItems.filter((item) => item.type === "user_message" && item.runId === busy.id),
     );
+  }).pipe(Effect.provide(runtime(provider)));
+});
+
+it.effect("send reads bounded control rows and reuses an existing queued message item", () => {
+  const provider = makeControllableProvider(CodexProviderCapabilitiesV2);
+  return Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const sql = yield* SqlClient.SqlClient;
+    const { queued } = yield* longThreadWithQueuedMessage;
+    // Historical runs must not become dispatch input, even when their ordinal
+    // is much larger than the live run's. New runs still use the durable max.
+    yield* sql`INSERT INTO orchestration_v2_projection_runs
+      SELECT 'run:history:' || n, thread_id, 100 + n, provider, provider_thread_id,
+        'completed', requested_at, ${SEEDED_AT},
+        json_set(payload_json, '$.id', 'run:history:' || n, '$.ordinal', 100 + n,
+          '$.status', 'completed', '$.completedAt', ${SEEDED_AT}), provider_instance_id
+      FROM (WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < ${HISTORY_ROWS}) SELECT n FROM seq)
+      CROSS JOIN orchestration_v2_projection_runs WHERE run_id = ${queued.id}`;
+    const before = yield* orchestrator.getThreadRecords(threadId, ["turnItems"], {
+      turnItemMessageIds: [MessageId.make("message:seed:1000")],
+    });
+    const { value, reads } = yield* recordRowsRead(
+      orchestrator.dispatch({
+        ...send("redispatch", { type: "queue_after_active" }),
+        messageId: MessageId.make("message:seed:1000"),
+      }),
+    );
+    expect(value.storedEvents.some((row) => row.event.type === "run.created")).toBe(true);
+    expect(reads.filter((read) => read.rows > 10)).toEqual([]);
+    expect(reads.reduce((total, read) => total + read.rows, 0)).toBeLessThan(100);
+    const after = yield* orchestrator.getThreadRecords(threadId, ["runs", "turnItems"], {
+      turnItemMessageIds: [MessageId.make("message:seed:1000")],
+    });
+    expect(after.runs.at(-1)?.ordinal).toBe(HISTORY_ROWS + 101);
+    expect(after.turnItems).toHaveLength(1);
+    expect(after.turnItems[0]?.id).toBe(before.turnItems[0]?.id);
+    // EventSink moves the retained item's ordinal into its newly assigned run.
+    expect(after.turnItems[0]?.ordinal).toBeGreaterThan(before.turnItems[0]!.ordinal);
+    expect(after.turnItems[0]?.runId).toBe(after.runs.at(-1)?.id);
+  }).pipe(Effect.provide(runtime(provider)));
+});
+
+it.effect("dispatch retains a title-history witness with ECMAScript maintenance whitespace", () => {
+  const provider = makeControllableProvider(CodexProviderCapabilitiesV2);
+  return Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const sql = yield* SqlClient.SqlClient;
+    yield* longThreadWithQueuedMessage;
+    yield* sql`UPDATE orchestration_v2_projection_messages
+      SET payload_json = json_set(payload_json, '$.text', ${"\uFEFF /CoMpAcT \u2029"})
+      WHERE thread_id = ${threadId}`;
+    const filter = { messageDispatch: { messageId: MessageId.make("message:new") } };
+    const maintenance = yield* orchestrator.getThreadRecords(threadId, ["messages"], filter);
+    expect(maintenance.messages.length).toBeLessThanOrEqual(3);
+    expect(maintenance.messages.every(Orchestrator.isNativeMaintenanceCommand)).toBe(true);
+    yield* sql`UPDATE orchestration_v2_projection_messages
+      SET payload_json = json_set(payload_json, '$.text', 'Original work')
+      WHERE message_id = 'message:seed:1000'`;
+    const realHistory = yield* orchestrator.getThreadRecords(threadId, ["messages"], filter);
+    expect(realHistory.messages.map((message) => message.id)).toContain("message:seed:1000");
+    expect(
+      realHistory.messages.some((message) => !Orchestrator.isNativeMaintenanceCommand(message)),
+    ).toBe(true);
+    expect(realHistory.messages.length).toBeLessThanOrEqual(3);
   }).pipe(Effect.provide(runtime(provider)));
 });
