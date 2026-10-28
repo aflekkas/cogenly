@@ -3,6 +3,11 @@
 // --disable-gpu uses cheaper software compositing while preserving SwiftShader WebGL.
 import {
   BUILT_IN_BROWSER_PROFILES,
+  BrowserExtensionError,
+  BrowserExtensionId,
+  BrowserExtensionPage,
+  BrowserProfileId,
+  type PreviewExtensionSurface,
   type BrowserCookieImportInput,
   type BrowserCookieImportResult,
   BrowserCookieImportError,
@@ -108,6 +113,9 @@ import {
 } from "./SitePermissionAgent.ts";
 import { BrowserControlInterrupted, SessionControl } from "./SessionControl.ts";
 import * as Targeting from "./serverBrowserTargeting.ts";
+import { openSurfaceWithinDeadline } from "./ServerBrowserSurfaceDeadline.ts";
+import { openExtensionSurface } from "./ServerBrowserExtensionSurfaces.ts";
+import { popupPreferredSize, watchPopupPreferredSize } from "./ServerBrowserPopupSize.ts";
 
 const SERVER_HOST_CLIENT_ID = SERVER_BROWSER_AUTOMATION_CLIENT_ID;
 const RENDER_SCALE = 2;
@@ -122,6 +130,13 @@ const SCREENCAST_MOTION_QUALITY = 50;
 const DESKTOP_ATTACH_TIMEOUT = "10 seconds";
 const VIEWER_OUTPUT_LIMIT = 64;
 const RECORDING_SCREENCAST = { format: "jpeg", quality: 90, everyNthFrame: 1 } as const;
+const decodeExtensionOpen = Schema.decodeUnknownSync(
+  Schema.Struct({
+    id: BrowserExtensionId,
+    page: BrowserExtensionPage,
+    profileId: Schema.optional(BrowserProfileId),
+  }),
+);
 const decodeViewportSetting = Schema.decodeUnknownSync(PreviewViewportSettingSchema);
 /** The agent cursor glides to its target, then pulses just before the press, like desktop tabs. */
 const AGENT_CURSOR_MOVE_MS = 160;
@@ -370,6 +385,9 @@ interface Recording {
 }
 
 interface ServerTab {
+  extensionSurface: PreviewExtensionSurface | undefined;
+  stopPopupSize: (() => Promise<void>) | null;
+  readonly releaseSurface?: () => Promise<void>;
   readonly threadId: ThreadId;
   readonly tabId: string;
   readonly page: Page;
@@ -592,10 +610,37 @@ const make = Effect.gen(function* () {
 
   const tabs = new Map<string, ServerTab>();
   const pendingTabs = new Map<string, Promise<ServerTab>>();
+  const pendingSurfaceTabs = new Set<string>();
   /** Sessions closed while their tab was still opening; the open discards its page. */
   const closedPendingTabs = new Set<string>();
   /** Popup pages waiting for the tab their `opened` event creates. */
-  const adoptedPages = new Map<string, { readonly page: Page; readonly openerTabId: string }>();
+  const adoptedPages = new Map<
+    string,
+    {
+      readonly page: Page;
+      readonly openerTabId: string;
+      readonly releaseSurface?: () => Promise<void>;
+    }
+  >();
+  const claimedPages = new WeakSet<Page>();
+  const surfaceNotices = new WeakMap<Page, string>();
+  const ownedPageCreations = new Map<BrowserContext, Set<Promise<Page>>>();
+  const surfaceLocks = new Map<string, Promise<unknown>>();
+  const newOwnedPage = async (context: BrowserContext) => {
+    const creations = ownedPageCreations.get(context) ?? new Set<Promise<Page>>();
+    ownedPageCreations.set(context, creations);
+    const creating = context.newPage().then((page) => {
+      claimedPages.add(page);
+      return page;
+    });
+    creations.add(creating);
+    try {
+      return await creating;
+    } finally {
+      creations.delete(creating);
+      if (!creations.size) ownedPageCreations.delete(context);
+    }
+  };
   /** Sessions the manager closed, so their tabs end for good. Pruned once dropped. */
   const closedSessions = new Set<string>();
   let hostConnectionId: string | null = null;
@@ -607,6 +652,7 @@ const make = Effect.gen(function* () {
 
   const targetable = (tab: ServerTab): Targeting.TargetableTab => ({
     tabId: tab.tabId,
+    extensionSurface: tab.extensionSurface,
     threadId: tab.threadId,
     agentId: tab.control.agentId,
     createdAt: tab.createdAt,
@@ -773,7 +819,7 @@ const make = Effect.gen(function* () {
    * zooms the pages it renders itself.
    */
   const applyZoom = async (tab: ServerTab) => {
-    if (tab.desktop) return;
+    if (tab.desktop || tab.extensionSurface?.kind === "popup") return;
     const size = tab.page.viewportSize();
     if (!size) return;
     if (tab.zoomFactor === 1) {
@@ -798,8 +844,8 @@ const make = Effect.gen(function* () {
 
   const applySetting = async (tab: ServerTab, setting: PreviewViewportSetting) => {
     tab.setting = setting;
-    // The desktop lays its webview out at the published setting itself.
-    if (tab.desktop) return;
+    // Popup dimensions come from document content, never the viewer's layout.
+    if (tab.desktop || tab.extensionSurface?.kind === "popup") return;
     const size =
       fixedViewportSize(setting) ??
       [...tab.viewers]
@@ -835,8 +881,14 @@ const make = Effect.gen(function* () {
     const key = tabKey(tab.threadId, tab.tabId);
     if (tabs.get(key) !== tab) return;
     tabs.delete(key);
+    // Surface pages and their relay resources belong to the host's lifetime.
+    for (const surface of tabs.values()) {
+      if (surface.threadId === tab.threadId && surface.extensionSurface?.hostTabId === tab.tabId)
+        dropTab(surface, true);
+    }
     if (closeSession) revealRequestedAt.delete(key);
     tab.closing = true;
+    void tab.stopPopupSize?.().catch(constVoid);
     for (const complete of tab.panelWaiters) complete(false);
     clearAbortedNavigation(tab);
     // A desktop page outlives the connection unless its session closed with it.
@@ -847,6 +899,7 @@ const make = Effect.gen(function* () {
     // The desktop owns its page; letting go only ends this connection.
     if (tab.desktop) void tab.desktop.close().catch(constVoid);
     else void tab.page.close().catch(constVoid);
+    if (tab.releaseSurface) void tab.releaseSurface().catch(constVoid);
     if (tab.isolatedContext) void tab.page.context().close().catch(constVoid);
     void tab.recording?.encoder.close().catch(constVoid);
     void NodeFSP.rm(downloadDir(tab), { recursive: true, force: true }).catch(constVoid);
@@ -920,6 +973,7 @@ const make = Effect.gen(function* () {
   };
 
   const createTab = async (snapshot: PreviewSessionSnapshot): Promise<ServerTab> => {
+    if (snapshot.extensionSurface) snapshot = { ...snapshot, serverRendering: "stream" };
     const profileId = snapshot.profileId ?? DEFAULT_BROWSER_PROFILE_ID;
     const adopted = adoptedPages.get(tabKey(snapshot.threadId, snapshot.tabId));
     adoptedPages.delete(tabKey(snapshot.threadId, snapshot.tabId));
@@ -984,7 +1038,8 @@ const make = Effect.gen(function* () {
     if (adopted?.page.isClosed()) throw new Error("The popup closed before it opened.");
     // The desktop page already has its own clipboard.
     if (!desktop) await prepareContext(context);
-    const page = adopted?.page ?? desktop?.page ?? (await context.newPage());
+    const page = adopted?.page ?? desktop?.page ?? (await newOwnedPage(context));
+    claimedPages.add(page);
     const cdp = await context.newCDPSession(page);
     // The desktop's page is already a normal browser. A popup's first request
     // went out before it became a tab; everything after presents as Chrome.
@@ -1000,6 +1055,9 @@ const make = Effect.gen(function* () {
       },
     });
     const tab: ServerTab = {
+      extensionSurface: snapshot.extensionSurface,
+      stopPopupSize: null,
+      ...(adopted?.releaseSurface ? { releaseSurface: adopted.releaseSurface } : {}),
       threadId: ThreadId.make(snapshot.threadId),
       tabId: snapshot.tabId,
       page,
@@ -1035,7 +1093,17 @@ const make = Effect.gen(function* () {
       capturing: 0,
     };
     if (!desktop) {
-      await page.setViewportSize(fixedViewportSize(tab.setting) ?? UNATTACHED_FILL_VIEWPORT);
+      // Native extension UI has its own Chrome dimensions. The second CDP
+      // connection's default viewport otherwise misreports it as 1280x800.
+      const size =
+        snapshot.extensionSurface?.kind === "popup" && snapshot.extensionSurface.preferredSize
+          ? snapshot.extensionSurface.preferredSize
+          : snapshot.extensionSurface
+            ? await page.evaluate<{ width: number; height: number }>(
+                "({width:innerWidth,height:innerHeight})",
+              )
+            : (fixedViewportSize(tab.setting) ?? UNATTACHED_FILL_VIEWPORT);
+      await page.setViewportSize(size);
     }
     await applyRendering(tab, snapshot);
     const isMainNavigation = (request: { isNavigationRequest(): boolean; frame(): unknown }) =>
@@ -1124,7 +1192,7 @@ const make = Effect.gen(function* () {
     page.on("download", (download) => void saveDownload(tab, download));
     page.on("filechooser", (chooser) => void offerFileChooser(tab, chooser));
     // Popups become tabs and keep `window.opener`, so sign-in popups can report back.
-    page.on("popup", (popup) => void adoptPopup(tab, popup));
+    page.on("popup", (popup) => void adoptPopup(tab, popup).catch(constVoid));
     // Playwright cannot reload a crashed page, so it must leave the tab list.
     const key = tabKey(tab.threadId, tab.tabId);
     if (closedPendingTabs.delete(key)) {
@@ -1138,8 +1206,38 @@ const make = Effect.gen(function* () {
     page.on("crash", () => dropTab(tab, true));
     tabs.set(key, tab);
     reportLiveTabs();
+    if (tab.extensionSurface?.kind === "popup") {
+      let sizing = Promise.resolve();
+      tab.stopPopupSize = await watchPopupPreferredSize(page, (preferredSize) => {
+        sizing = sizing.catch(constVoid).then(async () => {
+          const surface = tab.extensionSurface;
+          if (
+            tab.closing ||
+            surface?.kind !== "popup" ||
+            (surface.preferredSize?.width === preferredSize.width &&
+              surface.preferredSize.height === preferredSize.height)
+          )
+            return;
+          await page.setViewportSize(preferredSize);
+          if (tab.closing) return;
+          tab.extensionSurface = { ...surface, preferredSize };
+          await Effect.runPromise(
+            manager.reportPopupPreferredSize({
+              threadId: tab.threadId,
+              tabId: tab.tabId,
+              ...preferredSize,
+            }),
+          ).catch(constVoid);
+          broadcastViewport(tab);
+        });
+        return sizing;
+      });
+    }
     // An agent's own tab is the agent's from the start; the panel says so.
     if (control.agentDrives) broadcastControl(tab);
+    // Adoption may finish after the page's load event, especially for extension
+    // tabs whose first page event was about:blank. Publish its current URL too.
+    if (adopted) await reportLoaded(tab);
     // A popup is already loading its own URL, and the desktop loads its tab's.
     if (!adopted && !desktop && snapshot.navStatus._tag === "Loading") {
       tab.initialNavigation = page
@@ -1356,10 +1454,57 @@ const make = Effect.gen(function* () {
         : Option.some({ path: download.path, fileName: download.fileName });
     });
 
+  const extensionHosts = new WeakMap<BrowserContext, Map<string, ServerTab>>();
   const preparedContexts = new WeakSet<BrowserContext>();
   const prepareContext = async (context: BrowserContext) => {
     if (preparedContexts.has(context)) return;
     preparedContexts.add(context);
+    // Chrome extensions create normal tabs without a page opener. Observe the
+    // context as well as window.open. Initial blank pages keep their identity as they navigate.
+    context.on("page", (page) => {
+      const creations = [...(ownedPageCreations.get(context) ?? [])];
+      const consider = async () => {
+        await Promise.allSettled(creations);
+        if (claimedPages.has(page) || page.isClosed()) return;
+        const openerPage = await page.opener();
+        if (claimedPages.has(page)) return;
+        const candidates = [...tabs.values()].filter(
+          (tab) => tab.page.context() === context && !tab.closing,
+        );
+        const url = page.url();
+        if (!/^(https?:|chrome-extension:)/i.test(url)) return;
+        const realOpener = candidates.find((tab) => tab.page === openerPage);
+        const extensionId = /^chrome-extension:\/\/([^/]+)/.exec(url)?.[1];
+        const surfaces = [...tabs.values()]
+          .filter(
+            (tab) =>
+              !tab.closing &&
+              tab.extensionSurface &&
+              tabs.get(tabKey(tab.threadId, tab.extensionSurface.hostTabId))?.page.context() ===
+                context &&
+              (extensionId === undefined || tab.extensionSurface.extensionId === extensionId),
+          )
+          .toSorted((a, b) => b.usedAt - a.usedAt);
+        const surface = surfaces[0];
+        const recent = extensionHosts.get(context);
+        const previousHost = extensionId
+          ? recent?.get(extensionId)
+          : [...(recent?.values() ?? [])].toSorted((a, b) => b.usedAt - a.usedAt)[0];
+        const opener =
+          realOpener ??
+          (surface &&
+            candidates.find(
+              (tab) =>
+                tab.threadId === surface.threadId &&
+                tab.tabId === surface.extensionSurface?.hostTabId,
+            )) ??
+          (previousHost && candidates.includes(previousHost) ? previousHost : undefined);
+        if (!opener) return;
+        await adoptPopup(opener, page, realOpener !== undefined);
+      };
+      page.on("framenavigated", () => void consider().catch(constVoid));
+      void consider().catch(constVoid);
+    });
     await context.grantPermissions(["clipboard-write"]);
   };
 
@@ -1528,7 +1673,10 @@ const make = Effect.gen(function* () {
     return copies.flat().find((text) => text.length > 0);
   };
 
-  const adoptPopup = async (opener: ServerTab, popup: Page) => {
+  const adoptPopup = async (opener: ServerTab, popup: Page, switchView = true) => {
+    if (!/^(https?:|chrome-extension:)/i.test(popup.url())) return;
+    if (claimedPages.has(popup)) return;
+    claimedPages.add(popup);
     const agentId = opener.control.agentId;
     // A popup past an agent's limit closes; its page sees window.open return a closed window.
     if (opener.closing || (agentId !== null && atTabLimit(agentId))) {
@@ -1559,7 +1707,7 @@ const make = Effect.gen(function* () {
     ).then(
       (snapshot) => {
         // The opener stays open behind it, so `window.opener` can still report back.
-        if (opener.control.agentId === null)
+        if (switchView && opener.control.agentId === null)
           controller?.push({ _tag: "popup", tabId: snapshot.tabId });
       },
       async () => {
@@ -1574,6 +1722,7 @@ const make = Effect.gen(function* () {
     if (pending) return pending;
     const existing = tabs.get(key);
     if (existing) return Promise.resolve(existing);
+    if (snapshot.extensionSurface) pendingSurfaceTabs.add(key);
     const opening = createTab(snapshot)
       .catch((cause: unknown) => {
         runFork(
@@ -1586,6 +1735,7 @@ const make = Effect.gen(function* () {
       })
       .finally(() => {
         pendingTabs.delete(key);
+        pendingSurfaceTabs.delete(key);
         closedPendingTabs.delete(key);
       });
     pendingTabs.set(key, opening);
@@ -1611,9 +1761,12 @@ const make = Effect.gen(function* () {
     });
 
   const atTabLimit = (agentSessionId: string) =>
-    tabs.size + pendingTabs.size >= SERVER_TAB_LIMIT ||
-    [...tabs.values()].filter((tab) => tab.control.agentId === agentSessionId).length >=
-      AGENT_TAB_LIMIT;
+    [...tabs.values()].filter((tab) => !tab.extensionSurface).length +
+      [...pendingTabs.keys()].filter((key) => !pendingSurfaceTabs.has(key)).length >=
+      SERVER_TAB_LIMIT ||
+    [...tabs.values()].filter(
+      (tab) => !tab.extensionSurface && tab.control.agentId === agentSessionId,
+    ).length >= AGENT_TAB_LIMIT;
 
   const assertTabCapacity = (agentSessionId: string) => {
     if (atTabLimit(agentSessionId))
@@ -1645,16 +1798,19 @@ const make = Effect.gen(function* () {
         url: candidate.page.url() === "about:blank" ? null : candidate.page.url(),
       }));
     const rendering = Targeting.tabRenderingStatus(targetable(tab), desktopChannel.available);
-    const notice = Targeting.targetNotice(
+    const targetNotice = Targeting.targetNotice(
       { ...targetable(tab), url: url === "about:blank" ? null : url },
       threadTabs,
       desktopChannel.available,
       { reported: shownReport },
     );
+    const notice =
+      [surfaceNotices.get(tab.page), targetNotice].filter(Boolean).join(" ") || undefined;
     return {
       tabId: tab.tabId,
       url: url === "about:blank" ? null : url,
       ...(tab.profileId === undefined ? {} : { profileId: tab.profileId }),
+      ...(tab.extensionSurface === undefined ? {} : { extensionSurface: tab.extensionSurface }),
       visible: isShown(tab),
       rendering: rendering.rendering,
       ...(rendering.sessionMismatch ? { sessionMismatch: true } : {}),
@@ -1773,6 +1929,7 @@ const make = Effect.gen(function* () {
       url: url === "about:blank" ? null : url,
       title: null,
       loading: tab.loading,
+      ...(tab.extensionSurface === undefined ? {} : { extensionSurface: tab.extensionSurface }),
       ...(summary.profileId === undefined ? {} : { profileId: summary.profileId }),
       ...(summary.rendering === undefined ? {} : { rendering: summary.rendering }),
       ...(summary.sessionMismatch ? { sessionMismatch: true } : {}),
@@ -1790,10 +1947,21 @@ const make = Effect.gen(function* () {
       viewportSetting: tab.setting,
       ...(viewport ? { viewport } : {}),
       tabs: [...tabs.values()]
-        .filter((candidate) => candidate.threadId === tab.threadId)
+        .filter((candidate) => candidate.threadId === tab.threadId && !candidate.extensionSurface)
+        .flatMap((host) => [
+          host,
+          ...[...tabs.values()].filter(
+            (surface) =>
+              surface.threadId === host.threadId &&
+              surface.extensionSurface?.hostTabId === host.tabId,
+          ),
+        ])
         .map((candidate) => ({
           tabId: candidate.tabId,
           url: candidate.page.url() === "about:blank" ? null : candidate.page.url(),
+          ...(candidate.extensionSurface === undefined
+            ? {}
+            : { extensionSurface: candidate.extensionSurface }),
           ...(candidate.openerTabId === undefined ? {} : { openerTabId: candidate.openerTabId }),
           owner: tabOwner(candidate),
           ownedByCaller: candidate.control.agentId === agentSessionId,
@@ -2142,7 +2310,10 @@ const make = Effect.gen(function* () {
     if (!request.agentSessionId)
       throw new BrowserControlInterrupted("The agent session is missing. Reconnect the provider.");
     const owned = [...tabs.values()].filter(
-      (tab) => tab.threadId === request.threadId && tab.control.agentId === request.agentSessionId,
+      (tab) =>
+        tab.threadId === request.threadId &&
+        !tab.extensionSurface &&
+        tab.control.agentId === request.agentSessionId,
     );
     if (!request.tabIdExplicit && owned.length > 1)
       throw new BrowserControlInterrupted(
@@ -2176,12 +2347,15 @@ const make = Effect.gen(function* () {
    */
   const markUsed = (request: PreviewAutomationRequest) => {
     const now = Date.now();
-    for (const tab of tabs.values()) {
-      if (
-        tab.threadId === request.threadId &&
-        (tab.control.agentId === request.agentSessionId || tab.tabId === request.tabId)
-      )
-        tab.usedAt = now;
+    const target =
+      request.tabId === undefined
+        ? latestThreadTab(request.threadId, request.agentSessionId)
+        : tabs.get(tabKey(request.threadId, request.tabId));
+    if (!target) return;
+    target.usedAt = now;
+    if (target.extensionSurface) {
+      const host = tabs.get(tabKey(target.threadId, target.extensionSurface.hostTabId));
+      if (host) host.usedAt = now;
     }
   };
 
@@ -2209,6 +2383,12 @@ const make = Effect.gen(function* () {
   };
 
   const runOperation = async (request: PreviewAutomationRequest): Promise<unknown> => {
+    // The broker may remember an explicitly targeted surface after evaluate.
+    // Implicit requests always return to its host web tab.
+    if (!request.tabIdExplicit && request.tabId) {
+      const surface = tabs.get(tabKey(request.threadId, request.tabId))?.extensionSurface;
+      if (surface) request = { ...request, tabId: surface.hostTabId };
+    }
     const input = request.input;
     switch (request.operation) {
       case "status": {
@@ -2258,7 +2438,9 @@ const make = Effect.gen(function* () {
           !request.tabIdExplicit &&
           [...tabs.values()].filter(
             (tab) =>
-              tab.threadId === request.threadId && tab.control.agentId === request.agentSessionId,
+              tab.threadId === request.threadId &&
+              !tab.extensionSurface &&
+              tab.control.agentId === request.agentSessionId,
           ).length > 1
         )
           throw new BrowserControlInterrupted(
@@ -2526,6 +2708,10 @@ const make = Effect.gen(function* () {
     return { ...view, ...(errors.length ? { errors } : {}) };
   };
   const executeWithOutput = async (tab: ServerTab, request: PreviewAutomationRequest) => {
+    // Toolbar actions read no host DOM. The host may still be navigating after
+    // preview_open committed; scanning its fields here would race that navigation.
+    if (request.operation === "extensionOpen")
+      return redactPreview(await executeTabOperation(tab, request));
     // Includes vault-filled values, which stay secret after a page reveals them.
     const passwords = await ServerBrowserPage.credentialValues(tab.page);
     const result = await executeRawWithOutput(tab, request);
@@ -2667,6 +2853,29 @@ const make = Effect.gen(function* () {
             pointerFor(tab),
           ),
         );
+      case "extensionOpen": {
+        const extensionInput = decodeExtensionOpen(input);
+        if (
+          extensionInput.page !== "popup" &&
+          extensionInput.page !== "sidePanel" &&
+          extensionInput.page !== "action"
+        )
+          throw new Error("Use preview_open for options and extension page paths.");
+        const result = await Effect.runPromise(
+          browserExtensions.openSurface({
+            id: extensionInput.id,
+            kind: extensionInput.page,
+            hostTabId: tab.tabId,
+            threadId: tab.threadId,
+            agentSessionId: request.agentSessionId,
+            profileId: extensionInput.profileId ?? tab.profileId ?? DEFAULT_BROWSER_PROFILE_ID,
+          }),
+        );
+        const surface = result.surfaceTabId
+          ? tabs.get(tabKey(tab.threadId, result.surfaceTabId))
+          : undefined;
+        return { ...(await statusWithTitle(surface ?? tab, request.agentSessionId)), ...result };
+      }
       case "extract":
         return {
           value: await ServerBrowserPage.extract(
@@ -2716,7 +2925,10 @@ const make = Effect.gen(function* () {
 
   const handleRequest = (connectionId: string, request: PreviewAutomationRequest) =>
     Effect.tryPromise({
-      try: () => runOperation(request).finally(() => markUsed(request)),
+      try: () => {
+        markUsed(request);
+        return runOperation(request).finally(() => markUsed(request));
+      },
       catch: ServerBrowserPage.toOperationError,
     }).pipe(
       // Let Playwright report an ordinary operation timeout before diagnosing
@@ -2910,6 +3122,7 @@ const make = Effect.gen(function* () {
         const height = Math.min(Math.round(num(message.height)), 2160);
         if (width < 100 || height < 100) return;
         viewer.requestedSize = { width, height, order: ++viewerResizeOrder };
+        if (tab.extensionSurface?.kind === "popup") return;
         if (tab.setting._tag !== "fill" || tab.desktop) return;
         const current = tab.page.viewportSize();
         if (current?.width === width && current.height === height) return;
@@ -3330,7 +3543,217 @@ const make = Effect.gen(function* () {
     }),
   );
 
-  // Mutations wait for their load attempt; listing only reads its last result.
+  yield* browserExtensions.registerSurfaceOpener((input, extension) =>
+    Effect.tryPromise({
+      try: async (caller) => {
+        const hosts = [...tabs.values()].filter(
+          (tab) =>
+            tab.tabId === input.hostTabId &&
+            (input.threadId === undefined || tab.threadId === input.threadId),
+        );
+        const hostTab = hosts.length === 1 ? hosts[0] : undefined;
+        if (!hostTab)
+          throw new Error(
+            "The host tab is not attached to server Chrome. Open it with preview_open in the extension profile first.",
+          );
+        if (hostTab.desktop)
+          throw new Error(
+            "Extensions run in server Chrome. This host uses native desktop rendering; open a server tab in the extension profile. Desktop computer_* sees streamed surfaces as pixels; use preview_* for element access.",
+          );
+        if (hostTab.extensionSurface)
+          throw new Error("Choose the host web tab, not an extension surface.");
+        if (
+          (hostTab.profileId ?? DEFAULT_BROWSER_PROFILE_ID) !== input.profileId ||
+          hostTab.isolatedContext
+        )
+          throw new Error(
+            "The host tab must use the extension's browser profile. Incognito and isolated tabs do not run extensions.",
+          );
+        const surfaceOwner = input.agentSessionId ?? hostTab.control.agentId;
+        const key = tabKey(hostTab.threadId, hostTab.tabId);
+        return openSurfaceWithinDeadline(surfaceLocks, key, caller, async (signal) => {
+          signal.throwIfAborted();
+          const recent = extensionHosts.get(hostTab.page.context()) ?? new Map<string, ServerTab>();
+          recent.set(input.id, hostTab);
+          extensionHosts.set(hostTab.page.context(), recent);
+          if (hostTab.closing) throw new Error("The host tab closed before the extension opened.");
+          hostTab.usedAt = Date.now();
+          const existing = [...tabs.values()].find(
+            (tab) =>
+              tab.threadId === hostTab.threadId &&
+              tab.extensionSurface?.hostTabId === hostTab.tabId &&
+              tab.extensionSurface.extensionId === input.id &&
+              tab.extensionSurface.kind === input.kind,
+          );
+          const upgradePopup =
+            input.agentSessionId !== undefined &&
+            existing?.extensionSurface?.kind === "popup" &&
+            !surfaceNotices.has(existing.page);
+          if (existing && !existing.page.isClosed() && !upgradePopup) {
+            if (existing.extensionSurface?.kind === "popup" && surfaceNotices.has(existing.page))
+              await hostTab.page.bringToFront();
+            else await existing.page.bringToFront();
+            signal.throwIfAborted();
+            if (input.agentSessionId !== undefined) {
+              await Effect.runPromise(
+                manager.requestReveal({
+                  threadId: hostTab.threadId,
+                  tabId: existing.tabId,
+                  force: true,
+                }),
+                { signal },
+              );
+            }
+            const notice = surfaceNotices.get(existing.page);
+            return {
+              surfaceTabId: existing.tabId,
+              hostTabId: hostTab.tabId,
+              ...(notice ? { notice } : {}),
+            };
+          }
+          if (existing && upgradePopup) dropTab(existing, true);
+          const context = hostTab.page.context();
+          const openedSurface = await openExtensionSurface(
+            hostTab.page,
+            extension,
+            input.kind,
+            () => newOwnedPage(context),
+            signal,
+          );
+          hostTab.usedAt = Date.now();
+          if (signal.aborted && openedSurface) {
+            await openedSurface.page.close().catch(constVoid);
+            await openedSurface.close();
+          }
+          signal.throwIfAborted();
+          if (!openedSurface) return { hostTabId: hostTab.tabId };
+          let surface = openedSurface;
+          const abortSurface = () => {
+            void surface.page.close().catch(constVoid);
+            void surface.close().catch(constVoid);
+          };
+          signal.addEventListener("abort", abortSurface, { once: true });
+          try {
+            if (surface.kind === "popup" && surfaceOwner !== null && !surface.notice) {
+              // Native action popups close on Chrome focus changes. Agent-owned
+              // popups keep one ordinary extension page alive from the start, so
+              // subsequent host/panel actions preserve the popup's DOM and inputs.
+              const native = surface;
+              const url = native.page.url();
+              const page = await newOwnedPage(context);
+              surface = { ...native, page };
+              try {
+                signal.throwIfAborted();
+                // Load its UI while the original host is active, so common
+                // tabs.query({active:true}) calls still select the host page.
+                await hostTab.page.bringToFront();
+                signal.throwIfAborted();
+                await page.goto(url, { waitUntil: "domcontentloaded" });
+                await native.page.close().catch(constVoid);
+                await native.close();
+              } catch (cause) {
+                await page.close().catch(constVoid);
+                await native.close();
+                throw cause;
+              }
+              surface = {
+                page,
+                kind: "popup",
+                close: async () => {},
+                notice:
+                  "The agent's popup stays open as a persistent extension surface page until explicitly closed. Active-tab queries can differ from a native toolbar popup.",
+              };
+            }
+            let preferredSize: PreviewExtensionSurface["preferredSize"];
+            try {
+              preferredSize =
+                surface.kind === "popup" ? await popupPreferredSize(surface.page) : undefined;
+              if (preferredSize) await surface.page.setViewportSize(preferredSize);
+            } catch (cause) {
+              await surface.page.close().catch(constVoid);
+              await surface.close();
+              throw cause;
+            }
+            claimedPages.add(surface.page);
+            if (surface.notice) surfaceNotices.set(surface.page, surface.notice);
+            if (hostTab.closing || signal.aborted) {
+              await surface.page.close().catch(constVoid);
+              await surface.close();
+              throw new Error("The host tab closed while opening the extension.");
+            }
+            // A Chrome host has one panel slot, regardless of extension identity.
+            for (const tab of tabs.values()) {
+              if (
+                tab.threadId === hostTab.threadId &&
+                tab.extensionSurface?.hostTabId === hostTab.tabId &&
+                tab.extensionSurface.kind === surface.kind
+              )
+                dropTab(tab, true);
+            }
+            signal.throwIfAborted();
+            const snapshot = await Effect.runPromise(
+              manager.open({
+                threadId: hostTab.threadId,
+                runtime: "server",
+                serverRendering: "stream",
+                profileId: input.profileId,
+                reveal: false,
+                ...(surfaceOwner === null ? {} : { automationOwner: surfaceOwner }),
+                extensionSurface: {
+                  kind: surface.kind,
+                  extensionId: input.id,
+                  hostTabId: hostTab.tabId,
+                  ...(preferredSize ? { preferredSize } : {}),
+                },
+                beforePublish: (snapshot) => {
+                  signal.throwIfAborted();
+                  adoptedPages.set(tabKey(snapshot.threadId, snapshot.tabId), {
+                    page: surface.page,
+                    openerTabId: hostTab.tabId,
+                    releaseSurface: surface.close,
+                  });
+                },
+              }),
+            ).catch(async (cause: unknown) => {
+              await surface.page.close().catch(constVoid);
+              await surface.close();
+              throw cause;
+            });
+            try {
+              await ensureTab(snapshot);
+              signal.throwIfAborted();
+              if (input.agentSessionId !== undefined)
+                await Effect.runPromise(
+                  manager.requestReveal({
+                    threadId: hostTab.threadId,
+                    tabId: snapshot.tabId,
+                    force: true,
+                  }),
+                  { signal },
+                );
+              return {
+                surfaceTabId: snapshot.tabId,
+                hostTabId: hostTab.tabId,
+                ...(surface.notice ? { notice: surface.notice } : {}),
+              };
+            } catch (cause) {
+              await surface.page.close().catch(constVoid);
+              await surface.close();
+              await Effect.runPromise(
+                manager.close({ threadId: hostTab.threadId, tabId: snapshot.tabId }),
+              ).catch(constVoid);
+              throw cause;
+            }
+          } finally {
+            signal.removeEventListener("abort", abortSurface);
+          }
+        });
+      },
+      catch: (cause) => new BrowserExtensionError({ message: browserErrorMessage(cause) }),
+    }),
+  );
+
+  // Registry mutations schedule loads without waiting for Chrome's download lock.
   // Extension profiles render through Chrome's stream even on the desktop.
   const loadExtensions = (profileId: string) =>
     Effect.gen(function* () {
@@ -3429,7 +3852,7 @@ const make = Effect.gen(function* () {
           return cookieReader
             .importCookies({ ...input, targetProfileId }, async (profileId, cookie) => {
               writer ??= contexts.contextFor(profileId).then(async (context) => {
-                const page = await context.newPage();
+                const page = await newOwnedPage(context);
                 try {
                   return { page, cdp: await context.newCDPSession(page) };
                 } catch {

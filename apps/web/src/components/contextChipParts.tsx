@@ -12,7 +12,13 @@ import type { PullRequestContextDisplayState } from "~/lib/composerContextRecord
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import { middleTruncateAttachmentName } from "./composerInlineChip";
 import { PullRequestContextDetails } from "./PullRequestContextDetails";
-import { ContextChip, ContextChipLabel, type ContextChipKind } from "./ContextChip";
+import {
+  ContextChip,
+  ContextChipLabel,
+  ContextChipMeta,
+  ContextChipThumbnail,
+  type ContextChipKind,
+} from "./ContextChip";
 import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "./ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
@@ -175,12 +181,10 @@ export function ImageChipButton({
       {...props}
     >
       {previewUrl ? (
-        <img
+        <ContextChipThumbnail
           key={previewUrl}
           crossOrigin={corsFailedUrl === previewUrl ? undefined : "anonymous"}
           src={previewUrl}
-          alt=""
-          className="size-[1.17em] shrink-0 rounded-sm object-cover"
           onError={() => setCorsFailedUrl(previewUrl)}
           onLoad={(event) =>
             setSample({ url: previewUrl, color: averageImageColor(event.currentTarget) })
@@ -189,9 +193,9 @@ export function ImageChipButton({
       ) : (
         <ImageIcon />
       )}
-      <ContextChipLabel className="max-w-72">{middleTruncateAttachmentName(name)}</ContextChipLabel>
-      <span className="shrink-0 text-3xs text-current">{size}</span>
-      {suffix ? <span className="text-3xs text-current">{suffix}</span> : null}
+      <ContextChipLabel>{middleTruncateAttachmentName(name)}</ContextChipLabel>
+      <ContextChipMeta>{size}</ContextChipMeta>
+      {suffix ? <ContextChipMeta>{suffix}</ContextChipMeta> : null}
     </ContextChip>
   );
 }
@@ -209,6 +213,7 @@ export function FileChip(props: {
   error?: boolean;
   unresolved?: boolean;
   onOpen?: (() => void) | undefined;
+  onContextMenu?: ((event: MouseEvent<HTMLElement>) => void) | undefined;
 }) {
   const content = <FileChipContent {...props} />;
   const state = props.unresolved
@@ -222,6 +227,7 @@ export function FileChip(props: {
     "aria-label": [props.accessibleLabel, props.suffix].filter(Boolean).join(", "),
     "data-markdown-copy": props.copyMarkdown,
     "data-context-unresolved": props.unresolved ? "true" : undefined,
+    onContextMenu: props.onContextMenu,
   } as const;
   return (
     <Tooltip>
@@ -263,11 +269,9 @@ function FileChipContent(props: {
       ) : (
         <PierreEntryIcon pathValue={props.name} kind="file" theme={props.theme} />
       )}
-      <ContextChipLabel className="max-w-72">
-        {middleTruncateAttachmentName(props.name)}
-      </ContextChipLabel>
-      <span className="shrink-0 text-3xs text-current">{props.size}</span>
-      {props.suffix ? <span className="text-3xs text-current">{props.suffix}</span> : null}
+      <ContextChipLabel>{middleTruncateAttachmentName(props.name)}</ContextChipLabel>
+      <ContextChipMeta>{props.size}</ContextChipMeta>
+      {props.suffix ? <ContextChipMeta>{props.suffix}</ContextChipMeta> : null}
     </>
   );
 }

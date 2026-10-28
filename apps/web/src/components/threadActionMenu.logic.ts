@@ -218,6 +218,8 @@ export interface ThreadActionMenuFolder {
     readonly color?: string | undefined;
     /** Why the thread can't go there, such as "Doesn't include platform"; listed, disabled. */
     readonly blockedReason?: string | undefined;
+    /** The first project after the recently used ones, set apart by a separator. */
+    readonly startsGroup?: boolean | undefined;
   }>;
   /** The move command's permission on the thread's environment. */
   readonly canMove: boolean;
@@ -244,8 +246,8 @@ export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean
 
 /**
  * "Move to project…" ("Fork into project…" for a chat with turns, which goes
- * into a project as a fork) with "Open <folder>" first when filed, then every folder
- * (the current one checked, one that can't take the thread disabled with why),
+ * into a project as a fork) with "Open <folder>" first when filed, then every folder,
+ * recently used first (the current one checked, one that can't take the thread disabled with why),
  * "Remove from project", and "New project…" unless the thread works in a repository.
  */
 function folderMenuItems(
@@ -272,7 +274,7 @@ function folderMenuItems(
       iconColor: projectLabelColorValue(option.color),
       checked: isCurrent,
       disabled: disabled || isCurrent || blocked,
-      separatorBefore: index === 0 && children.length > 0,
+      separatorBefore: (index === 0 && children.length > 0) || option.startsGroup === true,
     });
   });
   if (current !== null && folder.removable) {

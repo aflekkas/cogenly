@@ -138,17 +138,86 @@ const rememberSnapshotUrl = (
     ? recentlySeenUrls
     : dedupeRecentUrls(recentlySeenUrls, snapshot.navStatus.url);
 
+/**
+ * An extension's popup or side panel: a server tab the panel draws beside its
+ * host tab, never in the tab strip and never as the active tab.
+ */
+export const isExtensionSurface = (snapshot: PreviewSessionSnapshot | undefined | null): boolean =>
+  snapshot?.extensionSurface !== undefined;
+
+/** The sessions that are tabs, the ones the tab strip, panel and desktop webviews show. */
+export const previewTabSessions = (
+  sessions: Record<string, PreviewSessionSnapshot>,
+): PreviewSessionSnapshot[] =>
+  Object.values(sessions).filter((snapshot) => !isExtensionSurface(snapshot));
+
+/**
+ * The tab a session's reveal brings into view: the tab itself, or for an
+ * extension's popup or side panel, the host tab it draws beside. Null for a
+ * surface whose host isn't here.
+ */
+export function previewRevealTabId(
+  sessions: Record<string, PreviewSessionSnapshot>,
+  snapshot: PreviewSessionSnapshot,
+): string | null {
+  const hostTabId = snapshot.extensionSurface?.hostTabId;
+  if (hostTabId === undefined) return snapshot.tabId;
+  const host = sessions[hostTabId];
+  return host && !isExtensionSurface(host) ? hostTabId : null;
+}
+
+/** The newest popup and side panel open on a host tab. */
+export function selectExtensionSurfaces(
+  sessions: Record<string, PreviewSessionSnapshot>,
+  hostTabId: string | null,
+): {
+  readonly popup: PreviewSessionSnapshot | null;
+  readonly sidePanel: PreviewSessionSnapshot | null;
+} {
+  let popup: PreviewSessionSnapshot | null = null;
+  let sidePanel: PreviewSessionSnapshot | null = null;
+  if (hostTabId === null) return { popup, sidePanel };
+  for (const snapshot of Object.values(sessions)) {
+    const surface = snapshot.extensionSurface;
+    if (surface?.hostTabId !== hostTabId) continue;
+    if (surface.kind === "popup") {
+      if (!popup || popup.updatedAt < snapshot.updatedAt) popup = snapshot;
+    } else if (!sidePanel || sidePanel.updatedAt < snapshot.updatedAt) {
+      sidePanel = snapshot;
+    }
+  }
+  return { popup, sidePanel };
+}
+
 const latestSnapshot = (
   sessions: Record<string, PreviewSessionSnapshot>,
 ): PreviewSessionSnapshot | null =>
   Object.values(sessions)
+    .filter((snapshot) => !isExtensionSurface(snapshot))
     .toSorted((a, b) => a.updatedAt.localeCompare(b.updatedAt))
     .at(-1) ?? null;
 
+/** Surfaces live only as long as their host tab. */
+const dropOrphanedSurfaces = (
+  sessions: Record<string, PreviewSessionSnapshot>,
+): Record<string, PreviewSessionSnapshot> => {
+  const orphaned = Object.values(sessions).filter((snapshot) => {
+    const hostTabId = snapshot.extensionSurface?.hostTabId;
+    return hostTabId !== undefined && sessions[hostTabId] === undefined;
+  });
+  if (orphaned.length === 0) return sessions;
+  const kept = { ...sessions };
+  for (const snapshot of orphaned) delete kept[snapshot.tabId];
+  return kept;
+};
+
 const removeSession = (current: ThreadPreviewState, tabId: string): ThreadPreviewState => {
   if (!current.sessions[tabId]) return current;
-  const { [tabId]: _closed, ...sessions } = current.sessions;
-  const { [tabId]: _desktop, ...desktopByTabId } = current.desktopByTabId;
+  const { [tabId]: _closed, ...remaining } = current.sessions;
+  const sessions = dropOrphanedSurfaces(remaining);
+  const desktopByTabId = Object.fromEntries(
+    Object.entries(current.desktopByTabId).filter(([id]) => sessions[id] !== undefined),
+  );
   const nextSnapshot = latestSnapshot(sessions);
   const activeTabId =
     current.activeTabId === tabId ? (nextSnapshot?.tabId ?? null) : current.activeTabId;
@@ -166,6 +235,13 @@ const removeSession = (current: ThreadPreviewState, tabId: string): ThreadPrevie
 export function useThreadPreviewState(ref: ScopedThreadRef | null | undefined): ThreadPreviewState {
   const atom = ref ? previewStateAtom(scopedThreadKey(ref)) : emptyPreviewStateAtom;
   return useAtomValue(atom);
+}
+
+/** Whether a tab is an extension's popup or side panel; renders only when that answer changes. */
+export function useIsExtensionSurfaceTab(ref: ScopedThreadRef, tabId: string): boolean {
+  return useAtomValue(previewStateAtom(scopedThreadKey(ref)), (state) =>
+    isExtensionSurface(state.sessions[tabId]),
+  );
 }
 
 export function useActivePreviewSessions(): Record<string, ThreadPreviewState> {
@@ -187,6 +263,12 @@ export function applyPreviewServerEvent(ref: ScopedThreadRef, event: PreviewEven
         case "resized": {
           const snapshot = event.snapshot;
           if (current.suppressedTabIds.has(snapshot.tabId)) return current;
+          const surface = snapshot.extensionSurface;
+          if (surface) {
+            // A surface whose host already closed here has nothing to hang from.
+            if (!current.sessions[surface.hostTabId]) return current;
+            return { ...current, sessions: { ...current.sessions, [snapshot.tabId]: snapshot } };
+          }
           const recentlySeenUrls =
             snapshot.navStatus._tag === "Idle"
               ? current.recentlySeenUrls
@@ -263,6 +345,9 @@ export function applyPreviewServerSnapshot(
     if (current.suppressedTabIds.has(snapshot.tabId)) return current;
     const existing = current.sessions[snapshot.tabId];
     if (existing && existing.updatedAt > snapshot.updatedAt) return current;
+    if (isExtensionSurface(snapshot)) {
+      return { ...current, sessions: { ...current.sessions, [snapshot.tabId]: snapshot } };
+    }
     const recentlySeenUrls = rememberSnapshotUrl(current.recentlySeenUrls, snapshot);
     return {
       ...current,
@@ -290,6 +375,7 @@ export function updatePreviewServerSnapshot(
     const existing = current.sessions[snapshot.tabId];
     if (existing && existing.updatedAt > snapshot.updatedAt) return current;
     const sessions = { ...current.sessions, [snapshot.tabId]: snapshot };
+    if (isExtensionSurface(snapshot)) return { ...current, sessions };
     const activeTabId =
       current.activeTabId && sessions[current.activeTabId] ? current.activeTabId : snapshot.tabId;
     const activeSnapshot = sessions[activeTabId] ?? snapshot;
@@ -319,20 +405,23 @@ export function reconcilePreviewServerSessions(
       return current;
     }
     const snapshots = result.sessions;
-    const sessions: Record<string, PreviewSessionSnapshot> = {};
+    const listed: Record<string, PreviewSessionSnapshot> = {};
     const currentSuppressedTabIds = sameServer ? current.suppressedTabIds : new Set<string>();
     let recentlySeenUrls = current.recentlySeenUrls;
     for (const snapshot of snapshots) {
       if (currentSuppressedTabIds.has(snapshot.tabId)) continue;
       const existing = sameServer ? current.sessions[snapshot.tabId] : undefined;
       const next = existing && existing.updatedAt > snapshot.updatedAt ? existing : snapshot;
-      sessions[next.tabId] = next;
-      recentlySeenUrls = rememberSnapshotUrl(recentlySeenUrls, next);
+      listed[next.tabId] = next;
+      if (!isExtensionSurface(next)) recentlySeenUrls = rememberSnapshotUrl(recentlySeenUrls, next);
     }
+    const sessions = dropOrphanedSurfaces(listed);
 
     const fallback = latestSnapshot(sessions);
     const activeTabId =
-      current.activeTabId && sessions[current.activeTabId]
+      current.activeTabId &&
+      sessions[current.activeTabId] &&
+      !isExtensionSurface(sessions[current.activeTabId])
         ? current.activeTabId
         : (fallback?.tabId ?? null);
     const snapshot = activeTabId ? (sessions[activeTabId] ?? null) : null;
@@ -429,6 +518,13 @@ export function cancelPreviewSessionClose(
     if (!snapshot) {
       return { ...current, suppressedTabIds };
     }
+    if (isExtensionSurface(snapshot)) {
+      return {
+        ...current,
+        sessions: { ...current.sessions, [snapshot.tabId]: snapshot },
+        suppressedTabIds,
+      };
+    }
     const recentlySeenUrls =
       snapshot.navStatus._tag !== "Idle"
         ? dedupeRecentUrls(current.recentlySeenUrls, snapshot.navStatus.url)
@@ -448,7 +544,7 @@ export function cancelPreviewSessionClose(
 export function setActivePreviewTab(ref: ScopedThreadRef, tabId: string): void {
   updateThreadPreviewState(ref, (current) => {
     const snapshot = current.sessions[tabId];
-    if (!snapshot || current.activeTabId === tabId) return current;
+    if (!snapshot || isExtensionSurface(snapshot) || current.activeTabId === tabId) return current;
     return {
       ...current,
       activeTabId: tabId,

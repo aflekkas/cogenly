@@ -12,6 +12,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
   type ReactNode,
+  type Ref,
   useEffect,
   useMemo,
   useRef,
@@ -187,24 +188,36 @@ interface Props {
 
 const NOOP = () => {};
 
-/** One ghost icon button of the toolbar's size, with its tooltip. */
-function ToolbarButton(props: {
+/**
+ * One ghost icon button of the toolbar's size, with its tooltip. A button that
+ * can't act here names why in `unavailableReason`: it stays hoverable, unlike
+ * `disabled`, so the tooltip can say so.
+ */
+export function ToolbarButton({
+  buttonRef,
+  ...props
+}: {
   label: string;
   tooltip?: ReactNode;
   onClick: () => void;
   disabled?: boolean | undefined;
+  unavailableReason?: string | null | undefined;
   pressed?: boolean | undefined;
+  buttonRef?: Ref<HTMLButtonElement> | undefined;
   children: ReactNode;
 }) {
+  const unavailable = Boolean(props.unavailableReason);
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <Button
+            ref={buttonRef}
             variant={props.pressed ? "secondary" : "ghost"}
             size="icon-sm"
-            onClick={props.disabled ? NOOP : props.onClick}
+            onClick={props.disabled || unavailable ? NOOP : props.onClick}
             disabled={props.disabled}
+            aria-disabled={unavailable ? "true" : undefined}
             aria-label={props.label}
             aria-pressed={
               props.pressed === undefined ? undefined : props.pressed ? "true" : "false"
@@ -215,7 +228,7 @@ function ToolbarButton(props: {
       >
         {props.children}
       </TooltipTrigger>
-      <TooltipPopup>{props.tooltip ?? props.label}</TooltipPopup>
+      <TooltipPopup>{props.unavailableReason || (props.tooltip ?? props.label)}</TooltipPopup>
     </Tooltip>
   );
 }

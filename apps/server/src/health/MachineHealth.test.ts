@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { EnvironmentId } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as MachineResources from "../resourceTelemetry/MachineResources.ts";
 
 import {
   awaitLinkState,
@@ -37,7 +38,25 @@ describe("MachineHealth.reportFor", () => {
         const spoke = yield* startMachine("laptop", "computer");
         const proxy = yield* startProxy(hub);
         yield* pair(hub, spoke, proxy.url);
-        yield* hub.run(makePeerReports(ownReport(hub, "hub")));
+        let samples = 0;
+        const resources = MachineResources.MachineResources.of({
+          read: Effect.sync(() => {
+            samples++;
+            return {
+              sampledAt: samples,
+              cpuCores: 4,
+              loadAverage1m: 0,
+              loadAverage5m: 0,
+              availableMemoryBytes: 1000,
+              totalMemoryBytes: 2000,
+            };
+          }),
+        });
+        yield* hub.run(
+          makePeerReports(ownReport(hub, "hub")).pipe(
+            Effect.provideService(MachineResources.MachineResources, resources),
+          ),
+        );
         const { reportFor } = yield* spoke.run(makePeerReports(ownReport(spoke, "laptop")));
 
         const own = yield* reportFor({});
@@ -47,6 +66,13 @@ describe("MachineHealth.reportFor", () => {
         assert.isTrue(online.reachable);
         assert.strictEqual(online.environmentId, hub.environmentId);
         assert.strictEqual(online.machineName, "hub");
+        assert.isUndefined(online.resources);
+        assert.strictEqual(samples, 0);
+        const sampled = yield* reportFor({ environmentId: hub.environmentId }, true);
+        assert.strictEqual(sampled.resources?.cpuCores, 4);
+        assert.strictEqual(samples, 1);
+        assert.isUndefined((yield* reportFor({ environmentId: hub.environmentId })).resources);
+        assert.strictEqual(samples, 1);
 
         // Stop the relay accepting, then cut its socket, so the spoke can't redial.
         yield* Effect.sync(() => proxy.server.close());

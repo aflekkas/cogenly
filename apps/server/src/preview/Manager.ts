@@ -47,6 +47,7 @@ export class PreviewManager extends Context.Service<
   {
     readonly open: (
       input: PreviewOpenInput & {
+        readonly extensionSurface?: PreviewSessionSnapshot["extensionSurface"];
         readonly automationOwner?: string;
         readonly serverRendering?: "stream" | "native";
         /** Runs before the `opened` event publishes, so subscribers find state keyed by the tab. */
@@ -73,6 +74,13 @@ export class PreviewManager extends Context.Service<
       readonly threadId: string;
       readonly tabId: string;
       readonly serverRendering: "stream" | "native";
+    }) => Effect.Effect<void, PreviewError>;
+    /** Publishes content-measured popup dimensions; viewer resize is a separate operation. */
+    readonly reportPopupPreferredSize: (input: {
+      readonly threadId: string;
+      readonly tabId: string;
+      readonly width: number;
+      readonly height: number;
     }) => Effect.Effect<void, PreviewError>;
     readonly resize: (
       input: PreviewResizeInput,
@@ -219,7 +227,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
 
   const open: PreviewManager["Service"]["open"] = Effect.fn("PreviewManager.open")(
     function* (input) {
-      const runtime = input.runtime;
+      const runtime = input.extensionSurface ? "server" : input.runtime;
       // Persisted client surfaces must not bind to a different tab after a server restart.
       const tabId = `${newPreviewTabId()}${runtime === "server" ? `_${serverEpoch}` : ""}`;
       const updatedAt = yield* currentIsoTimestamp;
@@ -229,12 +237,19 @@ export const make = Effect.gen(function* PreviewManagerMake() {
         navStatus: input.url
           ? { _tag: "Loading", url: yield* normalizeUrl(input.url), title: "" }
           : { _tag: "Idle" },
+        ...(input.extensionSurface === undefined
+          ? {}
+          : { extensionSurface: input.extensionSurface }),
         canGoBack: false,
         canGoForward: false,
         viewport: input.viewport ?? FILL_PREVIEW_VIEWPORT,
         ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
         ...(runtime === undefined ? {} : { runtime }),
-        ...(input.serverRendering === undefined ? {} : { serverRendering: input.serverRendering }),
+        ...(input.extensionSurface
+          ? { serverRendering: "stream" as const }
+          : input.serverRendering === undefined
+            ? {}
+            : { serverRendering: input.serverRendering }),
         ...(runtime === "server" && input.automationOwner !== undefined
           ? { automationOwner: input.automationOwner }
           : {}),
@@ -243,6 +258,15 @@ export const make = Effect.gen(function* PreviewManagerMake() {
       };
       yield* SynchronizedRef.modifyEffect(stateRef, (state) =>
         Effect.gen(function* () {
+          if (
+            input.extensionSurface &&
+            !state.sessions.has(compositeKey(input.threadId, input.extensionSurface.hostTabId))
+          ) {
+            return yield* new PreviewSessionLookupError({
+              threadId: input.threadId,
+              tabId: input.extensionSurface.hostTabId,
+            });
+          }
           const revision = state.revision + 1;
           const sessions = new Map(state.sessions);
           sessions.set(compositeKey(input.threadId, tabId), {
@@ -437,11 +461,12 @@ export const make = Effect.gen(function* PreviewManagerMake() {
       yield* SynchronizedRef.modifyEffect(stateRef, (state) => {
         const eventsToEmit: PreviewEvent[] = [];
         const sessions = new Map(state.sessions);
-        const targets = input.tabId
-          ? [state.sessions.get(compositeKey(input.threadId, input.tabId))].filter(
-              (entry): entry is PreviewSessionState => entry !== undefined,
-            )
-          : sessionsForThread(state, input.threadId);
+        const targets = sessionsForThread(state, input.threadId).filter(
+          (session) =>
+            input.tabId === undefined ||
+            session.tabId === input.tabId ||
+            session.snapshot.extensionSurface?.hostTabId === input.tabId,
+        );
         let revision = state.revision;
         for (const target of targets) {
           revision += 1;
@@ -546,11 +571,48 @@ export const make = Effect.gen(function* PreviewManagerMake() {
   const reportServerRendering: PreviewManager["Service"]["reportServerRendering"] = (input) =>
     mutateExistingSession(input.threadId, input.tabId, (session) =>
       Effect.gen(function* () {
-        if (session.snapshot.serverRendering === input.serverRendering)
+        const serverRendering = session.snapshot.extensionSurface
+          ? "stream"
+          : input.serverRendering;
+        if (session.snapshot.serverRendering === serverRendering)
           return { next: session, emit: null, result: undefined };
         const snapshot = {
           ...session.snapshot,
-          serverRendering: input.serverRendering,
+          serverRendering,
+          updatedAt: yield* currentIsoTimestamp,
+        };
+        return {
+          next: { ...session, snapshot },
+          emit: {
+            type: "navigated" as const,
+            threadId: session.threadId,
+            tabId: session.tabId,
+            createdAt: snapshot.updatedAt,
+            snapshot,
+          },
+          result: undefined,
+        };
+      }),
+    );
+
+  const reportPopupPreferredSize: PreviewManager["Service"]["reportPopupPreferredSize"] = (input) =>
+    mutateExistingSession(input.threadId, input.tabId, (session) =>
+      Effect.gen(function* () {
+        const surface = session.snapshot.extensionSurface;
+        if (surface?.kind !== "popup") return { next: session, emit: null, result: undefined };
+        const preferredSize = {
+          width: Math.max(25, Math.min(800, Math.ceil(input.width))),
+          height: Math.max(25, Math.min(600, Math.ceil(input.height))),
+        };
+        if (
+          surface.preferredSize?.width === preferredSize.width &&
+          surface.preferredSize.height === preferredSize.height
+        )
+          return { next: session, emit: null, result: undefined };
+        const snapshot: PreviewSessionSnapshot = {
+          ...session.snapshot,
+          serverRendering: "stream",
+          extensionSurface: { ...surface, preferredSize },
           updatedAt: yield* currentIsoTimestamp,
         };
         return {
@@ -568,6 +630,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     );
 
   return PreviewManager.of({
+    reportPopupPreferredSize,
     open,
     requestReveal,
     reportAgentDriving,

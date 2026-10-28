@@ -2,6 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   connectionCatalogDisplayUrl,
   hasRelayRoute,
+  type EnvironmentConnectionPhase,
   type EnvironmentPresentation as BaseEnvironmentPresentation,
 } from "@cogenly/client-runtime/connection";
 import { Discovery } from "@cogenly/client-runtime/relay";
@@ -100,6 +101,18 @@ export function useEnvironmentIdentities() {
 
 export function useEnvironmentMachines() {
   return useAtomValue(environmentSummaries.machineByIdAtom);
+}
+
+/** Each saved environment's connection phase, changing only when a phase does. */
+export function useEnvironmentConnectionPhases(): ReadonlyMap<
+  EnvironmentId,
+  EnvironmentConnectionPhase
+> {
+  const summaries = useAtomValue(environmentSummaries.environmentsAtom);
+  return useMemo(
+    () => new Map(summaries.map((summary) => [summary.environmentId, summary.connectionState])),
+    [summaries],
+  );
 }
 
 export function useConnectedEnvironmentIds() {

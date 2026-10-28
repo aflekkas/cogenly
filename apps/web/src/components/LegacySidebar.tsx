@@ -12,6 +12,9 @@ import {
 } from "lucide-react";
 import { ThreadStatusLabel, ThreadWorktreeIndicator } from "./ThreadStatusIndicators";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
+import { MachineBadge } from "./MachineBadge";
+import { threadRunsOn } from "../machines/machineBadge.logic";
+import { useRemoteMachine } from "../machines/useRemoteMachine";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { useAtomValue } from "@effect/atom-react";
 import { autoAnimate } from "@formkit/auto-animate";
@@ -27,7 +30,6 @@ import {
   type ScopedThreadRef,
   type ResolvedKeybindingsConfig,
   type SidebarProjectGroupingMode,
-  resolveEnvironmentMachineKind,
   ThreadId,
 } from "@cogenly/contracts";
 import {
@@ -406,18 +408,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   // No primary (the hosted app) means every thread is remote, and the machine
   // glyph is what tells the environments apart.
   const isRemoteThread = thread.environmentId !== primaryEnvironmentId;
-  const remoteEnvLabel = environment?.label ?? null;
-  const remoteMachine = resolveEnvironmentMachineKind(environment?.serverConfig ?? null);
+  const remoteMachine = useRemoteMachine(threadRunsOn(thread), thread.environmentId);
   // A desktop-local secondary backend (e.g. the WSL backend) shows up as a
   // bearer environment whose connection id is prefixed "local:". It runs on the
-  // user's own machine, so the cloud icon is misleading, label it "Local" and
-  // suppress the cloud icon (the project header already shows a
-  // local-environment icon for desktop-local projects, see sidebarProjectGrouping).
+  // user's own machine, so the cloud icon is misleading and is suppressed (the
+  // project header already shows a local-environment icon for desktop-local
+  // projects, see sidebarProjectGrouping).
   const isDesktopLocalThread =
     environment !== null && isDesktopLocalConnectionTarget(environment.entry.target);
-  const threadEnvironmentLabel = isRemoteThread
-    ? (remoteEnvLabel ?? (isDesktopLocalThread ? "Local" : "Remote"))
-    : null;
   const isHighlighted = isActive || isSelected;
   const handleOpenDiscoveredPort = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -788,23 +786,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               ) : null}
               <span className={threadMetaClassName}>
                 <span className="inline-flex items-center gap-1">
-                  {isRemoteThread && !isDesktopLocalThread && (
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <span
-                            aria-label={threadEnvironmentLabel ?? "Remote"}
-                            className="inline-flex items-center justify-center"
-                          />
-                        }
-                      >
-                        <EnvironmentMachineIcon
-                          kind={remoteMachine}
-                          className="size-3 text-muted-foreground/40"
-                        />
-                      </TooltipTrigger>
-                      <TooltipPopup side="top">{threadEnvironmentLabel}</TooltipPopup>
-                    </Tooltip>
+                  {isDesktopLocalThread ? null : (
+                    <MachineBadge placement="inline" machine={remoteMachine} />
                   )}
                   <span
                     className={`text-3xs tabular-nums ${

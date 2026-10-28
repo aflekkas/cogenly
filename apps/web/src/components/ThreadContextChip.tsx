@@ -11,9 +11,10 @@ import { Link } from "@tanstack/react-router";
 import { BotIcon, MessagesSquareIcon } from "lucide-react";
 
 import { useAgents } from "~/agents/agentsClient";
-import { useMachineLabel } from "~/machines/useMachineLabel";
+import { describeRemoteMachine, threadRunsOn } from "~/machines/machineBadge.logic";
+import { useRemoteMachine } from "~/machines/useRemoteMachine";
 import { IntegrationSourceIcon, useComposerSources } from "./chat/ComposerSourcesPicker";
-import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
+import { MachineGlyph } from "./MachineBadge";
 import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
 import { useEnvironmentProjectLabels } from "~/projectLabels/useProjectLabels";
 import { useThreadShell, useThreadShells } from "~/state/entities";
@@ -34,7 +35,7 @@ function useReachableThreadShell(environmentId: EnvironmentId, threadId: ThreadI
 /**
  * Inline chip for a thread: an attached thread record, or a `cogenly-thread://` link in the
  * composer and in sent messages. Prefers the live title so a renamed thread never shows a
- * stale label, badges a thread that runs on another machine than `record.environmentId`,
+ * stale label, puts a cloud on a thread that runs on another machine than this computer,
  * and opens the thread on click.
  */
 export function ThreadContextChip(props: {
@@ -43,9 +44,8 @@ export function ThreadContextChip(props: {
 }) {
   const { environmentId, threadId } = props.record;
   const shell = useReachableThreadShell(environmentId, threadId);
-  const runsOn = shell === null ? null : (shell.source.ownerMachine ?? shell.environmentId);
-  const runner = useMachineLabel(
-    runsOn === environmentId ? null : runsOn,
+  const runner = useRemoteMachine(
+    shell === null ? null : threadRunsOn(shell),
     shell?.environmentId ?? null,
   );
   const title = shell?.title?.trim() || props.record.title || threadId;
@@ -64,13 +64,13 @@ export function ThreadContextChip(props: {
               )
             }
             {...(params ? {} : { state: "unresolved" as const })}
-            aria-label={`Thread, ${title}${runner ? `, runs on ${runner.name}` : ""}`}
+            aria-label={`Thread, ${title}${runner ? `. ${describeRemoteMachine(runner)}` : ""}`}
             data-markdown-copy={props.copyMarkdown}
             className="no-underline"
           >
             <MessagesSquareIcon />
             <ContextChipLabel>{title}</ContextChipLabel>
-            {runner ? <EnvironmentMachineIcon aria-hidden kind={runner.kind} /> : null}
+            {runner ? <MachineGlyph machine={runner} /> : null}
           </ContextChip>
         }
       />
@@ -78,7 +78,7 @@ export function ThreadContextChip(props: {
         {!params
           ? "Thread no longer available"
           : runner
-            ? `Open thread. ${runner.name} runs it.`
+            ? `Open thread. ${describeRemoteMachine(runner)}.`
             : "Open thread"}
       </TooltipPopup>
     </Tooltip>
