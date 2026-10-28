@@ -35,7 +35,7 @@ export type DesktopAppAddEnvironmentRequest = typeof DesktopAppAddEnvironmentReq
 
 /**
  * `machine_pair`: pair two machines the desktop app is connected to, the same
- * way Settings → Machines → Add a machine does. Servers hold no credential
+ * way Settings → Machines → Add machine does. Servers hold no credential
  * for each other before pairing, so the app that is signed in to both runs
  * it, and the one-time join code stays inside the app. `hub` and `joining`
  * name a connection by environment id or by its name.

@@ -10,12 +10,14 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  groupVaultUsage,
   lastUsedByItem,
   parseDomainList,
   sortVaultItems,
   vaultCreateInput,
   vaultDraftFromItem,
   vaultDraftProblem,
+  vaultItemDisplay,
   splitVaultItems,
   vaultLastUsedText,
   vaultPolicySummary,
@@ -246,6 +248,36 @@ describe("sortVaultItems", () => {
   });
 });
 
+describe("vaultItemDisplay", () => {
+  it("titles a generated name by its label and keeps the name as metadata", () => {
+    expect(
+      vaultItemDisplay({
+        name: "integration-endpoint:b3286c58-ad34-4da6-aec2-a9b75321a9a1",
+        label: "Wispr Flow private endpoint",
+      }),
+    ).toEqual({
+      title: "Wispr Flow private endpoint",
+      description: null,
+      internalName: "integration-endpoint:b3286c58-ad34-4da6-aec2-a9b75321a9a1",
+    });
+  });
+
+  it("keeps a named item's own name, and a generated name without a label", () => {
+    expect(vaultItemDisplay({ name: "google-oauth-client", label: "Google" })).toEqual({
+      title: "google-oauth-client",
+      description: "Google",
+      internalName: null,
+    });
+    expect(
+      vaultItemDisplay({ name: "integration-oauth:b3286c58-ad34-4da6-aec2-a9b75321a9a1" }),
+    ).toEqual({
+      title: "integration-oauth:b3286c58-ad34-4da6-aec2-a9b75321a9a1",
+      description: null,
+      internalName: null,
+    });
+  });
+});
+
 describe("lastUsedByItem", () => {
   const use = (
     itemId: string,
@@ -263,6 +295,23 @@ describe("lastUsedByItem", () => {
       outcome: "allowed",
       ...overrides,
     }) as VaultUsageEntry;
+
+  it("folds back-to-back identical uses into one line, keeping the newest", () => {
+    const groups = groupVaultUsage([
+      use("a", "2026-10-05T03:00:00.000Z"),
+      use("a", "2026-10-05T02:00:00.000Z"),
+      use("a", "2026-10-05T01:00:00.000Z"),
+      use("a", "2026-10-04T00:00:00.000Z", { domain: "example.com" }),
+      use("b", "2026-10-03T00:00:00.000Z"),
+      use("a", "2026-10-02T00:00:00.000Z"),
+    ]);
+    expect(groups.map((group) => [group.entry.at, group.count])).toEqual([
+      ["2026-10-05T03:00:00.000Z", 3],
+      ["2026-10-04T00:00:00.000Z", 1],
+      ["2026-10-03T00:00:00.000Z", 1],
+      ["2026-10-02T00:00:00.000Z", 1],
+    ]);
+  });
 
   it("keeps the newest use per item, preferring one that went through", () => {
     const latest = lastUsedByItem([

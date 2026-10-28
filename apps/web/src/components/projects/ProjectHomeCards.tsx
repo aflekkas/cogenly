@@ -325,6 +325,7 @@ export function SourcesCard(props: {
     >
       {links.length === 0 && !linking ? (
         <SettingsEmpty
+          icon={<LinkIcon />}
           label={
             org === null
               ? "Link a GitHub org or repository for agents to reach."
@@ -351,7 +352,7 @@ export function SourcesCard(props: {
       })}
       <AnimatedHeight>
         {linking ? (
-          <div className="reveal-motion px-1 pt-1 pb-1">
+          <div className="p-1">
             <ProjectSourceLinkField
               environmentId={environmentId}
               label={label}

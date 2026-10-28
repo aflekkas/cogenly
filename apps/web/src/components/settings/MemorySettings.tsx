@@ -67,6 +67,13 @@ export function MemorySettings() {
     setStatus("current");
     setQuery("");
   };
+  // An empty memory offers its one action in the empty state, not twice.
+  const showsEmptyAction =
+    environmentId !== null &&
+    list.error === null &&
+    list.isLoaded &&
+    !filtered &&
+    list.facts.length === 0;
   const rememberButton = (
     <Button
       size="xs"
@@ -85,15 +92,18 @@ export function MemorySettings() {
       <SettingsSection
         footer="Chats in a project, and agents that can read it, use its confirmed facts. Facts without a project stay private. Proposals are never used until you confirm them."
         id="memory"
-        title="Memory"
+        // The page already says "Memory"; the section names what it lists.
+        title="Facts"
         headerAction={
-          <SettingsSectionAction
-            disabled={!actions.canWrite}
-            title={actions.canWrite ? undefined : NO_WRITE_TITLE}
-            onClick={() => setCreating(true)}
-          >
-            Remember something
-          </SettingsSectionAction>
+          showsEmptyAction ? null : (
+            <SettingsSectionAction
+              disabled={!actions.canWrite}
+              title={actions.canWrite ? undefined : NO_WRITE_TITLE}
+              onClick={() => setCreating(true)}
+            >
+              Remember something
+            </SettingsSectionAction>
+          )
         }
       >
         {environmentId === null ? (

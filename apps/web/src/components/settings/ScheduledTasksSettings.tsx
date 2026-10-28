@@ -115,7 +115,6 @@ import { Label } from "../ui/label";
 import { Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator } from "../ui/menu";
 import { ToggleGroup, Toggle } from "../ui/toggle-group";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
-import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -138,9 +137,9 @@ import {
   SettingsSection,
   SettingsSectionAction,
   SettingsNote,
-  SETTINGS_PICKER_TRIGGER_CLASSNAME,
   useRelativeTimeTick,
 } from "./settingsLayout";
+import { SettingsStatusBadge, type SettingsStatusTone } from "./SettingsStatus";
 
 /** JS day-of-week (0 = Sunday) rendered Monday-first, matching how people read a week. */
 const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0] as const;
@@ -266,7 +265,7 @@ const DELIVERY_OUTCOME_LABELS: Record<ScheduledTaskWebhookDeliveryOutcome, strin
   expired: "Too old",
 };
 
-function deliveryOutcomeVariant(outcome: ScheduledTaskWebhookDeliveryOutcome) {
+function deliveryOutcomeTone(outcome: ScheduledTaskWebhookDeliveryOutcome): SettingsStatusTone {
   if (outcome === "accepted") return "success";
   if (outcome === "disabled" || outcome === "rate_limited" || outcome === "expired") {
     return "warning";
@@ -299,6 +298,7 @@ export function ScheduledTasksSettings(target: {
     setEditor({ environmentId, task });
   }, []);
   const defaultEnvironment = environment ?? connectedEnvironments[0];
+  const noTasksYet = useNoScheduledTasksYet(environments, scope);
   const canCreate = useAtomValue(
     serverEnvironment.upsertScheduledTask.permissionAtom(defaultEnvironment?.environmentId ?? null),
   );
@@ -343,17 +343,19 @@ export function ScheduledTasksSettings(target: {
     <>
       <SettingsSection
         id={searchableSetting("scheduled-tasks").id}
-        title="Scheduled tasks"
+        // The page already says "Scheduled tasks"; the section names what it lists.
+        title="Tasks"
         headerAction={
-          <SettingsSectionAction disabled={!createTask} onClick={() => createTask?.()}>
-            New task
-          </SettingsSectionAction>
+          // With no tasks yet, the empty state carries the one New task action.
+          !filtered && noTasksYet ? null : (
+            <SettingsSectionAction disabled={!createTask} onClick={() => createTask?.()}>
+              New task
+            </SettingsSectionAction>
+          )
         }
       >
         {scope.kind === "unavailable" ? (
-          <SettingsSection title="Unavailable selection">
-            <SettingsRow title={scope.message} />
-          </SettingsSection>
+          <SettingsRow title={scope.message} />
         ) : environments.length === 0 ? (
           <SettingsListEmpty
             icon={<Clock3Icon />}
@@ -400,6 +402,46 @@ export function ScheduledTasksSettings(target: {
   );
 }
 
+/**
+ * Whether every machine that has answered has no scheduled tasks in scope, so
+ * the list shows the first-task empty state. Reads the same live queries the
+ * lists below subscribe to.
+ */
+function useNoScheduledTasksYet(
+  environments: ReadonlyArray<EnvironmentPresentation>,
+  scope: ReturnType<typeof useSettingsScope>["scope"],
+): boolean {
+  return useAtomValue(
+    useMemo(
+      () =>
+        Atom.make((get) => {
+          const lists = environments
+            .filter(
+              (environment) =>
+                environment.connection.phase === "connected" && environment.serverConfig !== null,
+            )
+            .map((environment) => {
+              const query = get(
+                serverEnvironment.scheduledTasksLive({
+                  environmentId: environment.environmentId,
+                  input: {},
+                }),
+              );
+              const data = Option.getOrNull(AsyncResult.value(query));
+              return data === null
+                ? null
+                : data.tasks.filter(() =>
+                    matchesScheduledTaskScope(scope, environment.environmentId),
+                  );
+            });
+          const loaded = lists.filter((list) => list !== null);
+          return loaded.length > 0 && loaded.every((list) => list.length === 0);
+        }),
+      [environments, scope],
+    ),
+  );
+}
+
 /** The page's search and filters, which the machine lists show once they have tasks. */
 interface TaskListView {
   readonly matchesTask: (task: ScheduledTask) => boolean;
@@ -425,7 +467,7 @@ function ScheduledTasksEmpty({ view, hasTasks }: { view: TaskListView; hasTasks:
   ) : (
     <SettingsListEmpty
       icon={<Clock3Icon />}
-      label="Run a prompt on a schedule, from a webhook, or when Work changes."
+      label="Run a prompt on a schedule, from a webhook or when Work changes."
       action={
         view.onCreate ? (
           <Button size="xs" variant="outline" onClick={view.onCreate}>
@@ -750,9 +792,7 @@ function ScheduledTaskRow({
             {lastRun === null ? null : lastRun.tone === null ? (
               lastRun.text
             ) : (
-              <Badge size="sm" variant={lastRun.tone}>
-                {lastRun.text}
-              </Badge>
+              <SettingsStatusBadge tone={lastRun.tone}>{lastRun.text}</SettingsStatusBadge>
             )}
           </SettingsListMeta>
           {task.lastRunError ? (
@@ -883,9 +923,9 @@ function WebhookDeliveriesDialog({
           ) : selected ? (
             <div className="space-y-4">
               <div className="flex flex-wrap items-center gap-2 text-sm">
-                <Badge variant={deliveryOutcomeVariant(selected.outcome)}>
+                <SettingsStatusBadge tone={deliveryOutcomeTone(selected.outcome)}>
                   {DELIVERY_OUTCOME_LABELS[selected.outcome]}
-                </Badge>
+                </SettingsStatusBadge>
                 <span>
                   {selected.method} · {relativeLabel(selected.receivedAt)}
                 </span>
@@ -929,9 +969,9 @@ function WebhookDeliveriesDialog({
                     className="flex w-full flex-wrap items-center gap-2 py-2 text-left text-sm state-hover"
                     onClick={() => setSelectedId(delivery.id)}
                   >
-                    <Badge variant={deliveryOutcomeVariant(delivery.outcome)}>
+                    <SettingsStatusBadge tone={deliveryOutcomeTone(delivery.outcome)}>
                       {DELIVERY_OUTCOME_LABELS[delivery.outcome]}
-                    </Badge>
+                    </SettingsStatusBadge>
                     <span>{delivery.method}</span>
                     <span className="text-muted-foreground">
                       {relativeLabel(delivery.receivedAt)}
@@ -957,7 +997,7 @@ function WebhookDeliveriesDialog({
             <Button
               variant="outline"
               size="sm"
-              disabled={deliveriesQuery.isPending}
+              busy={deliveriesQuery.isPending}
               onClick={deliveriesQuery.refresh}
             >
               Refresh
@@ -1047,7 +1087,8 @@ function WebhookEndpointField({
           size="sm"
           variant="outline"
           type="button"
-          disabled={rotating || !canRotate}
+          disabled={!canRotate}
+          busy={rotating}
           onClick={() => void rotateUrl()}
         >
           Rotate
@@ -1217,7 +1258,7 @@ function ScheduledTaskEditorDialog({
       !projects.some((project) => project.id === selectedProjectId) ||
       selection === null
     ) {
-      reportFailure("Scheduled task is incomplete", "Add a title, prompt, repository, and model.");
+      reportFailure("Scheduled task is incomplete", "Add a title, prompt, repository and model.");
       return;
     }
     if (draft.scheduleMode === "event" && draft.agentId === null) {
@@ -1319,8 +1360,7 @@ function ScheduledTaskEditorDialog({
         <DialogHeader>
           <DialogTitle>{draft.editingId ? "Edit task" : "New task"}</DialogTitle>
           <DialogDescription>
-            Runs a prompt on a schedule, when a webhook is called, or when something happens in
-            Work.
+            Runs a prompt on a schedule, when a webhook is called or when something happens in Work.
           </DialogDescription>
         </DialogHeader>
 
@@ -1669,7 +1709,7 @@ function ScheduledTaskEditorDialog({
             ) : null}
 
             <Field label="Model">
-              <div>
+              <div className="flex *:min-w-0 *:flex-1">
                 <ProviderModelPicker
                   environmentId={environmentId}
                   disabled={saving || !connected}
@@ -1679,7 +1719,7 @@ function ScheduledTaskEditorDialog({
                   instanceEntries={instanceEntries}
                   modelOptionsByInstance={modelOptionsByInstance}
                   isComposerOwned={false}
-                  triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+                  triggerVariant="field"
                   onInstanceModelChange={(instanceId, model) =>
                     setDraft((current) => ({ ...current, modelKey: `${instanceId}:${model}` }))
                   }
@@ -1822,7 +1862,8 @@ function ScheduledTaskEditorDialog({
           </DialogClose>
           <Button
             size="sm"
-            disabled={!canOperate || saving || editingTaskMissing || !connected || !tasksQuery.data}
+            disabled={!canOperate || editingTaskMissing || !connected || !tasksQuery.data}
+            busy={saving}
             onClick={() => void submit()}
           >
             {draft.editingId ? "Save task" : "Create task"}

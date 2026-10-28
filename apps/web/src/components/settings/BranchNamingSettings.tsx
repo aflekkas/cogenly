@@ -1,10 +1,11 @@
 import { useRef } from "react";
 import { BranchNamingMode, DEFAULT_SERVER_SETTINGS } from "@cogenly/contracts";
 
+import { AnimatedHeight } from "~/components/AnimatedHeight";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Textarea } from "../ui/textarea";
-import { SettingsRow, SettingResetButton } from "./settingsLayout";
+import { SettingsField, SettingsRow, SettingResetButton } from "./settingsLayout";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { searchableSetting } from "./settingsSearch";
 import { BRANCH_NAMING_MODE_LABELS as MODES } from "./settingValueLabels";
@@ -41,99 +42,109 @@ export function BranchNamingSettings() {
           ) : null
         }
         control={
-          <Select
-            value={settings.branchNamingMode}
-            onValueChange={(value) => {
-              if (BranchNamingMode.literals.includes(value as BranchNamingMode)) {
-                updateSettings({ branchNamingMode: value as BranchNamingMode });
-              }
-            }}
-          >
-            <SelectTrigger size="sm" aria-label="Branch names">
-              <SelectValue>{(value: BranchNamingMode) => MODES[value]}</SelectValue>
-            </SelectTrigger>
-            <SelectPopup align="end" alignItemWithTrigger={false}>
-              {BranchNamingMode.literals.map((mode) => (
-                <SelectItem key={mode} value={mode}>
-                  {MODES[mode]}
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
+          <SettingsField>
+            <Select
+              value={settings.branchNamingMode}
+              onValueChange={(value) => {
+                if (BranchNamingMode.literals.includes(value as BranchNamingMode)) {
+                  updateSettings({ branchNamingMode: value as BranchNamingMode });
+                }
+              }}
+            >
+              <SelectTrigger size="sm" aria-label="Branch names">
+                <SelectValue>{(value: BranchNamingMode) => MODES[value]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {BranchNamingMode.literals.map((mode) => (
+                  <SelectItem key={mode} value={mode}>
+                    {MODES[mode]}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          </SettingsField>
         }
       />
-      {settings.branchNamingMode === "static" ? (
-        <SettingsRow
-          serverScoped
-          settingKeys={["branchNamePrefix"]}
-          title="Branch prefix"
-          description="For example, c or c/ produces c/add-search. Leave empty for no prefix."
-          resetAction={
-            settings.branchNamePrefix !== DEFAULT_SERVER_SETTINGS.branchNamePrefix ? (
-              <SettingResetButton
-                label="branch prefix"
-                onClick={() =>
-                  updateSettings({ branchNamePrefix: DEFAULT_SERVER_SETTINGS.branchNamePrefix })
-                }
+      {/* Each mode's own row closes as the next one opens, instead of swapping with a jump. */}
+      <AnimatedHeight>
+        {settings.branchNamingMode === "static" ? (
+          <SettingsRow
+            serverScoped
+            settingKeys={["branchNamePrefix"]}
+            title="Branch prefix"
+            description="For example, c or c/ produces c/add-search. Leave empty for no prefix."
+            resetAction={
+              settings.branchNamePrefix !== DEFAULT_SERVER_SETTINGS.branchNamePrefix ? (
+                <SettingResetButton
+                  label="branch prefix"
+                  onClick={() =>
+                    updateSettings({ branchNamePrefix: DEFAULT_SERVER_SETTINGS.branchNamePrefix })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <SettingsField>
+                <Input
+                  key={`${scopeKey}:${settings.branchNamePrefix}`}
+                  aria-label="Branch prefix"
+                  size="sm"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  onChange={() => {
+                    prefixEdited.current = true;
+                  }}
+                  placeholder="No prefix"
+                  defaultValue={settings.branchNamePrefix}
+                  onBlur={(event) => {
+                    const value = event.target.value.trim();
+                    if (prefixEdited.current && value !== settings.branchNamePrefix)
+                      updateSettings({ branchNamePrefix: value });
+                    prefixEdited.current = false;
+                  }}
+                />
+              </SettingsField>
+            }
+          />
+        ) : null}
+      </AnimatedHeight>
+      <AnimatedHeight>
+        {settings.branchNamingMode === "custom" ? (
+          <SettingsRow
+            serverScoped
+            settingKeys={["branchNameInstructions"]}
+            title="Branch naming instructions"
+            description="Appended to the naming prompt. The model returns the complete branch name; no prefix or suffix is added."
+            resetAction={
+              settings.branchNameInstructions !== "" ? (
+                <SettingResetButton
+                  label="branch naming instructions"
+                  onClick={() => updateSettings({ branchNameInstructions: "" })}
+                />
+              ) : null
+            }
+          >
+            <div className="mt-3 max-w-2xl">
+              <Textarea
+                key={`${scopeKey}:${settings.branchNameInstructions}`}
+                aria-label="Branch naming instructions"
+                onChange={() => {
+                  instructionsEdited.current = true;
+                }}
+                rows={4}
+                defaultValue={settings.branchNameInstructions}
+                placeholder="Use julius/ followed by the issue ID and a short description."
+                onBlur={(event) => {
+                  const value = event.target.value.trim();
+                  if (instructionsEdited.current && value !== settings.branchNameInstructions)
+                    updateSettings({ branchNameInstructions: value });
+                  instructionsEdited.current = false;
+                }}
               />
-            ) : null
-          }
-          control={
-            <Input
-              key={`${scopeKey}:${settings.branchNamePrefix}`}
-              aria-label="Branch prefix"
-              autoCapitalize="none"
-              spellCheck={false}
-              onChange={() => {
-                prefixEdited.current = true;
-              }}
-              placeholder="No prefix"
-              defaultValue={settings.branchNamePrefix}
-              onBlur={(event) => {
-                const value = event.target.value.trim();
-                if (prefixEdited.current && value !== settings.branchNamePrefix)
-                  updateSettings({ branchNamePrefix: value });
-                prefixEdited.current = false;
-              }}
-            />
-          }
-        />
-      ) : null}
-      {settings.branchNamingMode === "custom" ? (
-        <SettingsRow
-          serverScoped
-          settingKeys={["branchNameInstructions"]}
-          title="Branch naming instructions"
-          description="Appended to the naming prompt. The model returns the complete branch name; no prefix or suffix is added."
-          resetAction={
-            settings.branchNameInstructions !== "" ? (
-              <SettingResetButton
-                label="branch naming instructions"
-                onClick={() => updateSettings({ branchNameInstructions: "" })}
-              />
-            ) : null
-          }
-        >
-          <div className="mt-3 max-w-2xl pb-3.5">
-            <Textarea
-              key={`${scopeKey}:${settings.branchNameInstructions}`}
-              aria-label="Branch naming instructions"
-              onChange={() => {
-                instructionsEdited.current = true;
-              }}
-              rows={4}
-              defaultValue={settings.branchNameInstructions}
-              placeholder="Use julius/ followed by the issue ID and a short description."
-              onBlur={(event) => {
-                const value = event.target.value.trim();
-                if (instructionsEdited.current && value !== settings.branchNameInstructions)
-                  updateSettings({ branchNameInstructions: value });
-                instructionsEdited.current = false;
-              }}
-            />
-          </div>
-        </SettingsRow>
-      ) : null}
+            </div>
+          </SettingsRow>
+        ) : null}
+      </AnimatedHeight>
     </>
   );
 }

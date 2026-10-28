@@ -9,6 +9,7 @@ import type {
   ExportValidation,
   ProjectLabelId,
 } from "@cogenly/contracts";
+import { FileArchiveIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { formatBytes } from "../../lib/formatBytes";
@@ -23,7 +24,7 @@ import { Checkbox } from "../ui/checkbox";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { SettingsEmpty, SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingsEmpty, SettingsField, SettingsRow, SettingsSection } from "./settingsLayout";
 
 type ExportSection = "chats" | "work" | "agents" | "commitments" | "projects" | "memory";
 const SECTIONS: ReadonlyArray<{ value: ExportSection; label: string }> = [
@@ -103,19 +104,28 @@ function DataSettingsPanel({
     ReadonlyMap<string, ExportValidation | { failed: string } | "running">
   >(new Map());
 
-  const refreshRecent = useCallback(async () => {
-    if (environmentId === null || !canExport) return;
-    const listed = await listExports({ environmentId, input: {} });
+  const showListed = useCallback((listed: Awaited<ReturnType<typeof listExports>>) => {
     if (listed._tag === "Success") {
       setRecent(listed.value.exports);
       setRecentError(null);
     } else if (!isAtomCommandInterrupted(listed)) {
       setRecentError(failureMessage(listed));
     }
-  }, [canExport, environmentId, listExports]);
+  }, []);
+  const refreshRecent = useCallback(async () => {
+    if (environmentId === null || !canExport) return;
+    showListed(await listExports({ environmentId, input: {} }));
+  }, [canExport, environmentId, listExports, showListed]);
   useEffect(() => {
-    void refreshRecent();
-  }, [refreshRecent]);
+    if (environmentId === null || !canExport) return;
+    let cancelled = false;
+    void listExports({ environmentId, input: {} }).then((listed) => {
+      if (!cancelled) showListed(listed);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [canExport, environmentId, listExports, showListed]);
 
   const run = async () => {
     if (environmentId === null || include.size === 0 || running) return;
@@ -199,23 +209,25 @@ function DataSettingsPanel({
           title="Project"
           description="Export everything, or only one project's chats, Work, open items and memory."
           control={
-            <Select value={labelId} onValueChange={(value) => setLabelId(value ?? ALL)}>
-              <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Project">
-                <SelectValue>
-                  {labelId === ALL
-                    ? "All projects"
-                    : (labels.find((label) => label.id === labelId)?.name ?? "Project")}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem value={ALL}>All projects</SelectItem>
-                {sortedLabels.map((label) => (
-                  <SelectItem key={label.id} value={label.id}>
-                    {label.name}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
+            <SettingsField>
+              <Select value={labelId} onValueChange={(value) => setLabelId(value ?? ALL)}>
+                <SelectTrigger size="sm" aria-label="Project">
+                  <SelectValue>
+                    {labelId === ALL
+                      ? "All projects"
+                      : (labels.find((label) => label.id === labelId)?.name ?? "Project")}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem value={ALL}>All projects</SelectItem>
+                  {sortedLabels.map((label) => (
+                    <SelectItem key={label.id} value={label.id}>
+                      {label.name}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </SettingsField>
           }
         />
         <SettingsRow
@@ -230,7 +242,8 @@ function DataSettingsPanel({
           control={
             <Button
               size="sm"
-              disabled={disabledReason !== null || include.size === 0 || running}
+              disabled={disabledReason !== null || include.size === 0}
+              busy={running}
               onClick={() => void run()}
             >
               {running ? "Exporting…" : "Export"}
@@ -243,14 +256,18 @@ function DataSettingsPanel({
         <SettingsSection
           id="data-exports-recent"
           title="Recent exports"
-          footer="Check reads an export back and confirms every record is intact. It changes nothing. Cogenly can't import exports yet."
+          footer={
+            recent !== null && recent.length > 0
+              ? "Check reads an export back and confirms every record is intact. It changes nothing. Cogenly can't import exports yet."
+              : undefined
+          }
         >
           {recentError !== null ? (
             <SettingsRow title="Couldn't list exports" description={recentError} />
           ) : recent === null ? (
             <SettingsRow title="Loading exports…" role="status" />
           ) : recent.length === 0 ? (
-            <SettingsEmpty label="Exports you make appear here." />
+            <SettingsEmpty icon={<FileArchiveIcon />} label="Exports you make appear here." />
           ) : (
             recent.map((entry) => {
               const createdAt = exportCreatedAt(entry.path);
@@ -292,7 +309,7 @@ function DataSettingsPanel({
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={validation === "running"}
+                        busy={validation === "running"}
                         onClick={() => void validate(entry.path)}
                       >
                         {validation === "running" ? "Checking…" : "Check"}

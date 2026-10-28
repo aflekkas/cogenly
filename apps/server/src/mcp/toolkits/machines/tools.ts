@@ -110,7 +110,7 @@ export const MachinesToolkit = Toolkit.make(
     parameters: Tool.EmptyParams,
     success: MachineSetupStatus,
     description:
-      "Check whether this machine is ready to pair with the user's other machines. Cogenly links machines through Tailscale, a free app that gives them a private, encrypted connection. Returns Tailscale's state (installed, running, signed in, tailnet, MagicDNS name, HTTPS allowed, whether Tailscale Serve fronts this server) and an ordered checklist: install, start, sign-in, enable-https, expose. Each step has a state, a plain-language title and detail, an `action` when machine_setup_step can do it, and a `handoff` (a URL to open, or a command the user runs because it needs their password). The Tailscale sign-in link is left out here; machine_setup_step returns it. When `ready` is true the user pairs machines in Settings → Machines → Add a machine.",
+      "Check whether this machine is ready to pair with the user's other machines. Cogenly links machines through Tailscale, a free app that gives them a private, encrypted connection. Returns Tailscale's state (installed, running, signed in, tailnet, MagicDNS name, HTTPS allowed, whether Tailscale Serve fronts this server) and an ordered checklist: install, start, sign-in, enable-https, expose. Each step has a state, a plain-language title and detail, an `action` when machine_setup_step can do it, and a `handoff` (a URL to open, or a command the user runs because it needs their password). The Tailscale sign-in link is left out here; machine_setup_step returns it. When `ready` is true the user pairs machines in Settings → Machines → Add machine.",
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false),
@@ -154,7 +154,7 @@ export const MachinesToolkit = Toolkit.make(
     }),
     success: Schema.Struct({ hub: DesktopAppPairedMachine, joining: DesktopAppPairedMachine }),
     description:
-      "Pair two of the user's machines so they sync, the same as Settings → Machines → Add a machine. The Cogenly desktop app on this computer runs it, because only an app signed in to both machines can: it checks the hub, mints a one-time join code bound to the joining machine's key, and redeems it, so the code never reaches you. Both machines must be connections in that app, and the hub must be ready: its machine_setup_status (or its checklist in Settings → Machines → Add a machine) shows ready. Only works from an environment on the same computer as the desktop app; elsewhere, ask the user to choose Add a machine in Settings → Machines. Requires a live full-access/default calling thread. machine_unpair undoes it.",
+      "Pair two of the user's machines so they sync, the same as Settings → Machines → Add machine. The Cogenly desktop app on this computer runs it, because only an app signed in to both machines can: it checks the hub, mints a one-time join code bound to the joining machine's key, and redeems it, so the code never reaches you. Both machines must be connections in that app, and the hub must be ready: its machine_setup_status (or its checklist in Settings → Machines → Add machine) shows ready. Only works from an environment on the same computer as the desktop app; elsewhere, ask the user to choose Add machine in Settings → Machines. Requires a live full-access/default calling thread. machine_unpair undoes it.",
   })
     .annotate(Tool.Readonly, false)
     .annotate(Tool.Destructive, false),

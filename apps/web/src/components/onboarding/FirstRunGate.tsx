@@ -220,7 +220,7 @@ function FirstRunRecovery({
           className="mt-5"
           size="sm"
           variant="outline"
-          disabled={retrying}
+          busy={retrying}
           onClick={() => {
             if (settingsReadFailed) {
               void ensureClientSettingsHydrated().catch(() => undefined);

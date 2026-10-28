@@ -58,3 +58,33 @@ export function resourceHistoryCpuScaleMax(
 ): number {
   return Math.max(1, ...buckets.map((bucket) => bucket.avgCpuPercent));
 }
+
+/**
+ * What the unavailable monitor row's one recovery action does. While the server's process
+ * sampling is hidden behind that row (both samplers failed), the action is the only way to
+ * re-sample them, so it refreshes them too, and stays offered to viewers who can't restart
+ * the monitor. `null` means the row has no action.
+ */
+export function resourceMonitorRecovery(input: {
+  readonly canRestartMonitor: boolean;
+  readonly samplersHidden: boolean;
+}): { readonly restartsMonitor: boolean; readonly refreshesSamplers: boolean } | null {
+  if (!input.canRestartMonitor && !input.samplersHidden) return null;
+  return { restartsMonitor: input.canRestartMonitor, refreshesSamplers: input.samplersHidden };
+}
+
+/**
+ * Why the resource monitor isn't running, said once. When the server's own process
+ * sampling failed too, its distinct reasons join the monitor's and the line says where
+ * the missing numbers went, instead of each section repeating the same error.
+ */
+export function resourceMonitorUnavailableText(
+  reason: string,
+  fallbackUnavailableReasons: ReadonlyArray<string> | null,
+): string {
+  if (fallbackUnavailableReasons === null) return reason;
+  const reasons = [...new Set([reason, ...fallbackUnavailableReasons].map((text) => text.trim()))]
+    .filter((text) => text.length > 0)
+    .map((text) => (/[.!?]$/.test(text) ? text : `${text}.`));
+  return `${reasons.join(" ")} Live processes and resource history show here once it runs.`;
+}

@@ -1,7 +1,6 @@
 import type { EnvironmentConnectionPhase } from "@cogenly/client-runtime/connection";
 import {
   AuthProvidersManageScope,
-  type AuthSessionState,
   type EnvironmentId,
   sessionGrantsScope,
   type SessionGrantInput,

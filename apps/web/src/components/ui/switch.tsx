@@ -12,7 +12,7 @@ function Switch({
   return (
     <SwitchPrimitive.Root
       className={cn(
-        "inline-flex h-[calc(var(--thumb-size)+2px)] w-[calc(var(--thumb-size)*2-2px)] shrink-0 cursor-pointer items-center rounded-full p-[2px] outline-none transition-[background-color,box-shadow] duration-200 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background data-checked:bg-primary data-unchecked:bg-input data-disabled:cursor-not-allowed data-disabled:opacity-64",
+        "inline-flex h-[calc(var(--thumb-size)+2px)] w-[calc(var(--thumb-size)*2-2px)] shrink-0 cursor-pointer items-center rounded-full p-[2px] outline-none transition-[background-color,box-shadow] duration-(--motion-duration-fast) ease-out focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background data-checked:bg-primary data-unchecked:bg-input data-disabled:cursor-not-allowed data-disabled:opacity-64",
         size === "sm"
           ? "[--thumb-size:--spacing(4)] sm:[--thumb-size:--spacing(3.5)]"
           : "[--thumb-size:--spacing(5)] sm:[--thumb-size:--spacing(4)]",
@@ -22,8 +22,11 @@ function Switch({
       data-slot="switch"
       {...props}
     >
+      {/* Off in dark mode, a background-colored thumb is darker than the card
+          and the switch reads as disabled; the muted-foreground thumb keeps
+          off-but-enabled at 3:1. Light mode keeps the pale thumb on its grey track. */}
       <SwitchPrimitive.Thumb
-        className="pointer-events-none block size-[calc(var(--thumb-size)-2px)] shrink-0 origin-left in-[[role=switch]:active,[data-slot=label]:active,[data-slot=field-label]:active]:not-data-disabled:scale-x-110 in-[[role=switch]:active,[data-slot=label]:active,[data-slot=field-label]:active]:rounded-[var(--thumb-size)/calc(var(--thumb-size)*1.1)] rounded-(--thumb-size) bg-background shadow-sm/5 [transition:translate_.15s,border-radius_.15s,scale_.1s_.1s,transform-origin_.15s] data-checked:origin-right data-checked:translate-x-[calc(var(--thumb-size)-4px)]"
+        className="pointer-events-none block size-[calc(var(--thumb-size)-2px)] shrink-0 origin-left in-[[role=switch]:active,[data-slot=label]:active,[data-slot=field-label]:active]:not-data-disabled:scale-x-110 in-[[role=switch]:active,[data-slot=label]:active,[data-slot=field-label]:active]:rounded-[var(--thumb-size)/calc(var(--thumb-size)*1.1)] rounded-(--thumb-size) bg-background shadow-sm/5 [transition:translate_var(--motion-duration-fast)_var(--ease-out),background-color_var(--motion-duration-fast)_var(--ease-out),border-radius_var(--motion-duration-fast)_var(--ease-out),scale_100ms_100ms,transform-origin_var(--motion-duration-fast)] motion-reduce:transition-none dark:data-unchecked:bg-muted-foreground data-checked:origin-right data-checked:translate-x-[calc(var(--thumb-size)-4px)]"
         data-slot="switch-thumb"
       />
     </SwitchPrimitive.Root>

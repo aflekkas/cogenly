@@ -48,6 +48,7 @@ import {
   VAULT_TYPE_LABELS,
   VAULT_TYPES,
   vaultCreateInput,
+  vaultItemDisplay,
   vaultLastUsedText,
   vaultPolicySummary,
   vaultUpdateInput,
@@ -55,14 +56,15 @@ import {
 import { VaultLoginsSection } from "../../vault/VaultLogins";
 import { integrationsRpc } from "../../rpc/integrations";
 import { useEnvironmentQuery } from "../../state/query";
-import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { CopyButton } from "../ui/copy-button";
 import { OverlayPresence } from "../ui/overlay-presence";
 import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PeerSyncRow } from "./PeerSyncRow";
 import { useSettingsScope } from "./SettingsScopeContext";
+import { SettingsTag } from "./SettingsStatus";
 import {
   SettingsRow,
   SettingsSection,
@@ -127,13 +129,16 @@ export function VaultSettings() {
   );
   const integrations = integrationsQuery.data?.integrations ?? EMPTY_INTEGRATIONS;
   const confirmDelete = async (item: VaultItemMetadata) => {
-    const message = `Delete “${item.type === "login" ? vaultLoginLabel(item) : item.name}”?\nAgents can no longer use it. Its usage log stays.`;
+    const message = `Delete “${item.type === "login" ? vaultLoginLabel(item) : vaultItemDisplay(item).title}”?\nAgents can no longer use it. Its usage log stays.`;
     const confirmed =
       (await requestConfirmDialog(message, { variant: "destructive" })) ?? window.confirm(message);
     if (confirmed) await actions.remove(item.id);
   };
   const agentName = (id: AgentId) => agents.find((agent) => agent.id === id)?.name;
-  const itemName = (id: string) => list.items.find((item) => item.id === id)?.name;
+  const itemName = (id: string) => {
+    const item = list.items.find((entry) => entry.id === id);
+    return item ? vaultItemDisplay(item).title : undefined;
+  };
   const scopeName = (id: string | null) =>
     id === null ? null : (labels.find((label) => label.id === id)?.name ?? "A removed project");
 
@@ -311,20 +316,46 @@ function VaultItemRow(props: {
   const [showUsage, setShowUsage] = useState(false);
   const [busy, setBusy] = useState(false);
   const disabled = busy || !props.canWrite;
+  const display = vaultItemDisplay(item);
   const cardLast4 = item.type === "card" && item.cardLast4 ? `•••• ${item.cardLast4}` : null;
-  const description = [item.label, cardLast4].filter(Boolean).join(" · ");
+  const description = [display.description, cardLast4].filter(Boolean).join(" · ");
   return (
     <SettingsListItem
-      title={item.name}
-      description={description || undefined}
+      title={display.title}
+      description={
+        description || display.internalName ? (
+          <>
+            {description ? <span className="block">{description}</span> : null}
+            {display.internalName ? (
+              // The generated name agents use for it: kept findable on a line
+              // of its own, never the headline or a wrap in the facts below.
+              <span className="flex min-w-0 items-center gap-0.5">
+                <Tooltip>
+                  <TooltipTrigger
+                    delay={300}
+                    render={<span className="min-w-0 truncate font-mono" />}
+                  >
+                    {display.internalName}
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">{display.internalName}</TooltipPopup>
+                </Tooltip>
+                <CopyButton
+                  size="icon-micro"
+                  value={display.internalName}
+                  label="Copy item name"
+                  target="item name"
+                />
+              </span>
+            ) : null}
+          </>
+        ) : undefined
+      }
       status={
         <SettingsListMeta>
-          <Badge size="sm" variant="outline">
-            {VAULT_TYPE_LABELS[item.type]}
-          </Badge>
+          <SettingsTag>{VAULT_TYPE_LABELS[item.type]}</SettingsTag>
           {props.paired && item.portability === "machine" ? (
             <Tooltip>
-              <TooltipTrigger delay={300} render={<Badge size="sm" variant="outline" />}>
+              <TooltipTrigger delay={300} render={<SettingsTag />}>
                 This machine only
               </TooltipTrigger>
               <TooltipPopup side="top">
@@ -342,9 +373,9 @@ function VaultItemRow(props: {
       control={
         <div className="flex shrink-0 items-center gap-0.5">
           <Button
-            size="icon-xs"
+            size="icon-sm"
             variant="ghost-muted"
-            aria-label={`Edit ${item.name}`}
+            aria-label={`Edit ${display.title}`}
             title={props.canWrite ? "Edit" : NO_WRITE_TITLE}
             disabled={disabled}
             onClick={props.onEdit}
@@ -352,7 +383,7 @@ function VaultItemRow(props: {
             <PencilIcon />
           </Button>
           <Button
-            size="icon-xs"
+            size="icon-sm"
             variant="ghost-muted"
             aria-label={showUsage ? "Hide usage" : "Show usage"}
             aria-expanded={showUsage}
@@ -362,9 +393,9 @@ function VaultItemRow(props: {
             <HistoryIcon />
           </Button>
           <Button
-            size="icon-xs"
+            size="icon-sm"
             variant="ghost-destructive"
-            aria-label={`Delete ${item.name}`}
+            aria-label={`Delete ${display.title}`}
             title={props.canWrite ? "Delete" : NO_WRITE_TITLE}
             disabled={disabled}
             onClick={() => {
@@ -483,7 +514,7 @@ function ItemUsage(props: {
 }) {
   const usage = useVaultUsage(props.environmentId, props.item.id);
   return (
-    <div className="reveal-motion ms-0.5 mt-2 mb-2 border-s border-border/70 ps-3 text-xs text-muted-foreground">
+    <div className="reveal-motion ms-0.5 mt-2 border-s border-border/70 ps-3 text-xs text-muted-foreground">
       <UsageBody error={usage.error} isLoaded={usage.isLoaded} empty={usage.usage.length === 0}>
         <VaultUsageList
           environmentId={props.environmentId}

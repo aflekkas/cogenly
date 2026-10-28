@@ -35,6 +35,7 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   SettingResetButton,
+  SettingsField,
   SettingsNote,
   SettingsPageMessage,
   SettingsRow,
@@ -259,20 +260,20 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
   const [iconPickerOpen, setIconPickerOpen] = useComposerMenuState(!canEditGroup);
   const [isSavingFavicon, setIsSavingFavicon] = useState(false);
   const savingFaviconRef = useRef(false);
-  const setProjectIcon = useCallback(
-    async (input: { faviconPath: string | null; projectIcon: ProjectIconOverride | null }) => {
-      if (savingFaviconRef.current) return;
-      savingFaviconRef.current = true;
-      setIsSavingFavicon(true);
-      try {
-        await updateAllMembers(input, "Failed to update repository icon");
-      } finally {
-        savingFaviconRef.current = false;
-        setIsSavingFavicon(false);
-      }
-    },
-    [updateAllMembers],
-  );
+  const setProjectIcon = async (input: {
+    faviconPath: string | null;
+    projectIcon: ProjectIconOverride | null;
+  }) => {
+    if (savingFaviconRef.current) return;
+    savingFaviconRef.current = true;
+    setIsSavingFavicon(true);
+    try {
+      await updateAllMembers(input, "Failed to update repository icon");
+    } finally {
+      savingFaviconRef.current = false;
+      setIsSavingFavicon(false);
+    }
+  };
 
   const hasMultipleCheckouts = group.memberProjects.length > 1;
 
@@ -429,7 +430,7 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
             control={hasMultiple ? undefined : checkoutRemoveButton(firstMember)}
           >
             {hasMultiple ? (
-              <div className="space-y-3 pb-2 pt-1">
+              <div className="space-y-3 pt-3">
                 {members.map((member) => (
                   <div
                     key={member.physicalProjectKey}
@@ -437,9 +438,7 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
                   >
                     <Tooltip>
                       <TooltipTrigger
-                        render={
-                          <span className="min-w-0 truncate text-xs text-muted-foreground/80" />
-                        }
+                        render={<span className="min-w-0 truncate text-xs text-muted-foreground" />}
                       >
                         {member.workspaceRoot}
                       </TooltipTrigger>
@@ -471,25 +470,26 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
             title="Name"
             description="Shown in the sidebar and thread lists on every machine."
             control={
-              <Input
-                key={`${group.projectKey}:${group.displayName}`}
-                size="sm"
-                className="w-full sm:w-64"
-                aria-label="Repository name"
-                disabled={!canEditGroup}
-                defaultValue={group.displayName}
-                onChange={() => {
-                  projectNameEditedRef.current = true;
-                }}
-                onBlur={(event) => {
-                  const wasEdited = projectNameEditedRef.current;
-                  projectNameEditedRef.current = false;
-                  void renameGroup(event.currentTarget.value, wasEdited);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") event.currentTarget.blur();
-                }}
-              />
+              <SettingsField>
+                <Input
+                  key={`${group.projectKey}:${group.displayName}`}
+                  size="sm"
+                  aria-label="Repository name"
+                  disabled={!canEditGroup}
+                  defaultValue={group.displayName}
+                  onChange={() => {
+                    projectNameEditedRef.current = true;
+                  }}
+                  onBlur={(event) => {
+                    const wasEdited = projectNameEditedRef.current;
+                    projectNameEditedRef.current = false;
+                    void renameGroup(event.currentTarget.value, wasEdited);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") event.currentTarget.blur();
+                  }}
+                />
+              </SettingsField>
             }
           />
           <SettingsRow

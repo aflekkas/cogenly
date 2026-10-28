@@ -2830,7 +2830,8 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                 <Button
                   size="xs"
                   variant="outline"
-                  disabled={desktopUpdateButtonDisabled || desktopUpdateActionPending}
+                  disabled={desktopUpdateButtonDisabled}
+                  busy={desktopUpdateActionPending}
                   onClick={handleDesktopUpdateButtonClick}
                 >
                   {desktopUpdateButtonAction === "download"

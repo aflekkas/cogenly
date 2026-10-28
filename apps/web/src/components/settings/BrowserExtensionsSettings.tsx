@@ -3,13 +3,13 @@ import {
   resolveBrowserProfiles,
   type EnvironmentId,
 } from "@cogenly/contracts";
+import { PuzzleIcon } from "lucide-react";
 import { useState } from "react";
 
 import { BrowserExtensionInstallForm } from "~/browser/BrowserExtensionInstall";
 import { browserExtensionPermissionLines } from "~/browser/browserExtensions.logic";
 import { useBrowserExtensions } from "~/browser/useBrowserExtensions";
 import { useClientSettings } from "~/hooks/useSettings";
-import { cn } from "~/lib/utils";
 
 import { BrowserExtensionDetailsDialog } from "../preview/extensions/BrowserExtensionDetails";
 import {
@@ -20,7 +20,8 @@ import {
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
-import { SettingsEmpty, SettingsNote, SettingsRow } from "./settingsLayout";
+import { SettingsGroup } from "./SettingsGroup";
+import { SettingsEmpty, SettingsField, SettingsNote, SettingsRow } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
 
@@ -54,53 +55,50 @@ function BrowserExtensionsRow({ environmentId }: { readonly environmentId: Envir
       {...searchableSetting("browser-extensions")}
       description="Extensions run in Cogenly's built-in Chrome on the selected machine. Desktop tabs in profiles with enabled extensions stream from it."
       control={
-        <Select
-          disabled={!canManage}
-          value={profileId}
-          onValueChange={(value) => {
-            if (value) setChosenProfileId(value);
-          }}
-        >
-          <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Browser profile">
-            <SelectValue>{profile?.name ?? "Default"}</SelectValue>
-          </SelectTrigger>
-          <SelectPopup align="end" alignItemWithTrigger={false}>
-            {profiles.map((candidate) => (
-              <SelectItem hideIndicator key={candidate.id} value={candidate.id}>
-                {candidate.name}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
+        <SettingsField>
+          <Select
+            disabled={!canManage}
+            value={profileId}
+            onValueChange={(value) => {
+              if (value) setChosenProfileId(value);
+            }}
+          >
+            <SelectTrigger size="sm" aria-label="Browser profile">
+              <SelectValue>{profile?.name ?? "Default"}</SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              {profiles.map((candidate) => (
+                <SelectItem hideIndicator key={candidate.id} value={candidate.id}>
+                  {candidate.name}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        </SettingsField>
       }
     >
-      <div className="mt-2 mb-2 grid gap-2">
+      <div className="mt-2 grid gap-2">
         {!canManage ? (
-          <p className="text-sm text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             {environmentId
               ? "You can't manage this machine's browser."
               : "Connect to a machine to manage its extensions."}
           </p>
         ) : (
-          <div className="overflow-hidden rounded-lg border border-border/60">
+          <SettingsGroup variant="inset" divided={extensions !== null && extensions.length > 0}>
             {extensions === null ? (
               <SettingsNote tone={loadError ? "destructive" : "muted"}>
                 {loadError ?? "Loading extensions…"}
               </SettingsNote>
             ) : extensions.length === 0 ? (
-              <SettingsEmpty label="No extensions in this profile yet." />
+              <SettingsEmpty icon={<PuzzleIcon />} label="No extensions in this profile yet." />
             ) : (
-              extensions.map((extension, index) => (
+              extensions.map((extension) => (
                 <div
                   key={extension.id}
-                  className={cn(
-                    "flex items-start gap-3 px-3 py-2",
-                    index > 0 && "border-t border-border/60",
-                  )}
+                  className="flex min-h-11 items-center gap-3 px-3 py-2 sm:px-4"
                 >
-                  <span className="mt-0.5">
-                    <BrowserExtensionIcon extension={extension} />
-                  </span>
+                  <BrowserExtensionIcon extension={extension} />
                   <div className="grid min-w-0 flex-1 gap-0.5">
                     <p className="flex min-w-0 items-baseline gap-2 text-sm text-foreground">
                       <span className="truncate">{extension.name}</span>
@@ -122,17 +120,21 @@ function BrowserExtensionsRow({ environmentId }: { readonly environmentId: Envir
                       checked={extension.enabled}
                       onCheckedChange={(checked) => void setEnabled(extension.id, checked)}
                     />
-                    <Button size="xs" variant="ghost" onClick={() => setDetailsId(extension.id)}>
+                    <Button size="sm" variant="ghost" onClick={() => setDetailsId(extension.id)}>
                       Details
                     </Button>
-                    <Button size="xs" variant="ghost" onClick={() => void remove(extension)}>
+                    <Button
+                      size="sm"
+                      variant="ghost-destructive"
+                      onClick={() => void remove(extension)}
+                    >
                       Remove
                     </Button>
                   </div>
                 </div>
               ))
             )}
-          </div>
+          </SettingsGroup>
         )}
         <BrowserExtensionInstallForm install={install} disabled={!canManage} />
       </div>

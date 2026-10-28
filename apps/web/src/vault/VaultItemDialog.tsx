@@ -269,7 +269,8 @@ export function VaultItemDialog(props: {
           <Button
             type="submit"
             form="vault-item-editor"
-            disabled={problem !== null || saving}
+            disabled={problem !== null}
+            busy={saving}
             {...(problem ? { title: problem } : {})}
           >
             {props.item ? "Save" : "Add item"}

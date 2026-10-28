@@ -36,7 +36,7 @@ import {
 } from "@cogenly/shared/backgroundActivitySettings";
 import * as Duration from "effect/Duration";
 import { PlusIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { isDesktopLocalConnectionTarget } from "../../connection/desktopLocal";
 import {
@@ -280,22 +280,16 @@ function ProviderSettingsPanelContent(target: ProviderSettingsTarget) {
       hasServerConfig: environment.serverConfig !== null,
     }),
   )?.environmentId;
-  useEffect(() => {
-    if (
-      !target.scoped &&
-      searchTargetId === searchableSetting("provider-health-check-interval").id &&
-      !selectedEnvironmentCanRenderSettings &&
-      searchableEnvironmentId !== undefined
-    ) {
-      setSelectedEnvironmentId(searchableEnvironmentId);
-    }
-  }, [
-    searchTargetId,
-    searchableEnvironmentId,
-    selectedEnvironment,
-    selectedEnvironmentCanRenderSettings,
-    target.scoped,
-  ]);
+  // A search for the health-check interval lands on a machine that can show it.
+  if (
+    !target.scoped &&
+    searchTargetId === searchableSetting("provider-health-check-interval").id &&
+    !selectedEnvironmentCanRenderSettings &&
+    searchableEnvironmentId !== undefined &&
+    selectedEnvironmentId !== searchableEnvironmentId
+  ) {
+    setSelectedEnvironmentId(searchableEnvironmentId);
+  }
   const onlyPrimaryMachine =
     options.length === 1 && options[0]?.entry.target._tag === "PrimaryConnectionTarget";
   const machineTabs =
@@ -950,6 +944,7 @@ export function EnvironmentProviderSettings({
         ) : null}
         <SettingsMasterDetail
           size="page"
+          detailKey={selectedRow?.instanceId ?? null}
           list={
             <>
               {rows.map((row) => renderProviderInstance(row, "list"))}

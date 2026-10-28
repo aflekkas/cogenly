@@ -1,4 +1,4 @@
-import { ExternalLinkIcon } from "lucide-react";
+import { ExternalLinkIcon, SearchXIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -11,10 +11,16 @@ import {
 } from "@cogenly/shared/thirdPartyLicenses";
 
 import { Button } from "../ui/button";
-import { DisclosureChevron } from "../ui/disclosure";
-import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
-import { SearchInput } from "../ui/search-input";
-import { SettingsEmpty, SettingsRow, SettingsSection, SettingsToolbar } from "./settingsLayout";
+import { DisclosurePanel } from "../ui/disclosure";
+import { SettingsListSearch } from "./SettingsList";
+import {
+  SettingsDenseRow,
+  SettingsEmpty,
+  SettingsRow,
+  SettingsSection,
+  SettingsToolbar,
+  SettingsVersion,
+} from "./settingsLayout";
 
 type LicenseManifestState =
   | { readonly status: "loading" }
@@ -62,25 +68,16 @@ function LicenseNoticeRow({
   readonly onOpenChange: (open: boolean) => void;
 }) {
   return (
-    <Collapsible open={open} onOpenChange={onOpenChange}>
-      <article>
-        <div className="flex min-h-10 items-center interactive hover:bg-muted/35 sm:min-h-9">
-          <CollapsibleTrigger className="flex min-h-10 min-w-0 flex-1 items-center gap-2.5 px-3 text-left sm:min-h-9 sm:px-4">
-            <DisclosureChevron />
-            <span className="flex min-w-0 flex-1 items-baseline gap-2">
-              <span className="truncate font-medium text-foreground">{entry.name}</span>
-              {entry.version ? (
-                <code className="shrink-0 text-xs text-muted-foreground">{entry.version}</code>
-              ) : null}
-            </span>
-            <span className="max-w-[42%] shrink-0 truncate text-xs text-muted-foreground">
-              {entry.license} · {formatLicenseBundles(entry.bundles)}
-            </span>
-          </CollapsibleTrigger>
-          {entry.sourceUrl ? (
+    <article>
+      <SettingsDenseRow
+        disclosure={{ open, onOpenChange }}
+        title={entry.name}
+        titleActions={entry.version ? <SettingsVersion>{entry.version}</SettingsVersion> : null}
+        meta={`${entry.license} · ${formatLicenseBundles(entry.bundles)}`}
+        control={
+          entry.sourceUrl ? (
             <Button
               aria-label={`View project source for ${entry.name}`}
-              className="me-3 shrink-0 sm:me-4"
               render={<a href={entry.sourceUrl} rel="noreferrer noopener" target="_blank" />}
               size="icon-micro"
               title="Project source"
@@ -88,19 +85,19 @@ function LicenseNoticeRow({
             >
               <ExternalLinkIcon aria-hidden className="size-3" />
             </Button>
-          ) : null}
+          ) : null
+        }
+      />
+      {/* Holds the notice while it folds away; closed notices never mount. */}
+      <DisclosurePanel open={open}>
+        {/* Indented to the name, past the row's inset and the chevron. */}
+        <div className="ps-7.5 pe-3 pt-1 pb-4 sm:ps-8.5 sm:pe-4">
+          <pre className="max-w-[76ch] whitespace-pre-wrap break-words font-mono text-xs/5 text-foreground/80">
+            {entry.noticeText}
+          </pre>
         </div>
-        <CollapsiblePanel>
-          {open ? (
-            <div className="px-9 pt-1 pb-4 sm:px-10">
-              <pre className="max-w-[76ch] whitespace-pre-wrap break-words font-mono text-xs/5 text-foreground/80">
-                {entry.noticeText}
-              </pre>
-            </div>
-          ) : null}
-        </CollapsiblePanel>
-      </article>
-    </Collapsible>
+      </DisclosurePanel>
+    </article>
   );
 }
 
@@ -120,35 +117,6 @@ function LicenseCount({
   );
 }
 
-/** Filter box in the card toolbar: matches package names, versions, licenses and app parts. */
-function LicenseSearchInput({
-  query,
-  onQueryChange,
-}: {
-  query: string;
-  onQueryChange: (value: string) => void;
-}) {
-  return (
-    <SearchInput
-      aria-label="Search open-source licenses"
-      frameClassName="basis-full sm:basis-0 sm:flex-1"
-      onChange={(event) => onQueryChange(event.currentTarget.value)}
-      onKeyDown={(event) => {
-        // The settings route treats an unhandled Escape as "go back";
-        // inside the search box it clears, then leaves the field.
-        if (event.key !== "Escape") return;
-        event.preventDefault();
-        if (query.length > 0) onQueryChange("");
-        else event.currentTarget.blur();
-      }}
-      placeholder="Search by package, version or license"
-      value={query}
-      clearLabel="Clear license search"
-      onClear={() => onQueryChange("")}
-    />
-  );
-}
-
 function LicenseManifestError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <SettingsRow
@@ -164,14 +132,19 @@ function LicenseManifestError({ message, onRetry }: { message: string; onRetry: 
 }
 
 export function OpenSourceLicensesPanel() {
+  // Each attempt is a fresh mount, so a retry starts from "loading" without an effect setting it.
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => setAttempt((value) => value + 1), []);
+  return <OpenSourceLicensesSection key={attempt} onRetry={retry} />;
+}
+
+function OpenSourceLicensesSection({ onRetry }: { readonly onRetry: () => void }) {
   const [state, setState] = useState<LicenseManifestState>({ status: "loading" });
   const [query, setQuery] = useState("");
   const [openEntryKey, setOpenEntryKey] = useState<string | null>(null);
-  const [requestVersion, setRequestVersion] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    setState({ status: "loading" });
     void loadLicenseManifest().then(
       (manifest) => {
         if (!cancelled) setState({ status: "ready", manifest });
@@ -187,14 +160,13 @@ export function OpenSourceLicensesPanel() {
     return () => {
       cancelled = true;
     };
-  }, [requestVersion]);
+  }, []);
 
   const entries = state.status === "ready" ? state.manifest.entries : [];
   const filteredEntries = useMemo(
     () => filterThirdPartyLicenseEntries(entries, query),
     [entries, query],
   );
-  const retry = useCallback(() => setRequestVersion((value) => value + 1), []);
 
   return (
     <>
@@ -209,7 +181,13 @@ export function OpenSourceLicensesPanel() {
         {state.status === "ready" ? (
           <>
             <SettingsToolbar>
-              <LicenseSearchInput query={query} onQueryChange={setQuery} />
+              {/* Matches package names, versions, licenses and app parts. */}
+              <SettingsListSearch
+                label="Search open-source licenses"
+                placeholder="Search by package, version or license"
+                value={query}
+                onValueChange={setQuery}
+              />
             </SettingsToolbar>
             <div className="text-base sm:text-sm">
               {filteredEntries.length > 0 ? (
@@ -226,6 +204,7 @@ export function OpenSourceLicensesPanel() {
                 })
               ) : (
                 <SettingsEmpty
+                  icon={<SearchXIcon />}
                   label="No licenses match this search."
                   action={
                     <Button size="xs" variant="outline" onClick={() => setQuery("")}>
@@ -237,7 +216,7 @@ export function OpenSourceLicensesPanel() {
             </div>
           </>
         ) : state.status === "error" ? (
-          <LicenseManifestError message={state.message} onRetry={retry} />
+          <LicenseManifestError message={state.message} onRetry={onRetry} />
         ) : (
           <SettingsRow title="Loading open-source notices…" role="status" />
         )}

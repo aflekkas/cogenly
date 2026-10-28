@@ -21,13 +21,15 @@ import {
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
+import { DisclosurePanel } from "../ui/disclosure";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
 import {
-  SETTINGS_PICKER_TRIGGER_CLASSNAME,
   SettingResetButton,
+  SettingsField,
+  SettingsModelPickers,
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
@@ -133,35 +135,37 @@ export function SourceControlWritingSettingsSection() {
           ) : null
         }
         control={
-          <Select
-            value={style.mode}
-            onValueChange={(value) => {
-              const customInstructions = customInstructionsRef.current?.value.trim();
-              updateSettings({
-                sourceControlWritingStyle: {
-                  mode: value as SourceControlWritingStyleMode,
-                  ...(customInstructions !== undefined ? { customInstructions } : {}),
-                },
-              });
-            }}
-          >
-            <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Writing style">
-              <SelectValue>
-                {(value: SourceControlWritingStyleMode) => MODE_OPTIONS[value].label}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectPopup align="end" alignItemWithTrigger={false}>
-              {(Object.keys(MODE_OPTIONS) as SourceControlWritingStyleMode[]).map((mode) => (
-                <SelectItem key={mode} hideIndicator value={mode}>
-                  {MODE_OPTIONS[mode].label}
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
+          <SettingsField>
+            <Select
+              value={style.mode}
+              onValueChange={(value) => {
+                const customInstructions = customInstructionsRef.current?.value.trim();
+                updateSettings({
+                  sourceControlWritingStyle: {
+                    mode: value as SourceControlWritingStyleMode,
+                    ...(customInstructions !== undefined ? { customInstructions } : {}),
+                  },
+                });
+              }}
+            >
+              <SelectTrigger size="sm" aria-label="Writing style">
+                <SelectValue>
+                  {(value: SourceControlWritingStyleMode) => MODE_OPTIONS[value].label}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {(Object.keys(MODE_OPTIONS) as SourceControlWritingStyleMode[]).map((mode) => (
+                  <SelectItem key={mode} hideIndicator value={mode}>
+                    {MODE_OPTIONS[mode].label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          </SettingsField>
         }
       >
-        {style.mode === "custom" ? (
-          <div className="mt-3 max-w-2xl pb-3.5">
+        <DisclosurePanel open={style.mode === "custom"}>
+          <div className="mt-3 max-w-2xl">
             <Textarea
               key={style.customInstructions}
               ref={customInstructionsRef}
@@ -177,7 +181,7 @@ export function SourceControlWritingSettingsSection() {
               aria-label="Custom source control writing instructions"
             />
           </div>
-        ) : null}
+        </DisclosurePanel>
       </SettingsRow>
 
       <BranchNamingSettings />
@@ -185,6 +189,11 @@ export function SourceControlWritingSettingsSection() {
       <SettingsRow
         serverScoped
         settingKeys={["sourceControlWriterModelSelection"]}
+        // Only the model pair needs the wide split; the lone off switch sits
+        // on the trailing edge like its siblings.
+        controlWidth={
+          hasServerTargets && usesDedicatedModel && canEnableDedicatedModel ? "wide" : "default"
+        }
         {...searchableSetting("source-control-writer-model")}
         description="Writes commit messages, pull requests and branch names. Off uses the text generation model from Models."
         control={
@@ -200,65 +209,67 @@ export function SourceControlWritingSettingsSection() {
                 </span>
               ) : null}
               {usesDedicatedModel && canEnableDedicatedModel ? (
-                <ProviderModelPicker
-                  environmentId={environmentId}
-                  activeInstanceId={activeSelection.instanceId}
-                  model={activeSelection.model}
-                  lockedProvider={null}
-                  instanceEntries={instanceEntries}
-                  modelOptionsByInstance={modelOptionsByInstance}
-                  triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                  triggerAriaLabel="Writing model"
-                  {...(environmentId
-                    ? {
-                        onOpenProviderSetup: (instanceId: ProviderInstanceId) => {
-                          void navigate({
-                            to: "/settings/providers",
-                            search: { environmentId, instanceId },
-                          });
-                        },
+                <SettingsModelPickers>
+                  <ProviderModelPicker
+                    environmentId={environmentId}
+                    activeInstanceId={activeSelection.instanceId}
+                    model={activeSelection.model}
+                    lockedProvider={null}
+                    instanceEntries={instanceEntries}
+                    modelOptionsByInstance={modelOptionsByInstance}
+                    triggerVariant="field"
+                    triggerAriaLabel="Writing model"
+                    {...(environmentId
+                      ? {
+                          onOpenProviderSetup: (instanceId: ProviderInstanceId) => {
+                            void navigate({
+                              to: "/settings/providers",
+                              search: { environmentId, instanceId },
+                            });
+                          },
+                        }
+                      : {})}
+                    getModelDisabledReason={writerModelDisabledReason}
+                    onInstanceModelChange={(instanceId, model) => {
+                      const reason = writerModelDisabledReason(instanceId, model);
+                      if (reason) {
+                        toastManager.add({
+                          type: "error",
+                          title: "Writing model not saved",
+                          description: reason,
+                        });
+                        return;
                       }
-                    : {})}
-                  getModelDisabledReason={writerModelDisabledReason}
-                  onInstanceModelChange={(instanceId, model) => {
-                    const reason = writerModelDisabledReason(instanceId, model);
-                    if (reason) {
-                      toastManager.add({
-                        type: "error",
-                        title: "Writing model not saved",
-                        description: reason,
+                      updateSettings({
+                        sourceControlWriterModelSelection: createModelSelection(instanceId, model),
                       });
-                      return;
-                    }
-                    updateSettings({
-                      sourceControlWriterModelSelection: createModelSelection(instanceId, model),
-                    });
-                  }}
-                />
-              ) : null}
-              {usesDedicatedModel && canEnableDedicatedModel && writerInstanceEntry ? (
-                <TraitsPicker
-                  provider={writerInstanceEntry.driverKind}
-                  models={writerInstanceEntry.models}
-                  model={activeSelection.model}
-                  prompt=""
-                  onPromptChange={() => {}}
-                  modelOptions={activeSelection.options ?? []}
-                  allowPromptInjectedEffort={false}
-                  planModeEnabled={
-                    settings.planModeEnabled || selectsPlanAgent(activeSelection.options)
-                  }
-                  triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                  onModelOptionsChange={(options) =>
-                    updateSettings({
-                      sourceControlWriterModelSelection: createModelSelection(
-                        activeSelection.instanceId,
-                        activeSelection.model,
-                        options,
-                      ),
-                    })
-                  }
-                />
+                    }}
+                  />
+                  {writerInstanceEntry ? (
+                    <TraitsPicker
+                      provider={writerInstanceEntry.driverKind}
+                      models={writerInstanceEntry.models}
+                      model={activeSelection.model}
+                      prompt=""
+                      onPromptChange={() => {}}
+                      modelOptions={activeSelection.options ?? []}
+                      allowPromptInjectedEffort={false}
+                      planModeEnabled={
+                        settings.planModeEnabled || selectsPlanAgent(activeSelection.options)
+                      }
+                      triggerVariant="field"
+                      onModelOptionsChange={(options) =>
+                        updateSettings({
+                          sourceControlWriterModelSelection: createModelSelection(
+                            activeSelection.instanceId,
+                            activeSelection.model,
+                            options,
+                          ),
+                        })
+                      }
+                    />
+                  ) : null}
+                </SettingsModelPickers>
               ) : null}
               <Switch
                 checked={usesDedicatedModel}

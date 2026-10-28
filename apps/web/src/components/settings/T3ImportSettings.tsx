@@ -12,7 +12,7 @@ import {
   type T3ImportSourceProject,
   type T3ImportStatus,
 } from "@cogenly/contracts";
-import { CircleCheckIcon } from "lucide-react";
+import { CircleCheckIcon, FolderIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { formatBytes } from "../../lib/formatBytes";
@@ -22,11 +22,11 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { WorkLogDisclosure } from "../chat/WorkLog";
 import { useSelectSidebarMode } from "../sidebar/modes/useSelectSidebarMode";
 import { useAnimatedPanelHeight } from "../ui/animated-panel-height";
-import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
+import { Button, InlineButton } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Spinner } from "../ui/spinner";
 import { useSettingsScope } from "./SettingsScopeContext";
+import { SettingsStatusBadge, SettingsTag } from "./SettingsStatus";
 import {
   T3_IMPORT_DOCS_URL,
   T3_IMPORT_PHASE_LABELS,
@@ -83,16 +83,18 @@ function T3ImportSettingsPanel({ environmentId }: { environmentId: EnvironmentId
   );
 }
 
-/** Opens the user guide for Import from T3 Code in the system browser. */
+/**
+ * Opens the user guide for Import from T3 Code in the system browser. Styled
+ * like every other link inside settings copy.
+ */
 export function T3ImportLearnMoreLink() {
   return (
-    <button
-      type="button"
-      className="link inline cursor-pointer"
+    <InlineButton
+      tone="muted"
       onClick={() => void readLocalApi()?.shell.openExternal(T3_IMPORT_DOCS_URL)}
     >
       Learn more
-    </button>
+    </InlineButton>
   );
 }
 
@@ -229,7 +231,7 @@ export function T3ImportFlowView({
     requestError,
   } = flow;
   const cancelButton = (
-    <Button size="sm" variant="outline" disabled={cancelling} onClick={() => void flow.stopJob()}>
+    <Button size="sm" variant="outline" busy={cancelling} onClick={() => void flow.stopJob()}>
       {cancelling ? "Stopping…" : "Cancel"}
     </Button>
   );
@@ -241,6 +243,7 @@ export function T3ImportFlowView({
     view.kind === "failed" ||
     view.kind === "cancelled" ||
     view.kind === "scanning";
+  const nothingToImport = (status?.source.projects ?? []).every(isEmptyT3Project);
 
   return statusError !== null ? (
     <SettingsSection id="t3-import" title="Import from T3 Code">
@@ -284,8 +287,17 @@ export function T3ImportFlowView({
         selectable={selectable}
         disabled={busy}
         onToggle={flow.toggleProject}
+        nothingToImport={nothingToImport}
+        onRecheck={refreshStatus}
         checkAction={
-          view.kind === "scanning" ? (
+          view.kind === "intro" && nothingToImport ? (
+            // Nothing can be picked, so the way on is to look at T3 Code again.
+            status!.source.projects.length > 0 ? (
+              <Button size="sm" variant="outline" onClick={refreshStatus}>
+                Check again
+              </Button>
+            ) : null
+          ) : view.kind === "scanning" ? (
             <>
               <Button size="sm" disabled>
                 <Spinner size="xs" />
@@ -297,6 +309,7 @@ export function T3ImportFlowView({
             <Button
               size="sm"
               disabled={busy || selection.size === 0}
+              busy={pending === "scan"}
               onClick={() => void flow.startScan()}
             >
               {pending === "scan" ? (
@@ -307,7 +320,7 @@ export function T3ImportFlowView({
               ) : view.kind === "report" ? (
                 "Check again"
               ) : (
-                "Check what will be imported"
+                "Preview import"
               )}
             </Button>
           ) : null
@@ -336,6 +349,11 @@ export function T3ImportFlowView({
   );
 }
 
+/** The scratch workspace only carries threads, so an empty one has nothing to bring. */
+function isEmptyT3Project(project: T3ImportSourceProject): boolean {
+  return project.isScratch && project.threadCount === 0;
+}
+
 function IntroSection({
   source,
   t3Open,
@@ -343,6 +361,8 @@ function IntroSection({
   selection,
   selectable,
   disabled,
+  nothingToImport,
+  onRecheck,
   onToggle,
   checkAction,
   scanPercent,
@@ -354,6 +374,9 @@ function IntroSection({
   selection: ReadonlySet<string>;
   selectable: boolean;
   disabled: boolean;
+  /** No project T3 Code has holds anything to bring over. */
+  nothingToImport: boolean;
+  onRecheck: () => void;
   onToggle: (sourceProjectId: string, checked: boolean) => void;
   checkAction: ReactNode;
   scanPercent: number | null | undefined;
@@ -376,14 +399,22 @@ function IntroSection({
         <SettingsNote className="swap-motion">{T3_IMPORT_RUNNING_NOTE}</SettingsNote>
       ) : null}
       {selectable && source.projects.length === 0 ? (
-        <SettingsEmpty label="Add a project in T3 Code, then check again here." />
+        <SettingsEmpty
+          icon={<FolderIcon />}
+          label="T3 Code has no projects yet. Add one there, then check again."
+          action={
+            <Button size="xs" variant="outline" disabled={disabled} onClick={onRecheck}>
+              Check again
+            </Button>
+          }
+        />
       ) : null}
       {selectable && source.projects.length > 0 ? (
         <SettingsRow
           title="Projects"
           description="Each becomes a repository. A folder that's already a repository here gets the threads instead of a duplicate."
         >
-          <ul className="flex flex-col gap-0.5 pt-1 pb-2" aria-label="T3 Code projects">
+          <ul className="flex flex-col gap-0.5 pt-1" aria-label="T3 Code projects">
             {source.projects.map((project) => (
               <ProjectOption
                 key={project.sourceProjectId}
@@ -398,9 +429,14 @@ function IntroSection({
       ) : null}
       {checkAction !== null || error !== null ? (
         <SettingsRow
-          title={error ? "That didn't work" : "Check first"}
+          title={error ? "That didn't work" : "Preview"}
           description={
-            error ?? "Reads T3 Code's data and lists what would come over. Nothing is written yet."
+            error ??
+            (selectable && nothingToImport
+              ? "Nothing to import yet. Start a thread in T3 Code, then check again."
+              : selectable && selection.size === 0
+                ? "Pick at least one project to preview what comes over."
+                : "Reads T3 Code's data and lists what would come over. Nothing is written yet.")
           }
           status={
             scanPercent != null ? <ProgressBar percent={scanPercent} label="Checking" /> : null
@@ -423,31 +459,32 @@ function ProjectOption({
   disabled: boolean;
   onChange: (checked: boolean) => void;
 }) {
+  const empty = isEmptyT3Project(project);
+  const inert = disabled || empty;
   return (
     <li>
+      {/* Disabled mutes the text only; the checkbox carries its own disabled look. */}
       <label
         className={
-          disabled
-            ? "flex items-center gap-2.5 rounded-md py-1 text-sm opacity-64"
+          inert
+            ? "flex items-center gap-2.5 rounded-md py-1 text-sm text-muted-foreground"
             : "flex cursor-pointer items-center gap-2.5 rounded-md py-1 text-sm"
         }
       >
         <Checkbox
-          checked={checked}
-          disabled={disabled}
+          checked={checked && !empty}
+          disabled={inert}
           onCheckedChange={(next) => onChange(next === true)}
         />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1.5">
             <span className="truncate font-medium">{project.title}</span>
             {project.isScratch ? (
-              <Badge size="sm" variant="outline">
-                Files under No project
-              </Badge>
+              <SettingsTag>Loose files</SettingsTag>
             ) : project.existingProjectTitle ? (
-              <Badge size="sm" variant="info">
+              <SettingsStatusBadge tone="info">
                 Merges into {project.existingProjectTitle}
-              </Badge>
+              </SettingsStatusBadge>
             ) : null}
           </span>
           <span className="block truncate text-xs text-muted-foreground">
@@ -510,7 +547,7 @@ function StageSection({
                   className={includeSettings ? undefined : "opacity-64"}
                   title={change.setting}
                   description={change.detail}
-                  control={<Badge variant="outline">{SETTING_ACTION_LABELS[change.action]}</Badge>}
+                  control={<SettingsTag>{SETTING_ACTION_LABELS[change.action]}</SettingsTag>}
                 />
               ))}
             </SettingsSection>
@@ -534,6 +571,7 @@ function StageSection({
                   <Button
                     size="sm"
                     disabled={busy || summarizeT3ImportReport(view.report).nothingToImport}
+                    busy={pending === "run"}
                     onClick={() => onImport(view.report)}
                   >
                     {pending === "run" ? (
@@ -692,9 +730,9 @@ function ReportSections({ report }: { report: T3ImportReport }) {
             title={
               <span className="flex items-center gap-1.5">
                 {project.title}
-                <Badge size="sm" variant={project.action === "merge" ? "info" : "success"}>
+                <SettingsStatusBadge tone={project.action === "merge" ? "info" : "success"}>
                   {project.action === "merge" ? `Matches ${project.projectTitle}` : "New"}
-                </Badge>
+                </SettingsStatusBadge>
               </span>
             }
             description={`${pluralize(project.threads, "thread")} · ${pluralize(project.messages, "message")} · ${pluralize(project.attachments, "attachment")} (${formatBytes(project.attachmentBytes)})`}
@@ -705,7 +743,7 @@ function ReportSections({ report }: { report: T3ImportReport }) {
             title={`${pluralize(report.totals.skippedEvents, "event")} can't be read`}
             description="These are left out; the rest of each thread still comes over."
           >
-            <div className="pb-2">
+            <div className="pt-1">
               <WorkLogDisclosure label="Show which">
                 <ul className="scroll-fade-y flex max-h-48 flex-col gap-0.5 overflow-y-auto font-mono text-2xs text-muted-foreground select-text">
                   {skipped.rows.map((row) => (
@@ -739,19 +777,19 @@ function ReportSections({ report }: { report: T3ImportReport }) {
                 .filter((part) => part !== null)
                 .join(" · ")}
               control={
-                <Badge
-                  variant={
+                <SettingsStatusBadge
+                  tone={
                     provider.status === "conflict"
                       ? "warning"
                       : provider.status === "create"
                         ? "success"
-                        : "outline"
+                        : "neutral"
                   }
                 >
                   {provider.status === "conflict"
                     ? "Differs"
                     : T3_PROVIDER_STATUS_LABELS[provider.status]}
-                </Badge>
+                </SettingsStatusBadge>
               }
               status={provider.status === "conflict" ? T3_PROVIDER_STATUS_LABELS.conflict : null}
             />

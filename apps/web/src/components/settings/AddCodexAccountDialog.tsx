@@ -138,7 +138,8 @@ export function AddCodexAccountDialog({
               <Button
                 type="submit"
                 form="add-codex-account"
-                disabled={pending || !name.trim() || !canManageProviders}
+                disabled={!name.trim() || !canManageProviders}
+                busy={pending}
               >
                 {pending ? "Adding account…" : "Continue"}
               </Button>

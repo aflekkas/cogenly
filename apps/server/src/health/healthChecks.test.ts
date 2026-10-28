@@ -566,6 +566,18 @@ describe("integrationsCheck", () => {
         ["integrations:linear", "fail", null],
       ],
     );
+    assert.strictEqual(result.summary, "1 failing, 1 needs attention");
+  });
+
+  it("words its summary like its status", () => {
+    const failing = integrationsCheck({
+      integrations: [summary("linear", "error"), summary("notion", "connected")],
+    });
+    assert.strictEqual(failing.summary, "1 of 2 integrations is failing");
+    const signIn = integrationsCheck({
+      integrations: [summary("gmail", "needs_sign_in"), summary("notion", "connected")],
+    });
+    assert.strictEqual(signIn.summary, "1 of 2 integrations needs attention");
   });
 });
 

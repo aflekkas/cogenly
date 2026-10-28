@@ -15,7 +15,9 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -23,13 +25,14 @@ import {
   PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE,
   usePrimarySettingsAvailable,
 } from "../../hooks/useSettings";
+import { observeResize } from "../../lib/observeResize";
 import { cn } from "../../lib/utils";
 import { getRelativeTimeState } from "../../timestampFormat";
 import { PageContent } from "../PageContent";
 import { Button } from "../ui/button";
+import { DraftInput, type DraftInputProps } from "../ui/draft-input";
 import { RefreshIcon } from "../ui/refresh-icon";
-import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
-import { DisclosureChevron } from "../ui/disclosure";
+import { DisclosureChevron, DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
 import { Empty, EmptyContent, EmptyDescription, EmptyMedia } from "../ui/empty";
 import {
   NumberField,
@@ -42,6 +45,8 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useOptionalSettingsScope } from "./SettingsScopeContext";
 import { MachineScopeMenu, SettingsScopeSentence } from "./SettingsScopeSentence";
 import { selectMachineLocalSettingsTargets } from "./scopedSettings";
+import { prefersReducedMotion } from "./settingsMotion";
+import { compactPathHint } from "./settingsText.logic";
 
 const EMPTY_SETTING_KEYS: readonly (keyof ServerSettings)[] = [];
 
@@ -83,7 +88,7 @@ function SettingsSearchTargetProvider({
 }
 
 function scrollAndFocusSettingsTarget(target: HTMLElement, highlight = true): void {
-  const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reducedMotion = prefersReducedMotion();
   const markedScrollTarget =
     typeof target.querySelector === "function"
       ? target.querySelector<HTMLElement>(":scope > [data-settings-scroll-target]")
@@ -95,12 +100,12 @@ function scrollAndFocusSettingsTarget(target: HTMLElement, highlight = true): vo
       : target);
 
   scrollTarget.scrollIntoView({
-    behavior: prefersReducedMotion ? "auto" : "smooth",
+    behavior: reducedMotion ? "auto" : "smooth",
     block: "center",
   });
   target.focus({ preventScroll: true });
   target.classList.remove("settings-search-target-pulse");
-  if (!highlight || prefersReducedMotion) return;
+  if (!highlight || reducedMotion) return;
   void target.offsetWidth;
   target.classList.add("settings-search-target-pulse");
   // The class also suppresses the focus outline (the pulse is the destination
@@ -143,8 +148,43 @@ export function SettingsSearchTarget({
   );
 }
 
-/** Layout for the composer model/traits pickers in a settings row: drop the composer's max-width. */
-export const SETTINGS_PICKER_TRIGGER_CLASSNAME = "min-w-0 max-w-none shrink-0";
+/**
+ * A model and its effort in a settings row's control slot, as bordered
+ * `triggerVariant="field"` pickers. The model (first) takes the one settings
+ * field width and the effort a fixed column after it, so the pickers line up
+ * from row to row. Stacked, the model fills the row. The pickers render their
+ * triggers directly, so the widths are set here on those children. Their row
+ * passes `controlWidth="wide"`, so it stacks before the pair starves its text.
+ */
+export function SettingsModelPickers({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex w-full min-w-0 items-center gap-2 *:min-w-0 *:first:flex-1 *:not-first:w-32 *:not-first:shrink-0 @min-[44rem]/settings-row:w-auto @min-[44rem]/settings-row:*:first:w-56 @min-[44rem]/settings-row:*:first:flex-none">
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Where a row puts its control beside its text instead of under it. A
+ * `default` control (one field, a switch, a button or two) sits beside the
+ * text from a 32rem row; a `wide` one (a model and its effort) waits for
+ * 44rem, so the description keeps a readable column. The classes are spelled
+ * out per width for Tailwind.
+ */
+const SETTINGS_ROW_SPLIT = {
+  default: {
+    grid: "@min-[32rem]/settings-row:grid @min-[32rem]/settings-row:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] @min-[32rem]/settings-row:items-center @min-[32rem]/settings-row:gap-8",
+    control: "@min-[32rem]/settings-row:w-auto @min-[32rem]/settings-row:justify-end",
+    inline: "@min-[32rem]/settings-row:w-auto",
+  },
+  wide: {
+    grid: "@min-[44rem]/settings-row:grid @min-[44rem]/settings-row:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] @min-[44rem]/settings-row:items-center @min-[44rem]/settings-row:gap-8",
+    control: "@min-[44rem]/settings-row:w-auto @min-[44rem]/settings-row:justify-end",
+    inline: "@min-[44rem]/settings-row:w-auto",
+  },
+} as const;
+
+type SettingsRowControlWidth = keyof typeof SETTINGS_ROW_SPLIT;
 
 /** Info affordance explaining how a setting interacts with the shared background policy. */
 export function PolicyTooltip({ children }: { readonly children: string }) {
@@ -176,7 +216,10 @@ export function useRelativeTimeTick(intervalMs = 1_000) {
 /**
  * The heading row above a section's card: a muted title (with an optional
  * leading icon), an optional small control right after it, and the section's
- * actions on the right. `title` may be a fold's trigger.
+ * actions on the right. `title` may be a fold's trigger. The header shares the
+ * rows' inset, and a quiet (ghost) last action is pulled out by its own
+ * padding, so its label or glyph ends on the same edge as the row controls
+ * and status badges below it.
  */
 export function SettingsSectionHeader({
   title,
@@ -201,7 +244,12 @@ export function SettingsSectionHeader({
         </h2>
         {titleAction}
       </div>
-      <div className="flex min-h-7 min-w-7 items-center justify-end gap-1.5">{headerAction}</div>
+      <div
+        data-settings-header-actions
+        className="flex min-h-7 min-w-7 shrink-0 items-center justify-end gap-1.5"
+      >
+        {headerAction}
+      </div>
     </div>
   );
 }
@@ -388,22 +436,25 @@ export function SettingsNote({
 
 /**
  * An empty list inside a card (settings, project cards): the `inline` `Empty`,
- * one short muted sentence with an optional glyph and one `xs` action. Loading
- * and failures are `SettingsRow`s with a title ("Loading memory…", "Could not
- * load memory") instead.
+ * a glyph for what the list holds, one short muted sentence and one `xs`
+ * action. Every empty list looks like this, including one nested in a row.
+ * An empty list's add action ("Add host", "New task") is that action, and
+ * the section header or row drops its own copy while the empty state shows.
+ * Loading and failures are `SettingsRow`s with a title ("Loading memory…",
+ * "Could not load memory") instead.
  */
 export function SettingsEmpty({
   icon,
   label,
   action,
 }: {
-  icon?: ReactNode;
+  icon: ReactNode;
   label: ReactNode;
   action?: ReactNode;
 }) {
   return (
     <Empty size="inline">
-      {icon ? <EmptyMedia>{icon}</EmptyMedia> : null}
+      <EmptyMedia>{icon}</EmptyMedia>
       <EmptyDescription>{label}</EmptyDescription>
       {action ? <EmptyContent>{action}</EmptyContent> : null}
     </Empty>
@@ -420,10 +471,70 @@ export function SettingsPageMessage({ children }: { children: ReactNode }) {
 }
 
 /**
- * A fold inside a card: a header row with the disclosure chevron, a title, a
- * one-line summary and an optional control, over rows that are divided like
- * the card's own. A settings search that targets `id`, or one of `targetIds`
- * inside it, opens it.
+ * A version number beside a title (the app, a provider, a CLI, a package):
+ * 12px monospace in the meta color. A long one truncates before the title does.
+ * `full` shows the raw version output on hover when the label shortens it.
+ */
+export function SettingsVersion({
+  children,
+  full,
+}: {
+  children: ReactNode;
+  full?: string | undefined;
+}) {
+  const code = <code className="min-w-0 truncate text-xs text-muted-foreground">{children}</code>;
+  if (!full) return code;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={code} />
+      <TooltipPopup side="top" variant="code">
+        {full}
+      </TooltipPopup>
+    </Tooltip>
+  );
+}
+
+/**
+ * The one way settings fold content away: a quiet "Show ›" / "Hide" button
+ * at the trailing edge of a row or section header, as tall as the row
+ * actions beside it, with its chevron pulled onto their trailing edge.
+ * `SettingsDisclosure` and `FoldedSettingsSection` use it; a row that folds
+ * its own children (Machines' "Other checks") passes it as the row's
+ * `control` over a `DisclosurePanel`.
+ */
+export function SettingsDisclosureToggle({
+  open,
+  onOpenChange,
+  label,
+  children,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Names what folds, for assistive tech: "Show {label}". */
+  label: string;
+  /** A visible name for the fold ("Details") in place of "Show" / "Hide". */
+  children?: ReactNode;
+}) {
+  return (
+    <Button
+      size="sm"
+      variant="ghost-muted"
+      data-settings-disclosure-toggle
+      aria-expanded={open}
+      aria-label={`${open ? "Hide" : "Show"} ${label}`}
+      onClick={() => onOpenChange(!open)}
+    >
+      {children ?? (open ? "Hide" : "Show")}
+      <DisclosureChevron open={open} />
+    </Button>
+  );
+}
+
+/**
+ * A fold inside a card: a row with the title, a one-line summary, an optional
+ * control and the trailing `SettingsDisclosureToggle`, over rows that are
+ * divided like the card's own. A settings search that targets `id`, or one of
+ * `targetIds` inside it, opens it.
  */
 export function SettingsDisclosure({
   id,
@@ -442,23 +553,27 @@ export function SettingsDisclosure({
 }) {
   const [open, setOpen] = useSearchTargetFold(id, targetIds);
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <div className="flex items-center gap-4 px-3 sm:px-4">
-        <CollapsibleTrigger className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-md py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
-          <DisclosureChevron />
-          <span className="shrink-0 text-sm font-medium">{title}</span>
-          {summary ? (
-            <span className="min-w-0 truncate text-xs text-muted-foreground">{summary}</span>
-          ) : null}
-        </CollapsibleTrigger>
-        {control ? <div className="flex shrink-0 items-center">{control}</div> : null}
-      </div>
-      <CollapsiblePanel>
+    <div>
+      <SettingsRowContent
+        title={title}
+        description={summary}
+        control={
+          <>
+            {control}
+            <SettingsDisclosureToggle
+              open={open}
+              onOpenChange={setOpen}
+              label={typeof title === "string" ? title.toLowerCase() : "details"}
+            />
+          </>
+        }
+      />
+      <DisclosurePanel open={open}>
         <div className="border-t border-border/50 [&>*+*]:border-t [&>*+*]:border-border/50">
           {children}
         </div>
-      </CollapsiblePanel>
-    </Collapsible>
+      </DisclosurePanel>
+    </div>
   );
 }
 
@@ -485,32 +600,141 @@ export function useSearchTargetFold(
   return [open, setOpen];
 }
 
-/** A number with its unit after it ("60 seconds"), sized for a settings row's control. */
+/**
+ * The one width for a select or text input in a settings row's control slot:
+ * 14rem beside the row's text, full width once the row stacks. Put the bare
+ * `SelectTrigger` or `Input` inside (no width of its own); with a second
+ * control, such as an icon button after an input, the first one flexes.
+ */
+export function SettingsField({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex w-full min-w-0 items-center gap-2 *:first:min-w-0 *:first:flex-1 @min-[32rem]/settings-row:w-56">
+      {children}
+    </div>
+  );
+}
+
+/**
+ * A folder path in a `SettingsField`. Outside editing, a long path shows its
+ * tail, the part that tells folders apart, and the tooltip shows all of it.
+ * A long default in `placeholder` is compacted around an ellipsis for the
+ * same reason, with the whole default in the tooltip.
+ */
+export function SettingsPathInput({ value, placeholder, ...props }: DraftInputProps) {
+  const hint = placeholder === undefined ? undefined : compactPathHint(placeholder);
+  const fullText = value.trim() !== "" ? value : hint !== placeholder ? placeholder : undefined;
+  const inputRef = useRef<HTMLInputElement>(null);
+  useLayoutEffect(() => {
+    const input = inputRef.current;
+    // Runs again for each saved path; an empty field has no tail to show.
+    if (!input || value === "") return;
+    let frame = 0;
+    const showTail = () => {
+      cancelAnimationFrame(frame);
+      // A frame later, after the browser's own blur reset of the scroll.
+      frame = requestAnimationFrame(() => {
+        if (input.ownerDocument.activeElement !== input) input.scrollLeft = input.scrollWidth;
+      });
+    };
+    showTail();
+    input.addEventListener("blur", showTail);
+    const stopObserving = observeResize(input, showTail);
+    return () => {
+      cancelAnimationFrame(frame);
+      input.removeEventListener("blur", showTail);
+      stopObserving();
+    };
+  }, [value]);
+  return (
+    <Tooltip disabled={fullText === undefined}>
+      <TooltipTrigger delay={400} render={<span className="flex min-w-0 flex-1" />}>
+        <DraftInput
+          {...props}
+          {...(hint === undefined ? {} : { placeholder: hint })}
+          ref={inputRef}
+          value={value}
+        />
+      </TooltipTrigger>
+      <TooltipPopup side="top">{fullText}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+/**
+ * A folder path as read-only text in a row: one line that, when it can't
+ * fit, drops its head behind an ellipsis and keeps the tail, the part that
+ * tells folders and volumes apart. Put the whole path in a tooltip or title.
+ */
+export function SettingsPathText({ path }: { path: string }) {
+  return (
+    // Right-to-left only so the ellipsis lands at the start; the path itself
+    // stays left-to-right inside the isolate.
+    <span dir="rtl" className="block min-w-0 truncate text-left">
+      <bdi dir="ltr">{path}</bdi>
+    </span>
+  );
+}
+
+/**
+ * The muted label over a column of numbers or a stat: a table header, a
+ * stat tile's caption. Sentence case, one size, never uppercase.
+ */
+export const SETTINGS_MICRO_LABEL_CLASSNAME = "text-xs font-normal text-muted-foreground";
+
+/**
+ * A number with its unit after it ("60 seconds"), sized for a settings row's
+ * control. `onValueChange` saves every step and keystroke; `onValueCommitted`
+ * instead keeps the typing local and saves once the user steps, presses Enter
+ * or leaves the field, for values where a half-typed number must never land
+ * (a "1" on the way to "14" days of retention).
+ */
 export function SettingsNumberField({
   label,
   unit,
   value,
   min,
+  max,
   step,
-  onValueChange,
+  ...save
 }: {
   /** Names the value in the stepper labels: "Decrease {label}", "{label} in {unit}". */
   label: string;
   unit: string;
   value: number;
   min?: number;
+  max?: number;
   step?: number;
-  onValueChange: (value: number | null) => void;
-}) {
+} & (
+  | { onValueChange: (value: number | null) => void; onValueCommitted?: never }
+  | { onValueCommitted: (value: number) => void; onValueChange?: never }
+)) {
+  const [draft, setDraft] = useState<number | null>(value);
+  const [savedValue, setSavedValue] = useState(value);
+  if (savedValue !== value) {
+    setSavedValue(value);
+    setDraft(value);
+  }
+  const committed = save.onValueCommitted;
   return (
-    <div className="flex shrink-0 items-center gap-2">
+    // A `SettingsField` wide, so a stepper's edges line up with the selects
+    // and inputs in the rows around it.
+    <div className="flex w-56 max-w-full shrink-0 items-center gap-2">
       <NumberField
-        value={value}
+        value={committed ? draft : value}
         {...(min === undefined ? {} : { min })}
+        {...(max === undefined ? {} : { max })}
         {...(step === undefined ? {} : { step })}
         size="sm"
-        className="w-32"
-        onValueChange={onValueChange}
+        className="min-w-0 flex-1"
+        onValueChange={committed ? setDraft : save.onValueChange}
+        {...(committed
+          ? {
+              onValueCommitted: (next: number | null) => {
+                if (next === null) setDraft(value);
+                else if (next !== value) committed(next);
+              },
+            }
+          : {})}
       >
         <NumberFieldGroup>
           <NumberFieldDecrement aria-label={`Decrease ${label}`} />
@@ -518,7 +742,8 @@ export function SettingsNumberField({
           <NumberFieldIncrement aria-label={`Increase ${label}`} />
         </NumberFieldGroup>
       </NumberField>
-      <span className="text-xs text-muted-foreground">{unit}</span>
+      {/* One unit column ("seconds" is the widest), so steppers line up across rows. */}
+      <span className="min-w-12 text-xs text-muted-foreground">{unit}</span>
     </div>
   );
 }
@@ -538,7 +763,10 @@ export function SettingsUnavailableGroup({
         <InfoIcon className="mt-0.5 size-3.5 shrink-0 text-warning" />
         <p>{message}</p>
       </div>
-      <div className="[&_h3]:opacity-64 [&_p]:opacity-64">{children}</div>
+      {/* One disabled treatment: titles, a row's or a nested list's, drop to the description's muted color. */}
+      <div className="[&_[data-slot=settings-inset-row-title]]:text-muted-foreground [&_h3]:text-muted-foreground [&>*+*]:border-t [&>*+*]:border-border/50 [&>[data-slot=settings-row]]:rounded-none">
+        {children}
+      </div>
     </div>
   );
 }
@@ -552,11 +780,18 @@ export function SettingsUnavailableGroup({
  * Keep descriptions short enough for one line where possible. Allow wrapping
  * for clarity or narrow screens instead of truncating or forcing no-wrap.
  *
- * Control sizing across settings follows three tiers so rows share a baseline:
- * - `control` slot: `size="sm"` (Button, Select, Input, NumberField) or `icon-sm`.
- * - Section `headerAction`s and buttons inside list items, cards, toolbars: `xs` / `icon-xs`.
+ * Control sizing across settings follows four tiers so rows share a baseline:
+ * - Anything a row or list item offers at its trailing edge, or under its text
+ *   as a recovery step (Fix, Retry, Revoke): `size="sm"` (Button, Select,
+ *   Input, NumberField) or `icon-sm`, 28px. One action height inside every card.
+ * - A list's toolbar, the header row above its entries: `SettingsListSearch`
+ *   and `SettingsListFilter`, 32px, one step up from the rows they filter.
+ * - Section `headerAction`s and an empty list's one action: quiet `xs` /
+ *   `icon-xs` (`SettingsSectionAction`, `SettingsRefreshAction`).
  * - Inline affordances (reset arrows, info tooltips, table-cell buttons): `icon-micro`.
- * Dialog footers keep the app-wide default button size.
+ * Statuses are a `SettingsStatusBadge` (or `SettingsStatusText` in a line of
+ * text) and type labels a `SettingsTag`. Dialog footers keep the app-wide
+ * default button size.
  */
 export function SettingsRow({
   title,
@@ -567,6 +802,7 @@ export function SettingsRow({
   serverScoped = false,
   settingKeys = EMPTY_SETTING_KEYS,
   interactive = false,
+  controlWidth = "default",
   children,
   className,
   ...rowProps
@@ -576,6 +812,7 @@ export function SettingsRow({
   status?: ReactNode;
   resetAction?: ReactNode;
   control?: ReactNode;
+  controlWidth?: SettingsRowControlWidth;
   serverScoped?: boolean;
   settingKeys?: readonly (keyof ServerSettings)[];
   interactive?: boolean;
@@ -621,13 +858,19 @@ export function SettingsRow({
           // Focusable so keyboard users can still reach the explanation.
           <span
             tabIndex={0}
-            className="flex w-full items-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring @min-[32rem]/settings-row:w-auto"
+            className={cn(
+              "flex w-full items-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+              SETTINGS_ROW_SPLIT[controlWidth].inline,
+            )}
           />
         }
       >
         <div
           inert
-          className="flex w-full items-center gap-2 opacity-50 @min-[32rem]/settings-row:w-auto"
+          className={cn(
+            "flex w-full items-center gap-2 opacity-50",
+            SETTINGS_ROW_SPLIT[controlWidth].inline,
+          )}
         >
           {control}
         </div>
@@ -661,6 +904,7 @@ export function SettingsRow({
       description={description}
       status={status}
       control={renderedControl}
+      controlWidth={controlWidth}
       interactive={interactive}
       className={className}
       titleActions={
@@ -690,6 +934,7 @@ export function SettingsRowContent({
   status,
   titleActions,
   control,
+  controlWidth = "default",
   children,
   interactive = false,
   className,
@@ -700,42 +945,159 @@ export function SettingsRowContent({
   status?: ReactNode;
   titleActions?: ReactNode;
   control?: ReactNode;
+  /** `wide` for a compound control (a model and its effort), which stacks under the text until 44rem. */
+  controlWidth?: SettingsRowControlWidth;
   interactive?: boolean;
   ref?: Ref<HTMLDivElement>;
 }) {
+  const split = SETTINGS_ROW_SPLIT[controlWidth];
   return (
     <div
       {...rowProps}
       data-slot="settings-row"
       className={cn(
-        "@container/settings-row rounded-xl px-3 sm:px-4 aria-disabled:opacity-64 aria-disabled:[&_*]:text-muted-foreground",
-        children ? "pt-3 pb-1" : "py-3",
+        // The row owns its padding on both ends; children add only the gap above them.
+        "@container/settings-row rounded-xl px-3 py-3 sm:px-4 aria-disabled:opacity-64 aria-disabled:[&_*]:text-muted-foreground",
         interactive &&
-          "cursor-pointer outline-none transition-opacity duration-(--motion-duration-fast) ease-out hover:bg-muted/20 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+          "cursor-pointer outline-none transition-colors duration-(--motion-duration-fast) ease-out hover:bg-muted/20 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
         className,
       )}
     >
-      <div className="flex flex-col gap-3 @min-[32rem]/settings-row:grid @min-[32rem]/settings-row:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] @min-[32rem]/settings-row:items-center @min-[32rem]/settings-row:gap-8">
+      {/* The control centres on the title and description, never on the
+          children below them, so every row in a card places it alike and a
+          fold opening under it moves nothing. */}
+      <div className={cn("flex flex-col gap-3", split.grid)}>
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex min-h-5 items-center gap-1.5">
             <h3 className="min-w-0 text-sm font-medium text-foreground">{title}</h3>
             {titleActions}
           </div>
           {description ? (
-            <p className="max-w-xl text-xs leading-normal text-muted-foreground/80">
-              {description}
-            </p>
+            <p className="max-w-xl text-xs leading-normal text-muted-foreground">{description}</p>
           ) : null}
           {status ? <div className="pt-0.5 text-xs text-muted-foreground">{status}</div> : null}
         </div>
         {control ? (
-          <div className="flex w-full min-w-0 shrink-0 items-center gap-2 @min-[32rem]/settings-row:w-auto @min-[32rem]/settings-row:justify-end">
+          <div className={cn("flex w-full min-w-0 shrink-0 items-center gap-2", split.control)}>
             {control}
           </div>
         ) : null}
       </div>
       {children}
     </div>
+  );
+}
+
+/**
+ * A dense list entry, for long lists of like items where a full row per item
+ * would be too tall (a provider's models): the row's `text-sm` title, any
+ * tags after it, its muted `meta` on the same line, and the trailing
+ * controls. Meta truncates first, then the title; in a narrow row it moves
+ * under the title. With `disclosure` the text is the trigger of a fold the
+ * caller renders after the row in a `DisclosurePanel`. Divide a run of them
+ * with `SettingsDenseList`.
+ */
+export function SettingsDenseRow({
+  title,
+  meta,
+  titleActions,
+  control,
+  disclosure,
+  className,
+  ...rowProps
+}: Omit<ComponentPropsWithoutRef<"div">, "title"> & {
+  title: ReactNode;
+  meta?: ReactNode;
+  titleActions?: ReactNode;
+  control?: ReactNode;
+  disclosure?: { open: boolean; onOpenChange: (open: boolean) => void };
+}) {
+  const text = (
+    <span className="flex min-w-0 flex-1 flex-col @min-[28rem]/settings-dense-row:flex-row @min-[28rem]/settings-dense-row:items-baseline @min-[28rem]/settings-dense-row:gap-2">
+      <span className="flex max-w-full min-w-0 items-baseline gap-2 @min-[28rem]/settings-dense-row:shrink-0">
+        <span className="min-w-0 truncate text-sm font-medium text-foreground">{title}</span>
+        {titleActions ? (
+          <span className="flex shrink-0 items-center gap-1.5 self-center">{titleActions}</span>
+        ) : null}
+      </span>
+      {meta ? (
+        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{meta}</span>
+      ) : null}
+    </span>
+  );
+  return (
+    <div
+      {...rowProps}
+      data-slot="settings-dense-row"
+      className={cn("flex min-h-10 items-center gap-3 px-3 py-1.5 sm:px-4", className)}
+    >
+      {disclosure ? (
+        <DisclosureTrigger
+          chevron="start"
+          open={disclosure.open}
+          onClick={() => disclosure.onOpenChange(!disclosure.open)}
+          className="@container/settings-dense-row flex-1 self-stretch"
+        >
+          {text}
+        </DisclosureTrigger>
+      ) : (
+        <div className="@container/settings-dense-row flex min-w-0 flex-1">{text}</div>
+      )}
+      {control ? <div className="flex shrink-0 items-center gap-2">{control}</div> : null}
+    </div>
+  );
+}
+
+/**
+ * One line of a short nested list inside a `SettingsGroup variant="inset"`
+ * (a machine's macOS grants): its name, then its status and action on the
+ * trailing edge, where every settings status sits. The inset group divides
+ * consecutive rows. A string title truncates; `tag` follows it, for a
+ * `SettingsTag` such as "Default".
+ */
+export function SettingsInsetRow({
+  title,
+  tag,
+  control,
+  className,
+  ...rowProps
+}: Omit<ComponentPropsWithoutRef<"div">, "title"> & {
+  /** A name, or the field that renames it. */
+  title: ReactNode;
+  tag?: ReactNode;
+  control?: ReactNode;
+}) {
+  return (
+    <div
+      {...rowProps}
+      data-slot="settings-inset-row"
+      className={cn(
+        "flex min-h-11 items-center justify-between gap-3 px-3 py-2 sm:px-4",
+        className,
+      )}
+    >
+      <span
+        data-slot="settings-inset-row-title"
+        className="flex min-w-0 flex-1 items-center gap-2 text-sm text-foreground"
+      >
+        {typeof title === "string" ? <span className="truncate">{title}</span> : title}
+        {tag}
+      </span>
+      {control ? <span className="flex shrink-0 items-center gap-2">{control}</span> : null}
+    </div>
+  );
+}
+
+/** Divides consecutive `SettingsDenseRow`s like a card's rows; other children sit between them undivided. */
+export function SettingsDenseList({ className, ...props }: ComponentProps<"div">) {
+  return (
+    <div
+      {...props}
+      className={cn(
+        "[&>[data-slot=settings-dense-row]+[data-slot=settings-dense-row]]:border-t [&>[data-slot=settings-dense-row]+[data-slot=settings-dense-row]]:border-border/50",
+        className,
+      )}
+    />
   );
 }
 

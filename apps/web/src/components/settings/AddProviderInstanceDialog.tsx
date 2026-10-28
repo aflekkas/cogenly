@@ -450,7 +450,8 @@ export function AddProviderInstanceDialog({
             ) : (
               <Button
                 size="sm"
-                disabled={isSaving || !canManageProviders}
+                disabled={!canManageProviders}
+                busy={isSaving}
                 onClick={() => void handleSave()}
               >
                 {isSaving ? "Adding..." : "Add instance"}

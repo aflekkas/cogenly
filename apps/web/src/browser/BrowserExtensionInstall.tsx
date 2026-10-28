@@ -67,7 +67,8 @@ export function BrowserExtensionInstallForm(props: {
         <Button
           type="submit"
           size="sm"
-          disabled={props.disabled || trimmed === "" || pending !== null}
+          disabled={props.disabled || trimmed === ""}
+          busy={pending !== null}
         >
           {pending !== null ? <Spinner /> : null}
           {pending !== null ? "Installing…" : "Install"}

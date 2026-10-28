@@ -1,13 +1,15 @@
 "use client";
 
-import { PlusIcon, XIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { XIcon } from "lucide-react";
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 
 import { hexToHsv, hsvToHex, type HsvColor } from "../../lib/color";
+import { cn } from "../../lib/utils";
 import { ColorHueSlider, ColorSaturationValuePlane } from "../ui/color-picker";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
 import { Popover, PopoverClose, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { normalizeProviderAccentColor } from "../../providerInstances";
 
 const FALLBACK_ACCENT_COLOR = "#2563eb";
@@ -77,29 +79,41 @@ function ProviderCustomColorPicker(props: {
 
   return (
     <Popover>
-      <PopoverTrigger
-        render={
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="ghost-muted"
-            style={shown ? { backgroundColor: shown } : undefined}
-            aria-label={
-              normalized
-                ? `Change accent color for ${props.displayName}`
-                : shown
-                  ? `Change automatic accent color for ${props.displayName}`
-                  : `Add accent color for ${props.displayName}`
-            }
-          >
-            {shown ? (
-              <span className="sr-only">Change accent color</span>
-            ) : (
-              <PlusIcon aria-hidden />
+      {/* The trigger is the color itself: a filled swatch, or an empty ring
+          while there is none, so it never reads as "add". */}
+      <Tooltip>
+        <TooltipTrigger
+          delay={200}
+          render={
+            <PopoverTrigger
+              render={
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost-muted"
+                  aria-label={
+                    normalized
+                      ? `Change accent color for ${props.displayName}`
+                      : shown
+                        ? `Change automatic accent color for ${props.displayName}`
+                        : `Choose accent color for ${props.displayName}`
+                  }
+                />
+              }
+            />
+          }
+        >
+          <span
+            aria-hidden
+            className={cn(
+              "size-4 rounded-full",
+              shown ? "bg-(--provider-accent)" : "border border-dashed border-muted-foreground",
             )}
-          </Button>
-        }
-      />
+            style={shown ? ({ "--provider-accent": shown } as CSSProperties) : undefined}
+          />
+        </TooltipTrigger>
+        <TooltipPopup side="top">{shown ? "Accent color" : "Choose an accent color"}</TooltipPopup>
+      </Tooltip>
       <PopoverPopup side="bottom" align="start" sideOffset={6} padding="none">
         <ProviderCustomColorPanel
           value={shown ?? FALLBACK_ACCENT_COLOR}

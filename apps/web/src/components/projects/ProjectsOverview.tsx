@@ -1,6 +1,6 @@
 import { matchesSettingsListQuery } from "../settings/settingsList.logic";
 import { ProjectFoldersSettings } from "../settings/ProjectFoldersSettings";
-import { SettingsSection } from "../settings/settingsLayout";
+import { SettingsSection, SettingsSectionAction } from "../settings/settingsLayout";
 import {
   SettingsList,
   SettingsListItem,
@@ -12,7 +12,7 @@ import {
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, ProjectLabelId } from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { FolderIcon, FolderPlusIcon, MoreHorizontalIcon } from "lucide-react";
+import { FolderIcon, MoreHorizontalIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAgents } from "../../agents/agentsClient";
@@ -105,12 +105,14 @@ function ProjectTile(props: {
   const { label } = props.entry;
   const menu = useProjectFolderMenu(props.entry, { ...props, onDeleted: () => {} });
   const description = label.description?.trim() || null;
-  // The summary moves under a description; the machines and last activity follow it.
+  // One meta line: the summary, machines and last activity. It sits under a
+  // description, or takes the description's place when there is none.
   const details = [
-    description ? props.summary : null,
+    props.summary,
     props.machinesLabel,
     props.lastActivityAt ? formatRelativeTimeLabel(props.lastActivityAt) : null,
   ].filter((part) => part !== null && part.length > 0);
+  const meta = details.length > 0 ? details.join(" · ") : undefined;
   return (
     <SettingsListItem
       onContextMenu={(event) => {
@@ -123,19 +125,19 @@ function ProjectTile(props: {
           {label.name}
         </span>
       }
-      description={description ?? props.summary}
-      status={details.length > 0 ? details.join(" · ") : undefined}
+      description={description ?? meta}
+      status={description ? meta : undefined}
       control={
         <>
           <Button
-            size="icon-xs"
+            size="icon-sm"
             variant="ghost-muted"
             aria-label={`Actions for ${label.name}`}
             onClick={(event) => menu.openMenuAtElement(event.currentTarget)}
           >
             <MoreHorizontalIcon />
           </Button>
-          <Button size="xs" variant="outline" onClick={props.onOpen}>
+          <Button size="sm" variant="outline" onClick={props.onOpen}>
             Open
           </Button>
         </>
@@ -206,17 +208,14 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
       <SettingsSection
         id="project-folders"
         title="Projects"
-        footer="Projects are optional. Make one to group several repositories, or the chats, Work and agents of a bigger effort. A single repository doesn't need one."
+        footer="Optional. Group the repositories, chats and agents of a bigger effort; a single repository doesn't need one."
         headerAction={
-          <Button
-            size="xs"
-            variant="ghost-muted"
+          <SettingsSectionAction
             disabled={createEnvironmentId === null || !canCreate}
             onClick={createProject}
           >
-            <FolderPlusIcon />
             New project
-          </Button>
+          </SettingsSectionAction>
         }
       >
         <SettingsListToolbar>

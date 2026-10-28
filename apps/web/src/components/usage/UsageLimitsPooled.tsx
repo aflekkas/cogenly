@@ -210,7 +210,8 @@ function SegmentPopover({
             <Button
               size="xs"
               variant="outline"
-              disabled={redeem.busy || !redeem.canManageProviders}
+              disabled={!redeem.canManageProviders}
+              busy={redeem.busy}
               className="ms-auto"
               onClick={onRedeem}
             >

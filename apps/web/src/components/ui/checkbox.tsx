@@ -4,11 +4,14 @@ import { Checkbox as CheckboxPrimitive } from "@base-ui/react/checkbox";
 
 import { cn } from "~/lib/utils";
 
+// Disabled matches the bordered buttons' disabled look instead of fading: the
+// resting border with no fill, and a checked box in muted grey. A fade stacks
+// with the row's own muted label and leaves the box almost invisible.
 function Checkbox({ className, ...props }: CheckboxPrimitive.Root.Props) {
   return (
     <CheckboxPrimitive.Root
       className={cn(
-        "group/checkbox relative inline-flex size-4.5 shrink-0 items-center justify-center rounded-[.25rem] border border-input bg-background not-dark:bg-clip-padding shadow-xs/5 outline-none interactive before:pointer-events-none before:absolute before:inset-0 before:rounded-[3px] not-data-disabled:not-data-checked:not-aria-invalid:before:shadow-[0_1px_--theme(--color-black/4%)] focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring aria-invalid:border-destructive/36 focus-visible:aria-invalid:border-destructive/64 focus-visible:aria-invalid:outline-destructive/48 data-disabled:opacity-64 sm:size-4 dark:not-data-checked:bg-input/32 dark:focus-visible:aria-invalid:outline-destructive/24 dark:not-data-disabled:not-data-checked:not-aria-invalid:before:shadow-[0_-1px_--theme(--color-white/6%)] [[data-disabled],[data-checked],[aria-invalid]]:shadow-none",
+        "group/checkbox relative inline-flex size-4.5 shrink-0 items-center justify-center rounded-[.25rem] border border-input bg-background not-dark:bg-clip-padding shadow-xs/5 outline-none interactive before:pointer-events-none before:absolute before:inset-0 before:rounded-[3px] not-data-disabled:not-data-checked:not-aria-invalid:before:shadow-[0_1px_--theme(--color-black/4%)] focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring aria-invalid:border-destructive/36 focus-visible:aria-invalid:border-destructive/64 focus-visible:aria-invalid:outline-destructive/48 data-disabled:bg-transparent sm:size-4 dark:not-data-checked:bg-input/32 dark:data-disabled:not-data-checked:bg-transparent dark:focus-visible:aria-invalid:outline-destructive/24 dark:not-data-disabled:not-data-checked:not-aria-invalid:before:shadow-[0_-1px_--theme(--color-white/6%)] [[data-disabled],[data-checked],[aria-invalid]]:shadow-none",
         className,
       )}
       data-slot="checkbox"
@@ -17,7 +20,7 @@ function Checkbox({ className, ...props }: CheckboxPrimitive.Root.Props) {
       {/* Leave a contrasting inner gap inside the 2px focus outline. The glyphs name their color so
           rows that mute stray icons, such as list items, leave the indicator's color alone. */}
       <CheckboxPrimitive.Indicator
-        className="-inset-px absolute flex items-center justify-center rounded-[.25rem] text-primary-foreground data-unchecked:hidden data-checked:bg-primary data-indeterminate:text-foreground group-focus-visible/checkbox:inset-shadow-[0_0_0_3px_var(--background)] group-focus-visible/checkbox:outline-2 group-focus-visible/checkbox:outline-solid group-focus-visible/checkbox:-outline-offset-2 group-focus-visible/checkbox:outline-inherit"
+        className="-inset-px absolute flex items-center justify-center rounded-[.25rem] text-primary-foreground data-unchecked:hidden data-checked:bg-primary data-indeterminate:text-foreground group-data-disabled/checkbox:data-checked:bg-muted-foreground group-data-disabled/checkbox:data-checked:text-background group-data-disabled/checkbox:data-indeterminate:text-muted-foreground group-focus-visible/checkbox:inset-shadow-[0_0_0_3px_var(--background)] group-focus-visible/checkbox:outline-2 group-focus-visible/checkbox:outline-solid group-focus-visible/checkbox:-outline-offset-2 group-focus-visible/checkbox:outline-inherit"
         data-slot="checkbox-indicator"
         render={(props, state) => (
           <span {...props}>

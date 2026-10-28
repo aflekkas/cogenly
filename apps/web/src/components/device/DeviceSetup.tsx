@@ -133,6 +133,7 @@ export function DeviceSetup(props: {
                   size="compact"
                   variant="outline"
                   disabled={!canConfigure || pending !== null}
+                  busy={pending === "enable"}
                   onClick={() => {
                     setPending("enable");
                     void configure({
@@ -233,7 +234,13 @@ function DevicePlatformSetup(props: {
       <p className="text-xs text-muted-foreground">
         You can use either platform. Fixing a missing platform does not block the other one.
       </p>
-      <Button size="compact" variant="outline" disabled={props.disabled} onClick={props.onCheck}>
+      <Button
+        size="compact"
+        variant="outline"
+        disabled={props.disabled}
+        busy={props.checking}
+        onClick={props.onCheck}
+      >
         {props.checking ? <Spinner size="xs" /> : null}
         {props.checking ? "Checking…" : "Check again"}
       </Button>
@@ -300,7 +307,7 @@ export function PlatformStatus(props: {
         icon={props.status.ready ? CheckGlyph : CircleAlert}
       />
       <div className={cn(props.compact && props.status.ready && "flex items-center gap-2")}>
-        <p className="font-medium">{props.platform}</p>
+        <p className="text-sm font-medium text-foreground">{props.platform}</p>
         <p className="text-xs text-muted-foreground">
           {props.compact && props.status.ready
             ? (props.readyLabel ?? "Ready")

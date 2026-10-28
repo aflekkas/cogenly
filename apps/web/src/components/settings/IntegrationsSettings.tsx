@@ -49,7 +49,7 @@ import { ScreenRotationIcon } from "~/browser/ScreenRotationIcon";
 import { AnimatedHeight } from "~/components/AnimatedHeight";
 import { resolveEnvironmentOptionLabel } from "~/components/BranchToolbar.logic";
 import { previewBridge } from "~/components/preview/previewBridge";
-import { cn, randomUUID } from "~/lib/utils";
+import { randomUUID } from "~/lib/utils";
 import { useEnvironments, usePrimaryEnvironment } from "~/state/environments";
 import { deviceEnvironment, useDeviceState } from "~/state/device";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
@@ -68,7 +68,6 @@ import {
 } from "~/components/device/DeviceSetup";
 import { isElectron } from "../../env";
 
-import { Badge } from "../ui/badge";
 import {
   Menu,
   MenuGroup,
@@ -114,11 +113,15 @@ import {
 
 import {
   SettingsDisclosure,
+  SettingsField,
+  SettingsInsetRow,
   SettingsUnavailableGroup,
   SettingResetButton,
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
+import { SettingsGroup } from "./SettingsGroup";
+import { SettingsTag } from "./SettingsStatus";
 import { searchableSetting } from "./settingsSearch";
 import { AgentAccessSettings } from "./AgentAccessSettings";
 import { IntegrationServicesSettings } from "./IntegrationServicesSettings";
@@ -312,37 +315,35 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
         ) : null
       }
       control={
-        <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
-          <Select
-            value={viewportSelectValue(viewport)}
-            onValueChange={selectViewport}
-            disabled={disabled}
-          >
-            <SelectTrigger
-              size="sm"
-              className="w-full min-w-0 sm:w-44"
-              aria-label="Default tab size"
+        <div className="flex w-full flex-wrap items-center justify-end gap-2 @min-[32rem]/settings-row:w-auto">
+          <SettingsField>
+            <Select
+              value={viewportSelectValue(viewport)}
+              onValueChange={selectViewport}
+              disabled={disabled}
             >
-              <SelectValue>{viewportSelectLabel(viewport)}</SelectValue>
-            </SelectTrigger>
-            <SelectPopup align="end" alignItemWithTrigger={false}>
-              <SelectItem value={FILL_VALUE}>Fill panel</SelectItem>
-              <SelectItem value={RESPONSIVE_VALUE}>Responsive</SelectItem>
-              <SelectGroup>
-                <SelectGroupLabel>Standard</SelectGroupLabel>
-                {PREVIEW_VIEWPORT_PRESETS.map((preset) => (
-                  <SelectItem key={preset.id} value={preset.id}>
-                    <span className="flex w-full items-center justify-between gap-5">
-                      <span>{preset.label}</span>
-                      <span className="text-xs tabular-nums text-muted-foreground">
-                        {preset.detail}
+              <SelectTrigger size="sm" aria-label="Default tab size">
+                <SelectValue>{viewportSelectLabel(viewport)}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem value={FILL_VALUE}>Fill panel</SelectItem>
+                <SelectItem value={RESPONSIVE_VALUE}>Responsive</SelectItem>
+                <SelectGroup>
+                  <SelectGroupLabel>Standard</SelectGroupLabel>
+                  {PREVIEW_VIEWPORT_PRESETS.map((preset) => (
+                    <SelectItem key={preset.id} value={preset.id}>
+                      <span className="flex w-full items-center justify-between gap-5">
+                        <span>{preset.label}</span>
+                        <span className="text-xs tabular-nums text-muted-foreground">
+                          {preset.detail}
+                        </span>
                       </span>
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectPopup>
-          </Select>
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectPopup>
+            </Select>
+          </SettingsField>
 
           {sized ? (
             <div className="flex min-w-0 items-center gap-1">
@@ -423,25 +424,27 @@ function BrowserZoomSetting({ disabled }: { readonly disabled: boolean }) {
         ) : null
       }
       control={
-        <Select
-          disabled={disabled}
-          value={String(zoomFactor)}
-          onValueChange={(value) => {
-            const next = PREVIEW_ZOOM_LEVELS.find((level) => String(level) === value);
-            if (next !== undefined) updateSettings({ browserDefaultZoomFactor: next });
-          }}
-        >
-          <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Default tab zoom">
-            <SelectValue>{zoomLabel(zoomFactor)}</SelectValue>
-          </SelectTrigger>
-          <SelectPopup align="end" alignItemWithTrigger={false}>
-            {PREVIEW_ZOOM_LEVELS.map((level) => (
-              <SelectItem hideIndicator key={level} value={String(level)}>
-                {zoomLabel(level)}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
+        <SettingsField>
+          <Select
+            disabled={disabled}
+            value={String(zoomFactor)}
+            onValueChange={(value) => {
+              const next = PREVIEW_ZOOM_LEVELS.find((level) => String(level) === value);
+              if (next !== undefined) updateSettings({ browserDefaultZoomFactor: next });
+            }}
+          >
+            <SelectTrigger size="sm" aria-label="Default tab zoom">
+              <SelectValue>{zoomLabel(zoomFactor)}</SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              {PREVIEW_ZOOM_LEVELS.map((level) => (
+                <SelectItem hideIndicator key={level} value={String(level)}>
+                  {zoomLabel(level)}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        </SettingsField>
       }
     />
   );
@@ -466,26 +469,33 @@ function BrowserAppearanceSettingRow({ disabled }: { readonly disabled: boolean 
         ) : null
       }
       control={
-        <Select
-          disabled={disabled}
-          value={appearance}
-          onValueChange={(value) => {
-            if (value === "match" || value === "system" || value === "light" || value === "dark") {
-              updateSettings({ browserDefaultAppearance: value });
-            }
-          }}
-        >
-          <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Tab color scheme">
-            <SelectValue>{APPEARANCE_LABELS[appearance]}</SelectValue>
-          </SelectTrigger>
-          <SelectPopup align="end" alignItemWithTrigger={false}>
-            {Object.entries(APPEARANCE_LABELS).map(([value, label]) => (
-              <SelectItem hideIndicator key={value} value={value}>
-                {label}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
+        <SettingsField>
+          <Select
+            disabled={disabled}
+            value={appearance}
+            onValueChange={(value) => {
+              if (
+                value === "match" ||
+                value === "system" ||
+                value === "light" ||
+                value === "dark"
+              ) {
+                updateSettings({ browserDefaultAppearance: value });
+              }
+            }}
+          >
+            <SelectTrigger size="sm" aria-label="Tab color scheme">
+              <SelectValue>{APPEARANCE_LABELS[appearance]}</SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              {Object.entries(APPEARANCE_LABELS).map(([value, label]) => (
+                <SelectItem hideIndicator key={value} value={value}>
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        </SettingsField>
       }
     />
   );
@@ -573,31 +583,29 @@ function BrowserRecordingFrameRateSetting({ disabled }: { readonly disabled: boo
         ) : null
       }
       control={
-        <Select
-          disabled={disabled}
-          value={String(frameRate)}
-          onValueChange={(value) => {
-            const next = BROWSER_RECORDING_FRAME_RATES.find((rate) => String(rate) === value);
-            if (next !== undefined) {
-              updateSettings({ browserRecordingFrameRate: next });
-            }
-          }}
-        >
-          <SelectTrigger
-            size="sm"
-            className="w-full sm:w-44"
-            aria-label="Browser recording frame rate"
+        <SettingsField>
+          <Select
+            disabled={disabled}
+            value={String(frameRate)}
+            onValueChange={(value) => {
+              const next = BROWSER_RECORDING_FRAME_RATES.find((rate) => String(rate) === value);
+              if (next !== undefined) {
+                updateSettings({ browserRecordingFrameRate: next });
+              }
+            }}
           >
-            <SelectValue>{frameRate} fps</SelectValue>
-          </SelectTrigger>
-          <SelectPopup align="end" alignItemWithTrigger={false}>
-            {BROWSER_RECORDING_FRAME_RATES.map((rate) => (
-              <SelectItem hideIndicator key={rate} value={String(rate)}>
-                {rate} fps
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
+            <SelectTrigger size="sm" aria-label="Browser recording frame rate">
+              <SelectValue>{frameRate} fps</SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              {BROWSER_RECORDING_FRAME_RATES.map((rate) => (
+                <SelectItem hideIndicator key={rate} value={String(rate)}>
+                  {rate} fps
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        </SettingsField>
       }
     />
   );
@@ -625,26 +633,30 @@ function BrowserLinkTargetSetting({ disabled }: { readonly disabled: boolean }) 
         ) : null
       }
       control={
-        <Select
-          disabled={disabled}
-          value={linkTarget}
-          onValueChange={(value) => {
-            if (value === "system" || value === "app") {
-              updateSettings({ browserLinkTarget: value });
-            }
-          }}
-        >
-          <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Open links in">
-            <SelectValue>{LINK_TARGET_LABELS[linkTarget]}</SelectValue>
-          </SelectTrigger>
-          <SelectPopup align="end" alignItemWithTrigger={false}>
-            {(Object.keys(LINK_TARGET_LABELS) as ReadonlyArray<BrowserLinkTarget>).map((target) => (
-              <SelectItem hideIndicator key={target} value={target}>
-                {LINK_TARGET_LABELS[target]}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
+        <SettingsField>
+          <Select
+            disabled={disabled}
+            value={linkTarget}
+            onValueChange={(value) => {
+              if (value === "system" || value === "app") {
+                updateSettings({ browserLinkTarget: value });
+              }
+            }}
+          >
+            <SelectTrigger size="sm" aria-label="Open links in">
+              <SelectValue>{LINK_TARGET_LABELS[linkTarget]}</SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              {(Object.keys(LINK_TARGET_LABELS) as ReadonlyArray<BrowserLinkTarget>).map(
+                (target) => (
+                  <SelectItem hideIndicator key={target} value={target}>
+                    {LINK_TARGET_LABELS[target]}
+                  </SelectItem>
+                ),
+              )}
+            </SelectPopup>
+          </Select>
+        </SettingsField>
       }
     />
   );
@@ -760,7 +772,9 @@ function DeviceIntegrationControls({
           {state.supportsToolUpdate && needsUpdate ? (
             <Button
               size="sm"
+              variant="outline"
               disabled={!environmentId || pending !== null || busy}
+              busy={pending === `update-${tool}`}
               onClick={() => {
                 if (!environmentId) return;
                 setUpdateError(null);
@@ -785,6 +799,7 @@ function DeviceIntegrationControls({
               size="sm"
               variant="outline"
               disabled={!environmentId || pending !== null || busy}
+              busy={pending === "check"}
               onClick={() => {
                 if (!environmentId) return;
                 setPending("check");
@@ -813,16 +828,17 @@ function DeviceIntegrationControls({
         serverScoped
         settingKeys={["enableDeviceSupport"]}
         description={deviceHubDescription}
+        // The version sits under the description, so the trailing slot holds only the switch.
+        status={
+          <DeviceToolVersions
+            action={versionActions("hub")}
+            kind="hub"
+            tools={state.hosts.find((host) => host.kind === "local")?.tools}
+            {...(enabled ? { missingLabel: "Installs when first used" } : {})}
+          />
+        }
         control={
           <>
-            <span className="text-xs">
-              <DeviceToolVersions
-                action={versionActions("hub")}
-                kind="hub"
-                tools={state.hosts.find((host) => host.kind === "local")?.tools}
-                {...(enabled ? { missingLabel: "Installs when first used" } : {})}
-              />
-            </span>
             {pending === "hub" ? <DeviceHubSetupStatus state={state} pending compact /> : null}
             <Switch
               checked={enabled}
@@ -861,6 +877,7 @@ function DeviceIntegrationControls({
                 size="sm"
                 variant="outline"
                 disabled={!environmentId || !enabled || busy || pending !== null}
+                busy={pending === "check"}
                 onClick={() => {
                   if (!environmentId) return;
                   setPending("check");
@@ -878,16 +895,16 @@ function DeviceIntegrationControls({
         serverScoped
         settingKeys={["enableAgentDeviceAccess"]}
         description={agentDeviceDescription}
+        status={
+          <DeviceToolVersions
+            action={versionActions("agent")}
+            kind="agent"
+            tools={state.hosts.find((host) => host.kind === "local")?.tools}
+            {...(agentAccessEnabled ? { missingLabel: "Installs when first used" } : {})}
+          />
+        }
         control={
           <>
-            <span className="text-xs">
-              <DeviceToolVersions
-                action={versionActions("agent")}
-                kind="agent"
-                tools={state.hosts.find((host) => host.kind === "local")?.tools}
-                {...(agentAccessEnabled ? { missingLabel: "Installs when first used" } : {})}
-              />
-            </span>
             {pending === "agent" ? <AgentDeviceSetupStatus state={state} pending compact /> : null}
             <Switch
               checked={agentAccessEnabled}
@@ -1224,7 +1241,10 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
       description="Each profile keeps its own cookies and sign-ins. Incognito is cleared when the app closes."
       control={
         <Menu onOpenChange={(open) => open && loadSources()}>
+          {/* Disabled on the trigger itself: Base UI's trigger props win over
+              the rendered Button's, which would leave the menu openable. */}
           <MenuTrigger
+            disabled={profileWritesDisabled || importInFlight}
             render={
               <Button
                 size="sm"
@@ -1288,120 +1308,101 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
         </Menu>
       }
     >
-      {/*
-        The bordered container groups rows unambiguously at any width, and
-        carries the bottom spacing `SettingsRow` leaves to its children
-        (`pt-3 pb-1`).
-      */}
-      <div className="mt-2 mb-2 overflow-hidden rounded-lg border border-border/60">
-        {listedProfiles.map((profile, index) => {
+      <SettingsGroup variant="inset" className="mt-2">
+        {listedProfiles.map((profile) => {
           const builtIn = isBuiltInBrowserProfileId(profile.id);
           const isDefault = profile.id === resolvedDefaultId;
+          // A profile named "Default" already says it; the tag would only repeat it.
+          const showDefaultTag = isDefault && profile.name.trim().toLowerCase() !== "default";
           return (
-            <div
+            // Outside the desktop app the unavailable group mutes the name like
+            // every other title in the block; the controls carry their own
+            // disabled look, so nothing here fades a second time.
+            <SettingsInsetRow
               key={profile.id}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2",
-                index > 0 && "border-t border-border/60",
-              )}
-            >
-              <span className="flex min-w-0 flex-1 items-center gap-2">
-                {builtIn ? (
-                  // Dimmed here rather than on the table: a wrapper-level dim
-                  // stacks with the rename field's and the row menu button's
-                  // own, landing them near 0.41 while every other disabled
-                  // control in the block sits at 0.64.
-                  <span
-                    className={cn(
-                      "truncate text-sm text-foreground",
-                      profileWritesDisabled && "opacity-64",
-                    )}
-                  >
-                    {profile.name}
-                  </span>
+              title={
+                builtIn ? (
+                  profile.name
                 ) : (
-                  <DraftInput
-                    nativeInput
-                    size="sm"
-                    className="w-full max-w-56"
-                    aria-label={`Rename ${profile.name}`}
-                    disabled={profileWritesDisabled || importInFlight}
-                    maxLength={BROWSER_PROFILE_NAME_MAX_LENGTH}
-                    value={profile.name}
-                    onCommit={(next) => renameProfile(profile.id, next)}
-                  />
-                )}
-                {/* Dimmed with the rest of the row, whose controls are all disabled. */}
-                {isDefault ? (
-                  <span className={cn("flex", profileWritesDisabled && "opacity-64")}>
-                    <Badge size="sm" variant="info">
-                      Default
-                    </Badge>
-                  </span>
-                ) : null}
-              </span>
-              <Menu>
-                <MenuTrigger
-                  render={
-                    <Button
-                      size="icon-xs"
-                      variant="ghost-muted"
+                  <SettingsField>
+                    <DraftInput
+                      nativeInput
+                      size="sm"
+                      aria-label={`Rename ${profile.name}`}
                       disabled={profileWritesDisabled || importInFlight}
-                      aria-label={`${profile.name} options`}
+                      maxLength={BROWSER_PROFILE_NAME_MAX_LENGTH}
+                      value={profile.name}
+                      onCommit={(next) => renameProfile(profile.id, next)}
                     />
-                  }
-                >
-                  <MoreVertical />
-                </MenuTrigger>
-                <MenuPopup align="end">
-                  <MenuItem
-                    disabled={!settingsHydrated || isDefault}
-                    onClick={() => {
-                      if (settingsHydrated) {
-                        updateSettings({ browserDefaultProfileId: profile.id });
-                      }
-                    }}
+                  </SettingsField>
+                )
+              }
+              tag={showDefaultTag ? <SettingsTag>Default</SettingsTag> : null}
+              control={
+                <Menu>
+                  <MenuTrigger
+                    disabled={profileWritesDisabled || importInFlight}
+                    render={
+                      <Button
+                        size="icon-sm"
+                        variant="ghost-muted"
+                        disabled={profileWritesDisabled || importInFlight}
+                        aria-label={`${profile.name} options`}
+                      />
+                    }
                   >
-                    Set as default
-                  </MenuItem>
-                  <MenuItem
-                    disabled={!settingsHydrated || !removalAvailable}
-                    onClick={() => {
-                      // Clearing a server copy closes its open tabs, so it asks first.
-                      if (serverProfileData.environmentIds.length > 0) {
-                        setProfilePendingClear(profile);
-                      } else clearProfileData(profile.id, profile.name);
-                    }}
-                  >
-                    Clear cookies and cache
-                  </MenuItem>
-                  {builtIn ? null : (
+                    <MoreVertical />
+                  </MenuTrigger>
+                  <MenuPopup align="end">
                     <MenuItem
-                      variant="destructive"
-                      disabled={!settingsHydrated || !removalAvailable}
+                      disabled={!settingsHydrated || isDefault}
                       onClick={() => {
-                        if (settingsHydrated) setProfilePendingRemoval(profile);
+                        if (settingsHydrated) {
+                          updateSettings({ browserDefaultProfileId: profile.id });
+                        }
                       }}
                     >
-                      Remove profile and data
+                      Set as default
                     </MenuItem>
-                  )}
-                  {!removalAvailable ? (
-                    <>
-                      <MenuSeparator />
-                      <MenuItem disabled>
-                        {environmentsReady
-                          ? "Connect to a machine to clear profile data"
-                          : "Checking machines…"}
+                    <MenuItem
+                      disabled={!settingsHydrated || !removalAvailable}
+                      onClick={() => {
+                        // Clearing a server copy closes its open tabs, so it asks first.
+                        if (serverProfileData.environmentIds.length > 0) {
+                          setProfilePendingClear(profile);
+                        } else clearProfileData(profile.id, profile.name);
+                      }}
+                    >
+                      Clear cookies and cache
+                    </MenuItem>
+                    {builtIn ? null : (
+                      <MenuItem
+                        variant="destructive"
+                        disabled={!settingsHydrated || !removalAvailable}
+                        onClick={() => {
+                          if (settingsHydrated) setProfilePendingRemoval(profile);
+                        }}
+                      >
+                        Remove profile and data
                       </MenuItem>
-                    </>
-                  ) : null}
-                </MenuPopup>
-              </Menu>
-            </div>
+                    )}
+                    {!removalAvailable ? (
+                      <>
+                        <MenuSeparator />
+                        <MenuItem disabled>
+                          {environmentsReady
+                            ? "Connect to a machine to clear profile data"
+                            : "Checking machines…"}
+                        </MenuItem>
+                      </>
+                    ) : null}
+                  </MenuPopup>
+                </Menu>
+              }
+            />
           );
         })}
-      </div>
+      </SettingsGroup>
       <AlertDialog
         open={profilePendingRemoval !== null}
         onOpenChange={(open) => {
@@ -1432,7 +1433,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
           <AlertDialogFooter>
             <AlertDialogClose
               disabled={profileRemovalInFlight}
-              render={<Button variant="outline" disabled={profileRemovalInFlight} />}
+              render={<Button variant="outline" busy={profileRemovalInFlight} />}
             >
               Cancel
             </AlertDialogClose>

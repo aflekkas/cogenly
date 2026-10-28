@@ -673,7 +673,7 @@ function PairingForm({
               <ChevronRightIcon className="size-3.5 group-data-panel-open:rotate-90" />
               Need a pairing link?
             </CollapsibleTrigger>
-            <Button type="submit" disabled={isPairing || pairingUrl.trim().length === 0}>
+            <Button type="submit" disabled={pairingUrl.trim().length === 0} busy={isPairing}>
               {isPairing ? "Pairing..." : "Pair"}
             </Button>
           </div>
@@ -1584,7 +1584,8 @@ function ImportStep({
         </Button>
         <Button
           autoFocus
-          disabled={!canImport || isImporting || selected.length === 0}
+          disabled={!canImport || selected.length === 0}
+          busy={isImporting}
           onClick={() => void runImport(selected)}
         >
           {isImporting

@@ -3,7 +3,7 @@ import { useCallback } from "react";
 
 import { MachinesSettingsPanel } from "../components/settings/MachinesSettings";
 
-/** `?add=1` opens the Add a machine dialog, as the command palette does. */
+/** `?add=1` opens the Add machine dialog, as the command palette does. */
 function SettingsMachinesRoute() {
   const { add } = Route.useSearch();
   const navigate = Route.useNavigate();

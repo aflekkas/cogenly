@@ -1,4 +1,5 @@
 import type { EnvironmentConnectionPhase } from "@cogenly/client-runtime/connection";
+import { useState } from "react";
 
 import { cn } from "~/lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
@@ -20,28 +21,51 @@ export function connectionPhaseDotClassName(phase: EnvironmentConnectionPhase): 
 
 /** Ping halo for transitional phases; null renders no ping. */
 export function connectionPhasePingClassName(phase: EnvironmentConnectionPhase): string | null {
-  return phase === "connecting" || phase === "reconnecting" ? "bg-warning/60 duration-2000" : null;
+  return phase === "connecting" || phase === "reconnecting" ? "bg-warning/60" : null;
 }
 
 type ConnectionStatusDotProps = {
   tooltipText?: string | null;
   dotClassName: string;
+  /**
+   * Halo color for a state worth noticing, such as connecting. The dot pings
+   * once when it enters that state, never on mount and never on a loop, so a
+   * page left open does not keep repainting.
+   */
   pingClassName?: string | null;
 };
+
+/**
+ * The ping a dot should play: the halo it just changed to, until that one
+ * ping ends. Derived during render so a dot that mounts mid-state stays still.
+ */
+function useArrivalPing(pingClassName: string | null) {
+  const [seen, setSeen] = useState(pingClassName);
+  const [arrival, setArrival] = useState<string | null>(null);
+  if (pingClassName !== seen) {
+    setSeen(pingClassName);
+    setArrival(pingClassName);
+  }
+  return [arrival, () => setArrival(null)] as const;
+}
 
 export function ConnectionStatusDot({
   tooltipText,
   dotClassName,
-  pingClassName,
+  pingClassName = null,
 }: ConnectionStatusDotProps) {
+  const [arrivalPing, endPing] = useArrivalPing(pingClassName);
   const dotContent = (
     <>
-      {pingClassName ? (
+      {arrivalPing ? (
         <span
+          key={arrivalPing}
+          aria-hidden
           className={cn(
-            "absolute inline-flex h-full w-full animate-status-ping rounded-full",
-            pingClassName,
+            "absolute inline-flex h-full w-full animate-status-ping rounded-full motion-reduce:hidden",
+            arrivalPing,
           )}
+          onAnimationEnd={endPing}
         />
       ) : null}
       <span className={cn("relative inline-flex size-2 rounded-full", dotClassName)} />

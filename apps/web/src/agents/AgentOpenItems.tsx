@@ -104,7 +104,12 @@ export function ApprovalDecision({
         </ul>
       )}
       <div className="mt-1 flex items-center gap-1.5">
-        <Button size="xs" disabled={pending || !canWrite} onClick={() => void decide("approve")}>
+        <Button
+          size="xs"
+          disabled={pending || !canWrite}
+          aria-busy={pending || undefined}
+          onClick={() => void decide("approve")}
+        >
           Approve
         </Button>
         <Button
@@ -621,7 +626,7 @@ function StatusReasonForm({
         <Button type="button" size="xs" variant="ghost" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" size="xs" disabled={pending || !why.trim() || !validLink}>
+        <Button type="submit" size="xs" disabled={!why.trim() || !validLink} busy={pending}>
           {kind === "done" ? "Mark done" : "Dismiss"}
         </Button>
       </div>
@@ -788,7 +793,7 @@ function AddCommitment({
         <Button type="button" size="xs" variant="ghost" onClick={onDone}>
           Cancel
         </Button>
-        <Button type="submit" size="xs" disabled={pending || !valid}>
+        <Button type="submit" size="xs" disabled={!valid} busy={pending}>
           Add item
         </Button>
       </div>

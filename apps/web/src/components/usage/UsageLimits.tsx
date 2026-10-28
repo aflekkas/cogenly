@@ -314,7 +314,8 @@ export function ResetCredits({
         <Button
           size="xs"
           variant="outline"
-          disabled={busy || !canManageProviders}
+          disabled={!canManageProviders}
+          busy={busy}
           onClick={() => {
             if (readEnvironmentScope(environmentId, AuthProvidersManageScope)) setConfirming(true);
           }}

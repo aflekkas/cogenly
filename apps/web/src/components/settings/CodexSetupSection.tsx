@@ -35,7 +35,8 @@ import { ChatGptAccountPicker } from "./ChatGptAccountPicker";
 import { Input } from "../ui/input";
 import { OpenAI } from "../Icons";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
-import { SettingsRow } from "./settingsLayout";
+import { SettingsGroup } from "./SettingsGroup";
+import { SettingsField, SettingsRow } from "./settingsLayout";
 import { AddCodexAccountDialog } from "./AddCodexAccountDialog";
 import { getOnboardingProviderState } from "../../onboarding/providerReadiness.logic";
 import { getProviderSummary } from "./providerStatus";
@@ -277,7 +278,10 @@ function ManagedCodexSetup({
   const continueWithSignIn = useRef<string | null>(null);
   const openRequested = useRef(false);
   const openedFlow = useRef<string | null>(null);
-  const [autoStartHandled, setAutoStartHandled] = useState(false);
+  // Auto-start is decided during render ("launching"), run once by the effect
+  // below, and reads as starting until the flow it runs is pending ("launched").
+  const [autoStartPhase, setAutoStartPhase] = useState<"idle" | "launching" | "launched">("idle");
+  const autoStartRan = useRef(false);
   const installed = installation?.installedVersion != null;
   const authenticated = provider?.auth.status === "authenticated";
   const updateAvailable =
@@ -291,17 +295,18 @@ function ManagedCodexSetup({
     awaitingProvider !== null &&
     !authenticated &&
     (auth?.phase === "succeeded" || awaitingProvider === "handoff");
-  useEffect(() => {
-    if (authenticated || auth?.phase === "failed" || auth?.phase === "cancelled") {
-      setAwaitingProvider(null);
-    }
-  }, [authenticated, auth?.phase]);
+  if (
+    awaitingProvider !== null &&
+    (authenticated || auth?.phase === "failed" || auth?.phase === "cancelled")
+  ) {
+    setAwaitingProvider(null);
+  }
   useEffect(() => {
     if (awaitingProvider && auth?.phase === "succeeded") {
       void refreshProviders({ environmentId, input: { instanceId } });
     }
   }, [awaitingProvider, auth?.phase, refreshProviders, environmentId, instanceId]);
-  const startingAutomatically = autoStart && !autoStartHandled;
+  const startingAutomatically = autoStart && autoStartPhase !== "launched";
   const waitingForAuthState =
     awaitingProvider === "sign-in" && !authenticated && (auth === null || auth.phase === "idle");
   const authInProgress =
@@ -319,6 +324,18 @@ function ManagedCodexSetup({
   const unavailable =
     readOnly || !enabled || pending || authQuery.error !== null || installQuery.error !== null;
   const busy = pending || authInProgress || installActive;
+  if (
+    autoStartPhase === "idle" &&
+    autoStart &&
+    !unavailable &&
+    !busy &&
+    installation !== null &&
+    provider?.setup?.canInstall
+  ) {
+    setAutoStartPhase("launching");
+  } else if (autoStartPhase === "launching" && pending) {
+    setAutoStartPhase("launched");
+  }
 
   const run = useCallback(
     async <A, E>(
@@ -375,21 +392,20 @@ function ManagedCodexSetup({
     importedAttempt.current = attemptId;
     void transferProfile(handoffQuery.data.profile);
   }, [handoff, handoffQuery.data, transferProfile]);
-  useEffect(() => {
-    if (!handoff) return;
-    if (
-      handoffQuery.error ||
+  // A handoff that failed on the primary machine ends here, during render.
+  if (
+    handoff &&
+    (handoffQuery.error ||
       (handoffQuery.data?.phase === "auth" &&
-        ["failed", "cancelled"].includes(handoffQuery.data.state.phase))
-    ) {
-      setError(
-        handoffQuery.data?.phase === "auth"
-          ? (handoffQuery.data.state.message ?? "ChatGPT sign-in could not finish. Try again.")
-          : "ChatGPT sign-in on the primary machine was interrupted. Try again.",
-      );
-      setHandoff(null);
-    }
-  }, [handoff, handoffQuery.data, handoffQuery.error]);
+        ["failed", "cancelled"].includes(handoffQuery.data.state.phase)))
+  ) {
+    setError(
+      handoffQuery.data?.phase === "auth"
+        ? (handoffQuery.data.state.message ?? "ChatGPT sign-in could not finish. Try again.")
+        : "ChatGPT sign-in on the primary machine was interrupted. Try again.",
+    );
+    setHandoff(null);
+  }
   const cancelSignIn = useCallback(() => {
     setAwaitingProvider(null);
     if (handoff) {
@@ -484,28 +500,12 @@ function ManagedCodexSetup({
   );
 
   useEffect(() => {
-    if (
-      !autoStart ||
-      autoStartHandled ||
-      unavailable ||
-      busy ||
-      installation === null ||
-      !provider?.setup?.canInstall
-    )
-      return;
-    setAutoStartHandled(true);
+    if (autoStartPhase !== "launching" || autoStartRan.current) return;
+    autoStartRan.current = true;
     onAutoStartConsumed();
-    void setup();
-  }, [
-    autoStart,
-    autoStartHandled,
-    unavailable,
-    busy,
-    installation,
-    provider?.setup?.canInstall,
-    onAutoStartConsumed,
-    setup,
-  ]);
+    // Pending marks the launch during render; this covers a setup that never got that far.
+    void setup().finally(() => setAutoStartPhase("launched"));
+  }, [autoStartPhase, onAutoStartConsumed, setup]);
 
   useEffect(() => {
     if (!continueWithSignIn.current || pending || installActive) return;
@@ -520,6 +520,9 @@ function ManagedCodexSetup({
 
   const receivingCallback = useRef<string | null>(null);
   const flowId = auth?.flowId;
+  // Opens the sign-in page and, on desktop, finishes sign-in from its
+  // callback. Resolves false when that failed; callers report it with
+  // `reportOpenPageResult`.
   const openPage = useCallback(
     async (authorizationUrl: string) => {
       try {
@@ -527,11 +530,11 @@ function ManagedCodexSetup({
         if (receive && clientCallback && flowId) {
           if (receivingCallback.current === authorizationUrl) {
             await ensureLocalApi().shell.openExternal(authorizationUrl);
-            return;
+            return true;
           }
           receivingCallback.current = authorizationUrl;
           const callbackUrl = await receive(authorizationUrl);
-          if (receivingCallback.current !== authorizationUrl) return;
+          if (receivingCallback.current !== authorizationUrl) return true;
           receivingCallback.current = null;
           await run(() =>
             completeAuth({ environmentId, input: { instanceId, flowId, callbackUrl } }),
@@ -539,14 +542,19 @@ function ManagedCodexSetup({
         } else {
           await ensureLocalApi().shell.openExternal(authorizationUrl);
         }
+        return true;
       } catch {
-        setError(
-          "Could not finish sign-in on this computer. Try again or paste the redirect URL below.",
-        );
+        return false;
       }
     },
     [clientCallback, flowId, run, completeAuth, environmentId, instanceId],
   );
+  const reportOpenPageResult = useCallback((opened: boolean) => {
+    if (opened) return;
+    setError(
+      "Could not finish sign-in on this computer. Try again or paste the redirect URL below.",
+    );
+  }, []);
 
   useEffect(() => {
     if (!clientCallback || !url || !window.desktopBridge?.cancelProviderAuthCallback) return;
@@ -567,8 +575,11 @@ function ManagedCodexSetup({
       return;
     openedFlow.current = auth.flowId;
     openRequested.current = false;
-    if (!remoteWeb) void openPage(url);
-  }, [auth?.phase, auth?.flowId, url, openPage, remoteWeb]);
+    if (remoteWeb) return;
+    void (async () => {
+      reportOpenPageResult(await openPage(url));
+    })();
+  }, [auth?.phase, auth?.flowId, url, openPage, reportOpenPageResult, remoteWeb]);
 
   const runtimeDescription =
     installation?.phase === "downloading"
@@ -635,7 +646,7 @@ function ManagedCodexSetup({
       onClick={() => {
         if (handoffQuery.data?.phase === "finished")
           void transferProfile(handoffQuery.data.profile);
-        else if (url) void openPage(url);
+        else if (url) void openPage(url).then(reportOpenPageResult);
       }}
     >
       {finishingSignIn
@@ -904,7 +915,7 @@ function ManagedCodexSetup({
                 {!finishingSignIn && (
                   <Button
                     size="sm"
-                    variant="ghost"
+                    variant="outline"
                     disabled={pending || readOnly}
                     onClick={() => {
                       if (!handoff && !auth?.flowId) return;
@@ -920,7 +931,7 @@ function ManagedCodexSetup({
             ) : installActive ? (
               <Button
                 size="sm"
-                variant="ghost"
+                variant="outline"
                 disabled={pending || readOnly}
                 onClick={() => {
                   if (!installation?.operationId) return;
@@ -947,11 +958,11 @@ function ManagedCodexSetup({
                 </Button>
                 <Button
                   size="sm"
-                  variant="ghost"
+                  variant="outline"
                   disabled={unavailable || busy}
                   onClick={() => void run(() => logoutAuth(target))}
                 >
-                  Disconnect
+                  Sign out
                 </Button>
               </>
             ) : (
@@ -977,7 +988,7 @@ function ManagedCodexSetup({
                 {hasSavedAccount ? (
                   <Button
                     size="sm"
-                    variant="ghost"
+                    variant="outline"
                     disabled={unavailable || busy}
                     onClick={() => void setup("chatgpt-change-account")}
                   >
@@ -990,9 +1001,11 @@ function ManagedCodexSetup({
         }
       />
       {authenticated ? (
-        <div className="flex justify-end px-3 py-1 sm:px-4">
-          <ChatGptUsageButton />
-        </div>
+        <SettingsRow
+          title="ChatGPT plan"
+          description="See how much of your plan's usage is left."
+          control={<ChatGptUsageButton variant="outline" />}
+        />
       ) : null}
       {logoutWarning ? (
         <p role="alert" className="px-3 py-2 text-xs text-muted-foreground sm:px-4">
@@ -1035,30 +1048,32 @@ export function CodexManagedRuntimeFields({
         title="Binary path"
         description="Selected by Cogenly."
         control={
-          <div className="w-full sm:w-80">
+          <SettingsField>
             <Input
+              size="sm"
               aria-label="Codex binary path"
               value={executablePath}
               title={executablePath}
               placeholder={installation.error ? "Could not read runtime path" : "Not installed"}
               disabled
             />
-          </div>
+          </SettingsField>
         }
       />
       <SettingsRow
         title="CODEX_HOME path"
-        description="Shared Codex config, sessions, and state."
+        description="Shared Codex config, sessions and state."
         control={
-          <div className="w-full sm:w-80">
+          <SettingsField>
             <Input
+              size="sm"
               aria-label="Codex home path"
               value={provider?.runtimePaths?.homePath ?? ""}
               title={provider?.runtimePaths?.homePath}
               placeholder="Unavailable"
               disabled
             />
-          </div>
+          </SettingsField>
         }
       />
       <SettingsRow
@@ -1069,15 +1084,16 @@ export function CodexManagedRuntimeFields({
             : "This instance uses the shared Codex home directly."
         }
         control={
-          <div className="w-full sm:w-80">
+          <SettingsField>
             <Input
+              size="sm"
               aria-label="Codex shadow home path"
               value={provider?.runtimePaths?.shadowHomePath ?? ""}
               title={provider?.runtimePaths?.shadowHomePath ?? undefined}
               placeholder={provider?.runtimePaths ? "Not used" : "Unavailable"}
               disabled
             />
-          </div>
+          </SettingsField>
         }
       />
     </>
@@ -1127,7 +1143,7 @@ function CodexWelcomeCard({
 }) {
   const footer = Children.toArray(children);
   return (
-    <div className="rounded-lg border border-border bg-background px-4 py-4">
+    <SettingsGroup variant="inset" divided={false} className="bg-background px-4 py-4">
       <div className="flex flex-wrap items-center gap-3">
         <OpenAI className="size-5 shrink-0 fill-foreground" />
         <div className="min-w-0 flex-1">
@@ -1144,6 +1160,6 @@ function CodexWelcomeCard({
       {footer.length > 0 ? (
         <div className="ml-8 mt-2 flex flex-wrap items-center gap-2">{footer}</div>
       ) : null}
-    </div>
+    </SettingsGroup>
   );
 }

@@ -615,7 +615,8 @@ export function ImageMarkupDialog({
                 render={
                   <Button
                     size="sm"
-                    disabled={busy || failed}
+                    disabled={failed}
+                    busy={busy}
                     aria-keyshortcuts={IS_MAC ? "Meta+Enter" : "Control+Enter"}
                     onClick={() => void done()}
                   />

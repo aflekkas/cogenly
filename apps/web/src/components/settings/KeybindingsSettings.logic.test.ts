@@ -10,11 +10,13 @@ import {
   groupKeybindingRows,
   keybindingConflictLabels,
   keybindingFromKeyboardEvent,
+  keycapLabel,
   parseWhenExpressionDraft,
   shortcutToKeybindingInput,
   unknownWhenVariables,
   whenAstToExpression,
   whenNodeRemoveLabel,
+  whenSummary,
 } from "./KeybindingsSettings.logic";
 
 describe("KeybindingsSettings.logic", () => {
@@ -64,13 +66,19 @@ describe("KeybindingsSettings.logic", () => {
       "Navigation",
       "Threads",
       "Composer",
+      "Model picker",
       "Preview",
       "Appearance",
       "Other",
     ]);
     const composer = groups.find((group) => group.id === "composer");
     expect(composer?.rows.map((row) => row.command)).toEqual(
-      expect.arrayContaining(["composer.host", "modelPicker.toggle"]),
+      expect.arrayContaining(["composer.host"]),
+    );
+    expect(composer?.rows.some((row) => row.command.startsWith("modelPicker."))).toBe(false);
+    const modelPicker = groups.find((group) => group.id === "modelPicker");
+    expect(modelPicker?.rows.map((row) => row.command)).toEqual(
+      expect.arrayContaining(["modelPicker.toggle", "modelPicker.jump.1"]),
     );
     expect(
       groupKeybindingRows(buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS, "preview.toggle")),
@@ -274,11 +282,60 @@ describe("KeybindingsSettings.logic", () => {
   });
 
   it("formats static and project script command labels", () => {
-    expect(commandLabel("commandPalette.toggle")).toBe("Command Palette: Toggle");
-    expect(commandLabel("sidebar.mode.tasks")).toBe("Sidebar: Mode: Work");
-    expect(commandLabel("view.reopenClosed")).toBe("Reopen Closed Tab");
-    expect(commandLabel("preview.focusUrl")).toBe("Preview: Focus URL");
-    expect(commandLabel("script.setup-db.run")).toBe("Run Script: Setup Db");
+    expect(commandLabel("commandPalette.toggle")).toBe("Command palette: toggle");
+    expect(commandLabel("modelPicker.previousProvider")).toBe("Model picker: previous provider");
+    expect(commandLabel("thread.jump.3")).toBe("Thread: jump to 3");
+    expect(commandLabel("sidebar.mode.tasks")).toBe("Sidebar: show Work");
+    expect(commandLabel("view.reopenClosed")).toBe("Reopen closed tab");
+    expect(commandLabel("preview.focusUrl")).toBe("Preview: focus URL");
+    expect(commandLabel("script.setup-db.run")).toBe("Run script: setup-db");
+  });
+
+  it("gives every default row a distinct title, main binding first", () => {
+    const rows = buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS, "");
+    expect(new Set(rows.map((row) => row.label)).size).toBe(rows.length);
+    const chatNew = rows.filter((row) => row.command === "chat.new");
+    expect(chatNew.map((row) => [row.label, row.key])).toEqual([
+      ["Chat: new", "mod+n"],
+      ["Chat: new (alternate)", "mod+shift+o"],
+    ]);
+    expect(
+      rows.filter((row) => row.command === "composer.sendBackground").map((row) => row.key),
+    ).toEqual(["mod+enter", "mod+alt+enter"]);
+  });
+
+  it("lists rows in the order of the labels people read", () => {
+    const labels = buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS, "").map((row) =>
+      commandLabel(row.command),
+    );
+    expect(labels).toEqual(labels.toSorted((left, right) => left.localeCompare(right)));
+  });
+
+  it("summarizes when clauses in plain words, falling back to the expression", () => {
+    const summarize = (expression: string) => {
+      const parsed = parseWhenExpressionDraft(expression);
+      if (!parsed.ok) throw new Error(parsed.message);
+      return whenSummary(parsed.value);
+    };
+    expect(summarize("")).toBe("Always");
+    expect(summarize("!terminalFocus")).toBe("Outside terminal");
+    expect(summarize("!terminalFocus && !modelPickerOpen")).toBe(
+      "Outside terminal, model picker closed",
+    );
+    expect(summarize("previewFocus || composerFocus")).toBe("In preview or in composer");
+    expect(summarize("!(terminalFocus && previewFocus)")).toBeNull();
+    expect(summarize("terminalFocus && (previewFocus || composerFocus)")).toBeNull();
+    expect(summarize("someRuntimeFlag")).toBeNull();
+  });
+
+  it("labels keycaps per platform", () => {
+    expect(keycapLabel("mod", "MacIntel")).toBe("⌘");
+    expect(keycapLabel("mod", "Win32")).toBe("Ctrl");
+    expect(keycapLabel("arrowup", "MacIntel")).toBe("↑");
+    expect(keycapLabel("enter", "MacIntel")).toBe("↩");
+    expect(keycapLabel("enter", "Win32")).toBe("Enter");
+    expect(keycapLabel("k", "Win32")).toBe("K");
+    expect(keycapLabel("f5", "MacIntel")).toBe("F5");
   });
 
   it("builds known when variable options from defaults without frontend labels", () => {
@@ -415,13 +472,13 @@ describe("KeybindingsSettings.logic", () => {
       "",
     );
 
-    expect(rows[0]?.conflicts).toEqual(["Chat: New Local"]);
+    expect(rows[0]?.conflicts).toEqual(["Chat: new local"]);
     expect(
       keybindingConflictLabels(rows, {
         rowId: rows[0]?.id ?? "",
         key: "mod+n",
         when: "",
       }),
-    ).toEqual(["Chat: New Local"]);
+    ).toEqual(["Chat: new local"]);
   });
 });

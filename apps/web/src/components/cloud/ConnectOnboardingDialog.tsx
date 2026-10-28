@@ -316,7 +316,8 @@ function ConfiguredConnectOnboardingDialog() {
                 Not now
               </Button>
               <Button
-                disabled={isApplying || !canManageRelay || linkStateData === null}
+                disabled={!canManageRelay || linkStateData === null}
+                busy={isApplying}
                 onClick={() => void applyPublishSelection()}
               >
                 {isApplying ? "Enabling…" : "Continue"}

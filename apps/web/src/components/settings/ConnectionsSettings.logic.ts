@@ -37,6 +37,20 @@ export function canRevokeOtherClients(
   return clientSessions === null || clientSessions.some((session) => !session.current);
 }
 
+/** The confirmation before revoking every client but this one, naming how many go. */
+export function revokeOtherClientsConfirmation(
+  clientSessions: ReadonlyArray<{ readonly current: boolean }> | null,
+): string {
+  const others = clientSessions?.filter((session) => !session.current).length ?? null;
+  const subject =
+    others === null
+      ? "every other paired device"
+      : others === 1
+        ? "1 other paired device"
+        : `${others} other paired devices`;
+  return `Revoke access for ${subject}?\nThey disconnect now and need a new pairing link to reconnect. This device keeps its access.`;
+}
+
 type WslEnableBridge = Pick<DesktopBridge, "setWslBackendEnabled" | "setWslDistro" | "setWslOnly">;
 
 /**

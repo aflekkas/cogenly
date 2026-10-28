@@ -9,7 +9,6 @@ import {
   type IntegrationCatalogId,
   type MachineHealthChannelTestResult,
   type MachineHealthCheck,
-  type MachineHealthCheckId,
   type MachineHealthItem,
   type MachineHealthReport,
   type MachineHealthStatus,
@@ -18,18 +17,10 @@ import {
 } from "@cogenly/contracts";
 import { Link } from "@tanstack/react-router";
 import * as DateTime from "effect/DateTime";
-import {
-  CheckCircle2Icon,
-  CircleAlertIcon,
-  CircleDashedIcon,
-  TriangleAlertIcon,
-  type LucideIcon,
-} from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { AnimatedHeight } from "~/components/AnimatedHeight";
 import { useUpdateEnvironmentSettings } from "../../hooks/useSettings";
-import { cn } from "../../lib/utils";
 import {
   healthItemActions,
   healthTargetAction,
@@ -53,13 +44,13 @@ import { environmentServerConfigsAtom, serverEnvironment } from "../../state/ser
 import { useEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
-import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
+import { DisclosurePanel } from "../ui/disclosure";
 import { DraftInput } from "../ui/draft-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useOpenMachineHealthAlerts } from "../../machines/machineHealthAlertsStore";
 import { createIntegrationStatusFade } from "./integrationStatusMotion";
 import { SettingsAttentionTitle } from "./SettingsAttentionTitle";
@@ -74,8 +65,8 @@ import {
   canaryMachineId,
   channelTestLines,
   HEALTH_CHECK_LABELS,
-  HEALTH_STATUS_BADGE_VARIANTS,
   HEALTH_STATUS_LABELS,
+  HEALTH_STATUS_TONES,
   healthHeadline,
   machineHealthView,
   partitionHealthChecks,
@@ -83,12 +74,15 @@ import {
   uptimeLabel,
 } from "./MachineHealthSection.logic";
 import {
+  SettingsDisclosureToggle,
+  SettingsField,
   SettingsRow,
   SettingsSearchTarget,
   SettingsSection,
   useRelativeTimeTick,
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
+import { SettingsStatusBadge, SettingsStatusDot } from "./SettingsStatus";
 
 /** Fades an element when `status` changes, never on mount. */
 function useStatusFade<T extends HTMLElement>(status: string) {
@@ -174,21 +168,25 @@ export function MachineHealthSections({
   );
 }
 
-function StatusBadge({ status }: { readonly status: MachineHealthStatus | "connecting" }) {
+function StatusBadge({ status }: { readonly status: MachineHealthStatus }) {
   const node = useStatusFade<HTMLSpanElement>(status);
   return (
     <span ref={node} className="flex">
-      {status === "connecting" ? (
-        <Badge size="sm" variant="outline">
-          Connecting…
-        </Badge>
-      ) : (
-        <Badge size="sm" variant={HEALTH_STATUS_BADGE_VARIANTS[status]}>
-          {HEALTH_STATUS_LABELS[status]}
-        </Badge>
-      )}
+      <SettingsStatusBadge tone={HEALTH_STATUS_TONES[status]}>
+        {HEALTH_STATUS_LABELS[status]}
+      </SettingsStatusBadge>
     </span>
   );
+}
+
+/** A check's summary, dropped when its one item already says the same thing. */
+function checkDescription(check: MachineHealthCheck): string | undefined {
+  const [only, ...rest] = check.items;
+  const repeated =
+    only !== undefined &&
+    rest.length === 0 &&
+    only.title.trim().toLowerCase() === check.summary.trim().toLowerCase();
+  return repeated ? undefined : check.summary;
 }
 
 function MachineHealthSection({
@@ -236,8 +234,6 @@ function MachineHealthSection({
     if (machine.online && !wasOnline.current) refreshReport();
     wasOnline.current = machine.online;
   }, [machine.online, refreshReport]);
-  const overall: MachineHealthStatus | "connecting" | null =
-    view._tag === "connecting" ? "connecting" : view._tag === "report" ? view.overall : null;
   const context: MachineHealthActionContext = {
     originEnvironmentId: machine.environmentId,
     originMachineName: machine.name,
@@ -247,11 +243,12 @@ function MachineHealthSection({
     supportsTurnOffProvider,
   };
 
+  // No overall badge in the header: the first row already says it ("1 check
+  // is failing", "Connecting to MacBook…"), right under it.
   return (
     <SettingsSection
       id={machineHealthAnchorId(machine.environmentId)}
       title={`${machine.name} health`}
-      headerAction={overall === null ? null : <StatusBadge status={overall} />}
     >
       {view._tag === "error" ? (
         <SettingsRow title={`Couldn't check ${machine.name}'s health`} description={query.error} />
@@ -319,23 +316,20 @@ function HealthReportRows({
         machine={machine}
         viewed={viewed}
       />
+      {/* The badge is the row's one status: no attention dot after the title. */}
       {problems.map((check) => (
         <SettingsRow
           key={check.id}
           className={arrived(check.id) ? ARRIVAL_FADE : undefined}
-          title={
-            <SettingsAttentionTitle tone={attention.get(check.id) ?? null}>
-              {HEALTH_CHECK_LABELS[check.id]}
-            </SettingsAttentionTitle>
-          }
-          description={check.summary}
+          title={HEALTH_CHECK_LABELS[check.id]}
+          description={checkDescription(check)}
           control={<StatusBadge status={check.status} />}
         >
           <AnimatedHeight>
             {check.items.length > 0 ? (
-              <ul className="space-y-3 pt-1 pb-2">
+              <ul className="space-y-3 pt-2">
                 {check.items.map((item) => (
-                  <HealthItemRow key={item.key} item={item} checkId={check.id} context={context} />
+                  <HealthItemRow key={item.key} item={item} check={check} context={context} />
                 ))}
               </ul>
             ) : null}
@@ -413,18 +407,10 @@ function OtherChecksRow({
     <SettingsRow
       title={<SettingsAttentionTitle tone={attention}>Other checks</SettingsAttentionTitle>}
       description={summary}
-      control={
-        <DisclosureTrigger
-          variant="quiet"
-          open={open}
-          onClick={() => setOpen((current) => !current)}
-        >
-          {open ? "Hide" : "Show"}
-        </DisclosureTrigger>
-      }
+      control={<SettingsDisclosureToggle open={open} onOpenChange={setOpen} label="other checks" />}
     >
       <DisclosurePanel open={open}>
-        <ul className="space-y-3 pt-1 pb-2">
+        <ul className="space-y-3 pt-2">
           {checks.map((check) => (
             <li key={check.id} className="space-y-2">
               <HealthLine
@@ -433,14 +419,10 @@ function OtherChecksRow({
                 detail={check.summary}
               />
               {check.items.length > 0 ? (
-                <ul className="space-y-3 ps-6.5">
+                // Indented past the check's dot, onto its title.
+                <ul className="space-y-2 ps-3.5">
                   {check.items.map((item) => (
-                    <HealthItemRow
-                      key={item.key}
-                      item={item}
-                      checkId={check.id}
-                      context={context}
-                    />
+                    <HealthItemRow key={item.key} item={item} check={check} context={context} />
                   ))}
                 </ul>
               ) : null}
@@ -452,53 +434,55 @@ function OtherChecksRow({
   );
 }
 
-const STATUS_ICONS = {
-  ok: { icon: CheckCircle2Icon, className: "text-success" },
-  warn: { icon: TriangleAlertIcon, className: "text-warning" },
-  fail: { icon: CircleAlertIcon, className: "text-destructive" },
-  unknown: { icon: CircleDashedIcon, className: "text-muted-foreground" },
-} as const satisfies Record<MachineHealthStatus, { icon: LucideIcon; className: string }>;
-
-/** A status glyph beside a title and its detail: one item, or one folded check. */
+/**
+ * One line under a health row: an item, one folded check, or a test send's
+ * channel. Smaller than the row title, with its detail muted under it.
+ * `status` puts a tone dot before the title; pass null when the row's own
+ * badge already says it. `actions` sit on the row's trailing edge, under the
+ * row's own control, and drop below the text on a narrow row.
+ */
 function HealthLine({
   status,
   title,
   detail,
-  children,
+  actions,
 }: {
-  readonly status: MachineHealthStatus;
+  readonly status: MachineHealthStatus | null;
   readonly title: ReactNode;
   readonly detail: ReactNode;
-  readonly children?: ReactNode;
+  readonly actions?: ReactNode;
 }) {
-  const marker = STATUS_ICONS[status];
-  const Icon = marker.icon;
   return (
-    <div className="flex gap-2.5">
-      <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center">
-        <Icon
-          aria-label={HEALTH_STATUS_LABELS[status]}
-          className={cn("size-4", marker.className)}
-        />
-      </span>
-      <div className="min-w-0 flex-1 space-y-1.5">
-        <div>
-          <div className="text-sm text-foreground">{title}</div>
-          {detail ? <p className="text-xs text-muted-foreground">{detail}</p> : null}
+    <div className="flex gap-2 text-xs">
+      {status === null ? null : <SettingsStatusDot tone={HEALTH_STATUS_TONES[status]} />}
+      <div className="flex min-w-0 flex-1 flex-col gap-2 @min-[32rem]/settings-row:flex-row @min-[32rem]/settings-row:items-center @min-[32rem]/settings-row:gap-8">
+        <div className="min-w-0 flex-1">
+          <div className="text-foreground">
+            {status === null ? null : (
+              <span className="sr-only">{HEALTH_STATUS_LABELS[status]}: </span>
+            )}
+            {title}
+          </div>
+          {detail ? <p className="text-muted-foreground">{detail}</p> : null}
         </div>
-        {children}
+        {actions ? (
+          <div className="flex shrink-0 flex-wrap items-center gap-1.5 @min-[32rem]/settings-row:justify-end">
+            {actions}
+          </div>
+        ) : null}
       </div>
     </div>
   );
 }
 
+/** One item of a check; it shows its own status only where it differs from the check's. */
 function HealthItemRow({
   item,
-  checkId,
+  check,
   context,
 }: {
   readonly item: MachineHealthItem;
-  readonly checkId: MachineHealthCheckId;
+  readonly check: MachineHealthCheck;
   readonly context: MachineHealthActionContext;
 }) {
   // A passing line ("Canary passed") needs no Fix, only its link.
@@ -512,7 +496,7 @@ function HealthItemRow({
       : healthItemActions(
           {
             itemKey: item.key,
-            checkId,
+            checkId: check.id,
             title: item.title,
             detail: item.detail,
             fix: item.fix,
@@ -525,22 +509,25 @@ function HealthItemRow({
   return (
     <li>
       <HealthLine
-        status={item.status}
+        status={item.status === check.status ? null : item.status}
         title={item.title}
         detail={[item.detail, since].filter(Boolean).join(" · ")}
-      >
-        {fix !== null || open !== null || turnOff !== null ? (
-          <div className="flex flex-wrap gap-1.5">
-            {fix !== null ? <HealthActionButton action={fix} primary subject={item.title} /> : null}
-            {open !== null ? (
-              <HealthActionButton action={open} primary={fix === null} subject={item.title} />
-            ) : null}
-            {turnOff !== null ? (
-              <HealthActionButton action={turnOff} primary={false} subject={item.title} />
-            ) : null}
-          </div>
-        ) : null}
-      </HealthLine>
+        actions={
+          fix !== null || open !== null || turnOff !== null ? (
+            <>
+              {turnOff !== null ? (
+                <HealthActionButton action={turnOff} primary={false} subject={item.title} />
+              ) : null}
+              {open !== null ? (
+                <HealthActionButton action={open} primary={fix === null} subject={item.title} />
+              ) : null}
+              {fix !== null ? (
+                <HealthActionButton action={fix} primary subject={item.title} />
+              ) : null}
+            </>
+          ) : null
+        }
+      />
     </li>
   );
 }
@@ -559,9 +546,10 @@ function HealthActionButton({
   const [busy, setBusy] = useState(false);
   return (
     <Button
-      size="xs"
+      size="sm"
       variant={primary ? "default" : "outline"}
-      disabled={!permitted || busy}
+      disabled={!permitted}
+      busy={busy}
       aria-label={`${action.label}: ${subject}`}
       onClick={async () => {
         setBusy(true);
@@ -646,45 +634,50 @@ function CanaryRow({
       {...searchableSetting("health-canary")}
       description={blocked === null ? description : `${description} ${blocked}`}
       control={
-        <>
-          {canary !== null ? (
-            <Select
-              value={String(canary.intervalMinutes)}
-              disabled={!editable || !canary.enabled}
-              onValueChange={(value) => {
-                const intervalMinutes = Number(value);
-                if (Number.isInteger(intervalMinutes)) {
-                  update({ health: { canary: { intervalMinutes } } });
-                }
-              }}
-            >
-              <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Canary interval">
-                <SelectValue>
-                  {
-                    canaryIntervalOptions(canary.intervalMinutes).find(
-                      (option) => option.minutes === canary.intervalMinutes,
-                    )?.label
-                  }
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup alignItemWithTrigger={false}>
-                {canaryIntervalOptions(canary.intervalMinutes).map((option) => (
-                  <SelectItem key={option.minutes} value={String(option.minutes)}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          ) : null}
-          <Switch
-            checked={canary?.enabled ?? false}
-            disabled={!editable}
-            aria-label={`Canary check on ${machine.name}`}
-            onCheckedChange={(enabled) => update({ health: { canary: { enabled } } })}
-          />
-        </>
+        <Switch
+          checked={canary?.enabled ?? false}
+          disabled={!editable}
+          aria-label={`Canary check on ${machine.name}`}
+          onCheckedChange={(enabled) => update({ health: { canary: { enabled } } })}
+        />
       }
-    />
+    >
+      {canary !== null ? (
+        <DisclosurePanel open={canary.enabled}>
+          <ChannelFields>
+            <ChannelField label="Runs">
+              <Select
+                value={String(canary.intervalMinutes)}
+                disabled={!editable}
+                onValueChange={(value) => {
+                  const intervalMinutes = Number(value);
+                  if (Number.isInteger(intervalMinutes)) {
+                    update({ health: { canary: { intervalMinutes } } });
+                  }
+                }}
+              >
+                <SelectTrigger size="sm" aria-label="Canary interval">
+                  <SelectValue>
+                    {
+                      canaryIntervalOptions(canary.intervalMinutes).find(
+                        (option) => option.minutes === canary.intervalMinutes,
+                      )?.label
+                    }
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup alignItemWithTrigger={false}>
+                  {canaryIntervalOptions(canary.intervalMinutes).map((option) => (
+                    <SelectItem key={option.minutes} value={String(option.minutes)}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </ChannelField>
+          </ChannelFields>
+        </DisclosurePanel>
+      ) : null}
+    </SettingsRow>
   );
 }
 
@@ -822,10 +815,13 @@ function AlertChannelRows({ environment }: { readonly environment: EnvironmentPr
 }
 
 function ChannelFields({ children }: { readonly children: ReactNode }) {
-  return <div className="space-y-2.5 pt-1 pb-2">{children}</div>;
+  return <div className="space-y-2.5 pt-2">{children}</div>;
 }
 
-/** A label on the left and its control on the right, stacking on narrow rows. */
+/**
+ * A label (and any hint or warning under it) on the left, its control on the
+ * right at the settings field width, stacking on narrow rows.
+ */
 function ChannelField({
   label,
   hint,
@@ -843,11 +839,9 @@ function ChannelField({
         <label htmlFor={htmlFor} className="text-xs text-muted-foreground">
           {label}
         </label>
-        {hint ? <p className="text-xs text-muted-foreground/70">{hint}</p> : null}
+        {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
       </div>
-      <div className="flex w-full shrink-0 flex-col gap-1 @min-[32rem]/settings-row:w-56">
-        {children}
-      </div>
+      <SettingsField>{children}</SettingsField>
     </div>
   );
 }
@@ -892,13 +886,22 @@ function IntegrationField({
   }
   const selected = options.find((option) => option.name === value) ?? null;
   return (
-    <ChannelField label={label}>
+    <ChannelField
+      label={label}
+      hint={
+        selected !== null && !selected.connected ? (
+          <span className="text-warning-foreground">
+            {selected.label} isn't connected right now, so alerts can't go out through it.
+          </span>
+        ) : undefined
+      }
+    >
       <Select
         value={value ?? NO_INTEGRATION}
         disabled={disabled}
         onValueChange={(next) => onChange(next === NO_INTEGRATION ? null : String(next))}
       >
-        <SelectTrigger size="sm" className="w-full" aria-label={label}>
+        <SelectTrigger size="sm" aria-label={label}>
           <SelectValue>{selected?.label ?? `Choose ${service}`}</SelectValue>
         </SelectTrigger>
         <SelectPopup alignItemWithTrigger={false}>
@@ -910,11 +913,6 @@ function IntegrationField({
           ))}
         </SelectPopup>
       </Select>
-      {selected !== null && !selected.connected ? (
-        <p className="text-xs text-warning-foreground">
-          {selected.label} isn't connected right now, so alerts can't go out through it.
-        </p>
-      ) : null}
     </ChannelField>
   );
 }
@@ -992,29 +990,57 @@ function TestAlertRow({
     }
   };
 
+  // Why the button is off, since a disabled button can't say so itself.
+  const blocked = !canTest
+    ? "This connection can't send test alerts."
+    : !anyEnabled
+      ? "Turn on Slack or email alerts first."
+      : null;
+  const button = (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={blocked !== null}
+      busy={busy}
+      onClick={() => void send()}
+    >
+      {busy ? <Spinner /> : null}
+      Send test
+    </Button>
+  );
+
   return (
     <SettingsRow
-      title="Send test alert"
+      title="Test alerts"
       description="Sends a test message through each channel that's on, so you know alerts will reach you."
       control={
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!canTest || !anyEnabled || busy}
-          onClick={() => void send()}
-        >
-          {busy ? <Spinner /> : null}
-          Send test alert
-        </Button>
+        blocked === null ? (
+          button
+        ) : (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                // Focusable so keyboard users can still reach the reason.
+                <span
+                  tabIndex={0}
+                  className="flex rounded-md outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                />
+              }
+            >
+              {button}
+            </TooltipTrigger>
+            <TooltipPopup side="top">{blocked}</TooltipPopup>
+          </Tooltip>
+        )
       }
     >
       <AnimatedHeight>
         {error !== null ? (
-          <p role="alert" className="pb-2 text-xs text-destructive">
+          <p role="alert" className="pt-2 text-xs text-destructive">
             {error}
           </p>
         ) : result !== null ? (
-          <ul className="space-y-2 pt-1 pb-2" role="status">
+          <ul className="space-y-2 pt-2" role="status">
             {channelTestLines(result).map((line) => (
               <li key={line.channel}>
                 <HealthLine

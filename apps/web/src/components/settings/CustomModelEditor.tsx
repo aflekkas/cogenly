@@ -10,6 +10,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
+import { SettingsGroup } from "./SettingsGroup";
 import {
   DESCRIPTOR_PRESETS_BY_KIND,
   type CustomModelDraft,
@@ -169,7 +170,7 @@ export function CustomModelEditor({
         className="min-w-0 flex-1"
         aria-label="Choice label"
       />
-      <label className="flex shrink-0 items-center gap-1.5 text-2xs text-muted-foreground">
+      <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
         <Switch
           checked={choice.isDefault}
           onCheckedChange={(checked) =>
@@ -195,12 +196,14 @@ export function CustomModelEditor({
   );
 
   const renderDescriptor = (descriptor: EditorDescriptor, index: number) => (
-    <div
+    <SettingsGroup
       key={descriptor.key}
-      className="flex flex-col gap-2 rounded-md border border-border/60 bg-background/40 p-2.5"
+      variant="inset"
+      divided={false}
+      className="flex flex-col gap-2 p-2.5"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <span className="w-14 shrink-0 text-2xs text-muted-foreground">Option {index + 1}</span>
+        <span className="w-14 shrink-0 text-xs text-muted-foreground">Option {index + 1}</span>
         {presets.length > 0 ? (
           <Select
             value={idSelectValue(descriptor)}
@@ -286,12 +289,14 @@ export function CustomModelEditor({
           </Button>
         </div>
       ) : null}
-    </div>
+    </SettingsGroup>
   );
 
   return (
-    <div
-      className="mx-2 mt-1 mb-2 flex flex-col gap-3 rounded-md border border-border bg-muted/20 p-3"
+    <SettingsGroup
+      variant="inset"
+      divided={false}
+      className="mx-3 mb-3 flex flex-col gap-3 p-3 sm:mx-4"
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -379,10 +384,10 @@ export function CustomModelEditor({
         <Button size="sm" variant="outline" onClick={handleSave}>
           Save
         </Button>
-        <Button size="sm" variant="ghost" onClick={onCancel}>
+        <Button size="sm" variant="outline" onClick={onCancel}>
           Cancel
         </Button>
       </div>
-    </div>
+    </SettingsGroup>
   );
 }

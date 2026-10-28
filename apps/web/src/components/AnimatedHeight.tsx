@@ -1,10 +1,18 @@
 "use client";
 
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Children, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { observeResize } from "../lib/observeResize";
+import { DisclosurePanel } from "./ui/disclosure";
 
 const HEIGHT_TRANSITION_FALLBACK_MS = 250;
 
+/**
+ * Eases its own height as its content changes size. Content that appears or
+ * leaves entirely (children turn empty) goes through `DisclosurePanel`: the
+ * departing content stays mounted while its height and opacity close together,
+ * and arriving content grows in while it fades. Content present at mount
+ * stays still. Reduced motion keeps only the fade in.
+ */
 export function AnimatedHeight({
   children,
   holdHeight = false,
@@ -13,21 +21,43 @@ export function AnimatedHeight({
   /** Retain the previous content height while a replacement is loading. */
   readonly holdHeight?: boolean;
 }) {
+  const present = Children.toArray(children).length > 0;
+  return (
+    // `data-empty` lets a divided settings card drop the separator at once.
+    <div data-slot="animated-height" data-empty={present ? undefined : ""}>
+      <DisclosurePanel open={present}>
+        <MeasuredHeight holdHeight={holdHeight}>{children}</MeasuredHeight>
+      </DisclosurePanel>
+    </div>
+  );
+}
+
+function MeasuredHeight({
+  children,
+  holdHeight,
+}: {
+  readonly children: ReactNode;
+  readonly holdHeight: boolean;
+}) {
   const contentRef = useRef<HTMLDivElement>(null);
   const [heightState, setHeightState] = useState<{
     readonly height: number | null;
     readonly isClipping: boolean;
   }>({ height: null, isClipping: false });
 
+  const { height, isClipping } = heightState;
+  // Unclips if transitionend never fires. Each new target height restarts the
+  // timer, so a resize mid-motion still gets its full transition. A clipping
+  // state always has a measured height.
   useEffect(() => {
-    if (!heightState.isClipping) return;
+    if (!isClipping || height === null) return;
     const timeoutId = window.setTimeout(() => {
       setHeightState((currentState) =>
         currentState.isClipping ? { ...currentState, isClipping: false } : currentState,
       );
     }, HEIGHT_TRANSITION_FALLBACK_MS);
     return () => window.clearTimeout(timeoutId);
-  }, [heightState.height, heightState.isClipping]);
+  }, [height, isClipping]);
 
   useLayoutEffect(() => {
     if (holdHeight) return;
@@ -79,7 +109,6 @@ export function AnimatedHeight({
 
   return (
     <div
-      data-slot="animated-height"
       className="transition-[height] duration-200 ease-out motion-reduce:transition-none [overflow-clip-margin:2px]"
       style={
         heightState.height === null

@@ -53,13 +53,13 @@ export function SettingsScopeSentence() {
       <p className="px-3 text-sm text-muted-foreground sm:px-4">
         {/* Sidebar layout stays on the device that set it (appearancePreferences.ts). */}
         {pathname === "/settings/appearance"
-          ? "Shared across your machines, except Sidebar layout"
+          ? "Shared across your machines, except the sidebar layout"
           : "Shared across your machines"}
       </p>
     );
   if (scope === null || !scope.machinePage || SETTINGS_SCOPELESS_PATHS.has(pathname)) return null;
   return (
-    <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 px-3 text-base text-muted-foreground sm:px-4">
+    <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 px-3 text-sm text-muted-foreground sm:px-4">
       <span className="shrink-0">Settings for</span>
       <MachineScopeMenu />
     </p>

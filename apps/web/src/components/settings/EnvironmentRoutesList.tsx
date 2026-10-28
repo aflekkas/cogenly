@@ -35,6 +35,7 @@ import { usePreparedConnection } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { SettingsStatusBadge } from "./SettingsStatus";
 
 /**
  * The ways this client reaches one saved machine, preferred first. Drag to
@@ -176,11 +177,7 @@ function SortableRouteRow({
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-1.5 text-xs font-medium text-foreground">
           {label}
-          {inUse ? (
-            <span className="rounded-sm bg-success/12 px-1 text-2xs font-normal text-success-foreground">
-              In use
-            </span>
-          ) : null}
+          {inUse ? <SettingsStatusBadge tone="success">In use</SettingsStatusBadge> : null}
         </p>
         {address !== null ? (
           <p className="truncate text-2xs text-muted-foreground">

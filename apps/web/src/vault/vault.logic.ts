@@ -316,6 +316,60 @@ export function vaultLastUsedText(
   return `Used ${relative(entry.at)}${who}`;
 }
 
+// Names Cogenly generates for items an integration's setup stores, such as
+// `integration-endpoint:<uuid>`: a kind, a colon and an id.
+const GENERATED_NAME = /^[a-z][a-z0-9-]*:[0-9a-f]{8}-[0-9a-f-]{27,}$/i;
+
+/**
+ * What a vault item is called in a list. An item with a generated name and a
+ * human label ("Wispr Flow private endpoint") is titled by the label, with the
+ * generated name kept as `internalName` for agents and support; every other
+ * item keeps its own name as the title and its label as the description.
+ */
+export function vaultItemDisplay(item: Pick<VaultItemMetadata, "name" | "label">): {
+  readonly title: string;
+  readonly description: string | null;
+  readonly internalName: string | null;
+} {
+  const label = item.label?.trim() || null;
+  if (label !== null && GENERATED_NAME.test(item.name)) {
+    return { title: label, description: null, internalName: item.name };
+  }
+  return { title: item.name, description: label, internalName: null };
+}
+
+/** A run of identical uses (same item, action, outcome, site and user), newest first. */
+export interface VaultUsageGroup {
+  readonly entry: VaultUsageEntry;
+  readonly count: number;
+}
+
+/**
+ * Collapses consecutive identical uses into one line with a count, so an
+ * item filled every hour reads as one entry instead of a page of them. The
+ * kept entry is the newest of its run.
+ */
+export function groupVaultUsage(usage: ReadonlyArray<VaultUsageEntry>): Array<VaultUsageGroup> {
+  const groups: Array<{ entry: VaultUsageEntry; count: number }> = [];
+  for (const entry of usage) {
+    const last = groups.at(-1);
+    if (
+      last !== undefined &&
+      last.entry.itemId === entry.itemId &&
+      last.entry.action === entry.action &&
+      last.entry.outcome === entry.outcome &&
+      last.entry.domain === entry.domain &&
+      last.entry.agentId === entry.agentId &&
+      last.entry.threadId === entry.threadId
+    ) {
+      last.count += 1;
+    } else {
+      groups.push({ entry, count: 1 });
+    }
+  }
+  return groups;
+}
+
 /** Logins first (they get their own list), then everything else. */
 export function splitVaultItems(items: ReadonlyArray<VaultItemMetadata>): {
   readonly logins: ReadonlyArray<VaultItemMetadata>;
@@ -339,7 +393,8 @@ const OUTCOME_LABELS: Readonly<Record<string, string>> = {
 
 const ACTION_LABELS: Readonly<Record<string, string>> = {
   fill: "Filled",
-  resolve: "Used by Cogenly",
+  // The line names who used it ("Cogenly", an agent) after the site.
+  resolve: "Used",
   use: "Used",
 };
 

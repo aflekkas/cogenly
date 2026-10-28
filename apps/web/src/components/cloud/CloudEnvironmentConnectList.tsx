@@ -496,6 +496,7 @@ export function CloudEnvironmentConnectRows({
             <Button
               size="sm"
               disabled={connectingEnvironmentIds.size > 0}
+              busy={connectingEnvironmentIds.has(environment.environmentId)}
               onClick={() => void connectEnvironment(environment)}
             >
               {connectingEnvironmentIds.has(environment.environmentId)

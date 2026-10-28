@@ -30,7 +30,6 @@ import { useEnvironments, type EnvironmentPresentation } from "../../state/envir
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
-import { Badge } from "../ui/badge";
 import { Button, InlineButton } from "../ui/button";
 import {
   Dialog,
@@ -57,6 +56,7 @@ import {
   SettingsSectionAction,
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
+import { SettingsStatusBadge } from "./SettingsStatus";
 
 const TAILSCALE_SENTENCE =
   "Cogenly links your machines through Tailscale, a free app that gives them a private, encrypted connection only you can use.";
@@ -139,14 +139,14 @@ function relationText(machine: MachineInfo, list: MachineListResult): string {
 
 /**
  * Settings → Machines: the viewed machine's pairing, every machine it knows
- * about, and Add a machine, which walks both machines through Tailscale and
+ * about, and Add machine, which walks both machines through Tailscale and
  * pairs them. Unpair is the way back out.
  */
 export function MachinesSettingsPanel({
   addRequested,
   onAddOpened,
 }: {
-  /** A link asked for Add a machine, such as the command palette's; `onAddOpened` consumes it. */
+  /** A link asked for Add machine, such as the command palette's; `onAddOpened` consumes it. */
   readonly addRequested: boolean;
   readonly onAddOpened: () => void;
 }) {
@@ -189,9 +189,7 @@ function MachinesSection({
       {...searchableSetting("machines")}
       title="Your machines"
       headerAction={
-        canPair ? (
-          <SettingsSectionAction onClick={onAdd}>Add a machine</SettingsSectionAction>
-        ) : null
+        canPair ? <SettingsSectionAction onClick={onAdd}>Add machine</SettingsSectionAction> : null
       }
     >
       {environment === null ? (
@@ -362,14 +360,13 @@ function MachineRow({
         <>
           <div ref={statusNode} className="flex">
             {presence === null ? null : (
-              <Badge
-                size="sm"
-                variant={
-                  presence === "Online" ? "success" : presence === "Offline" ? "outline" : "warning"
+              <SettingsStatusBadge
+                tone={
+                  presence === "Online" ? "success" : presence === "Offline" ? "neutral" : "warning"
                 }
               >
                 {presence}
-              </Badge>
+              </SettingsStatusBadge>
             )}
           </div>
           {unpairable && canUnpair ? (
@@ -596,7 +593,7 @@ function AddMachineDialog({
     >
       <DialogPopup className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Add a machine</DialogTitle>
+          <DialogTitle>Add machine</DialogTitle>
           <DialogDescription>{TAILSCALE_SENTENCE}</DialogDescription>
         </DialogHeader>
         <DialogPanel>{body}</DialogPanel>
@@ -605,7 +602,7 @@ function AddMachineDialog({
             Cancel
           </DialogClose>
           {hub !== null && spoke !== null ? (
-            <Button disabled={!bothReady || !canPair || pairing} onClick={() => void pairNow()}>
+            <Button disabled={!bothReady || !canPair} busy={pairing} onClick={() => void pairNow()}>
               {pairing ? <Spinner /> : null}
               {pairing ? `Pairing ${spoke.label}…` : `Pair ${spoke.label} with ${hubName}`}
             </Button>
@@ -768,8 +765,9 @@ function SetupStepRow({
             <div className="flex flex-wrap gap-1.5">
               {step.action !== null ? (
                 <Button
-                  size="xs"
-                  disabled={!canRun || starting}
+                  size="sm"
+                  disabled={!canRun}
+                  busy={starting}
                   aria-label={`${step.action} on ${name}`}
                   onClick={() => void start()}
                 >
@@ -779,7 +777,7 @@ function SetupStepRow({
               ) : null}
               {handoff?._tag === "open-url" ? (
                 <Button
-                  size="xs"
+                  size="sm"
                   variant={step.action === null ? "default" : "outline"}
                   aria-label={`${handoff.label} for ${name}`}
                   onClick={() => {

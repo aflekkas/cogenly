@@ -489,7 +489,7 @@ export function ProjectScriptEditorDialog({
             <Button type="button" variant="outline" onClick={close}>
               Cancel
             </Button>
-            <Button form={formId} type="submit" disabled={isSaving || !canEditActions}>
+            <Button form={formId} type="submit" disabled={!canEditActions} busy={isSaving}>
               {isSaving ? "Saving…" : isEditing ? "Save changes" : "Save action"}
             </Button>
           </DialogFooter>

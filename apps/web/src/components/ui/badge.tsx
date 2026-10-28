@@ -20,6 +20,9 @@ const badgeVariants = cva(
         default:
           "h-5.5 min-w-5.5 px-[calc(--spacing(1)-1px)] text-sm sm:h-4.5 sm:min-w-4.5 sm:text-xs",
         lg: "h-6.5 min-w-6.5 px-[calc(--spacing(1.5)-1px)] text-base sm:h-5.5 sm:min-w-5.5 sm:text-sm",
+        // A worded status or tag beside 12px meta text (settings rows and headers):
+        // the meta's own size, with room either side of the word.
+        md: "h-5 min-w-5 rounded-[var(--control-radius-2xs)] px-[calc(--spacing(1.5)-1px)] text-xs leading-none",
         // leading-none: with the inherited fractional leading the rounded font metrics
         // leave the label sitting high in the fixed-height box, worse under renderer zoom.
         sm: "h-5 min-w-5 rounded-[.25rem] px-[calc(--spacing(1)-1px)] text-xs leading-none sm:h-4 sm:min-w-4 sm:text-[.625rem]",
@@ -32,6 +35,11 @@ const badgeVariants = cva(
         outline:
           "border-input bg-background text-foreground dark:bg-input/32 [button&,a&]:hover:bg-accent/50 dark:[button&,a&]:hover:bg-input/48",
         secondary: "bg-secondary text-secondary-foreground [button&,a&]:hover:bg-secondary/90",
+        // A fact about an item (its type, "Default"): a quiet outline at the meta
+        // text's color and weight, so it reads as neither a status nor a button.
+        tag: "border-border bg-transparent font-normal text-muted-foreground",
+        // A state that recedes (off, not checked): quieter than any tone.
+        muted: "bg-muted text-muted-foreground",
         success: "bg-success/8 text-success-foreground dark:bg-success/16",
         warning: "bg-warning/8 text-warning-foreground dark:bg-warning/16",
         // A label tinted from the --label color the consumer sets in style.

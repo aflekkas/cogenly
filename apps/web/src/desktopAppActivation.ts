@@ -177,7 +177,7 @@ export interface DesktopPairingCandidate {
 
 export interface DesktopPairMachinesDependencies {
   readonly machines: ReadonlyArray<DesktopPairingCandidate>;
-  /** Runs Settings → Machines → Add a machine's pairing command; throws its failure. */
+  /** Runs Settings → Machines → Add machine's pairing command; throws its failure. */
   readonly pair: (input: {
     readonly hub: DesktopAppPairedMachine;
     readonly joining: DesktopAppPairedMachine;
@@ -215,7 +215,7 @@ export function findPairingCandidate(
 
 /**
  * Pairs two machines for `machine_pair`, with the command Settings → Machines →
- * Add a machine uses. The join code passes between the two connections inside
+ * Add machine uses. The join code passes between the two connections inside
  * that command and never reaches the request, the response, or the agent.
  */
 export async function handleDesktopPairMachinesRequest(

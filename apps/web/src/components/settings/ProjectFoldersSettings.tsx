@@ -3,9 +3,14 @@ import { DEFAULT_UNIFIED_SETTINGS } from "@cogenly/contracts/settings";
 import { readLocalApi } from "../../localApi";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { Button } from "../ui/button";
-import { DraftInput } from "../ui/draft-input";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SettingResetButton,
+  SettingsField,
+  SettingsPathInput,
+  SettingsRow,
+  SettingsSection,
+} from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
@@ -45,7 +50,7 @@ export function ProjectFoldersSettings() {
         serverScoped
         settingKeys={["projectsRoot"]}
         {...searchableSetting("projects-folder")}
-        description="Where Cogenly creates projects and clones repositories. Each project gets a folder here; repositories outside a project go in Repositories. Existing folders don't move."
+        description="Where Cogenly creates projects and clones repositories. Existing folders don't move."
         resetAction={
           settings.projectsRoot !== DEFAULT_UNIFIED_SETTINGS.projectsRoot ? (
             <SettingResetButton
@@ -57,10 +62,9 @@ export function ProjectFoldersSettings() {
           ) : null
         }
         control={
-          <div className="flex w-full items-center gap-2 sm:w-auto">
-            <DraftInput
+          <SettingsField>
+            <SettingsPathInput
               size="sm"
-              className="w-full sm:w-56"
               value={settings.projectsRoot}
               onCommit={(next) => updateSettings({ projectsRoot: next })}
               placeholder={
@@ -74,14 +78,14 @@ export function ProjectFoldersSettings() {
                 Change…
               </Button>
             ) : null}
-          </div>
+          </SettingsField>
         }
       />
       <SettingsRow
         serverScoped
         settingKeys={["addProjectBaseDirectory"]}
         {...searchableSetting("add-project-starts-in")}
-        description="Where the folder browser opens when you add a repository that's already on this machine. Empty opens your home folder."
+        description="Where the folder browser opens when you add an existing repository. Empty opens your home folder."
         resetAction={
           settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory ? (
             <SettingResetButton
@@ -95,15 +99,16 @@ export function ProjectFoldersSettings() {
           ) : null
         }
         control={
-          <DraftInput
-            size="sm"
-            className="w-full sm:w-56"
-            value={settings.addProjectBaseDirectory}
-            onCommit={(next) => updateSettings({ addProjectBaseDirectory: next })}
-            placeholder="~/"
-            spellCheck={false}
-            aria-label="Folder browser starts in"
-          />
+          <SettingsField>
+            <SettingsPathInput
+              size="sm"
+              value={settings.addProjectBaseDirectory}
+              onCommit={(next) => updateSettings({ addProjectBaseDirectory: next })}
+              placeholder="~/"
+              spellCheck={false}
+              aria-label="Folder browser starts in"
+            />
+          </SettingsField>
         }
       />
     </SettingsSection>

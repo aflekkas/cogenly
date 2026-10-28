@@ -31,7 +31,7 @@ import {
   Settings2Icon,
   SparklesIcon,
 } from "lucide-react";
-import { useLocation, useNavigate } from "@tanstack/react-router";
+import { useLocation, useRouter } from "@tanstack/react-router";
 
 import { cn } from "~/lib/utils";
 import { useLegacySidebarEnabled } from "../../hooks/useSettings";
@@ -45,6 +45,7 @@ import {
   sidebarRowClassName,
 } from "../sidebar/SidebarList";
 import { SidebarListColumn } from "../sidebar/SidebarListColumn";
+import { crossfadeModeSwitch } from "../sidebar/modes/modeSwitchMotion";
 import { SidebarSearchDock, type SidebarDockAction } from "../sidebar/SidebarSearchDock";
 import { sidebarListEdge, stepSearchResultIndex } from "../sidebar/sidebarListAnchor.logic";
 import { BadgeDot } from "../ui/badge-dot";
@@ -102,12 +103,18 @@ const SETTINGS_ICON_CLASS_NAME = "size-4 shrink-0 text-sidebar-muted-foreground"
 const NO_DOCK_ACTIONS: ReadonlyArray<SidebarDockAction> = [];
 
 export function SettingsSidebarNav({ pathname }: { pathname: string }) {
-  const navigate = useNavigate();
+  const router = useRouter();
   const currentHash = useLocation({ select: (location) => location.hash });
   const currentSearch = useLocation({ select: (location) => location.search });
   const scopeSearch = useMemo(() => validateSettingsScopeSearch(currentSearch), [currentSearch]);
-  // Detail pages (Repository, Open-source licenses) highlight their parent.
+  // A detail page (Repositories, Open-source licenses) has no row of its own,
+  // so its parent row stays selected there too: the nav always shows one
+  // selected row. Only the page itself is the current page to assistive tech.
   const activeNavPath = settingsNavPathFor(pathname);
+  const normalizedPathname = pathname.replace(/\/+$/, "");
+  const onActiveNavPage =
+    activeNavPath !== null &&
+    (normalizedPathname === activeNavPath || normalizedPathname.startsWith(`${activeNavPath}/`));
   const { isMobile, setOpenMobile, open, setOpen } = useSidebar();
   const legacySidebarEnabled = useLegacySidebarEnabled();
   const navRailVisible = !isMobile && !legacySidebarEnabled;
@@ -126,16 +133,14 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   });
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
-  const [activeResultIndex, setActiveResultIndex] = useState(0);
+  const [storedResultIndex, setActiveResultIndex] = useState(0);
   const attentionByPage = useSettingsAttentionByPage();
   const searchableItems = useAvailableSettingsSearchItems(scopeSearch);
   const results = useMemo(() => searchSettings(query, searchableItems), [query, searchableItems]);
   const isSearching = query.trim().length > 0;
   const hasResults = results.length > 0;
-
-  useEffect(() => {
-    setActiveResultIndex((index) => Math.min(index, Math.max(results.length - 1, 0)));
-  }, [results.length]);
+  // A narrowed query keeps the highlight on the last result rather than past it.
+  const activeResultIndex = Math.min(storedResultIndex, Math.max(results.length - 1, 0));
 
   useEffect(() => {
     const result = results[activeResultIndex];
@@ -188,21 +193,26 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isMobile, open, setOpen, setOpenMobile]);
 
-  // Picking a section selects its row the way picking a thread does: the row
-  // takes the selected fill at once and the page swaps, with no crossfade.
+  // Moving to another section crossfades the pane like a mode switch, opacity
+  // only: the old page holds until the new one commits (the settings layout
+  // settles the fade then), so a lazily loaded page never flashes blank. A
+  // jump within the page changes nothing to fade.
   const handleSectionClick = useCallback(
     (to: SettingsPath) => {
       if (isMobile) {
         setOpenMobile(false);
       }
-      void navigate({
-        to,
-        hash: "",
-        replace: true,
-        hashScrollIntoView: false,
+      const options = { to, hash: "", replace: true, hashScrollIntoView: false };
+      if (to === pathname.replace(/\/+$/, "")) {
+        void router.navigate(options);
+        return;
+      }
+      crossfadeModeSwitch(() => {
+        void router.navigate(options);
+        return true;
       });
     },
-    [isMobile, navigate, setOpenMobile],
+    [isMobile, pathname, router, setOpenMobile],
   );
   const clearSearch = useCallback(() => {
     setQuery("");
@@ -219,15 +229,23 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
         scrollToSettingsTarget(targetId);
         return;
       }
-      void navigate({
+      const options = {
         to: item.to,
         hash: targetId,
         replace: true,
         hashScrollIntoView: false,
         state: { settingsTargetHighlight: true },
+      };
+      if (item.to === pathname.replace(/\/+$/, "")) {
+        void router.navigate(options);
+        return;
+      }
+      crossfadeModeSwitch(() => {
+        void router.navigate(options);
+        return true;
       });
     },
-    [clearSearch, currentHash, isMobile, navigate, pathname, setOpenMobile],
+    [clearSearch, currentHash, isMobile, pathname, router, setOpenMobile],
   );
   const handleSearchKeyDown = useCallback(
     (event: KeyboardEvent<HTMLInputElement>) => {
@@ -241,8 +259,8 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
         const key = event.key;
-        setActiveResultIndex((index) =>
-          stepSearchResultIndex(key, index, results.length, searchEdge),
+        setActiveResultIndex(
+          stepSearchResultIndex(key, activeResultIndex, results.length, searchEdge),
         );
         return;
       }
@@ -368,7 +386,9 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                     <li key={to} className="list-none">
                       <button
                         type="button"
-                        aria-current={isActive ? "page" : undefined}
+                        aria-current={
+                          isActive ? (onActiveNavPage ? "page" : "location") : undefined
+                        }
                         aria-label={
                           attention === null
                             ? undefined

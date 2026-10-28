@@ -64,12 +64,14 @@ const inputGroupAddonVariants = cva(
       {
         align: "inline-end",
         inset: "pill",
-        className: "has-[>button]:me-0 pe-1 [[data-size=sm]+&]:pe-1 gap-0.5",
+        className:
+          "has-[>button]:me-0 pe-1 [:is([data-slot=input-control],[data-slot=textarea-control])[data-size=sm]+&]:pe-1 gap-0.5",
       },
       {
         align: "inline-start",
         inset: "pill",
-        className: "has-[>button]:ms-0 ps-1 [[data-size=sm]+&]:ps-1 gap-0.5",
+        className:
+          "has-[>button]:ms-0 ps-1 [:is([data-slot=input-control],[data-slot=textarea-control])[data-size=sm]+&]:ps-1 gap-0.5",
       },
     ],
     variants: {
@@ -79,13 +81,13 @@ const inputGroupAddonVariants = cva(
       },
       align: {
         "block-end":
-          "order-last w-full justify-start px-[calc(--spacing(3)-1px)] pb-[calc(--spacing(3)-1px)] [.border-t]:pt-[calc(--spacing(3)-1px)] [[data-size=sm]+&]:px-[calc(--spacing(2.5)-1px)]",
+          "order-last w-full justify-start px-[calc(--spacing(3)-1px)] pb-[calc(--spacing(3)-1px)] [.border-t]:pt-[calc(--spacing(3)-1px)] [:is([data-slot=input-control],[data-slot=textarea-control])[data-size=sm]+&]:px-[calc(--spacing(2.5)-1px)]",
         "block-start":
-          "order-first w-full justify-start px-[calc(--spacing(3)-1px)] pt-[calc(--spacing(3)-1px)] [.border-b]:pb-[calc(--spacing(3)-1px)] [[data-size=sm]+&]:px-[calc(--spacing(2.5)-1px)]",
+          "order-first w-full justify-start px-[calc(--spacing(3)-1px)] pt-[calc(--spacing(3)-1px)] [.border-b]:pb-[calc(--spacing(3)-1px)] [:is([data-slot=input-control],[data-slot=textarea-control])[data-size=sm]+&]:px-[calc(--spacing(2.5)-1px)]",
         "inline-end":
-          "has-[>:last-child[data-slot=badge]]:-me-1.5 has-[>button]:-me-2 order-last pe-[calc(--spacing(3)-1px)] has-[>kbd:last-child]:me-[-0.35rem] [[data-size=sm]+&]:pe-[calc(--spacing(2.5)-1px)]",
+          "has-[>:last-child[data-slot=badge]]:-me-1.5 has-[>button]:-me-2 order-last pe-[calc(--spacing(3)-1px)] has-[>kbd:last-child]:me-[-0.35rem] [:is([data-slot=input-control],[data-slot=textarea-control])[data-size=sm]+&]:pe-[calc(--spacing(2.5)-1px)]",
         "inline-start":
-          "has-[>:last-child[data-slot=badge]]:-ms-1.5 has-[>button]:-ms-2 order-first ps-[calc(--spacing(3)-1px)] has-[>kbd:last-child]:ms-[-0.35rem] [[data-size=sm]+&]:ps-[calc(--spacing(2.5)-1px)]",
+          "has-[>:last-child[data-slot=badge]]:-ms-1.5 has-[>button]:-ms-2 order-first ps-[calc(--spacing(3)-1px)] has-[>kbd:last-child]:ms-[-0.35rem] [:is([data-slot=input-control],[data-slot=textarea-control])[data-size=sm]+&]:ps-[calc(--spacing(2.5)-1px)]",
       },
     },
   },

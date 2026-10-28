@@ -2,7 +2,6 @@ import type { ComputerUseStatus, EnvironmentId } from "@cogenly/contracts";
 import { useEffect } from "react";
 
 import { AnimatedHeight } from "~/components/AnimatedHeight";
-import { PlatformStatus } from "~/components/device/DeviceSetup";
 import { Button } from "~/components/ui/button";
 
 import {
@@ -14,7 +13,9 @@ import {
   useComputerUseStatus,
   useRequestComputerUsePermission,
 } from "../../computerUse/useComputerUse";
-import { SettingsRow } from "./settingsLayout";
+import { SettingsGroup } from "./SettingsGroup";
+import { SettingsInsetRow, SettingsRow } from "./settingsLayout";
+import { SettingsStatusBadge } from "./SettingsStatus";
 import { useSettingsScope } from "./SettingsScopeContext";
 
 const STALE_RETRY_MS = 1_500;
@@ -78,36 +79,37 @@ function ComputerUsePermissionsRow({
       undefined);
 
   return (
-    <SettingsRow
-      id="computer-use-permissions"
-      title="macOS permissions"
-      description={description}
-      status={
-        computerUseAvailable(status) ? (
-          <div className="flex flex-wrap gap-x-5 gap-y-2">
-            {status.permissions.map((entry) => (
-              <div key={entry.permission} className="flex items-center gap-3">
-                <PlatformStatus
-                  compact
-                  platform={entry.title}
-                  readyLabel="Granted"
-                  status={{ ready: entry.grant === "granted", message: "Not granted" }}
-                />
-                {entry.grant === "granted" ? null : (
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    disabled={!canRequest || pending}
-                    onClick={() => void request(entry.permission).then(onRequested)}
-                  >
-                    Open System Settings
-                  </Button>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : undefined
-      }
-    />
+    <SettingsRow id="computer-use-permissions" title="macOS permissions" description={description}>
+      {computerUseAvailable(status) ? (
+        // One line per grant, like a nested list.
+        <SettingsGroup variant="inset" className="mt-2">
+          {status.permissions.map((entry) => (
+            <SettingsInsetRow
+              key={entry.permission}
+              title={entry.title}
+              control={
+                entry.grant === "granted" ? (
+                  <SettingsStatusBadge tone="success">Granted</SettingsStatusBadge>
+                ) : (
+                  <>
+                    <SettingsStatusBadge tone="warning">Not granted</SettingsStatusBadge>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!canRequest}
+                      busy={pending}
+                      aria-label={`Open System Settings for ${entry.title}`}
+                      onClick={() => void request(entry.permission).then(onRequested)}
+                    >
+                      Open System Settings
+                    </Button>
+                  </>
+                )
+              }
+            />
+          ))}
+        </SettingsGroup>
+      ) : null}
+    </SettingsRow>
   );
 }

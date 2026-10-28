@@ -11,16 +11,24 @@ import { AppleIcon, AndroidIcon } from "../Icons";
 import { Spinner } from "../ui/spinner";
 import type { EnvironmentId, SshDeviceHostConfig } from "@cogenly/contracts";
 import { randomUUID } from "../../lib/utils";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { deviceEnvironment } from "../../state/device";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button, InlineButton } from "../ui/button";
-import { CheckIcon, CircleIcon, MoreVertical, PlusIcon, TriangleAlertIcon } from "lucide-react";
+import {
+  CheckIcon,
+  CircleIcon,
+  MoreVertical,
+  PlusIcon,
+  SmartphoneIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import { DisclosureChevron } from "../ui/disclosure";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Menu, MenuTrigger, MenuPopup, MenuItem } from "../ui/menu";
-import { SettingsRow } from "./settingsLayout";
+import { SettingsGroup } from "./SettingsGroup";
+import { SettingsEmpty, SettingsRow } from "./settingsLayout";
 
 import { useSettingsScope } from "./SettingsScopeContext";
 import { toastManager } from "../ui/toast";
@@ -143,6 +151,25 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
     },
     onRemove: (host: SshDeviceHostConfig) => void save(host, true),
   };
+  const addHostButton = (size: "sm" | "xs") => (
+    <Button
+      size={size}
+      variant="outline"
+      disabled={!canConfigure || busy || !props.environmentId || editing !== null}
+      onClick={() => {
+        setOriginalHost(null);
+        setEditing({ id: randomUUID(), label: "", target: "" });
+      }}
+    >
+      <PlusIcon /> Add host
+    </Button>
+  );
+  const foldedByMachine = hostEnvironments.length > 1 && groupedHosts === null;
+  // An empty list offers its one action in the empty state, not twice.
+  const showsEmptyAction =
+    props.environmentId !== null &&
+    !foldedByMachine &&
+    hostEnvironments.every((environment) => environment.hosts.length === 0);
   return (
     <SettingsRow
       id="device-hosts"
@@ -150,28 +177,16 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
       serverScoped
       settingKeys={["deviceHosts"]}
       description="Other machines with simulators or emulators. This machine connects to them over SSH and sets up the device tools."
-      control={
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!canConfigure || busy || !props.environmentId || editing !== null}
-          onClick={() => {
-            setOriginalHost(null);
-            setEditing({ id: randomUUID(), label: "", target: "" });
-          }}
-        >
-          <PlusIcon className="size-3.5" /> Add host
-        </Button>
-      }
+      control={showsEmptyAction ? null : addHostButton("sm")}
     >
-      <div className="pt-3 pb-2">
+      <div className="mt-2">
         {!props.environmentId ? (
           <p className="text-xs text-muted-foreground">
             Connect this machine to manage its device hosts.
           </p>
         ) : (
           <>
-            {hostEnvironments.length > 1 && groupedHosts === null ? (
+            {foldedByMachine ? (
               <div className="space-y-2">
                 {hostEnvironments.map((environment) => (
                   <FoldedSettingsSection
@@ -194,7 +209,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
                       "No device hosts"
                     }
                   >
-                    <div className="px-3 sm:px-4 [&>div:first-child]:border-t-0">
+                    <div className="p-3 sm:px-4">
                       <DeviceHostList environments={[environment]} {...listActions} />
                     </div>
                   </FoldedSettingsSection>
@@ -205,6 +220,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
                 environments={hostEnvironments}
                 groups={groupedHosts ?? undefined}
                 compact={hostEnvironments.length > 1}
+                emptyAction={addHostButton("xs")}
                 {...listActions}
               />
             )}
@@ -232,6 +248,7 @@ function DeviceHostList({
   environments,
   groups,
   compact = false,
+  emptyAction,
   busy,
   onEdit,
   onRemove,
@@ -241,6 +258,8 @@ function DeviceHostList({
   environments: ReadonlyArray<DeviceHostEnvironment>;
   groups?: ReadonlyArray<DeviceHostGroup> | undefined;
   compact?: boolean;
+  /** The list's add action, shown in its empty state. */
+  emptyAction?: ReactNode;
   busy: boolean;
   onEdit: (host: SshDeviceHostConfig) => void;
   onRemove: (host: SshDeviceHostConfig) => void;
@@ -283,11 +302,19 @@ function DeviceHostList({
         members: [{ environmentId: environment.environmentId, label: environment.label, host }],
       })),
     );
+  if (rows.length === 0) {
+    return (
+      <SettingsGroup variant="inset" divided={false}>
+        <SettingsEmpty
+          icon={<SmartphoneIcon />}
+          label="No device hosts yet."
+          action={emptyAction}
+        />
+      </SettingsGroup>
+    );
+  }
   return (
-    <>
-      {rows.length === 0 ? (
-        <p className="py-2 text-xs text-muted-foreground">No device hosts yet.</p>
-      ) : null}
+    <SettingsGroup variant="inset">
       {rows.map(({ host, members }) => {
         const hostChecks = checks[deviceHostConnectionKey(host)];
         const checkedMembers = scopeEnvironments.flatMap((environment) =>
@@ -420,7 +447,7 @@ function DeviceHostList({
                   ),
               }));
         return (
-          <div key={host.id} className="flex items-center gap-2 border-t border-border/50 py-2.5">
+          <div key={host.id} className="flex items-center gap-2 px-3 py-2.5 sm:px-4">
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 items-center gap-2">
                 <p className="truncate text-sm font-medium">{host.label}</p>
@@ -558,9 +585,7 @@ function DeviceHostList({
             <Button
               size="sm"
               variant="outline"
-              disabled={
-                busy || (canRetry ? retrying !== null : compact ? pending : progress !== null)
-              }
+              busy={canRetry && retrying === host.id}
               onClick={() => {
                 if (canRetry) retryHost(environmentId, host.id);
                 else void testConnection(host);
@@ -571,7 +596,7 @@ function DeviceHostList({
           </div>
         );
       })}
-    </>
+    </SettingsGroup>
   );
 }
 
