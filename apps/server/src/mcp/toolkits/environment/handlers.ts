@@ -164,7 +164,7 @@ export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
   ),
   machine_health: McpToolAccess.reads((input) =>
     MachineHealth.MachineHealth.pipe(
-      Effect.flatMap((health) => health.reportFor(input)),
+      Effect.flatMap((health) => health.reportFor(input, true)),
       Effect.mapError(healthFailure),
     ),
   ),

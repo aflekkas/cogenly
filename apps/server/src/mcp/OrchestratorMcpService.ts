@@ -1,3 +1,4 @@
+import * as MachineResources from "../resourceTelemetry/MachineResources.ts";
 import { assertRunOwnership } from "./runOwnership.ts";
 import { derivePendingBackgroundWork } from "@cogenly/shared/orchestrationV2PendingBackgroundWork";
 import * as AccountConnections from "../accounts/AccountConnections.ts";
@@ -1274,10 +1275,20 @@ const make = Effect.gen(function* () {
                 ),
                 Effect.orElseSucceed(() => undefined),
               );
-          return { providers: catalog.value, remote: true, machineName };
+          return {
+            providers: catalog.value.providers,
+            resources: catalog.value.resources,
+            remote: true,
+            machineName,
+          };
         }
       }
-      return { providers: yield* loadProviders, remote: false, machineName: undefined };
+      return {
+        providers: yield* loadProviders,
+        resources: undefined,
+        remote: false,
+        machineName: undefined,
+      };
     });
 
   /**
@@ -2413,6 +2424,10 @@ const make = Effect.gen(function* () {
           })),
           Effect.mapError(() => failure("orchestration_error", "Unable to read server settings.")),
         );
+        const resourcesService = yield* Effect.serviceOption(MachineResources.MachineResources);
+        const localResources = Option.isNone(resourcesService)
+          ? undefined
+          : yield* resourcesService.value.read;
         const machinesService = yield* Effect.serviceOption(Machines.Machines);
         const machineCatalogs = Option.isNone(machinesService)
           ? undefined
@@ -2424,12 +2439,20 @@ const make = Effect.gen(function* () {
                   view.machines,
                   (machine) =>
                     machine.relation === "this" || !machine.online || machine.pairing === "revoked"
-                      ? Effect.succeed(machine)
+                      ? Effect.succeed(
+                          machine.relation === "this" && localResources !== undefined
+                            ? { ...machine, resources: localResources }
+                            : machine,
+                        )
                       : targetProviders(machine.environmentId).pipe(
                           Effect.timeout("10 seconds"),
-                          Effect.map(({ providers, remote }) =>
+                          Effect.map(({ providers, remote, resources }) =>
                             remote
-                              ? { ...machine, catalog: providers.map(machineProvider) }
+                              ? {
+                                  ...machine,
+                                  catalog: providers.map(machineProvider),
+                                  ...(resources === undefined ? {} : { resources }),
+                                }
                               : machine,
                           ),
                           Effect.catch((error) =>
