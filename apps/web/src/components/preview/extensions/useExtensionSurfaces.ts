@@ -77,7 +77,17 @@ export function useExtensionSurfaceActions(threadRef: ScopedThreadRef, profileId
           threadId: threadRef.threadId,
         },
       });
-      if (result._tag === "Success") return result.value.surfaceTabId ?? null;
+      if (result._tag === "Success") {
+        // The server fell back to a plain extension page; say it may behave differently.
+        if (result.value.notice) {
+          toastManager.add({
+            type: "info",
+            title: extension.name,
+            description: result.value.notice,
+          });
+        }
+        return result.value.surfaceTabId ?? null;
+      }
       if (isAtomCommandInterrupted(result)) return null;
       toastManager.add({
         type: "error",

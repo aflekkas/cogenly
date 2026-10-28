@@ -45,9 +45,9 @@ The extension list belongs to each machine. A paired machine keeps its own list.
 
 ## Popups and side panels
 
-Extension popups and side panels stream into the browser panel beside their host website. Toolbar actions run against that host, including actions that have no popup. Closing the host also closes its extension surfaces.
+Extension popups and side panels stream into the browser panel beside their host website: a popup hangs from its toolbar icon at the size the extension asks for, and a side panel sits in a column beside the page. Toolbar actions run against that host, including actions that have no popup. Closing the host also closes its popups and side panels.
 
-Agent-opened popups stay open while the agent switches focus. Some extensions require a fallback page whose behavior differs from a native popup; Cogenly shows a notice when that happens. Options pages and popup pages opened directly from the extension menus remain ordinary tabs.
+Some extensions need a fallback page whose behavior differs from a native popup or side panel; Cogenly shows a notice when that happens. Options pages open as ordinary tabs.
 
 ## Passwords
 
