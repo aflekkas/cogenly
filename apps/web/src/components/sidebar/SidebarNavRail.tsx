@@ -111,8 +111,16 @@ export function SidebarNavRail({
         aria-label="Toggle main sidebar"
         aria-pressed={sidebarVisible}
         data-sidebar="trigger"
+        // Pages without a list column keep the toggle in place, disabled:
+        // the rail's top slot never moves or vanishes between routes.
+        disabled={listColumnHidden}
         onClick={toggleSidebar}
-        className={cn(RAIL_BUTTON_CLASS, RAIL_TOGGLE_TONE, "[-webkit-app-region:no-drag]")}
+        className={cn(
+          RAIL_BUTTON_CLASS,
+          RAIL_TOGGLE_TONE,
+          "[-webkit-app-region:no-drag]",
+          listColumnHidden && "cursor-default opacity-40 hover:text-sidebar-muted-foreground",
+        )}
       >
         <MorphIcon icon={sidebarVisible ? PanelLeftClose : PanelLeft} />
       </button>
@@ -139,7 +147,7 @@ export function SidebarNavRail({
           isElectron && "drag-region",
         )}
       >
-        {showSidebarToggle && !listColumnHidden ? sidebarToggle : null}
+        {showSidebarToggle ? sidebarToggle : null}
       </div>
       <div
         role="tablist"

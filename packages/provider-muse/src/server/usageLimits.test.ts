@@ -1,6 +1,16 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { ProviderInstanceId } from "@t3tools/contracts";
+import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
-import { describe, expect, it } from "vite-plus/test";
-import { parseMuseUsageLimits } from "./usageLimits.ts";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import * as TestClock from "effect/testing/TestClock";
+import {
+  parseMuseUsageLimits,
+  parseMuseUsageReadResponse,
+  readCachedMuseUsageLimits,
+} from "./usageLimits.ts";
 
 const observation = {
   observedAtMs: 1_792_166_400_000,
@@ -50,4 +60,62 @@ describe("Muse subscription limits", () => {
       expect(parseMuseUsageLimits(value)).toBeUndefined();
     }
   });
+
+  it("parses the usage/read envelope and treats an empty result as unobserved", () => {
+    expect(parseMuseUsageReadResponse({ usage: observation })).toEqual(
+      parseMuseUsageLimits(observation),
+    );
+    expect(parseMuseUsageReadResponse({})).toBeUndefined();
+    expect(parseMuseUsageReadResponse(undefined)).toBeUndefined();
+  });
+});
+
+describe("readCachedMuseUsageLimits", () => {
+  const instanceId = ProviderInstanceId.make("muse");
+  const writeCache = Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "muse-limits-cache-" });
+    const provider = {
+      instanceId: "muse",
+      driver: "muse",
+      enabled: true,
+      installed: true,
+      version: "1.4.11",
+      status: "ready",
+      auth: { status: "unknown" },
+      checkedAt: DateTime.formatIso(DateTime.makeUnsafe(observation.observedAtMs)),
+      models: [],
+      usageLimits: parseMuseUsageLimits(observation),
+    };
+    yield* fileSystem.writeFileString(path.join(dir, "muse.json"), `${JSON.stringify(provider)}\n`);
+    return dir;
+  });
+
+  it.effect("returns last-known windows and drops them as their resets pass", () =>
+    Effect.gen(function* () {
+      const dir = yield* writeCache;
+      yield* TestClock.setTime(observation.observedAtMs);
+      const atObservation = yield* readCachedMuseUsageLimits(dir, instanceId);
+      expect(atObservation?.windows.map((window) => window.id)).toEqual(["window", "weekly"]);
+
+      yield* TestClock.setTime(observation.window.resetsAtMs + 1);
+      const afterSessionReset = yield* readCachedMuseUsageLimits(dir, instanceId);
+      expect(afterSessionReset?.windows.map((window) => window.id)).toEqual(["weekly"]);
+
+      yield* TestClock.setTime(observation.weekly.resetsAtMs + 1);
+      expect(yield* readCachedMuseUsageLimits(dir, instanceId)).toBeUndefined();
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("ignores a missing file and another instance's cache", () =>
+    Effect.gen(function* () {
+      const dir = yield* writeCache;
+      yield* TestClock.setTime(observation.observedAtMs);
+      expect(
+        yield* readCachedMuseUsageLimits(dir, ProviderInstanceId.make("muse_work")),
+      ).toBeUndefined();
+      expect(yield* readCachedMuseUsageLimits("/definitely/missing", instanceId)).toBeUndefined();
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
 });

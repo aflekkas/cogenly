@@ -1,3 +1,4 @@
+import { readMuseAccountEmail } from "./auth.ts";
 import { readMuseUsageLimits } from "./usageLimits.ts";
 import { ServerProviderModel } from "@t3tools/contracts";
 import { MuseSettings } from "../settings.ts";
@@ -136,12 +137,14 @@ export const checkMuseProviderStatus = Effect.fn("checkMuseProviderStatus")(func
   // MSP has no auth signal, and model/list answers from Muse's cache even when logged out.
   // Auth failures surface on the first turn instead.
   const usageLimits = yield* readMuseUsageLimits(settings, museEnvironment, cwd, createHost);
+  // Not proof of a working login, but it names the account the limits belong to.
+  const email = yield* readMuseAccountEmail(museEnvironment);
   return {
     ...snapshot(
       {
         installed: true,
         version,
-        auth: { status: "unknown" },
+        auth: { status: "unknown", ...(email ? { email } : {}) },
         ...(models.length > 0
           ? { status: "ready" }
           : {

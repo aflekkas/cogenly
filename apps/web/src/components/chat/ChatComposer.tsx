@@ -33,7 +33,6 @@ import type {
   ProviderApprovalDecision,
   ThreadContextRecord,
   ProviderInteractionMode,
-  RuntimeMode,
   ResolvedKeybindingsConfig,
   RuntimeRequestId,
   ScopedThreadRef,
@@ -279,7 +278,6 @@ import {
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerRunningBar } from "./ComposerRunningBar";
-import { ComposerAccessModePicker, availableRuntimeModes } from "./ComposerAccessModePicker";
 import { ComposerImageThumbnail } from "./ComposerImageThumbnail";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
@@ -1547,11 +1545,8 @@ export interface ChatComposerProps {
   getModelDisabledReason: (instanceId: ProviderInstanceId, model: string) => string | null;
   toggleInteractionMode: () => void;
   handleInteractionModeChange: (mode: ProviderInteractionMode) => void;
-  /** A chat has no access picker (it always runs supervised) and a conversational placeholder. */
+  /** A chat has a conversational placeholder. */
   isChat: boolean;
-  /** The thread's access mode as the next send applies it. */
-  runtimeMode: RuntimeMode;
-  handleRuntimeModeChange: (mode: RuntimeMode) => void;
 
   focusComposer: () => void;
   scheduleComposerFocus: () => void;
@@ -1655,8 +1650,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     toggleInteractionMode,
     handleInteractionModeChange,
     isChat,
-    runtimeMode,
-    handleRuntimeModeChange,
     focusComposer,
     scheduleComposerFocus,
     setThreadError,
@@ -4937,11 +4930,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ...providerTraitsPickerInput,
     size: composerControlsCollapsed ? "xs" : "sm",
     // Traits is the first block, so it hides once every block after it has.
-    hidden:
-      composerControlsHidden ||
-      restingHiddenBlockCount > (isChat ? 0 : 1) + (planModeUiEnabled ? 1 : 0),
+    hidden: composerControlsHidden || restingHiddenBlockCount > (planModeUiEnabled ? 1 : 0),
   });
-  const runtimeModes = availableRuntimeModes(selectedProviderStatus?.supportedRuntimeModes);
   const restingBlockDefs = [
     ...(providerTraitsPicker
       ? [
@@ -4956,28 +4946,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           },
         ]
       : []),
-    // A chat always runs supervised, so it offers no access choice.
-    ...(isChat
-      ? []
-      : [
-          {
-            id: "access",
-            content: (
-              <>
-                <ComposerControlSeparator size={composerControlsCollapsed ? "xs" : "sm"} />
-                <ComposerAccessModePicker
-                  runtimeMode={runtimeMode}
-                  runtimeModes={runtimeModes}
-                  size={composerControlsCollapsed ? "xs" : "sm"}
-                  hidden={
-                    composerControlsHidden || restingHiddenBlockCount > (planModeUiEnabled ? 1 : 0)
-                  }
-                  onRuntimeModeChange={handleRuntimeModeChange}
-                />
-              </>
-            ),
-          },
-        ]),
     ...(planModeUiEnabled
       ? [
           {
@@ -5147,11 +5115,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             size={composerControlsCollapsed ? "xs" : "sm"}
             hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
             showInteractionModeToggle={planModeUiEnabled && hiddenRestingBlockIds.includes("mode")}
-            accessMode={
-              hiddenRestingBlockIds.includes("access")
-                ? { runtimeMode, runtimeModes, onRuntimeModeChange: handleRuntimeModeChange }
-                : undefined
-            }
             traitsMenuContent={
               hiddenRestingBlockIds.includes("traits") ? providerTraitsMenuContent : undefined
             }

@@ -59,7 +59,14 @@ function readViewportWidth(): number {
   return window.innerWidth;
 }
 
-function SidebarControl({ showButton }: { showButton: boolean }) {
+function SidebarControl({
+  showButton,
+  disabled = false,
+}: {
+  showButton: boolean;
+  /** A page without the list column has nothing to toggle; the control stays, disabled. */
+  disabled?: boolean;
+}) {
   const usagePageOpen = useLocation({ select: (location) => location.pathname === "/usage" });
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { toggleSidebar, isMobile, mobileSheetMounted } = useSidebar();
@@ -69,7 +76,7 @@ function SidebarControl({ showButton }: { showButton: boolean }) {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
+      if (disabled || event.defaultPrevented) return;
       if (
         event.target instanceof HTMLElement &&
         event.target.closest("[data-keybinding-capture]")
@@ -100,13 +107,13 @@ function SidebarControl({ showButton }: { showButton: boolean }) {
     window.addEventListener("keydown", onKeyDown, true);
     // A focused desktop browser page forwards the chord as a menu action.
     const unsubscribe = window.desktopBridge?.onMenuAction((action) => {
-      if (action === "sidebar.toggle") toggleSidebar();
+      if (!disabled && action === "sidebar.toggle") toggleSidebar();
     });
     return () => {
       window.removeEventListener("keydown", onKeyDown, true);
       unsubscribe?.();
     };
-  }, [keybindings, toggleSidebar, usagePageOpen]);
+  }, [disabled, keybindings, toggleSidebar, usagePageOpen]);
 
   // The rail draws the toggle itself; this still owns the shortcut.
   if (!showButton) return null;
@@ -130,6 +137,7 @@ function SidebarControl({ showButton }: { showButton: boolean }) {
               variant="ghost"
               className="pointer-events-auto"
               aria-label="Toggle main sidebar"
+              disabled={disabled}
             />
           }
         />
@@ -302,9 +310,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
         <ProjectProjectionRetention />
         {navRailVisible ? (
-          <SidebarNavRail
-            showSidebarToggle={titlebarLayout.sidebarToggle === "rail-titlebar"}
-          />
+          <SidebarNavRail showSidebarToggle={titlebarLayout.sidebarToggle === "rail-titlebar"} />
         ) : null}
         {listSidebarHidden ? null : (
           <Sidebar
@@ -346,9 +352,10 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         )}
         {children}
         {/* Without the rail, or after the macOS traffic lights beside it. A page
-            without the list column has nothing to toggle. */}
+            without the list column has nothing to toggle, so it stays disabled. */}
         <SidebarControl
-          showButton={titlebarLayout.sidebarToggle === "fixed" && !listSidebarHidden}
+          showButton={titlebarLayout.sidebarToggle === "fixed"}
+          disabled={listSidebarHidden}
         />
         <NavigationHistoryShortcuts />
         <MainAppLocationTracker />

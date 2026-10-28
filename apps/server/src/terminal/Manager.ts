@@ -68,6 +68,7 @@ import * as ServerConfig from "../config.ts";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { makeClaudeEnvironment } from "../provider/Drivers/ClaudeHome.ts";
+import { makeMuseEnvironment } from "@t3tools/provider-muse/server";
 import { deriveProviderInstanceConfigMap } from "../provider/ProviderInstanceRegistryHydration.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
@@ -1473,6 +1474,13 @@ export const resolveProviderInstanceTerminalEnvironment = Effect.fn(
         Effect.provideService(Path.Path, input.path),
       );
     }
+  } else if (instance.driver === "muse") {
+    // Same shape as the driver: strip an inherited META_API_KEY first, then
+    // let instance variables win over the cleaned base.
+    resolved = yield* mergeProviderInstanceEnvironment(
+      instance.environment,
+      makeMuseEnvironment(input.env ?? {}),
+    );
   }
 
   return Object.fromEntries(

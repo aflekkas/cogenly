@@ -124,7 +124,7 @@ export function adjacentModelPickerProvider(input: {
   ]!;
 }
 
-type LegacyResize = {
+type ModelListResize = {
   /** Room the list may take inside the popover, so growth ends where it visibly stops. */
   readonly maxHeight: number;
   /** Rows height to shrink to while collapsing; the legacy rows stay mounted until then. */
@@ -135,18 +135,9 @@ function prefersReducedMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-/**
- * Measure the list frame before Legacy models opens or closes. The frame's
- * height then transitions between the two content heights, and the popover
- * follows it, so the popover resizes in one transition instead of jumping.
- */
-function measureLegacyResize(input: {
-  frame: HTMLElement;
-  listState: ReturnType<LegendListRef["getState"]> | undefined;
-  legacyKey: string;
-  collapsing: boolean;
-}): LegacyResize | null {
-  const picker = input.frame.closest<HTMLElement>("[data-model-picker-content]");
+/** Room the list frame may take inside the popover, in pixels. */
+function measureModelListMaxHeight(frame: HTMLElement): number | null {
+  const picker = frame.closest<HTMLElement>("[data-model-picker-content]");
   if (!picker) return null;
   const pickerMaxHeight = Number.parseFloat(getComputedStyle(picker).maxHeight);
   // The popover viewport is capped to the space beside the trigger and also
@@ -159,7 +150,22 @@ function measureLegacyResize(input: {
     ? Math.min(pickerMaxHeight, viewportMaxHeight - (viewport!.scrollHeight - picker.offsetHeight))
     : pickerMaxHeight;
   if (!Number.isFinite(pickerRoom)) return null;
-  const maxHeight = pickerRoom - (picker.offsetHeight - input.frame.offsetHeight);
+  return pickerRoom - (picker.offsetHeight - frame.offsetHeight);
+}
+
+/**
+ * Measure the list frame before Legacy models opens or closes. The frame's
+ * height then transitions between the two content heights, and the popover
+ * follows it, so the popover resizes in one transition instead of jumping.
+ */
+function measureLegacyResize(input: {
+  frame: HTMLElement;
+  listState: ReturnType<LegendListRef["getState"]> | undefined;
+  legacyKey: string;
+  collapsing: boolean;
+}): ModelListResize | null {
+  const maxHeight = measureModelListMaxHeight(input.frame);
+  if (maxHeight === null) return null;
   if (!input.collapsing) return { maxHeight };
   // The row's own height: the list's measured size for it includes the separator after it.
   const legacyTop = input.listState?.positionByKey(input.legacyKey);
@@ -277,7 +283,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           : [],
       ),
   );
-  const [legacyResize, setLegacyResize] = useState<LegacyResize | null>(null);
+  const [modelListResize, setModelListResize] = useState<ModelListResize | null>(null);
   const serverKeybindings = useAtomValue(primaryServerKeybindingsAtom);
   const keybindings = providedKeybindings ?? serverKeybindings;
   const navigate = useNavigate();
@@ -289,14 +295,29 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
   const handleSelectInstance = useCallback(
     (instanceId: ProviderInstanceId) => {
+      // Measure before the switch so the frame transitions from the old
+      // provider's list height to the new one instead of jumping.
+      const frame = modelListFrameRef.current;
+      const maxHeight =
+        frame && instanceId !== selectedInstanceId && !prefersReducedMotion()
+          ? measureModelListMaxHeight(frame)
+          : null;
+      setModelListResize(maxHeight === null ? null : { maxHeight });
       setSelectedInstanceId(instanceId);
-      setLegacyResize(null);
       window.requestAnimationFrame(() => {
         focusModelList();
       });
     },
-    [focusModelList],
+    [focusModelList, selectedInstanceId],
   );
+
+  // A resize whose height does not change never fires transitionend; clear
+  // the cap shortly after the transition would have ended either way.
+  useEffect(() => {
+    if (!modelListResize) return;
+    const timer = window.setTimeout(() => setModelListResize(null), 300);
+    return () => window.clearTimeout(timer);
+  }, [modelListResize]);
 
   useLayoutEffect(() => {
     focusModelList();
@@ -449,9 +470,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       // Collapsing keeps the rows until the list has shrunk over them.
       rendersLegacyModels:
         expandedLegacyInstances.has(selectedInstanceId) ||
-        legacyResize?.collapsedHeight !== undefined,
+        modelListResize?.collapsedHeight !== undefined,
     };
-  }, [expandedLegacyInstances, filteredModels, legacyResize, selectedInstanceId]);
+  }, [expandedLegacyInstances, filteredModels, modelListResize, selectedInstanceId]);
 
   const visibleModels = useMemo(() => {
     if (!legacySection) {
@@ -495,7 +516,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               collapsing: isExpanded,
             })
           : null;
-      setLegacyResize(resize);
+      setModelListResize(resize);
       setExpandedLegacyInstances((expanded) => {
         const next = new Set(expanded);
         if (isExpanded) {
@@ -606,12 +627,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   // Fit the list to its rows plus the combobox list `py-1` and LegendList `py-1.5`.
   // While Legacy models opens or closes, the height is capped to the room the
   // popover has, so the transition ends where the list visibly stops growing.
-  const modelListContentHeight = `calc(${legacyResize?.collapsedHeight ?? modelListContentSize}px + var(--spacing) * 5)`;
+  const modelListContentHeight = `calc(${modelListResize?.collapsedHeight ?? modelListContentSize}px + var(--spacing) * 5)`;
   const modelListHeight =
     filteredItemKeys.length === 0
       ? 0
-      : legacyResize
-        ? `min(${modelListContentHeight}, ${legacyResize.maxHeight}px)`
+      : modelListResize
+        ? `min(${modelListContentHeight}, ${modelListResize.maxHeight}px)`
         : modelListContentHeight;
   const updateModelListScrollFades = useCallback(() => {
     const scrollElement = modelListRef.current?.getScrollableNode();
@@ -852,13 +873,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               ref={modelListFrameRef}
               className={cn(
                 "relative min-h-0 overflow-hidden pr-px",
-                legacyResize &&
+                modelListResize &&
                   "transition-[height] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none",
               )}
               style={{ height: modelListHeight }}
               onTransitionEnd={(event) => {
                 if (event.target === event.currentTarget && event.propertyName === "height") {
-                  setLegacyResize(null);
+                  setModelListResize(null);
                 }
               }}
             >

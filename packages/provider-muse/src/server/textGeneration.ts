@@ -3,6 +3,7 @@ import {
   MUSE_DEFAULT_MODEL,
   type ModelSelection,
   type ServerProviderModel,
+  type ServerProviderUsageLimits,
   TextGenerationError,
 } from "@t3tools/contracts";
 import type { MuseSettings } from "../settings.ts";
@@ -15,6 +16,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import { createMuseSdkHost, createMuseSdkHostEffect, type MuseSdkHost } from "./sdk.ts";
+import { readMuseUsageLimitsFromHost } from "./usageLimits.ts";
 import { museModelCapabilities, resolveMuseReasoningEffort } from "./modelCatalog.ts";
 import type { ProviderTextGeneration } from "@t3tools/provider-core/server/textGeneration";
 import { investigationUnsupported } from "@t3tools/provider-core/server/textGenerationOperations";
@@ -199,11 +201,13 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
   options: {
     readonly environment?: NodeJS.ProcessEnv;
     readonly modelCatalog?: Effect.Effect<ReadonlyArray<ServerProviderModel>>;
+    /** Publishes subscription limits observed by this generation's model call. */
+    readonly onUsageLimits?: (limits: ServerProviderUsageLimits) => Effect.Effect<void>;
     /** Test hook. */
     readonly createHost?: typeof createMuseSdkHost;
   } = {},
 ) {
-  const { environment, modelCatalog = Effect.succeed([]), createHost } = options;
+  const { environment, modelCatalog = Effect.succeed([]), onUsageLimits, createHost } = options;
   const fileSystem = yield* FileSystem.FileSystem;
   const runMuseJson = Effect.fn("runMuseJson")(function* <S extends Schema.Top>(input: {
     operation: Operation;
@@ -252,7 +256,7 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
         (host: MuseSdkHost) => Effect.promise(() => host.close()),
         { interruptible: true },
       );
-      return yield* Effect.tryPromise((signal) =>
+      const text = yield* Effect.tryPromise((signal) =>
         generateMuseText(
           host,
           cwd,
@@ -262,6 +266,13 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
           signal,
         ),
       );
+      // This host just made a model call, so it holds a usage observation a
+      // fresh status probe cannot get. Publish it before the host closes.
+      if (onUsageLimits) {
+        const limits = yield* readMuseUsageLimitsFromHost(host);
+        if (limits) yield* onUsageLimits(limits).pipe(Effect.ignore);
+      }
+      return text;
     }).pipe(
       Effect.scoped,
       Effect.mapError(

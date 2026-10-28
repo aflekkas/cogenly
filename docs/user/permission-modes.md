@@ -1,12 +1,11 @@
 # Permission modes
 
-Permission modes control when an agent needs your approval to act. Choose a mode in the message
-composer; it applies to that thread.
+Permission modes control when an agent needs your approval to act.
 
-Set the default for new threads in **Settings → General → New threads → Permissions**.
+Set the mode for new threads in **Settings → General → New threads → Permissions**.
 Projects can override the environment default. New threads use this setting rather than the
 mode of the thread you were viewing. The initial default is **Full access**; existing threads
-and modes you choose in a draft keep their permissions.
+keep the permissions they were created with.
 
 | Mode                  | Behavior                                                                              |
 | --------------------- | ------------------------------------------------------------------------------------- |

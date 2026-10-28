@@ -2,7 +2,7 @@ import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { useAtomValue } from "@effect/atom-react";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { createFileRoute, Link, useNavigate, useRouter } from "@tanstack/react-router";
-import { LinkIcon, PlusIcon } from "lucide-react";
+import { LinkIcon, MessageCircleIcon, PlusIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
@@ -10,7 +10,13 @@ import { isElectron } from "../env";
 import { NoProjectsHero } from "../components/NoProjectsHero";
 import { sortScopedProjectsForSidebar } from "../components/Sidebar.logic";
 import { Button } from "../components/ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../components/ui/empty";
 import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
@@ -193,8 +199,14 @@ function ModeIndexLanding({ mode }: { readonly mode: SidebarMode }) {
       return (
         <IndexEmptyState
           title="Chats aren’t available here"
-          description="This machine can’t start a chat without a repository right now."
-        />
+          description="This machine can’t start a chat without a repository right now. Open a project to start working in one."
+          media={<MessageCircleIcon className="size-16 text-foreground/90" strokeWidth={1.25} />}
+        >
+          <Button variant="brand" size="sm" render={<Link to="/project" />}>
+            <PlusIcon className="size-4" />
+            Open a project
+          </Button>
+        </IndexEmptyState>
       );
     // With no agents the list column is hidden (routeHidesListColumn), so this
     // is the one empty state: mascot, a line of copy and the brand CTA.
@@ -229,6 +241,11 @@ function ModeIndexLanding({ mode }: { readonly mode: SidebarMode }) {
   }
 }
 
+/**
+ * The index route's empty-state layout, one column in reading order: media
+ * (icon or mascot), title, description, then the action. Every full-panel
+ * empty state on this route uses it so they read as one family.
+ */
 function IndexEmptyState(props: {
   readonly title: string;
   readonly description: string;
@@ -240,7 +257,7 @@ function IndexEmptyState(props: {
       {isElectron ? <WorkspacePageHeader electron /> : null}
       <Empty className="flex-1">
         <EmptyHeader className="max-w-md">
-          {props.media ? <div className="mb-4 flex justify-center">{props.media}</div> : null}
+          {props.media ? <EmptyMedia>{props.media}</EmptyMedia> : null}
           <EmptyTitle>{props.title}</EmptyTitle>
           <EmptyDescription>{props.description}</EmptyDescription>
           {props.children ? <div className="mt-5 flex justify-center">{props.children}</div> : null}
@@ -252,23 +269,15 @@ function IndexEmptyState(props: {
 
 function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
-      {isElectron ? <WorkspacePageHeader electron /> : null}
-      <Empty className="flex-1">
-        <EmptyHeader className="max-w-md">
-          <EmptyTitle>Couldn’t start a new thread</EmptyTitle>
-          <EmptyDescription>
-            The repository is still available. Try opening the draft again.
-          </EmptyDescription>
-          <div className="mt-5 flex justify-center">
-            <Button size="sm" onClick={onRetry}>
-              <RefreshIcon size="md" />
-              Try again
-            </Button>
-          </div>
-        </EmptyHeader>
-      </Empty>
-    </SidebarInset>
+    <IndexEmptyState
+      title="Couldn’t start a new thread"
+      description="The repository is still available. Try opening the draft again."
+    >
+      <Button size="sm" onClick={onRetry}>
+        <RefreshIcon size="md" />
+        Try again
+      </Button>
+    </IndexEmptyState>
   );
 }
 

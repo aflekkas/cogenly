@@ -13,6 +13,9 @@ import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import { makeMuseTextGeneration } from "./textGeneration.ts";
+import { museUsageReader } from "./usage.ts";
+import { readCachedMuseUsageLimits } from "./usageLimits.ts";
+import { readMuseAccountEmail } from "./auth.ts";
 import { ProviderDriverError } from "@t3tools/provider-core/server/errors";
 import { makeMuseAdapterV2 } from "./adapter.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -53,10 +56,11 @@ export type MuseDriverEnv =
   | Path.Path
   | ProviderEventLoggers.ProviderEventLoggers;
 
-export const MuseDriver: ProviderDriver<MuseSettings, MuseDriverEnv> = {
+export const MuseDriver: ProviderDriver<MuseSettings, MuseDriverEnv, Path.Path> = {
   driverKind: DRIVER_KIND,
   metadata: { displayName: "Muse Code", supportsMultipleInstances: true },
   configSchema: MuseSettings,
+  usage: museUsageReader,
   defaultConfig: () => decodeMuseSettings({}),
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
     Effect.gen(function* () {
@@ -91,6 +95,24 @@ export const MuseDriver: ProviderDriver<MuseSettings, MuseDriverEnv> = {
         accentColor,
         continuationGroupKey: continuationIdentity.continuationKey,
       });
+      // Seed last-known limits: a fresh status host cannot observe usage
+      // until a model call runs through this server (see usageLimits.ts).
+      const cachedUsageLimits = yield* readCachedMuseUsageLimits(
+        host.paths.providerStatusCacheDir,
+        instanceId,
+      ).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+        Effect.orElseSucceed(() => undefined),
+      );
+      // Cached limits need their account too, or another environment on the
+      // same login shows them as a second account until the first check.
+      const accountEmail = cachedUsageLimits
+        ? yield* readMuseAccountEmail(processEnvironment).pipe(
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+            Effect.provideService(Path.Path, path),
+          )
+        : undefined;
       const snapshotSettings = yield* makeProviderSnapshotSettingsSource(effectiveConfig);
       const resolveInstallation = yield* makeCachedProviderMaintenanceResolution(
         resolveProviderMaintenanceCapabilitiesEffect(museMaintenance, {
@@ -124,7 +146,18 @@ export const MuseDriver: ProviderDriver<MuseSettings, MuseDriverEnv> = {
         streamSettings: snapshotSettings.streamSettings,
         haveSettingsChanged: haveProviderSnapshotSettingsChanged,
         initialSnapshot: (settings) =>
-          makePendingMuseProvider(settings.provider).pipe(Effect.map(stampIdentity)),
+          makePendingMuseProvider(settings.provider).pipe(
+            Effect.map(stampIdentity),
+            Effect.map((pending) =>
+              cachedUsageLimits
+                ? {
+                    ...pending,
+                    auth: { ...pending.auth, ...(accountEmail ? { email: accountEmail } : {}) },
+                    usageLimits: cachedUsageLimits,
+                  }
+                : pending,
+            ),
+          ),
         checkProvider: checkMuseProviderStatus(effectiveConfig, processEnvironment, cwd).pipe(
           Effect.map(stampIdentity),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
@@ -169,6 +202,7 @@ export const MuseDriver: ProviderDriver<MuseSettings, MuseDriverEnv> = {
       const textGeneration = yield* makeMuseTextGeneration(effectiveConfig, {
         environment: processEnvironment,
         modelCatalog,
+        onUsageLimits: (limits) => snapshot.applyUsageLimits(limits),
       });
       return {
         instanceId,
