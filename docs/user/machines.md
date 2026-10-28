@@ -20,6 +20,11 @@ The owner must be online to save the edit; an offline notice identifies which ma
 Changes never start a second copy. Provider sign-ins and an agent's current fallback position stay on the
 owner.
 
+Work on the computer you are using carries no machine label. A thread, agent or
+subagent that runs on another machine shows a small cloud on its provider icon;
+hover it for the machine's name. Machine pickers list this one as **This
+computer**.
+
 Repository checkouts and worktrees stay local, but every machine lists all of a
 project's repositories. One that is not on this machine yet is marked as needing
 a clone. Pick it, and it clones into the project's folder on this machine;
