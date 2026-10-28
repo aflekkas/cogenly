@@ -18,6 +18,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { readPreviewAnnotationTheme } from "./annotationTheme";
 import { useBrowserDefaults } from "./browserDefaults";
 import { useBrowserPointerStore } from "./browserPointerStore";
+import { DesktopServerTabSync } from "./DesktopServerTabSync";
 import { HostedBrowserWebview } from "./HostedBrowserWebview";
 import { openUrlInPreview } from "./openFileInPreview";
 import { rendersServerTabNatively } from "./previewRuntime";
@@ -142,7 +143,10 @@ export function ElectronBrowserHost() {
   return (
     <div className="contents" data-electron-browser-host>
       {primaryEnvironmentId ? (
-        <ShownServerTabReporter environmentId={primaryEnvironmentId} tabs={nativeServerTabs} />
+        <>
+          <DesktopServerTabSync environmentId={primaryEnvironmentId} />
+          <ShownServerTabReporter environmentId={primaryEnvironmentId} tabs={nativeServerTabs} />
+        </>
       ) : null}
       {sessions.map(({ threadRef, snapshot, runtimeTabId, pictureInPicture, zoomFactor }) => {
         const url = snapshot.navStatus._tag === "Idle" ? null : snapshot.navStatus.url;
