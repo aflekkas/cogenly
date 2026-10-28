@@ -330,6 +330,10 @@ describe.skipIf(chromium === undefined)("server browser extensions", () => {
         yield* r.store.toggle({ id: first.extension.id, enabled: true });
         const enabledContext = yield* Effect.promise(() => r.contexts.contextFor("default"));
         expect(enabledContext).not.toBe(context);
+        const diagnostic = yield* Effect.promise(() => enabledContext.browser()!.newBrowserCDPSession());
+        console.log("CHROME EXTENSIONS", yield* Effect.promise(() => diagnostic.send("Extensions.getExtensions")));
+        yield* Effect.promise(() => diagnostic.detach());
+        console.log("REGISTRY", yield* r.store.list({}));
         const options = yield* Effect.promise(() => enabledContext.newPage());
         const url = yield* r.store.pageUrl({ id: first.extension.id, page: "options" });
         yield* Effect.promise(() => options.goto(url));
