@@ -3,12 +3,9 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   collectUpdateAllTargets,
-  describeComponentFailure,
-  describeComponentProgress,
-  describeComponentVersions,
-  formatComponentVersionSummary,
   groupUpdatesByComponent,
   type MachineUpdates,
+  summarizeComponent,
 } from "./navRailUpdateGroups.logic";
 import type { UpdateRowStatus, UpdateRowView } from "./navRailUpdates.logic";
 
@@ -39,9 +36,6 @@ function machine(
     rows: rows.map((entry) => ({ row: entry, canUpdate: canUpdate(entry) })),
   };
 }
-
-const summarize = (machines: ReadonlyArray<{ row: UpdateRowView }>) =>
-  formatComponentVersionSummary(describeComponentVersions(machines));
 
 describe("groupUpdatesByComponent", () => {
   it("makes one row per component, server first, with each machine under it", () => {
@@ -83,77 +77,111 @@ describe("groupUpdatesByComponent", () => {
   });
 });
 
-describe("describeComponentVersions", () => {
-  const on = (...rows: ReadonlyArray<UpdateRowView>) => rows.map((entry) => ({ row: entry }));
+describe("summarizeComponent", () => {
+  const on = (...rows: ReadonlyArray<UpdateRowView>) =>
+    rows.map((entry, index) => ({ id: `m${index}`, machineLabel: `Machine ${index}`, row: entry }));
+  const none = new Set<string>();
 
-  it("keeps one machine's own version pair, with no scope", () => {
-    expect(summarize(on(row("muse", "available", "1.4.12", "1.4.13")))).toBe("1.4.12 → 1.4.13");
-    expect(summarize(on(row("muse", "current", "1.4.13")))).toBe("1.4.13");
+  it("collapses machines on one version into one plain row", () => {
+    expect(
+      summarizeComponent(
+        on(row("codex", "current", "0.165.0"), row("codex", "current", "0.165.0")),
+        none,
+      ),
+    ).toEqual({ current: "0.165.0", next: null, split: false, percent: null, failure: null });
+    expect(
+      summarizeComponent(
+        on(
+          row("claudeAgent", "available", "2.1.311", "2.1.312"),
+          row("claudeAgent", "available", "2.1.311", "2.1.312"),
+        ),
+        none,
+      ),
+    ).toMatchObject({ current: "2.1.311", next: "2.1.312", split: false });
   });
 
-  it("says how many machines a shared update reaches", () => {
+  it("keeps one machine's own pair and its failure reason", () => {
     expect(
-      summarize(
-        on(
-          row("muse", "available", "1.4.12", "1.4.13"),
-          row("muse", "updating", "1.4.12", "1.4.13"),
-        ),
-      ),
-    ).toBe("1.4.12 → 1.4.13 on 2 machines");
-    expect(
-      summarize(
-        on(
-          row("muse", "available", "1.4.12", "1.4.13"),
-          row("muse", "current", "1.4.13"),
-          row("muse", "current", "1.4.13"),
-        ),
-      ),
-    ).toBe("1.4.12 → 1.4.13 on 1 of 3");
+      summarizeComponent(on(row("muse", "failed", "1.4.12", "1.4.13", "npm exited 1")), none),
+    ).toEqual({
+      current: "1.4.12",
+      next: "1.4.13",
+      split: false,
+      percent: null,
+      failure: "npm exited 1",
+    });
   });
 
-  it("counts machines on the target when the behind ones start from different versions", () => {
+  it("splits when machines disagree", () => {
+    // Different versions, each current by its own check.
     expect(
-      summarize(
-        on(
-          row("server", "current", "0.2.3"),
-          row("server", "current", "0.2.3"),
-          row("server", "current", "0.2.3"),
-          row("server", "available", "0.2.2", "0.2.3"),
-          row("server", "available", "0.2.1", "0.2.3"),
-        ),
+      summarizeComponent(
+        on(row("codex", "current", "0.50.0"), row("codex", "current", "0.49.0")),
+        none,
       ),
-    ).toBe("0.2.3 on 3 of 5");
-  });
-
-  it("is short when every machine agrees", () => {
+    ).toMatchObject({ current: "0.50.0", split: true });
+    // One behind, one already there.
     expect(
-      summarize(on(row("codex", "current", "0.50.0"), row("codex", "current", "0.50.0"))),
-    ).toBe("0.50.0 on both machines");
-    expect(
-      summarize(on(...Array.from({ length: 5 }, () => row("codex", "current", "0.50.0")))),
-    ).toBe("0.50.0 on all 5 machines");
-    // Current by their own checks, yet on different versions.
-    expect(
-      summarize(
-        on(
-          row("codex", "current", "0.50.0"),
-          row("codex", "current", "0.49.0"),
-          row("codex", "current", "0.50.0"),
-        ),
+      summarizeComponent(
+        on(row("codex", "available", "0.49.0", "0.50.0"), row("codex", "current", "0.50.0")),
+        none,
       ),
-    ).toBe("0.50.0 on 2 of 3");
-  });
-
-  it("falls back to a count when machines head to different versions", () => {
+    ).toMatchObject({ current: "0.49.0", next: "0.50.0", split: true });
+    // One failed, one still waiting.
     expect(
-      summarize(
+      summarizeComponent(
+        on(row("codex", "failed", "1", "2", "npm exited 1"), row("codex", "available", "1", "2")),
+        none,
+      ),
+    ).toMatchObject({ split: true, failure: "Failed on Machine 0" });
+    // Behind from different versions: only the target.
+    expect(
+      summarizeComponent(
         on(
-          row("codex", "available", "0.48.0", "0.49.0"),
+          row("codex", "available", "0.48.0", "0.50.0"),
           row("codex", "available", "0.49.0", "0.50.0"),
-          row("codex", "current", "0.50.0"),
         ),
+        none,
       ),
-    ).toBe("Updates on 2 of 3");
+    ).toMatchObject({ current: null, next: "0.50.0", split: true });
+  });
+
+  it("stays one row while a batch updates, filling one bar as machines finish", () => {
+    const batch = new Set(["m0", "m1"]);
+    expect(
+      summarizeComponent(
+        on(row("claudeAgent", "updating", "1", "2"), row("claudeAgent", "updating", "1", "2")),
+        batch,
+      ),
+    ).toEqual({ current: "1", next: "2", split: false, percent: 0, failure: null });
+    expect(
+      summarizeComponent(
+        on(row("claudeAgent", "current", "2"), row("claudeAgent", "updating", "1", "2")),
+        batch,
+      ),
+    ).toEqual({ current: "1", next: "2", split: false, percent: 50, failure: null });
+  });
+
+  it("passes a lone update's own progress through", () => {
+    expect(
+      summarizeComponent(
+        on({ ...row("muse", "updating", "1", "2"), percent: 41 }),
+        new Set(["m0"]),
+      ),
+    ).toMatchObject({ percent: 41 });
+  });
+
+  it("counts failures across several machines", () => {
+    expect(
+      summarizeComponent(
+        on(
+          row("codex", "failed", "1", "2"),
+          row("codex", "failed", "1", "2"),
+          row("codex", "current", "2"),
+        ),
+        none,
+      ),
+    ).toMatchObject({ failure: "Failed on 2 machines", split: true });
   });
 });
 
@@ -181,68 +209,5 @@ describe("collectUpdateAllTargets", () => {
       "vps:server",
       "mac:codex",
     ]);
-  });
-});
-
-describe("describeComponentProgress", () => {
-  const entry = (id: string, status: UpdateRowStatus, detail: string | null = null) => ({
-    id,
-    row: row("muse", status, "1", "2", detail),
-  });
-
-  it("counts on through the batch as machines finish", () => {
-    const batch = new Set(["a", "b", "c"]);
-    expect(
-      describeComponentProgress(
-        [entry("a", "updating"), entry("b", "updating"), entry("c", "updating")],
-        batch,
-      ),
-    ).toEqual({ label: "Updating 1 of 3", percent: 0 });
-    expect(
-      describeComponentProgress(
-        [entry("a", "current"), entry("b", "updating"), entry("c", "updating")],
-        batch,
-      ),
-    ).toMatchObject({ label: "Updating 2 of 3" });
-    expect(
-      describeComponentProgress(
-        [entry("a", "current"), entry("b", "current"), entry("c", "updating")],
-        batch,
-      ),
-    ).toMatchObject({ label: "Updating 3 of 3" });
-  });
-
-  it("settles once nothing is updating, and leaves machines outside the batch out", () => {
-    expect(
-      describeComponentProgress([entry("a", "current"), entry("b", "failed")], new Set(["a", "b"])),
-    ).toBeNull();
-    expect(
-      describeComponentProgress(
-        [entry("a", "updating", "Downloading…"), entry("b", "available")],
-        new Set(["a"]),
-      ),
-    ).toEqual({ label: "Downloading…", percent: null });
-  });
-});
-
-describe("describeComponentFailure", () => {
-  const entry = (label: string, status: UpdateRowStatus, detail: string | null = null) => ({
-    machineLabel: label,
-    row: row("codex", status, "1", "2", detail),
-  });
-
-  it("names the machine that failed, or counts them", () => {
-    expect(describeComponentFailure([entry("Mac", "failed", "npm exited 1")])).toBe("npm exited 1");
-    expect(
-      describeComponentFailure([entry("Mac", "failed", "npm exited 1"), entry("VPS", "current")]),
-    ).toBe("Failed on Mac: npm exited 1");
-    expect(
-      describeComponentFailure([
-        entry("Mac", "failed"),
-        entry("VPS", "failed"),
-        entry("Box", "current"),
-      ]),
-    ).toBe("Failed on 2 of 3 machines");
-    expect(describeComponentFailure([entry("Mac", "current")])).toBeNull();
   });
 });
